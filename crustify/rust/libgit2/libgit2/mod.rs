@@ -4,3 +4,4 @@
 
 pub mod odb;
 pub mod raw;
+pub mod util;
