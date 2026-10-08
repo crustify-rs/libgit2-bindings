@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `v` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/odb_data_str_vec_aliased_reborrow.rs:7:5
+  |
+6 |     let shared = v.as_slice();
+  |                  - immutable borrow occurs here
+7 |     v.as_mut_slice()[0] = OdbDataStrFree::dup(c"b").unwrap();
+  |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+8 |     let _ = shared[0].as_bytes();
+  |             --------- immutable borrow later used here
