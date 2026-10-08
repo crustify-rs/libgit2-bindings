@@ -12,7 +12,7 @@
     "min_fields": 20
   },
   "summary": {
-    "unit_count": 32,
+    "unit_count": 34,
     "layer_count": 3,
     "batch_count": 6,
     "file_count": 4
@@ -549,12 +549,39 @@
       ]
     },
     {
-      "unit_count": 12,
+      "unit_count": 14,
       "batches": [
         {
           "kind": "symbol",
           "source_file": null,
           "items": [
+            {
+              "name": "git_filter_check_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
             {
               "name": "git_filter_cleanup_fn",
               "defined_in": "include/git2/sys/filter.h",
@@ -894,6 +921,38 @@
                   "scope": "wrap"
                 }
               ],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_stream_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_writestream",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
               "generates": [],
               "field_anchors": []
             }

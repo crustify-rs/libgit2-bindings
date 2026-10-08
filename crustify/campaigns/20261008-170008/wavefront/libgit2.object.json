@@ -12,7 +12,7 @@
     "min_fields": 20
   },
   "summary": {
-    "unit_count": 171,
+    "unit_count": 173,
     "layer_count": 4,
     "batch_count": 21,
     "file_count": 11
@@ -280,7 +280,7 @@
       ]
     },
     {
-      "unit_count": 63,
+      "unit_count": 64,
       "batches": [
         {
           "kind": "type",
@@ -788,6 +788,33 @@
               "field_anchors": []
             },
             {
+              "name": "git_commit_signature_cb",
+              "defined_in": "include/git2/commit.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commitbuilder",
+                    "defined_in": "src/libgit2/commit.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
               "name": "git_commitbuilder_add_header",
               "defined_in": "src/libgit2/commit.c",
               "kind": "symbol",
@@ -1193,7 +1220,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_object_rawcontent_is_valid",
               "defined_in": "src/libgit2/object.c",
@@ -1220,13 +1253,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_object_short_id",
               "defined_in": "src/libgit2/object.c",
@@ -1819,7 +1846,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_treebuilder_get",
               "defined_in": "src/libgit2/tree.c",
@@ -1846,13 +1879,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_treebuilder_insert",
               "defined_in": "src/libgit2/tree.c",
@@ -1966,7 +1993,7 @@
       ]
     },
     {
-      "unit_count": 89,
+      "unit_count": 90,
       "batches": [
         {
           "kind": "type",
@@ -2569,6 +2596,43 @@
               "field_anchors": []
             },
             {
+              "name": "git_commit_create_cb",
+              "defined_in": "include/git2/commit.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_signature",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
               "name": "git_commit_create_ext",
               "defined_in": "src/libgit2/commit.c",
               "kind": "symbol",
@@ -2743,7 +2807,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_commit_dup",
               "defined_in": "src/libgit2/object_api.c",
@@ -2765,13 +2835,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_commit_free",
               "defined_in": "src/libgit2/object_api.c",
@@ -3364,7 +3428,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_object_id_options_init",
               "defined_in": "src/libgit2/object.c",
@@ -3386,13 +3456,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_signature_default",
               "defined_in": "src/libgit2/signature.c",
@@ -4036,7 +4100,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_tree_dup",
               "defined_in": "src/libgit2/object_api.c",
@@ -4058,13 +4128,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_tree_entry_byid",
               "defined_in": "src/libgit2/tree.c",

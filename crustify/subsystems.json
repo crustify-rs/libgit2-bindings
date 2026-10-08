@@ -1,5 +1,5 @@
 {
-  "version": "0551dfd4ad989b6a3d5683c0d4cf326c6efef929",
+  "version": "cdbe98f53e3c4383a190f1f72d058eee5bf5e75d",
   "link_units": [
     {
       "name": "libgit2",
@@ -1009,7 +1009,7 @@
               "global_variables": 0,
               "enums": 3,
               "unions": 0,
-              "callbacks": 5,
+              "callbacks": 6,
               "macros": 8
             }
           },
@@ -2073,7 +2073,7 @@
               "global_variables": 0,
               "enums": 12,
               "unions": 0,
-              "callbacks": 7,
+              "callbacks": 8,
               "macros": 12
             }
           },
@@ -3063,7 +3063,7 @@
               "global_variables": 0,
               "enums": 11,
               "unions": 0,
-              "callbacks": 5,
+              "callbacks": 6,
               "macros": 15
             }
           },
@@ -3405,7 +3405,7 @@
               "global_variables": 0,
               "enums": 2,
               "unions": 0,
-              "callbacks": 3,
+              "callbacks": 5,
               "macros": 8
             }
           },
@@ -3594,7 +3594,7 @@
               "global_variables": 0,
               "enums": 6,
               "unions": 0,
-              "callbacks": 2,
+              "callbacks": 3,
               "macros": 15
             }
           },

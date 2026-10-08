@@ -12,14 +12,14 @@
     "min_fields": 20
   },
   "summary": {
-    "unit_count": 79,
+    "unit_count": 81,
     "layer_count": 7,
     "batch_count": 20,
     "file_count": 6
   },
   "waves": [
     {
-      "unit_count": 15,
+      "unit_count": 16,
       "batches": [
         {
           "kind": "type",
@@ -276,6 +276,22 @@
           "source_file": null,
           "items": [
             {
+              "name": "git_push_transfer_progress_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
               "name": "git_push_update_reference_cb",
               "defined_in": "include/git2/remote.h",
               "kind": "callback",
@@ -312,7 +328,7 @@
       ]
     },
     {
-      "unit_count": 39,
+      "unit_count": 40,
       "batches": [
         {
           "kind": "type",
@@ -1036,12 +1052,12 @@
               "field_anchors": []
             },
             {
-              "name": "git_remote_refspec_count",
-              "defined_in": "src/libgit2/remote.c",
-              "kind": "symbol",
-              "source_kind": "function_exported",
+              "name": "git_remote_ready_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "source_kind": "callback",
               "layer": 1,
-              "loc": 3,
+              "loc": 0,
               "deps": {
                 "types": [
                   {
@@ -1063,6 +1079,28 @@
           "kind": "symbol",
           "source_file": null,
           "items": [
+            {
+              "name": "git_remote_refspec_count",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
             {
               "name": "git_remote_rename",
               "defined_in": "src/libgit2/remote.c",
@@ -1483,6 +1521,11 @@
                   },
                   {
                     "name": "git_push_negotiation",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_push_transfer_progress_cb",
                     "defined_in": "include/git2/remote.h",
                     "scope": "wrap"
                   },

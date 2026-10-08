@@ -1110,43 +1110,6 @@
               "field_anchors": []
             },
             {
-              "name": "git_commit_create_cb",
-              "defined_in": "include/git2/commit.h",
-              "kind": "callback",
-              "source_kind": "callback",
-              "layer": 2,
-              "loc": 0,
-              "deps": {
-                "types": [
-                  {
-                    "name": "git_commit",
-                    "defined_in": "src/libgit2/commit.h",
-                    "scope": "wrap"
-                  },
-                  {
-                    "name": "git_oid",
-                    "defined_in": "include/git2/oid.h",
-                    "scope": "wrap"
-                  },
-                  {
-                    "name": "git_signature",
-                    "defined_in": "include/git2/types.h",
-                    "scope": "wrap"
-                  },
-                  {
-                    "name": "git_tree",
-                    "defined_in": "src/libgit2/tree.h",
-                    "scope": "wrap"
-                  }
-                ],
-                "symbols": []
-              },
-              "fallback": [],
-              "back_fill": [],
-              "generates": [],
-              "field_anchors": []
-            },
-            {
               "name": "git_merge",
               "defined_in": "src/libgit2/merge.c",
               "kind": "symbol",
@@ -1210,6 +1173,38 @@
                   {
                     "name": "git_repository",
                     "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_apply_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver",
+                    "defined_in": "include/git2/sys/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
                     "scope": "wrap"
                   }
                 ],

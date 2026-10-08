@@ -18,7 +18,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **`--min-fields`** — `20`
 - **orchestrator parallelism** — `10` concurrent batch processes
 - **branch** — `crustify/campaigns/20261008-170008`, tip `<sha>`
-- **deps** — crustify `7912683` (`main`), ffibox not enabled
+- **deps** — crustify `7912683` (`main`; `scan-unsafe` from `8f4fb06`, `fix/unsafe-driver-nightly-2026-10`), ffibox `695d52d` (`main`)
 - **build version** — `1`
 - **C test baseline** — `3443/3498, 55 skipped, and ctest targets invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online, online_customcert, proxy, auth_clone, auth_clone_and_push disabled`
 
@@ -128,12 +128,12 @@ in Notes.
 - **wrapped types** — `<n>`
 - **wrapped symbols** — `<n>`
 
-Implementation `<provider>/<model>` via `<backend>`; review
-`<provider>/<model>` via `<backend>`.
+Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | sub-campaign | nr types | nr symbols | sub-campaign wall | batch | review | total | $/type | $/sym |
 |---|---:|---:|---|---:|---:|---:|---:|---:|
-| `raw-lifetime-void` | `0` | `<n>` | `<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | — | `$<n>` |
+| `raw-lifetime-void` | `0` | `2` | `1h54m19s` | `$8.28` | `$7.89` | `$16.17` | — | `$8.09` |
 | `raw-lifetime-string` | `0` | `<n>` | `<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | — | `$<n>` |
 | `<link-unit>/<subsystem>` | `<n>` | `<n>` | `<n>h<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | `$<n>` | `$<n>` |
 | orchestrator | `<n>` | `<n>` | — | — | — | `$<n>`+ | — | — |
@@ -141,21 +141,21 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ## Raw lifetime discovery
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
 
 | tier | strategies emitted | $ | wall |
 |---|---|---|---|
-| void | `<n>` | `$<n>` | `<n>m<n>s` |
+| void | `2` | `$8.28` | `51m29s` |
 | string | `<n>` | `$<n>` | `<n>m<n>s` |
 | **Σ** | **`<n>`** | **`$<n>`** | **`<n>m<n>s`** |
 
 ### Review
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | tier | rv loc | rv $ | rv wall |
 |---|---|---|---|
-| void | `+<n>/-<n>` | `$<n>` | `<n>m<n>s` |
+| void | `+80/-1` | `$7.89` | `18m36s` |
 | string | `+<n>/-<n>` | `$<n>` | `<n>m<n>s` |
 | **Σ** | **`+<n>/-<n>`** | **`$<n>`** | **`<n>m<n>s`** |
 
@@ -163,7 +163,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — wrap
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
 
 | wave | batch | types | fields | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -172,7 +172,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — port
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
 
 | wave | batch | types | fields | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -181,7 +181,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — review
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | wave | batch | types | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/type |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -190,7 +190,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — review: PoC + reports
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | wave | batch | +lifecycle | +unsafe | +UB safe | +UB unsafe | +equiv | +internal | +conventions | +misc | total | +rejected PoCs |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
 
 | wave | batch | objective | symbols | loc | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/symbol | $/loc |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -211,7 +211,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — review
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | wave | batch | symbols | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/symbol |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -220,7 +220,7 @@ Implementation `<provider>/<model>` via `<backend>`; review
 
 ### Batches — review: PoC + reports
 
-`<provider>/<model>` via `<backend>`.
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
 
 | wave | batch | +lifecycle | +unsafe | +UB safe | +UB unsafe | +equiv | +internal | +conventions | +misc | total | +rejected PoCs |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -356,7 +356,7 @@ suites are the sanitizer baseline the regression gates compare against.
 
 ### Scope
 
-The schedule covers the 912 exported functions, 57 callbacks and 258 types the public
+The schedule covers the 912 exported functions, 63 callbacks and 258 types the public
 headers publish, except six declarations `libgit2.so` does not export and so cannot be
 linked: `git_blame_file_from_buffer`, `git_config_backend_from_string`,
 `git_config_backend_from_values`, `git_stdalloc_init_allocator`, `git_transport_dummy` and
@@ -371,9 +371,14 @@ The ten public function-like macros (`GIT_ATTR_IS_*`, `GIT_ATTR_HAS_VALUE`,
 `GIT_INDEX_ENTRY_STAGE{,_SET}`, `GIT_SUBMODULE_STATUS_IS_*`) are scheduled as symbol
 batches in the last wave of `attr`, `index` and `submodule`.
 
-`git_push_transfer_progress_cb` resolves under the campaign-wide wavefront config but not
-under the `remote` subsystem config that publishes it, so the orchestrator placed it beside
-`git_push_negotiation` in `remote` wave 2.
+Wavefront dropped a published callback no target body reaches: six callbacks were missing
+from the campaign-wide inventory (`git_apply_hunk_cb`, `git_commit_signature_cb`,
+`git_filter_check_fn`, `git_filter_stream_fn`, `git_merge_driver_apply_fn`,
+`git_remote_ready_cb`) and `git_push_transfer_progress_cb` from the `remote` subsystem's.
+The schedule was regenerated, before any subsystem sub-campaign started, with the fixed
+composer (wavefront `fix/subsystem-callback-scope`), which leaves its shape unchanged
+(20 sub-campaigns, 75 waves, 246 batches) and adds the six callbacks. Translators query the
+installed wavefront, whose named lookups resolve these callbacks.
 
 ### Sub-campaign order and transitive producers
 
@@ -384,3 +389,28 @@ owned by a later subsystem is translated with its first consumer and homed under
 owner's header module (for example `git_checkout_options` in `repository`, homed in
 `workdir/checkout.rs`). `llhttp`, `ntlmclient`, `xdiff` and `reftable` publish no API and
 have no sub-campaign.
+
+### `raw-lifetime-void`
+
+The batch found the only public `void *` lifecycle pair, `git_odb_backend_data_alloc` /
+`git_odb_backend_data_free`, and emitted two release strategies over it, `OdbDataFree` for
+one object (`OdbDataBox<T>`) and `OdbDataArrayFree` for a counted run (`OdbDataVec<T>`),
+homed in `odb/sys/odb_backend.rs` and re-exported from `raw.rs`. The review filed one `misc`
+report, both integration suites aborting under Miri before their Rust-only tests, which
+reproduced and whose `cfg_attr(miri, ignore)` gating holds; no PoC was rejected. The
+sub-campaign wall includes orchestrator self-repair time between the batch and its review
+and an operator pause before the final gate.
+
+### `ub_safe` admits a fixture module
+
+The `raw-lifetime-void` batch relaxed `tests/ub_safe/main.rs` from the scaffolded
+`#![forbid(unsafe_code)]` to `#![deny(unsafe_code)]` so that a `fixture` module can stand in,
+with `unsafe`, for safe constructors the crate does not have yet; the review did not flag it.
+It is an open departure from the `ub_safe` contract, left in place until the constructors
+it stands in for are wrapped.
+
+### BSan skips the compile-fail suite
+
+`trybuild`'s nested cargo build does not finish under BorrowSanitizer, so
+`crustify/rust/scripts/cargo-variant.sh bsan test` skips `compile_fail`; the plain variant
+runs it.
