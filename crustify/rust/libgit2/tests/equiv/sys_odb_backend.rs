@@ -1,10 +1,15 @@
 //! Equivalence of `git2/sys/odb_backend.h`'s raw-lifetime strategies with the C
 //! routines they call, `git_odb_backend_data_alloc` / `git_odb_backend_data_free`.
 //!
-//! libgit2's allocator and initialisation are process-global, so the test reruns
+//! libgit2's allocator and initialisation are process-global, so each test reruns
 //! itself alone in a child process, which installs a tracing `git_allocator` before
 //! `git_libgit2_init`. The C side passes a real backend; the Rust strategies pass
 //! NULL, which both routines ignore.
+//!
+//! The string strategies are compared with `git__strdup` and `git_strarray_copy`
+//! rebuilt over the exported routines (neither is exported), and with the C
+//! disposers that release libgit2's strings, `git_strarray_dispose` and
+//! `git_buf_dispose`, on strings either side made or libgit2 handed out.
 //!
 //! Documented divergences, outside these comparisons:
 //!
@@ -16,7 +21,7 @@
 //!   `ub_safe`.
 
 use std::collections::HashMap;
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::mem::size_of;
 use std::process::Command;
 use std::ptr;
@@ -24,7 +29,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use libgit2::ffi;
-use libgit2::libgit2::raw::{OdbDataArrayFree, OdbDataBox, OdbDataVec};
+use libgit2::libgit2::raw::{
+    OdbDataArrayFree, OdbDataBox, OdbDataStr, OdbDataStrFree, OdbDataStrVec, OdbDataVec,
+};
 
 #[repr(C)]
 pub struct pair_st {
@@ -72,12 +79,25 @@ enum Raw {
 }
 
 static TRACING: AtomicBool = AtomicBool::new(false);
-static FAIL_NEXT: AtomicBool = AtomicBool::new(false);
+/// Fails the `n`th allocation from now when `n > 0`.
+static FAIL_IN: AtomicUsize = AtomicUsize::new(0);
 static TRACE: Mutex<Vec<Raw>> = Mutex::new(Vec::new());
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
+/// Counts `FAIL_IN` down; `true` for the allocation it names.
+fn refuse_now() -> bool {
+    let mut n = FAIL_IN.load(Ordering::SeqCst);
+    while n > 0 {
+        match FAIL_IN.compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return n == 1,
+            Err(now) => n = now,
+        }
+    }
+    false
+}
+
 unsafe extern "C" fn traced_malloc(len: usize, file: *const c_char, line: c_int) -> *mut c_void {
-    let ptr = if FAIL_NEXT.swap(false, Ordering::SeqCst) {
+    let ptr = if refuse_now() {
         ptr::null_mut()
     } else {
         // SAFETY: plain libc allocation.
@@ -151,6 +171,14 @@ struct Recorder {
 }
 
 impl Recorder {
+    /// Numbers an allocation made before the sequence, as the next one, and counts it
+    /// live: the sequence releases it.
+    fn adopt(&mut self, ptr: *const c_void) {
+        self.allocs.insert(ptr as usize, self.count);
+        self.count += 1;
+        LIVE.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn step<R>(&mut self, f: impl FnOnce() -> R) -> R {
         TRACE.lock().unwrap().clear();
         TRACING.store(true, Ordering::SeqCst);
@@ -384,11 +412,11 @@ fn allocation_failures() {
     let fail = |c_step: &mut dyn FnMut() -> bool, rust_step: &mut dyn FnMut() -> bool| {
         let (mut c, mut r) = (Recorder::default(), Recorder::default());
         clear_error();
-        FAIL_NEXT.store(true, Ordering::SeqCst);
+        FAIL_IN.store(1, Ordering::SeqCst);
         assert!(c.step(&mut *c_step), "C reports failure");
         let c_error = last_error();
         clear_error();
-        FAIL_NEXT.store(true, Ordering::SeqCst);
+        FAIL_IN.store(1, Ordering::SeqCst);
         assert!(r.step(&mut *rust_step), "Rust reports failure");
         assert_eq!(c.steps, r.steps);
         assert!(matches!(r.steps[0][..], [Event::AllocFailed { .. }]));
@@ -435,4 +463,435 @@ fn empty_runs() {
         drop((a.clone(), a, b, c));
     });
     assert_eq!(r.steps, [vec![]]);
+}
+
+// --- strings --------------------------------------------------------------------
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn traced_string_sequences() {
+    isolated(concat!(module_path!(), "::traced_string_sequences"), || {
+        install_tracing_allocator();
+        let long = CString::new(pattern_text(4096)).unwrap();
+        for s in [c"", c"a", c"refs/heads/main", &long] {
+            str_copy_then_release(s);
+            str_clone_then_release_source_first(s);
+            str_handed_to_git_buf_dispose(s);
+        }
+        let runs: [&[&CStr]; 4] = [
+            &[],
+            &[c"one"],
+            &[c"", c"origin", c"upstream"],
+            &[&long, c"x"],
+        ];
+        for strs in runs {
+            run_copy_then_dispose(strs);
+            run_handed_to_git_strarray_dispose(strs);
+            run_clone_then_release_source_first(strs);
+            run_moved_through_a_vec(strs);
+        }
+        string_allocation_failures();
+        run_adopted_from_libgit2();
+        str_adopted_from_a_git_buf();
+        assert_eq!(
+            LIVE.load(Ordering::SeqCst),
+            0,
+            "every traced allocation was released"
+        );
+    });
+}
+
+fn pattern_text(len: usize) -> Vec<u8> {
+    (0..len).map(|i| b'a' + (i % 26) as u8).collect()
+}
+
+/// `git__strdup` over the exported allocator: NULL on failure.
+fn c_strdup(s: &CStr) -> *mut c_char {
+    let bytes = s.to_bytes_with_nul();
+    let p = c_alloc(&mut backend(), bytes.len());
+    if !p.is_null() {
+        // SAFETY: `p` holds `bytes.len()` writable bytes.
+        unsafe { p.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
+    }
+    p.cast()
+}
+
+fn c_str(s: *const c_char) -> Vec<u8> {
+    // SAFETY: callers pass a live NUL-terminated string.
+    unsafe { CStr::from_ptr(s) }.to_bytes().to_vec()
+}
+
+/// `git_strarray_copy` over the exported allocator: the array (`git__calloc`), then
+/// each string; a failure disposes of what was made and leaves a zeroed array.
+fn c_strarray_copy(strs: &[&CStr]) -> Result<ffi::git_strarray, ffi::git_strarray> {
+    let mut tgt = ffi::git_strarray {
+        strings: ptr::null_mut(),
+        count: 0,
+    };
+    if strs.is_empty() {
+        return Ok(tgt);
+    }
+    let size = strs.len() * size_of::<*mut c_char>();
+    let arr = c_alloc(&mut backend(), size);
+    if arr.is_null() {
+        return Err(tgt);
+    }
+    // SAFETY: `arr` holds `size` writable bytes.
+    unsafe { arr.write_bytes(0, size) };
+    tgt.strings = arr.cast();
+    for s in strs {
+        let copy = c_strdup(s);
+        if copy.is_null() {
+            c_strarray_dispose(&mut tgt);
+            return Err(tgt);
+        }
+        // SAFETY: `tgt.count < strs.len()` slots of the array are in use.
+        unsafe { tgt.strings.add(tgt.count).write(copy) };
+        tgt.count += 1;
+    }
+    Ok(tgt)
+}
+
+fn c_strarray_dispose(array: &mut ffi::git_strarray) {
+    // SAFETY: `array` holds `count` strings and the array from libgit2's allocator,
+    // or is zeroed.
+    unsafe { ffi::git_strarray_dispose(array) }
+}
+
+fn c_strings(array: &ffi::git_strarray) -> Vec<Vec<u8>> {
+    (0..array.count)
+        // SAFETY: `array` holds `count` live strings.
+        .map(|i| c_str(unsafe { array.strings.add(i).read() }))
+        .collect()
+}
+
+fn rust_strings(v: &OdbDataStrVec) -> Vec<Vec<u8>> {
+    v.as_slice().iter().map(|s| s.as_bytes().to_vec()).collect()
+}
+
+fn is_zeroed(array: &ffi::git_strarray) -> bool {
+    array.strings.is_null() && array.count == 0
+}
+
+/// `git__strdup` then free: `OdbDataStrFree::dup` and drop.
+fn str_copy_then_release(s: &CStr) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let p = c.step(|| c_strdup(s));
+    let o = r.step(|| OdbDataStrFree::dup(s).unwrap());
+    assert_eq!(c.steps, r.steps);
+    assert!(matches!(&r.steps[0][..], [Event::Alloc { len, .. }] if *len == s.count_bytes() + 1));
+    assert_eq!(c_str(p), o.as_bytes());
+    assert_eq!(s.is_empty(), o.is_empty());
+
+    c.step(|| c_free(&mut backend(), p.cast()));
+    r.step(|| drop(o));
+    assert_eq!(c.steps, r.steps);
+}
+
+/// A copy of a copy, the source released first: `clone`.
+fn str_clone_then_release_source_first(s: &CStr) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let p = c.step(|| c_strdup(s));
+    let o = r.step(|| OdbDataStrFree::dup(s).unwrap());
+    // SAFETY: `p` is a live string.
+    let q = c.step(|| c_strdup(unsafe { CStr::from_ptr(p) }));
+    let w = r.step(|| o.clone());
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_str(q), w.as_bytes());
+
+    c.step(|| c_free(&mut backend(), p.cast()));
+    r.step(|| drop(o));
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_str(q), w.as_bytes());
+
+    c.step(|| c_free(&mut backend(), q.cast()));
+    r.step(|| drop(w));
+    assert_eq!(c.steps, r.steps);
+}
+
+/// A string handed to a `git_buf` that `git_buf_dispose` releases, as libgit2's
+/// output buffers are.
+fn str_handed_to_git_buf_dispose(s: &CStr) {
+    let into_buf = |p: *mut c_char| ffi::git_buf {
+        ptr: p,
+        reserved: s.count_bytes() + 1,
+        size: s.count_bytes(),
+    };
+    let dispose = |buf: &mut ffi::git_buf| {
+        // SAFETY: `buf` owns a string from libgit2's allocator.
+        unsafe { ffi::git_buf_dispose(buf) }
+    };
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let mut cbuf = c.step(|| into_buf(c_strdup(s)));
+    let mut rbuf = r.step(|| into_buf(OdbDataStrFree::dup(s).unwrap().into_raw()));
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_str(cbuf.ptr), c_str(rbuf.ptr));
+
+    c.step(|| dispose(&mut cbuf));
+    r.step(|| dispose(&mut rbuf));
+    assert_eq!(c.steps, r.steps);
+    assert!(matches!(c.steps[1][..], [Event::Free { alloc: 0 }]));
+    // Both are reset to libgit2's static empty string.
+    assert_eq!((cbuf.ptr, cbuf.reserved, cbuf.size), (rbuf.ptr, 0, 0));
+    assert_eq!((rbuf.reserved, rbuf.size), (0, 0));
+}
+
+/// `git_strarray_copy` then `git_strarray_dispose`: `dup_all` and drop.
+fn run_copy_then_dispose(strs: &[&CStr]) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let mut a = c.step(|| c_strarray_copy(strs).unwrap());
+    let v = r.step(|| OdbDataStrVec::dup_all(strs).unwrap());
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(
+        (a.count, a.strings.is_null()),
+        (v.len(), v.as_ptr().is_null())
+    );
+    assert_eq!(c_strings(&a), rust_strings(&v));
+
+    c.step(|| c_strarray_dispose(&mut a));
+    r.step(|| drop(v));
+    assert_eq!(c.steps, r.steps);
+    assert!(is_zeroed(&a));
+}
+
+/// Rust's run released by C: `into_raw_parts` into a `git_strarray`, then
+/// `git_strarray_dispose`, as for a C-made copy.
+fn run_handed_to_git_strarray_dispose(strs: &[&CStr]) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let mut a = c.step(|| c_strarray_copy(strs).unwrap());
+    let mut b = r.step(|| {
+        let (strings, count) = OdbDataStrVec::dup_all(strs).unwrap().into_raw_parts();
+        ffi::git_strarray { strings, count }
+    });
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_strings(&a), c_strings(&b));
+
+    c.step(|| c_strarray_dispose(&mut a));
+    r.step(|| c_strarray_dispose(&mut b));
+    assert_eq!(c.steps, r.steps);
+    assert!(is_zeroed(&a) && is_zeroed(&b));
+}
+
+/// A copy of a copy, the source released first: `OdbDataStrVec::clone`.
+fn run_clone_then_release_source_first(strs: &[&CStr]) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let mut a = c.step(|| c_strarray_copy(strs).unwrap());
+    let v = r.step(|| OdbDataStrVec::dup_all(strs).unwrap());
+    let mut b = c.step(|| {
+        let src: Vec<&CStr> = (0..a.count)
+            // SAFETY: `a` holds `count` live strings.
+            .map(|i| unsafe { CStr::from_ptr(a.strings.add(i).read()) })
+            .collect();
+        c_strarray_copy(&src).unwrap()
+    });
+    let w = r.step(|| v.clone());
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_strings(&b), rust_strings(&w));
+
+    c.step(|| c_strarray_dispose(&mut a));
+    r.step(|| drop(v));
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_strings(&b), rust_strings(&w));
+
+    c.step(|| c_strarray_dispose(&mut b));
+    r.step(|| drop(w));
+    assert_eq!(c.steps, r.steps);
+}
+
+/// Strings moved out of a run and back into a fresh one keep their storage; only the
+/// array is replaced, as C moving the pointers into a new array would.
+fn run_moved_through_a_vec(strs: &[&CStr]) {
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let mut a = c.step(|| c_strarray_copy(strs).unwrap());
+    let v = r.step(|| OdbDataStrVec::dup_all(strs).unwrap());
+
+    let mut b = c.step(|| {
+        let mut b = ffi::git_strarray {
+            strings: ptr::null_mut(),
+            count: 0,
+        };
+        if a.count > 0 {
+            // SAFETY: `a` holds `count` strings, moved out before its array is freed.
+            let moved = unsafe { std::slice::from_raw_parts(a.strings, a.count) }.to_vec();
+            c_free(&mut backend(), a.strings.cast());
+            let arr = c_alloc(&mut backend(), moved.len() * size_of::<*mut c_char>());
+            let arr = arr.cast::<*mut c_char>();
+            // SAFETY: `arr` holds `moved.len()` writable slots.
+            unsafe { arr.copy_from_nonoverlapping(moved.as_ptr(), moved.len()) };
+            b = ffi::git_strarray {
+                strings: arr,
+                count: moved.len(),
+            };
+        }
+        a = ffi::git_strarray {
+            strings: ptr::null_mut(),
+            count: 0,
+        };
+        b
+    });
+    let w = r.step(|| OdbDataStrVec::from_vec(v.into_vec()).unwrap());
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(c_strings(&b), rust_strings(&w));
+    assert!(is_zeroed(&a));
+
+    c.step(|| c_strarray_dispose(&mut b));
+    r.step(|| drop(w));
+    assert_eq!(c.steps, r.steps);
+}
+
+/// Every allocation of a copy refused in turn: C disposes of the partial copy and
+/// reports OOM; Rust releases the same storage in the same order, returns `None` and
+/// reports the same error.
+fn string_allocation_failures() {
+    let strs = [c"alpha", c"beta", c"gamma"];
+    for at in 1..=strs.len() + 1 {
+        let (mut c, mut r) = (Recorder::default(), Recorder::default());
+        clear_error();
+        FAIL_IN.store(at, Ordering::SeqCst);
+        let a = c.step(|| c_strarray_copy(&strs)).unwrap_err();
+        let c_error = last_error();
+        clear_error();
+        FAIL_IN.store(at, Ordering::SeqCst);
+        assert!(r.step(|| OdbDataStrVec::dup_all(&strs)).is_none());
+        assert_eq!(c.steps, r.steps, "allocation {at} refused");
+        assert!(is_zeroed(&a));
+        assert_eq!(c_error, last_error());
+        assert_eq!(c_error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
+    }
+
+    // A refused `git__strdup`, and a refused clone, leave their sources intact.
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let v = OdbDataStrVec::dup_all(&strs).unwrap();
+    let s = OdbDataStrFree::dup(c"delta").unwrap();
+    clear_error();
+    FAIL_IN.store(1, Ordering::SeqCst);
+    assert!(c.step(|| c_strdup(c"delta")).is_null());
+    let c_error = last_error();
+    clear_error();
+    FAIL_IN.store(1, Ordering::SeqCst);
+    assert!(r.step(|| s.try_clone()).is_none());
+    assert_eq!(
+        (c.steps.clone(), c_error.clone()),
+        (r.steps.clone(), last_error())
+    );
+    FAIL_IN.store(2, Ordering::SeqCst);
+    assert!(v.try_clone().is_none());
+    assert_eq!(FAIL_IN.load(Ordering::SeqCst), 0);
+    assert_eq!(rust_strings(&v), [&b"alpha"[..], b"beta", b"gamma"]);
+    assert_eq!(s.as_bytes(), b"delta");
+}
+
+/// `GIT_OPT_GET_EXTENSIONS` hands out a `git_strarray` from a `git_vector`, its array
+/// with spare capacity: adopted, it reads and releases as `git_strarray_dispose`
+/// would.
+fn run_adopted_from_libgit2() {
+    let get = || {
+        let mut out = ffi::git_strarray {
+            strings: ptr::null_mut(),
+            count: 0,
+        };
+        // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills.
+        let rc =
+            unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+        assert_eq!(rc, 0);
+        out
+    };
+    let exts = [c"!noop", c"crustify"];
+    let ptrs: Vec<*const c_char> = exts.iter().map(|s| s.as_ptr()).collect();
+    // SAFETY: `GIT_OPT_SET_EXTENSIONS` takes an array of `len` strings, which it copies.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ptrs.as_ptr(),
+            ptrs.len(),
+        )
+    };
+    assert_eq!(rc, 0);
+
+    let mut a = get();
+    let b = get();
+    // SAFETY: `b` is libgit2's output, handed over whole and not used again.
+    let v = unsafe { OdbDataStrVec::from_raw_parts(b.strings, b.count) }.unwrap();
+    assert_eq!(c_strings(&a), rust_strings(&v));
+    assert!(rust_strings(&v).contains(&b"crustify".to_vec()));
+    assert!(!rust_strings(&v).contains(&b"noop".to_vec()));
+
+    let n = a.count;
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    for (rec, array) in [(&mut c, &a), (&mut r, &b)] {
+        for i in 0..array.count {
+            // SAFETY: `array` holds `count` live strings.
+            rec.adopt(unsafe { array.strings.add(i).read() }.cast());
+        }
+        rec.adopt(array.strings.cast());
+    }
+    c.step(|| c_strarray_dispose(&mut a));
+    r.step(|| drop(v));
+    assert_eq!(c.steps, r.steps);
+    // Every string in order, then the array.
+    assert_eq!(
+        c.steps[0],
+        (0..=n)
+            .map(|alloc| Event::Free { alloc })
+            .collect::<Vec<_>>()
+    );
+
+    // SAFETY: an empty list of user extensions.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ptr::null::<*const c_char>(),
+            0usize,
+        )
+    };
+    assert_eq!(rc, 0);
+}
+
+/// `GIT_OPT_GET_USER_AGENT` hands out a `git_buf`: its string, adopted, releases as
+/// `git_buf_dispose` would.
+fn str_adopted_from_a_git_buf() {
+    // SAFETY: `GIT_OPT_SET_USER_AGENT` copies the string.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_USER_AGENT as c_int,
+            c"crustify/1.0".as_ptr(),
+        )
+    };
+    assert_eq!(rc, 0);
+    let get = || {
+        let mut out = ffi::git_buf {
+            ptr: ptr::null_mut(),
+            reserved: 0,
+            size: 0,
+        };
+        // SAFETY: `GIT_OPT_GET_USER_AGENT` takes a zeroed `git_buf *`, which it fills.
+        let rc =
+            unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT as c_int, &raw mut out) };
+        assert_eq!(rc, 0);
+        assert!(out.reserved > 0, "the buffer owns an allocation");
+        out
+    };
+    let mut a = get();
+    let b = get();
+    // SAFETY: `b.ptr` is the buffer's NUL-terminated `git__malloc` string, handed over
+    // whole; `b` is not used again.
+    let s = unsafe { OdbDataStr::from_raw(b.ptr) }.unwrap();
+    assert_eq!(c_str(a.ptr), s.as_bytes());
+    assert_eq!(a.size, s.len());
+    assert_eq!(s.to_str(), Ok("crustify/1.0"));
+
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    c.adopt(a.ptr.cast());
+    r.adopt(b.ptr.cast());
+    // SAFETY: `a` owns its string.
+    c.step(|| unsafe { ffi::git_buf_dispose(&mut a) });
+    r.step(|| drop(s));
+    assert_eq!(c.steps, r.steps);
+    assert!(matches!(c.steps[0][..], [Event::Free { alloc: 0 }]));
+
+    // SAFETY: NULL restores the default user agent.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_USER_AGENT as c_int, ptr::null::<c_char>())
+    };
+    assert_eq!(rc, 0);
 }

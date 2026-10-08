@@ -13,5 +13,19 @@
 //! |---|---|---|
 //! | one object | [`OdbDataFree`] | [`OdbDataBox<T>`] |
 //! | a counted run | [`OdbDataArrayFree`] | [`OdbDataVec<T>`] |
+//!
+//! # string
+//!
+//! libgit2 releases the strings it hands out (`git_strarray` elements, `git_buf`
+//! contents, `git_signature` names) with `git__free` and makes them with
+//! `git__strdup`, neither of which is exported; the same pair settles them.
+//!
+//! | handle | policy | owner |
+//! |---|---|---|
+//! | one string | [`OdbDataStrFree`] | [`OdbDataStr`] |
+//! | a counted run of strings | [`OdbDataStrFree`] in [`OdbDataArrayFree`] storage | [`OdbDataStrVec`] |
 
-pub use super::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataBox, OdbDataFree, OdbDataVec};
+pub use super::odb::sys::odb_backend::{
+    OdbDataArrayFree, OdbDataBox, OdbDataFree, OdbDataStr, OdbDataStrFree, OdbDataStrVec,
+    OdbDataVec,
+};

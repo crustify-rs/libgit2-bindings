@@ -1,10 +1,14 @@
-//! UB tests for `git2/sys/odb_backend.h`'s raw-lifetime strategies: `OdbDataBox` and
-//! `OdbDataVec` over `git_odb_backend_data_alloc` / `git_odb_backend_data_free`.
+//! UB tests for `git2/sys/odb_backend.h`'s raw-lifetime strategies over
+//! `git_odb_backend_data_alloc` / `git_odb_backend_data_free`: `OdbDataBox` and
+//! `OdbDataVec` for raw storage, `OdbDataStr` and `OdbDataStrVec` for strings.
 
+use std::ffi::{CStr, CString};
 use std::mem::{MaybeUninit, align_of};
 use std::thread;
 
-use libgit2::libgit2::raw::{OdbDataArrayFree, OdbDataBox, OdbDataVec};
+use libgit2::libgit2::raw::{
+    OdbDataArrayFree, OdbDataBox, OdbDataStr, OdbDataStrFree, OdbDataStrVec, OdbDataVec,
+};
 
 use crate::fixture::{Pair, filled, isolated};
 
@@ -198,4 +202,196 @@ fn first_allocations_race_to_pin_the_runtime() {
             }
         });
     });
+}
+
+// --- strings --------------------------------------------------------------------
+
+/// String lengths up to just past a page, the empty string included.
+const STR_LENS: [usize; 8] = [0, 1, 2, 7, 16, 63, 4095, 4096];
+
+fn text(len: usize, seed: u8) -> CString {
+    CString::new(
+        (0..len)
+            .map(|i| b'!' + ((i as u8).wrapping_mul(7) ^ seed) % 90)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap()
+}
+
+fn strs(v: &OdbDataStrVec) -> Vec<&[u8]> {
+    v.as_slice().iter().map(OdbDataStr::as_bytes).collect()
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_copies_strings_of_every_length() {
+    for len in STR_LENS {
+        let src = text(len, 3);
+        let s = OdbDataStrFree::dup(&src).unwrap();
+        assert_ne!(s.as_ptr(), src.as_ptr());
+        assert_eq!((s.len(), s.is_empty()), (len, len == 0));
+        assert_eq!(s.as_c_str(), src.as_c_str());
+        assert_eq!(s.as_bytes(), src.as_bytes());
+        assert_eq!(s.to_str().unwrap().len(), len);
+        assert_eq!(format!("{s:?}"), format!("CStrBox({src:?})"));
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_keeps_bytes_that_are_not_utf8() {
+    let s = OdbDataStrFree::dup(c"caf\xe9").unwrap();
+    assert!(s.to_str().is_err());
+    assert_eq!(s.as_bytes(), b"caf\xe9");
+    assert_eq!(s.clone().as_bytes(), b"caf\xe9");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_clone_is_independent_and_outlives_its_source() {
+    let s = OdbDataStrFree::dup(c"refs/remotes/origin/HEAD").unwrap();
+    let t = s.clone();
+    let u = t.try_clone().unwrap();
+    assert!(s.as_ptr() != t.as_ptr() && t.as_ptr() != u.as_ptr());
+    drop(s);
+    drop(t);
+    assert_eq!(u.as_c_str(), c"refs/remotes/origin/HEAD");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_vec_copies_runs_of_every_shape() {
+    for n in [1, 2, 3, 17, 512] {
+        let src: Vec<CString> = (0..n)
+            .map(|i| text(STR_LENS[i % STR_LENS.len()], i as u8))
+            .collect();
+        let v = OdbDataStrVec::dup_all(&src).unwrap();
+        assert_eq!((v.len(), v.is_empty()), (n, false));
+        assert_eq!(
+            strs(&v),
+            src.iter().map(|s| s.as_bytes()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            v.as_slice().last().unwrap().as_c_str(),
+            src.last().unwrap().as_c_str()
+        );
+        assert!(
+            v.as_slice()
+                .iter()
+                .zip(&src)
+                .all(|(a, b)| a.as_ptr() != b.as_ptr())
+        );
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_vec_elements_replace_and_move_in_place() {
+    let mut v = OdbDataStrVec::dup_all(&[c"c", c"a", c"d", c"b"]).unwrap();
+    // The replaced string is freed; ASan flags a leak or a double free.
+    v.as_mut_slice()[2] = OdbDataStrFree::dup(c"e").unwrap();
+    v.as_mut_slice()
+        .sort_by(|x, y| x.as_bytes().cmp(y.as_bytes()));
+    assert_eq!(strs(&v), [&b"a"[..], b"b", b"c", b"e"]);
+    v.as_mut_slice().swap(0, 3);
+    v.as_mut_slice().reverse();
+
+    // Elements swapped between two runs belong to their new run.
+    let mut w = OdbDataStrVec::dup_all(&[c"other"]).unwrap();
+    std::mem::swap(&mut v.as_mut_slice()[1], &mut w.as_mut_slice()[0]);
+    drop(v);
+    assert_eq!(strs(&w), [&b"c"[..]]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_vec_moves_through_a_vec() {
+    let v = OdbDataStrVec::dup_all(&[c"origin", c"upstream", c"fork"]).unwrap();
+    let mut owned = v.into_vec();
+    drop(owned.remove(1));
+    owned.push(OdbDataStrFree::dup(c"mirror").unwrap());
+    let kept = owned[0].clone();
+    let v = OdbDataStrVec::from_vec(owned).unwrap();
+    assert_eq!(strs(&v), [&b"origin"[..], b"fork", b"mirror"]);
+    // Strings moved out survive the run they left.
+    let mut out = v.into_vec();
+    let last = out.pop().unwrap();
+    drop(out);
+    assert_eq!(
+        (kept.as_bytes(), last.as_bytes()),
+        (&b"origin"[..], &b"mirror"[..])
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_vec_clone_is_independent_and_outlives_its_source() {
+    let v = OdbDataStrVec::dup_all(&[c"x", c"", c"zz"]).unwrap();
+    let mut w = v.clone();
+    assert_ne!(v.as_ptr(), w.as_ptr());
+    w.as_mut_slice()[0] = OdbDataStrFree::dup(c"y").unwrap();
+    assert_eq!(strs(&v), [&b"x"[..], b"", b"zz"]);
+    let t = w.try_clone().unwrap();
+    drop(v);
+    drop(w);
+    assert_eq!(strs(&t), [&b"y"[..], b"", b"zz"]);
+    assert_eq!(format!("{t:?}"), r#"["y", "", "zz"]"#);
+}
+
+#[test]
+fn str_vec_empty_forms_own_nothing() {
+    let v = OdbDataStrVec::new();
+    let d = OdbDataStrVec::default();
+    let e = OdbDataStrVec::dup_all::<&CStr>(&[]).unwrap();
+    let f = OdbDataStrVec::from_vec(Vec::new()).unwrap();
+    for r in [&v, &d, &e, &f] {
+        assert!(r.is_empty() && r.as_ptr().is_null() && r.as_slice().is_empty());
+    }
+    assert!(v.clone().into_vec().is_empty());
+    let (strings, count) = e.into_raw_parts();
+    assert!(strings.is_null() && count == 0);
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_owners_cross_threads() {
+    let s = OdbDataStrFree::dup(c"shared").unwrap();
+    let v = OdbDataStrVec::dup_all(&[c"a", c"b", c"c"]).unwrap();
+    thread::scope(|scope| {
+        for _ in 0..4 {
+            // Shared reads and copies of one string and one run at once.
+            scope.spawn(|| {
+                assert_eq!(s.clone().as_bytes(), b"shared");
+                let w = v.clone();
+                assert_eq!(strs(&w), strs(&v));
+            });
+        }
+    });
+    // Made here, freed on other threads.
+    let t = thread::spawn(move || drop(s));
+    let u = thread::spawn(move || v.into_vec());
+    t.join().unwrap();
+    let strings = u.join().unwrap();
+    assert_eq!(strings.len(), 3);
+
+    let made: Vec<OdbDataStrVec> = (0..4)
+        .map(|i| thread::spawn(move || OdbDataStrVec::dup_all(&[text(64, i), text(1, i)]).unwrap()))
+        .map(|h| h.join().unwrap())
+        .collect();
+    assert!(made.iter().all(|v| v.len() == 2));
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn str_owners_work_before_any_init() {
+    isolated(
+        concat!(module_path!(), "::str_owners_work_before_any_init"),
+        || {
+            // Nothing has initialised libgit2: an unpinned allocation would fail through
+            // libgit2's `failalloc` and write the OOM through a nonexistent TLS key.
+            let s = OdbDataStrFree::dup(c"first").unwrap();
+            let v = OdbDataStrVec::dup_all(&[c"a", c"b"]).unwrap();
+            assert_eq!((s.clone().as_bytes(), v.clone().len()), (&b"first"[..], 2));
+        },
+    );
 }

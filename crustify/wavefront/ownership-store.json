@@ -222,12 +222,12 @@
      "array": {
       "by_val": true
      },
-     "string": false,
+     "string": true,
      "owned": true,
      "borrowed": null,
      "nullable": true,
      "mutable": true,
-     "note": "git__malloc(len): plain, NON-zeroing storage from git__allocator.gmalloc (stdalloc malloc by default). NULL on OOM via git_error_set_oom. HAZARD: before git_libgit2_init (and after the last shutdown) failalloc makes every request fail, and git_error_set_oom then reads the error TLS slot under an uninitialised/deleted key (0), writing &oom_error into another component's TLS block (ASan: unknown-crash in git_error_set_oom, errors.c:170). Rust strategies pin the runtime with their own git_libgit2_init reference first. len 0 is malloc(0): implementation-defined NULL or a unique pointer. Released by git_odb_backend_data_free or, once returned from a backend read callback, by libgit2's own git__free. Holds one object or a byte buffer."
+     "note": "git__malloc(len): plain, NON-zeroing storage from git__allocator.gmalloc (stdalloc malloc by default). NULL on OOM via git_error_set_oom. HAZARD: before git_libgit2_init (and after the last shutdown) failalloc makes every request fail, and git_error_set_oom then reads the error TLS slot under an uninitialised/deleted key (0), writing &oom_error into another component's TLS block (ASan: unknown-crash in git_error_set_oom, errors.c:170). Rust strategies pin the runtime with their own git_libgit2_init reference first. len 0 is malloc(0): implementation-defined NULL or a unique pointer. Released by git_odb_backend_data_free or, once returned from a backend read callback, by libgit2's own git__free. Holds one object, a byte buffer, or - filled with a copy and its terminator, as git__strdup does (git__strdup is not exported) - a NUL-terminated string that git_strarray_dispose / git_signature_free / git_buf_dispose may release; Rust OdbDataStrFree::dup, OdbDataStrVec::dup_all and their Clone build strings and char** arrays through it."
     }
    }
   },
@@ -268,12 +268,12 @@
       "array": {
        "by_val": true
       },
-      "string": false,
+      "string": true,
       "owned": true,
       "borrowed": null,
       "nullable": true,
       "mutable": true,
-      "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object or a buffer) without reading it; NULL is a no-op. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+      "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object, a buffer, or a NUL-terminated string) without reading it; NULL is a no-op. Strings: libgit2 makes its strings with git__strdup/git__strndup/git__substrdup (git__malloc) and releases them with git__free in git_strarray_dispose (each element, then the array), git_signature_free (name, email) and git_buf_dispose (ptr), none of which exports a single-string free, so this is the only exported releaser for one libgit2 string or a char** array of them; Rust OdbDataStrFree / OdbDataStrVec drop through it. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
      }
     }
    ]

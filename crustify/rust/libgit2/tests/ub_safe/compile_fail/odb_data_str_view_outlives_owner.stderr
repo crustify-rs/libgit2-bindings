@@ -1,0 +1,16 @@
+error[E0505]: cannot move out of `s` because it is borrowed
+ --> tests/ub_safe/compile_fail/odb_data_str_view_outlives_owner.rs:7:10
+  |
+5 |     let s = OdbDataStrFree::dup(c"odb").unwrap();
+  |         - binding `s` declared here
+6 |     let view = s.as_c_str();
+  |                - borrow of `s` occurs here
+7 |     drop(s);
+  |          ^ move out of `s` occurs here
+8 |     let _ = view.to_bytes();
+  |             ---- borrow later used here
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+6 |     let view = s.clone().as_c_str();
+  |                 ++++++++
