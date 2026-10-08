@@ -1,0 +1,8 @@
+{
+ "names": [
+  "git_error_code",
+  "git_error_t"
+ ],
+ "exit": 1,
+ "stderr": "unsafe: no sites matched --name git_error_code git_error_t"
+}
