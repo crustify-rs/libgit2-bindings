@@ -29,7 +29,9 @@ use crate::ffi;
 
 /// `git_allocator.gmalloc`: allocate `n` bytes for the caller at `file`:`line`.
 ///
-/// Returns a fresh allocation of at least `n` bytes, or NULL on failure.
+/// Returns a fresh allocation of at least `n` bytes, or NULL on failure. A zero-byte
+/// request is as C's `malloc(0)`: NULL, or an allocation of its own that `gfree`
+/// releases; libgit2 reads NULL as out of memory.
 ///
 /// # Safety
 ///
@@ -41,14 +43,19 @@ pub type MallocFn = unsafe extern "C" fn(n: usize, file: *const c_char, line: c_
 /// `git_allocator.grealloc`: resize the allocation at `ptr` to `size` bytes for the
 /// caller at `file`:`line`, as C's `realloc`.
 ///
-/// NULL `ptr` allocates afresh. On success the old allocation is released and a new one
-/// holding its first `min(old, size)` bytes is returned; on failure NULL is returned and
-/// `ptr` stays live.
+/// NULL `ptr` allocates afresh, as [`MallocFn`] does. On success the old allocation is
+/// released and a new one holding its first `min(old, size)` bytes is returned; on
+/// failure NULL is returned and `ptr` stays live.
 ///
 /// # Safety
 ///
 /// `ptr` must be NULL or a live allocation of the same allocator family, which the
 /// caller owns and, on success, gives up; `file` as for [`MallocFn`].
+///
+/// `size` must be non-zero when `ptr` is not NULL. C leaves a zero-byte resize of a
+/// live allocation implementation-defined: glibc releases `ptr` and returns NULL, which
+/// this contract would read as a failure that left `ptr` live. No libgit2 code path
+/// makes one, so a caller must not either.
 pub type ReallocFn = unsafe extern "C" fn(
     ptr: *mut c_void,
     size: usize,
@@ -132,7 +139,9 @@ impl Allocator {
     ///     fn free(p: *mut c_void);
     /// }
     ///
-    /// /// libc's allocator, which already meets `Alloc`'s contract.
+    /// /// libc's allocator, which meets `Alloc`'s contract as C's `malloc` family does
+    /// /// (libgit2 never resizes a live allocation to zero bytes, where glibc would
+    /// /// release it and return NULL).
     /// struct Libc;
     ///
     /// // SAFETY: forwards to libc's `malloc` family, unchanged.
@@ -247,17 +256,25 @@ impl AllocatorMut<'_> {
 /// libgit2 trusts these functions as it trusts C's `malloc`, `realloc` and `free`:
 ///
 /// - `malloc(len, ..)` returns `None`, or the start of a fresh allocation of at least
-///   `len` bytes, aligned for any object of up to `len` bytes as `malloc` aligns (to
-///   `max_align_t`, or the largest power of two not above a smaller `len`),
-///   overlapping no other live allocation of the implementation;
+///   `len` bytes, aligned for any object that fits in `len` bytes as `malloc` aligns
+///   (to `max_align_t`, or the largest power of two not above a smaller `len`),
+///   overlapping no other live allocation of the implementation. `len` may be 0, as
+///   for C's `malloc(0)`: the result is `None` (which libgit2 reads as out of memory)
+///   or an allocation of its own, which `free` releases like any other;
 /// - `realloc(None, len, ..)` behaves as `malloc`. `realloc(Some(ptr), len, ..)`, with
-///   `ptr` a live allocation of the implementation, either returns `None` and leaves
-///   `ptr` live and unchanged, or releases `ptr` and returns an allocation as `malloc`
-///   would whose first `min(old, len)` bytes are those `ptr` held (it may be `ptr`
-///   itself);
+///   `ptr` a live allocation of the implementation and `len` non-zero, either returns
+///   `None` and leaves `ptr` live and unchanged, or releases `ptr` and returns an
+///   allocation as `malloc` would whose first `min(old, len)` bytes are those `ptr`
+///   held (it may be `ptr` itself). It is never called with `Some(ptr)` and `len == 0`,
+///   which C leaves implementation-defined (see [`ReallocFn`]), so an implementation
+///   need not decide that case;
 /// - `free(ptr)` releases `ptr`, a live allocation of the implementation;
 /// - all three may run concurrently on any threads, and an allocation may be resized
 ///   or released on a thread other than the one that made it.
+///
+/// None of them may call into libgit2: libgit2 allocates through them, its per-thread
+/// error state included (`threadstate_get`), so a libgit2 call from inside one recurses
+/// without bound.
 ///
 /// Handwritten
 pub unsafe trait Alloc {
@@ -270,7 +287,7 @@ pub unsafe trait Alloc {
     /// # Safety
     ///
     /// `ptr` is `None` or a live allocation of this implementation that the caller
-    /// owns and, on success, gives up.
+    /// owns and, on success, gives up; `len` is non-zero when `ptr` is `Some`.
     unsafe fn realloc(
         ptr: Option<NonNull<u8>>,
         len: usize,
@@ -326,7 +343,8 @@ unsafe extern "C" fn realloc_with<A: Alloc>(
     // SAFETY: as in `malloc_with`.
     let file = unsafe { site_file(file) };
     // SAFETY: `ReallocFn`'s contract: `ptr` is NULL or a live allocation of this
-    // family, i.e. one `A` made, which the caller gives up on success.
+    // family, i.e. one `A` made, which the caller gives up on success, and `size` is
+    // non-zero when `ptr` is not NULL.
     let resized = unsafe { A::realloc(NonNull::new(ptr.cast()), size, file, line) };
     resized.map_or(ptr::null_mut(), |p| p.as_ptr().cast())
 }
@@ -552,6 +570,94 @@ mod unit_tests {
                 Call::Malloc(REFUSED, None, 0),
             ]
         );
+    }
+
+    /// A zero-byte request is an allocation like any other: distinct, and released by
+    /// `free`, through `malloc` and through `realloc(NULL, ..)` alike.
+    #[test]
+    fn zero_byte_requests_are_allocations() {
+        static HEAP: Allocator = Allocator::new::<Heap>();
+        let r = HEAP.as_ref();
+        let (malloc, realloc, free) =
+            (r.malloc().unwrap(), r.realloc().unwrap(), r.free().unwrap());
+        take_calls();
+        // SAFETY: NULL `file`; both blocks are released below.
+        let (a, b) = unsafe {
+            (
+                malloc(0, ptr::null(), 0),
+                realloc(ptr::null_mut(), 0, ptr::null(), 0),
+            )
+        };
+        assert!(!a.is_null() && !b.is_null() && a != b);
+        // A zero-byte block grows like any other, keeping its (empty) prefix.
+        // SAFETY: `a` is a live block of this family, given up on success.
+        let grown = unsafe { realloc(a, 24, c"x".as_ptr(), 1) };
+        assert!(!grown.is_null());
+        // SAFETY: `grown` holds 24 writable bytes.
+        unsafe { grown.cast::<u8>().write_bytes(0xAB, 24) };
+        // SAFETY: two live blocks of this family, each given up once.
+        unsafe {
+            free(grown);
+            free(b);
+        }
+        assert_eq!(
+            take_calls(),
+            [
+                Call::Malloc(0, None, 0),
+                Call::Realloc(false, 0, None, 0),
+                Call::Realloc(true, 24, Some(c"x".to_owned()), 1),
+                Call::Free,
+                Call::Free,
+            ]
+        );
+    }
+
+    /// An implementation that panics: libgit2 would call the trampoline from C, so the
+    /// panic cannot unwind and aborts the process instead of corrupting a C frame.
+    struct Panicking;
+
+    // SAFETY: never returns an allocation, so nothing is ever live.
+    unsafe impl Alloc for Panicking {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            panic!("refusing {len} bytes");
+        }
+        unsafe fn realloc(
+            _: Option<NonNull<u8>>,
+            _: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            None
+        }
+        unsafe fn free(_: NonNull<u8>) {}
+    }
+
+    const CHILD: &str = "CRUSTIFY_ALLOC_UNIT_CHILD";
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    #[cfg_attr(bsan, ignore = "the child's abort path spins under BorrowSanitizer")]
+    fn panic_in_the_implementation_aborts() {
+        // The test's path within the binary: `module_path!` less the crate name.
+        let path = concat!(module_path!(), "::panic_in_the_implementation_aborts");
+        let name = path.split_once("::").map_or(path, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            static PANICKING: Allocator = Allocator::new::<Panicking>();
+            let malloc = PANICKING.as_ref().malloc().unwrap();
+            // SAFETY: NULL `file`; the implementation panics before allocating.
+            let _ = unsafe { malloc(1, ptr::null(), 0) };
+            unreachable!("the trampoline must not return from a panic");
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{stderr}");
+        assert!(stderr.contains("refusing 1 bytes"), "{stderr}");
+        assert!(stderr.contains("cannot unwind"), "{stderr}");
+        assert!(!stderr.contains("must not return"), "{stderr}");
     }
 
     #[test]
