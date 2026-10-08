@@ -25,9 +25,10 @@
 //! `git_buf`'s `ptr` is never adopted through `from_raw` directly.
 //!
 //! The first allocation pins libgit2's runtime with a `git_libgit2_init` reference
-//! of its own, held for the rest of the process (`runtime_pinned`). C callers
-//! get NULL before initialisation instead, through a path that corrupts foreign
-//! thread-local state; the strategies deliberately diverge from it.
+//! of its own, held for the rest of the process (`runtime_pinned`, from
+//! `util::sys::errors`). C callers get NULL before initialisation instead, through a
+//! path that corrupts foreign thread-local state; the strategies deliberately diverge
+//! from it.
 //!
 //! Storage handed out by a custom `GIT_OPT_SET_ALLOCATOR` allocator is released
 //! through whichever allocator is current when the owner drops, so the allocator must
@@ -38,7 +39,6 @@ use core::ffi::{CStr, c_char};
 use core::fmt;
 use core::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
 use core::ptr::{self, NonNull};
-use std::sync::OnceLock;
 
 use ffibox::{
     CAlloc, CAllocZeroed, CBox, CCell, CDrop, CPlainElem, CStrBox, CVec, CZeroable,
@@ -46,6 +46,7 @@ use ffibox::{
 };
 
 use crate::ffi;
+use crate::libgit2::util::sys::errors::runtime_pinned;
 
 /// The alignment `git_odb_backend_data_alloc` storage is guaranteed to have.
 ///
@@ -56,27 +57,6 @@ const DATA_ALIGN: usize = {
     let (word, wide) = (align_of::<usize>(), align_of::<u64>());
     if word > wide { word } else { wide }
 };
-
-/// Holds one `git_libgit2_init` reference for the rest of the process; `false` when
-/// libgit2 cannot be initialised.
-///
-/// Until the first initialisation, and after the last shutdown, libgit2's allocator
-/// fails every request and `git__malloc` reports it through `git_error_set_oom`,
-/// which looks up thread-local state under a TLS key that does not exist: it writes
-/// into whatever block key 0 holds. A reference that is never released keeps the key
-/// live across balanced `git_libgit2_init` / `git_libgit2_shutdown` pairs.
-///
-/// Raw seam: replace with the safe `git_libgit2_init` wrapper (`core/global.rs`).
-fn runtime_pinned() -> bool {
-    static PINNED: OnceLock<bool> = OnceLock::new();
-    *PINNED.get_or_init(|| {
-        // SAFETY: no arguments; libgit2 counts initialisations under its own lock, so
-        // concurrent callers are serialised. A negative result is a failed
-        // initialisation, after which nothing is allocated.
-        let count = unsafe { ffi::git_libgit2_init() };
-        count >= 0
-    })
-}
 
 /// `git_odb_backend_data_alloc` for at least `byte_len` bytes; `None` on failure,
 /// or when libgit2 cannot be initialised.

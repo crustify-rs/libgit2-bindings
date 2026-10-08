@@ -328,6 +328,56 @@
    }
   },
   {
+   "name": "git_error_clear",
+   "defined_in": "src/util/errors.c"
+  },
+  {
+   "name": "git_error_set",
+   "defined_in": "src/util/errors.c",
+   "ptr_args": [
+    {
+     "name": "fmt",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:fmt"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "printf-style format read during the call only (git_str_vprintf into the thread's error buffer), together with the variadic arguments it names; never retained. NULL is accepted: the message is then empty, or for GIT_ERROR_OS just strerror(errno). With GIT_ERROR_OS and a non-NULL fmt, ': ' and strerror(errno) are appended when errno != 0, and errno is reset to 0. Allocation failure leaves `last` at the static oom_error (git__realloc -> git_error_set_oom) and the thread's buffer stuck at git_str__oom, so later messages on that thread are dropped. Like every errors.c entry point, it reads TLS under errors.c's tls_key, which only exists while the runtime is initialised (pre-init it reads key 0's foreign block). Safe Rust passes \"%s\" with a &CStr message, or NULL (set_without_message)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_error_set_oom",
+   "defined_in": "src/util/errors.c"
+  },
+  {
+   "name": "git_error_set_str",
+   "defined_in": "src/util/errors.c",
+   "ptr_args": [
+    {
+     "name": "string",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:string"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied with git_str_puts into the thread's error buffer during the call; never retained (the header's 'static string' wording is wrong: any string works). NULL is rejected by GIT_ASSERT_ARG: -1 and an 'invalid argument' error in release builds, assert() abort under _DEBUG/GIT_ASSERT_HARD (the coverage build). Returns -1 when the thread state cannot be allocated or the copy runs out of memory (buffer then stuck at git_str__oom, `last` at oom_error), 0 otherwise; unlike git_error_set it never consults errno."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_odb_backend_data_alloc",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {
