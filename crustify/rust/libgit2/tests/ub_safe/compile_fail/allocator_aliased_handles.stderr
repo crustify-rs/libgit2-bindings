@@ -1,0 +1,10 @@
+error[E0502]: cannot borrow `*allocator` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/allocator_aliased_handles.rs:6:25
+  |
+5 |     let shared = allocator.as_ref();
+  |                  --------- immutable borrow occurs here
+6 |     let mut exclusive = allocator.as_mut();
+  |                         ^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+7 |     exclusive.set_free(free);
+8 |     let _ = shared.free();
+  |             ------ immutable borrow later used here

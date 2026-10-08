@@ -1,6 +1,87 @@
 {
  "_comment": "Authored analysis: ownership, lifecycle, refcount and locking judgements that no composer can derive, keyed to the C entities they describe. The structural half of each record (field layout, signatures, footprints, casts) is composed from the CodeQL tables on demand and merged in at read time, so a re-extract rewrites nothing here. Written only by `wavefront <repo> <target> query {types,symbols} --update`; read through wavefront.manifests. Hand-edit at your own risk: `--update` validates a submission against the composed skeleton (unknown field, wrong kind, ptr-invariant violation) and this file does not.",
- "types": [],
+ "types": [
+  {
+   "name": "git_allocator",
+   "defined_in": "include/git2/sys/alloc.h",
+   "_comment_agent": "A plain vtable value: no lifecycle of its own. git_allocator_setup (GIT_OPT_SET_ALLOCATOR) memcpys the caller's struct into the hidden global git__allocator, so the caller's storage is borrowed for the call only. The init routines git_stdalloc_init_allocator / git_debugalloc_init_allocator fill caller storage but are not exported from libgit2.so (declared without GIT_EXTERN, hidden), and git_win32_crtdbg_init_allocator is declared but never defined on this build; the only public producer is a value the caller fills itself. The three members form one allocator family: storage from gmalloc/grealloc must be released by the same family's grealloc/gfree, and libgit2 calls them from any thread.",
+   "fields": [
+    {
+     "name": "gfree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer to code: static. Releases a live allocation of this allocator; NULL is a no-op. Called unconditionally by git__free, so it must be set when installed."
+     }
+    },
+    {
+     "name": "gmalloc",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer to code: static, never owned or freed. libgit2 calls it unconditionally through git__allocator (git__malloc, threadstate_get), so every installed allocator must set it (git2/sys/alloc.h: 'all fields need to be set'); the C type admits NULL (bindgen Option), which only a never-installed value may hold. Returns fresh storage of >= n bytes or NULL; file/line are the call site (__FILE__, a static string) and are borrowed for the call."
+     }
+    },
+    {
+     "name": "grealloc",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer to code: static. C realloc contract: consumes a live allocation of this allocator (or NULL = malloc) and returns a new one of `size` bytes, or NULL leaving the old one live. Called unconditionally by git__realloc / git__reallocarray, so it must be set when installed."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_error",
+   "defined_in": "include/git2/errors.h",
+   "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
+   "fields": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Runtime-conditional ownership. In every git_error libgit2 publishes (git_error_last) it is borrowed: for the per-thread error it aliases error_threadstate.message.ptr (a git_str the thread state owns; set_error_from_buffer), so it dangles once the next error on that thread grows the buffer (git_str_puts/vprintf realloc) and dies with the thread state (thread exit, git_libgit2_shutdown); for the four static errors (oom, uninitialized, tlsdata, no_error) it is a static string literal. Only in the private copies made by git_error_save is it owned: a git__strdup that git_error_free / git_error_restore release with git__free. Never NULL in a published error (the thread state's git_str is initialised to git_str__initstr and set_error_from_buffer is skipped on OOM); C callers (fetchhead_ref_parse, local_push, git_fs_path_direach) read it unchecked. Never written through: libgit2 writes the git_str and re-points the field."
+     }
+    }
+   ]
+  }
+ ],
  "symbols": [
   {
    "name": "calloc",
@@ -332,6 +413,104 @@
    "defined_in": "src/util/errors.c"
   },
   {
+   "name": "git_error_free",
+   "defined_in": "src/util/errors.c",
+   "lifetime": {
+    "for": "error",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "error",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Releases a git_error_save copy (message, then the struct, with git__free); NULL and the static errors are ignored. Internal (hidden)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_error_restore",
+   "defined_in": "src/util/errors.c",
+   "lifetime": {
+    "for": "error",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "error",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Consumes a git_error_save result: makes it the thread's last error (a static one by pointer, a copy by re-setting its class and message) and then releases it with git_error_free. NULL is rejected (GIT_ASSERT_ARG). Internal (hidden)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_error_save",
+   "defined_in": "src/util/errors.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": {
+         "lifetime": "static"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot. Receives either a fresh git__malloc copy of the thread's last error (message git__strdup'ed), owned by the caller and released by git_error_free / git_error_restore, or one of the static errors (no_error, oom_error, tlsdata_error, or the static last error itself), which those routines skip (IS_STATIC_ERROR). Leaks the copy when the message strdup fails. Internal (src/util/errors.h, hidden)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_error_set",
    "defined_in": "src/util/errors.c",
    "ptr_args": [
@@ -469,6 +648,39 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object, a buffer, or a NUL-terminated string) without reading it; NULL is a no-op. Strings: libgit2 makes its strings with git__strdup/git__strndup/git__substrdup (git__malloc) and releases them with git__free in git_strarray_dispose (each element, then the array), git_signature_free (name, email) and git_buf_dispose (ptr), none of which exports a single-string free, so this is the only exported releaser for one libgit2 string or a char** array of them; Rust OdbDataStrFree / OdbDataStrVec drop through it. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_stdalloc_init_allocator",
+   "defined_in": "src/util/allocators/stdalloc.c",
+   "lifetime": {
+    "for": "allocator",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "allocator",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage filled in place: sets all three members to the stdalloc malloc/realloc/free forwarders and returns 0. Not exported from libgit2.so (declared in git2/sys/alloc.h without GIT_EXTERN, hidden), so it cannot be bound; git_allocator_global_init applies it to git__allocator."
      }
     }
    ]

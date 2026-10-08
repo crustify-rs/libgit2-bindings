@@ -1,0 +1,11 @@
+error[E0597]: `allocator` does not live long enough
+  --> tests/ub_safe/compile_fail/allocator_handle_outlives_value.rs:24:9
+   |
+22 |     let handle = {
+   |         ------ borrow later stored here
+23 |         let allocator = Allocator::new::<Refuse>();
+   |             --------- binding `allocator` declared here
+24 |         allocator.as_ref()
+   |         ^^^^^^^^^ borrowed value does not live long enough
+25 |     };
+   |     - `allocator` dropped here while still borrowed
