@@ -80,6 +80,18 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_error_code",
+   "defined_in": "include/git2/errors.h",
+   "_comment_agent": "Plain C enum (bindgen: c_int constants, values 0 and -1..-40 with gaps at -2 and -25..-29). No storage, no pointer, no lifecycle: libgit2 never names the type in a signature, every API returns or accepts these codes as plain int, and callbacks may return any int (positive values and unknown negatives are passed through, e.g. git_error_set_after_callback), so a raw int is not guaranteed to be a variant. GIT_EUSER is never produced by libgit2; GIT_RETRY is internal. Wrapped as a Rust enum whose discriminants are the bindgen constants, converted from int fallibly (from_raw -> Option) and never transmuted.",
+   "fields": []
+  },
+  {
+   "name": "git_error_t",
+   "defined_in": "include/git2/errors.h",
+   "_comment_agent": "Plain C enum of error classes (bindgen: c_uint constants 0..=36, contiguous). No storage, no pointer, no lifecycle. Consumers carry it as int: git_error.klass (int, @type git_error_t) and git_error_set/git_error_set_str(int error_class, ...), which accept any int from user code, so git_error_last()->klass may hold a value outside the enum. Wrapped as a Rust enum with discriminants from the bindgen constants, converted from int fallibly (from_raw -> Option).",
+   "fields": []
   }
  ],
  "symbols": [
