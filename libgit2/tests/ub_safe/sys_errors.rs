@@ -12,9 +12,16 @@ use std::sync::Barrier;
 use std::thread;
 
 use libgit2::ffi;
+use libgit2::libgit2::util::errors::last;
 use libgit2::libgit2::util::sys::errors;
 
-use crate::fixture::{isolated, last_error};
+use crate::fixture::isolated;
+
+/// The thread's last error's class and message, through the safe `last`.
+fn last_error() -> (c_int, Vec<u8>) {
+    let e = last();
+    (e.raw_class(), e.message().to_bytes().to_vec())
+}
 
 fn class(c: ffi::git_error_t) -> c_int {
     c as c_int

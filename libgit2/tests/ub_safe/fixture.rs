@@ -30,17 +30,6 @@ pub fn isolated(test: &str, body: fn()) {
     );
 }
 
-/// `git_error_last()`'s class and message, copied out; stands in for the safe
-/// `git_error_last` wrapper.
-pub fn last_error() -> (c_int, Vec<u8>) {
-    // SAFETY: `git_error_last` never returns NULL; its message lives until the next
-    // libgit2 call on this thread, and is copied out before one.
-    unsafe {
-        let e = libgit2::ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_bytes().to_vec())
-    }
-}
-
 /// Promotes a run every element of which the test wrote; stands in for the typed
 /// constructors that fill a run in one safe call.
 pub fn filled<T>(v: OdbDataVec<MaybeUninit<T>>) -> OdbDataVec<T> {
