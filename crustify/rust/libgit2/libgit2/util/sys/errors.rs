@@ -20,16 +20,18 @@
 //! on the thread is dropped — [`set`] and [`set_without_message`] keep the previous
 //! error, [`set_str`] fails. The wrappers keep libgit2's behaviour.
 //!
-//! The error class is libgit2's `git_error_t`, taken raw and stored as given, any value
-//! included. Raw seam: the safe `git_error_t` wrapper (`util/errors.rs`) replaces it.
+//! The error class is an [`ErrorClass`], which libgit2 stores as the `int` its
+//! `git_error_t` constant is. C code may store an `int` the header does not name,
+//! which `git_error_last` reports as a raw class; the setters here only take named ones.
 
-use core::ffi::{CStr, c_int};
+use core::ffi::CStr;
 use core::fmt;
 use core::ptr;
 use std::io;
 use std::sync::OnceLock;
 
 use crate::ffi;
+use crate::libgit2::util::errors::ErrorClass;
 
 /// Holds one `git_libgit2_init` reference for the rest of the process; `false` when
 /// libgit2 cannot be initialised.
@@ -82,34 +84,43 @@ pub fn clear() {
 /// Sets the calling thread's last error to `message` in `class`.
 ///
 /// `message` is handed to `git_error_set` as the argument of a `"%s"` format, so a `%`
-/// in it is literal. For `GIT_ERROR_OS`, libgit2 appends `": "` and, when the thread's
-/// `errno` is non-zero, its description, then resets `errno` to 0. libgit2 copies the
-/// message; nothing borrows it after the call.
+/// in it is literal. For [`ErrorClass::Os`], libgit2 appends `": "` and, when the
+/// thread's `errno` is non-zero, its description, then resets `errno` to 0. libgit2
+/// copies the message; nothing borrows it after the call.
 ///
 /// When the message cannot be stored, the last error is `GIT_ERROR_NOMEMORY`, or the
-/// previous one once the thread's buffer is out of memory (see the module docs).
+/// previous one once the thread's buffer is out of memory (see the module docs). A
+/// message of `c_int::MAX` bytes or more cannot be formatted at all: libgit2 then
+/// keeps the previous error and the thread's buffer goes out of memory for good;
+/// [`set_str`] has no such limit.
 ///
 /// ```compile_fail,E0308
 /// // The message must be NUL-terminated: a `&str` is not.
-/// libgit2::libgit2::util::sys::errors::set(libgit2::ffi::GIT_ERROR_INVALID, "bad");
+/// use libgit2::libgit2::util::errors::ErrorClass;
+/// libgit2::libgit2::util::sys::errors::set(ErrorClass::Invalid, "bad");
+/// ```
+///
+/// ```compile_fail,E0308
+/// // The class is a named one, not the `int` libgit2 stores.
+/// libgit2::libgit2::util::sys::errors::set(libgit2::ffi::GIT_ERROR_INVALID, c"bad");
 /// ```
 ///
 /// Wraps: git_error_set
-pub fn set(class: ffi::git_error_t, message: &CStr) {
+pub fn set(class: ErrorClass, message: &CStr) {
     if runtime_pinned() {
         // SAFETY: a `"%s"` format with the one NUL-terminated string argument it
-        // names, both read during the call only; `class` is any `int` (the cast keeps
-        // C's conversion of a `git_error_t`). The runtime is pinned, so the thread
-        // state is looked up under libgit2's live TLS key.
-        unsafe { ffi::git_error_set(class as c_int, c"%s".as_ptr(), message.as_ptr()) }
+        // names, both read during the call only; `class` is the `int` of a
+        // `git_error_t` constant. The runtime is pinned, so the thread state is looked
+        // up under libgit2's live TLS key.
+        unsafe { ffi::git_error_set(class.raw(), c"%s".as_ptr(), message.as_ptr()) }
     }
 }
 
 /// Sets the calling thread's last error to `class` without a message of its own:
 /// `git_error_set` with a NULL format.
 ///
-/// For `GIT_ERROR_OS` the message is the description of the thread's `errno` when it
-/// is non-zero, and empty otherwise, and `errno` is reset to 0; for any other class
+/// For [`ErrorClass::Os`] the message is the description of the thread's `errno` when
+/// it is non-zero, and empty otherwise, and `errno` is reset to 0; for any other class
 /// the message is empty.
 ///
 /// Only the `errno` description needs storage: when it cannot be stored, the last
@@ -117,11 +128,12 @@ pub fn set(class: ffi::git_error_t, message: &CStr) {
 /// previous error stays, whatever the class (see the module docs).
 ///
 /// Wraps: git_error_set
-pub fn set_without_message(class: ffi::git_error_t) {
+pub fn set_without_message(class: ErrorClass) {
     if runtime_pinned() {
         // SAFETY: a NULL format, which libgit2 checks before formatting, so no variadic
-        // argument is read; `class` is any `int`, as in `set`. The runtime is pinned.
-        unsafe { ffi::git_error_set(class as c_int, ptr::null()) }
+        // argument is read; `class` is the `int` of a `git_error_t` constant. The
+        // runtime is pinned.
+        unsafe { ffi::git_error_set(class.raw(), ptr::null()) }
     }
 }
 
@@ -132,13 +144,13 @@ pub fn set_without_message(class: ffi::git_error_t) {
 /// the thread's buffer is already out of memory (see the module docs).
 ///
 /// Wraps: git_error_set_str
-pub fn set_str(class: ffi::git_error_t, message: &CStr) -> Result<(), MessageNotStored> {
+pub fn set_str(class: ErrorClass, message: &CStr) -> Result<(), MessageNotStored> {
     if !runtime_pinned() {
         return Err(MessageNotStored);
     }
     // SAFETY: a NUL-terminated string, copied during the call and never retained;
-    // `class` is any `int`, as in `set`. The runtime is pinned.
-    match unsafe { ffi::git_error_set_str(class as c_int, message.as_ptr()) } {
+    // `class` is the `int` of a `git_error_t` constant. The runtime is pinned.
+    match unsafe { ffi::git_error_set_str(class.raw(), message.as_ptr()) } {
         0 => Ok(()),
         _ => Err(MessageNotStored),
     }
@@ -175,7 +187,11 @@ impl std::error::Error for MessageNotStored {}
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+    use core::ffi::{c_int, c_void};
+    use core::ptr::NonNull;
     use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -236,9 +252,9 @@ mod unit_tests {
             set_errno(libc::ENOENT);
             assert!(runtime_pinned());
             assert_eq!(errno(), libc::ENOENT);
-            set(ffi::GIT_ERROR_OS, c"open");
+            set(ErrorClass::Os, c"open");
             let expected = b"open: No such file or directory".to_vec();
-            assert_eq!(last_error(), (ffi::GIT_ERROR_OS as c_int, expected));
+            assert_eq!(last_error(), (ErrorClass::Os.raw(), expected));
             assert_eq!(errno(), 0, "libgit2 consumed it");
         });
     }
@@ -277,6 +293,90 @@ mod unit_tests {
                 // SAFETY: no arguments; the extra reference dies with the process.
                 let count = unsafe { ffi::git_libgit2_init() };
                 assert_eq!(count, 2, "one pinned reference");
+            },
+        );
+    }
+
+    static REFUSING: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut c_void;
+        fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+        fn free(p: *mut c_void);
+    }
+
+    /// libc's allocator, refusing everything while `REFUSING` is set.
+    struct Refusing;
+
+    // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+    unsafe impl Alloc for Refusing {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            // SAFETY: plain libc allocation.
+            NonNull::new(unsafe { malloc(len) }.cast())
+        }
+        unsafe fn realloc(
+            p: Option<NonNull<u8>>,
+            len: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+            // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+            NonNull::new(unsafe { realloc(p, len) }.cast())
+        }
+        unsafe fn free(p: NonNull<u8>) {
+            // SAFETY: `p` is a live libc block the caller gives up.
+            unsafe { free(p.as_ptr().cast()) }
+        }
+    }
+
+    /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+    fn install_refusing() {
+        let allocator = Allocator::new::<Refusing>();
+        // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
+        // member set; libgit2 copies it before anything is allocated.
+        let rc = unsafe {
+            ffi::git_libgit2_opts(
+                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                allocator.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+    }
+
+    /// When libgit2 cannot be initialised, no wrapper reaches it: `clear`, `set`,
+    /// `set_without_message` and `set_oom` do nothing, `set_str` fails, and the pin
+    /// stays refused. (`errors.c` would write through a nonexistent TLS key.)
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn without_a_runtime_nothing_reaches_libgit2() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::without_a_runtime_nothing_reaches_libgit2"
+            ),
+            || {
+                install_refusing();
+                REFUSING.store(true, SeqCst);
+                set_errno(libc::ENOENT);
+                clear();
+                assert_eq!(errno(), libc::ENOENT, "nothing consumed it");
+                set(ErrorClass::Os, c"open");
+                assert_eq!(errno(), libc::ENOENT);
+                set_without_message(ErrorClass::Os);
+                assert_eq!(errno(), libc::ENOENT);
+                assert_eq!(set_str(ErrorClass::Invalid, c"x"), Err(MessageNotStored));
+                set_oom();
+                assert!(!runtime_pinned(), "libgit2 could not initialise");
+                REFUSING.store(false, SeqCst);
+                assert!(!runtime_pinned(), "a refused pin is final");
+                assert_eq!(set_str(ErrorClass::Invalid, c"x"), Err(MessageNotStored));
             },
         );
     }

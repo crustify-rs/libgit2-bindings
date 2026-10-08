@@ -11,8 +11,7 @@ use std::ffi::{CString, c_int};
 use std::sync::Barrier;
 use std::thread;
 
-use libgit2::ffi;
-use libgit2::libgit2::util::errors::last;
+use libgit2::libgit2::util::errors::{ErrorClass, last};
 use libgit2::libgit2::util::sys::errors;
 
 use crate::fixture::isolated;
@@ -23,8 +22,8 @@ fn last_error() -> (c_int, Vec<u8>) {
     (e.raw_class(), e.message().to_bytes().to_vec())
 }
 
-fn class(c: ffi::git_error_t) -> c_int {
-    c as c_int
+fn class(c: ErrorClass) -> c_int {
+    c.raw()
 }
 
 fn text(len: usize, seed: u8) -> CString {
@@ -35,11 +34,11 @@ fn text(len: usize, seed: u8) -> CString {
 }
 
 fn oom() -> (c_int, Vec<u8>) {
-    (class(ffi::GIT_ERROR_NOMEMORY), b"Out of memory".to_vec())
+    (class(ErrorClass::NoMemory), b"Out of memory".to_vec())
 }
 
 fn no_error() -> (c_int, Vec<u8>) {
-    (class(ffi::GIT_ERROR_NONE), b"no error".to_vec())
+    (class(ErrorClass::None), b"no error".to_vec())
 }
 
 #[test]
@@ -60,10 +59,10 @@ fn set_works_before_any_init() {
     isolated(
         concat!(module_path!(), "::set_works_before_any_init"),
         || {
-            errors::set(ffi::GIT_ERROR_INVALID, c"first");
+            errors::set(ErrorClass::Invalid, c"first");
             assert_eq!(
                 last_error(),
-                (class(ffi::GIT_ERROR_INVALID), b"first".to_vec())
+                (class(ErrorClass::Invalid), b"first".to_vec())
             );
         },
     );
@@ -78,8 +77,8 @@ fn set_without_message_works_before_any_init() {
             "::set_without_message_works_before_any_init"
         ),
         || {
-            errors::set_without_message(ffi::GIT_ERROR_CONFIG);
-            assert_eq!(last_error(), (class(ffi::GIT_ERROR_CONFIG), Vec::new()));
+            errors::set_without_message(ErrorClass::Config);
+            assert_eq!(last_error(), (class(ErrorClass::Config), Vec::new()));
         },
     );
 }
@@ -90,8 +89,8 @@ fn set_str_works_before_any_init() {
     isolated(
         concat!(module_path!(), "::set_str_works_before_any_init"),
         || {
-            assert_eq!(errors::set_str(ffi::GIT_ERROR_ODB, c"first"), Ok(()));
-            assert_eq!(last_error(), (class(ffi::GIT_ERROR_ODB), b"first".to_vec()));
+            assert_eq!(errors::set_str(ErrorClass::Odb, c"first"), Ok(()));
+            assert_eq!(last_error(), (class(ErrorClass::Odb), b"first".to_vec()));
         },
     );
 }
@@ -123,15 +122,15 @@ fn first_contacts_race_to_pin_the_runtime() {
                         barrier.wait();
                         match t % 5 {
                             0 => errors::clear(),
-                            1 => errors::set(ffi::GIT_ERROR_NET, c"raced"),
-                            2 => errors::set_without_message(ffi::GIT_ERROR_NET),
-                            3 => errors::set_str(ffi::GIT_ERROR_NET, c"raced").unwrap(),
+                            1 => errors::set(ErrorClass::Net, c"raced"),
+                            2 => errors::set_without_message(ErrorClass::Net),
+                            3 => errors::set_str(ErrorClass::Net, c"raced").unwrap(),
                             _ => errors::set_oom(),
                         }
                         let expected = match t % 5 {
                             0 => no_error(),
-                            1 | 3 => (class(ffi::GIT_ERROR_NET), b"raced".to_vec()),
-                            2 => (class(ffi::GIT_ERROR_NET), Vec::new()),
+                            1 | 3 => (class(ErrorClass::Net), b"raced".to_vec()),
+                            2 => (class(ErrorClass::Net), Vec::new()),
                             _ => oom(),
                         };
                         assert_eq!(last_error(), expected);
@@ -148,11 +147,11 @@ fn first_contacts_race_to_pin_the_runtime() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn format_directives_stay_literal() {
     let message = c"%s%s%s%s %n%n %p %99999999d %";
-    errors::set(ffi::GIT_ERROR_INVALID, message);
+    errors::set(ErrorClass::Invalid, message);
     assert_eq!(last_error().1, message.to_bytes());
-    assert_eq!(errors::set_str(ffi::GIT_ERROR_INVALID, message), Ok(()));
+    assert_eq!(errors::set_str(ErrorClass::Invalid, message), Ok(()));
     assert_eq!(last_error().1, message.to_bytes());
-    errors::set(ffi::GIT_ERROR_OS, message);
+    errors::set(ErrorClass::Os, message);
     assert!(last_error().1.starts_with(message.to_bytes()));
 }
 
@@ -167,36 +166,44 @@ fn messages_are_copied_at_every_size() {
     {
         let expected = text(len, i as u8);
         let source = expected.clone();
-        errors::set(ffi::GIT_ERROR_TREE, &source);
+        errors::set(ErrorClass::Tree, &source);
         drop(source);
         assert_eq!(
             last_error(),
-            (class(ffi::GIT_ERROR_TREE), expected.to_bytes().to_vec())
+            (class(ErrorClass::Tree), expected.to_bytes().to_vec())
         );
 
         let source = expected.clone();
-        assert_eq!(errors::set_str(ffi::GIT_ERROR_INDEX, &source), Ok(()));
+        assert_eq!(errors::set_str(ErrorClass::Index, &source), Ok(()));
         drop(source);
         assert_eq!(
             last_error(),
-            (class(ffi::GIT_ERROR_INDEX), expected.to_bytes().to_vec())
+            (class(ErrorClass::Index), expected.to_bytes().to_vec())
         );
     }
     errors::clear();
     assert_eq!(last_error(), no_error());
 }
 
-/// Bytes that are not UTF-8, and classes outside `git_error_t`, are kept as given.
+/// Bytes that are not UTF-8, and every class, are kept as given.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn messages_and_classes_are_kept_verbatim() {
     let message = c"\xff\xfe\x80 bytes\n";
-    assert_eq!(errors::set_str(999, message), Ok(()));
-    assert_eq!(last_error(), (999, message.to_bytes().to_vec()));
-    errors::set(u32::MAX, message);
-    assert_eq!(last_error(), (-1, message.to_bytes().to_vec()));
-    errors::set_without_message(u32::MAX - 1);
-    assert_eq!(last_error(), (-2, Vec::new()));
+    let classes: Vec<ErrorClass> = (0..=36).filter_map(ErrorClass::from_raw).collect();
+    assert_eq!(classes.len(), 37);
+    for c in classes {
+        assert_eq!(errors::set_str(c, message), Ok(()));
+        assert_eq!(last_error(), (class(c), message.to_bytes().to_vec()));
+        assert_eq!(last().class(), Some(c));
+        errors::set(c, message);
+        assert_eq!(last().class(), Some(c));
+        if c != ErrorClass::Os {
+            assert_eq!(last_error(), (class(c), message.to_bytes().to_vec()));
+            errors::set_without_message(c);
+            assert_eq!(last_error(), (class(c), Vec::new()));
+        }
+    }
 }
 
 /// Every setter and `clear`, in alternation, on threads that check only their own
@@ -214,22 +221,22 @@ fn threads_set_and_clear_concurrently() {
                     let own = text(i % 97 + usize::from(t), t);
                     match i % 5 {
                         0 => {
-                            errors::set(ffi::GIT_ERROR_NET, &own);
+                            errors::set(ErrorClass::Net, &own);
                             assert_eq!(
                                 last_error(),
-                                (class(ffi::GIT_ERROR_NET), own.to_bytes().to_vec())
+                                (class(ErrorClass::Net), own.to_bytes().to_vec())
                             );
                         }
                         1 => {
-                            errors::set_str(ffi::GIT_ERROR_SSL, &own).unwrap();
+                            errors::set_str(ErrorClass::Ssl, &own).unwrap();
                             assert_eq!(
                                 last_error(),
-                                (class(ffi::GIT_ERROR_SSL), own.to_bytes().to_vec())
+                                (class(ErrorClass::Ssl), own.to_bytes().to_vec())
                             );
                         }
                         2 => {
-                            errors::set_without_message(ffi::GIT_ERROR_SSH);
-                            assert_eq!(last_error(), (class(ffi::GIT_ERROR_SSH), Vec::new()));
+                            errors::set_without_message(ErrorClass::Ssh);
+                            assert_eq!(last_error(), (class(ErrorClass::Ssh), Vec::new()));
                         }
                         3 => {
                             errors::set_oom();
@@ -246,16 +253,65 @@ fn threads_set_and_clear_concurrently() {
     });
 }
 
+/// A thread-local destructor that sets and reads errors while its thread exits: the
+/// thread's state is allocated or reused there, and still released with the thread
+/// (LSan flags a leak, ASan a use after free of a state torn down first).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn errors_set_while_a_thread_exits_are_released() {
+    struct AtExit(usize);
+
+    impl Drop for AtExit {
+        fn drop(&mut self) {
+            let message = text(self.0, 7);
+            errors::set(ErrorClass::Filesystem, &message);
+            assert_eq!(
+                last_error(),
+                (class(ErrorClass::Filesystem), message.to_bytes().to_vec())
+            );
+            assert_eq!(errors::set_str(ErrorClass::Worktree, &message), Ok(()));
+            assert_eq!(
+                last_error(),
+                (class(ErrorClass::Worktree), message.to_bytes().to_vec())
+            );
+            errors::set_oom();
+            assert_eq!(last_error(), oom());
+            errors::clear();
+            assert_eq!(last_error(), no_error());
+            errors::set_without_message(ErrorClass::Filesystem);
+            assert_eq!(last_error(), (class(ErrorClass::Filesystem), Vec::new()));
+        }
+    }
+
+    thread_local! {
+        static AT_EXIT: std::cell::Cell<Option<AtExit>> = const { std::cell::Cell::new(None) };
+    }
+
+    for len in [0, 10, 4096] {
+        // A thread whose first contact with libgit2 is its destructor.
+        thread::spawn(move || AT_EXIT.with(|c| c.set(Some(AtExit(len)))))
+            .join()
+            .unwrap();
+        // One that already holds an error, of another size, when it exits.
+        thread::spawn(move || {
+            errors::set(ErrorClass::Object, &text(4096 - len, 3));
+            AT_EXIT.with(|c| c.set(Some(AtExit(len))));
+        })
+        .join()
+        .unwrap();
+    }
+}
+
 /// A thread that exits holding a message releases its error state with it; LSan
 /// flags a leak, ASan a double free.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn thread_exit_releases_the_message() {
     for len in [0, 10, 4096] {
-        thread::spawn(move || errors::set(ffi::GIT_ERROR_OBJECT, &text(len, 1)))
+        thread::spawn(move || errors::set(ErrorClass::Object, &text(len, 1)))
             .join()
             .unwrap();
-        thread::spawn(move || errors::set_str(ffi::GIT_ERROR_OBJECT, &text(len, 2)))
+        thread::spawn(move || errors::set_str(ErrorClass::Object, &text(len, 2)))
             .join()
             .unwrap()
             .unwrap();

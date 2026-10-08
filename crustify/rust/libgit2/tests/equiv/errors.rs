@@ -350,7 +350,7 @@ fn set_classes_round_trip_through_libgit2() {
         assert_eq!(ret, 0);
         let from_c = last_klass();
 
-        set_str(class.into(), c"class").unwrap();
+        set_str(class, c"class").unwrap();
         let from_rust = last_klass();
 
         assert_eq!(from_c, from_rust, "{class:?}");

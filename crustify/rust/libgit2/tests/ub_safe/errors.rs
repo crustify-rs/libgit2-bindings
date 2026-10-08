@@ -120,7 +120,7 @@ fn last_works_before_any_init() {
         concat!(module_path!(), "::last_works_before_any_init"),
         || {
             assert!(is_no_error(&last()));
-            set_str(ErrorClass::Odb.into(), c"after").unwrap();
+            set_str(ErrorClass::Odb, c"after").unwrap();
             let e = last();
             assert_eq!((e.class(), e.message()), (Some(ErrorClass::Odb), c"after"));
         },
@@ -160,9 +160,9 @@ fn copies_outlive_the_next_errors() {
         .map(|(i, &len)| {
             let message = text(len, i as u8);
             if i % 2 == 0 {
-                set(ErrorClass::Tree.into(), &message);
+                set(ErrorClass::Tree, &message);
             } else {
-                set_str(ErrorClass::Index.into(), &message).unwrap();
+                set_str(ErrorClass::Index, &message).unwrap();
             }
             (message, last())
         })
@@ -192,7 +192,7 @@ fn copies_outlive_the_next_errors() {
 fn copies_outlive_their_thread() {
     for len in [0, 10, 4096] {
         let copy = thread::spawn(move || {
-            set_str(ErrorClass::Net.into(), &text(len, 3)).unwrap();
+            set_str(ErrorClass::Net, &text(len, 3)).unwrap();
             last()
         })
         .join()
@@ -218,7 +218,7 @@ fn reading_threads_release_their_state() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn copies_cross_threads_while_they_read() {
-    set_str(ErrorClass::Config.into(), c"shared").unwrap();
+    set_str(ErrorClass::Config, c"shared").unwrap();
     let shared = last();
     let barrier = Barrier::new(8);
     let sent: Vec<ErrorBuf> = thread::scope(|s| {
@@ -231,7 +231,7 @@ fn copies_cross_threads_while_they_read() {
                         assert_eq!(shared.message(), c"shared");
                         let message = text(i % 97 + usize::from(t), t);
                         match i % 3 {
-                            0 => set_str(ErrorClass::Ssl.into(), &message).unwrap(),
+                            0 => set_str(ErrorClass::Ssl, &message).unwrap(),
                             1 => set_oom(),
                             _ => clear(),
                         }
