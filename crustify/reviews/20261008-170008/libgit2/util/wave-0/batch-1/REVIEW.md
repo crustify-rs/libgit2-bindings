@@ -1,0 +1,19 @@
+# Review: libgit2 / util / wave 0 / batch 1 (`git_error_code`, `git_error_t`)
+
+Reviewed commit `cb97c64a8` (`ErrorCode`, `ErrorClass` in
+`crustify/rust/libgit2/libgit2/util/errors.rs`: fieldless `#[repr(i32)]`
+`#[non_exhaustive]` enums over the bindgen constants, converted from an `int` only
+through `from_raw` / `TryFrom` and back through `raw()` / `From`; `ErrorClass` also
+converts to the bindgen `git_error_t`).
+
+| step | outcome |
+|---|---|
+| lifecycle discovery | nothing to discover: both are plain C enums with no storage, pointer or lifecycle routine (`wavefront query types --lifecycle-ops` is empty for both); libgit2 traffics them as `int`. No missing representation. |
+| wavefront findings | verified against `include/git2/errors.h` and `src/util/errors.c`: 35 codes (0, −1, −3..−24, −30..−40) and 37 contiguous classes (0..=36), bindgen `c_int` / `c_uint` constants, never named in a signature, callbacks' own results passed through (`git_error_set_after_callback_function`), any class stored as given. Nothing to resubmit. |
+| safe boundary | the workset's public API holds no `unsafe` and no raw pointer (`crustify scan-unsafe --name git_error_code git_error_t`: no sites); `as`-casting an `int` into either enum is rejected by the compiler (`ub_safe/compile_fail/error_code_from_int_cast.rs`). Not fixed here: `util/sys/errors.rs`'s `set` / `set_without_message` / `set_str` still take the class as the bindgen `ffi::git_error_t`, a seam their module docs mark for "the safe `git_error_t` wrapper" — those symbols, and the tests that deliberately exercise unnamed classes through them, belong to review batch 2 running in parallel; `From<ErrorClass> for git_error_t` already lets callers pass `ErrorClass::Odb.into()`, and the signature change is batch 2's call. |
+| UB | none possible from the safe surface (no unsafe, no pointers; `Option<ErrorCode>` keeps a niche no variant uses) and none found: plain, ASan/UBSan (with LSan), TSan, BSan (`ub_safe`) and Miri (Rust-only tests) are clean on the reviewed commit and after the changes. No public unsafe API, so no `ub_unsafe` suite. |
+| equivalence | no defect: every variant carries its C constant and `from_raw` names exactly the C values over a probe range; codes and classes libgit2 reports classify to the right variants. Coverage gap filled: the existing tests only saw `GIT_OK` and `GIT_ERROR` produced; `classifies_codes_libgit2_produces` now adds `GIT_EINVALIDSPEC` and `GIT_EBUFS` (`git_reference_normalize_name`, class `GIT_ERROR_REFERENCE`) and `GIT_ENOTFOUND` (`git_repository_open_ext` on a missing path, class `GIT_ERROR_OS`), allowlisting those two functions and their flag enums in `libgit2-sys`. The other codes need repository state. |
+| internal | no defect in the `c_enum!` macro's `from_raw` / `raw` / conversions. |
+| conventions | none: anchors (`Wraps:` + `Handwritten`) present, naming idiomatic, new code `rustfmt`-clean, `cargo doc -p libgit2 -D warnings` clean. |
+| misc | 2 reports, both fixed: `misc/try-from-error-is-a-bare-int` (`TryFrom<c_int>::Error` was a bare `c_int`, not an error type; now `UnnamedErrorCode` / `UnnamedErrorClass` with `Display` + `Error`, keeping the value behind `raw()`), and `misc/equiv-sequences-start-with-unspecified-errno` (the `git_error_last` equivalence sequences in `tests/equiv/errors.rs` compared a fresh thread's uninitialised `errno`; 1 in ~6 400 spawned threads starts with `EAGAIN`, seen once in a plain run; the runner now zeroes it first). Handoff to batch 2: `tests/equiv/sys_errors.rs::run` has the same `errno` gap (it failed the same way once in the coverage run, `threads_keep_their_own_errors`). |
+| coverage | Rust: every line of both enums and their conversions is covered (`cargo llvm-cov`); the only uncovered line in `util/errors.rs` is the child-process fixture's failure message. C: the enums have no code of their own; the calls that produce the codes are exercised through the equivalence suite. |
