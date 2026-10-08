@@ -1,0 +1,905 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/filter/wavefront-config.json",
+    "sha256": "4fff30760958dcf6b5d8354ad6123f548dc31bbe3ac20cbaecf587e30eab0776"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 32,
+    "layer_count": 3,
+    "batch_count": 6,
+    "file_count": 4
+  },
+  "waves": [
+    {
+      "unit_count": 4,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/filter.h",
+          "items": [
+            {
+              "name": "git_filter_flag_t",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_mode_t",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/filter.c",
+          "items": [
+            {
+              "name": "git_filter_source",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 6,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_filter_unregister",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 39,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 16,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/filter.h",
+          "items": [
+            {
+              "name": "git_filter",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_writestream",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "stream",
+                "reserved",
+                "cleanup",
+                "attributes",
+                "shutdown",
+                "initialize",
+                "check"
+              ]
+            },
+            {
+              "name": "git_filter_options",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "reserved",
+                "attr_commit_id"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_filter_list_apply_to_buffer",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_apply_to_file",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_contains",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_free",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_length",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_new",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_mode_t",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_stream_buffer",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 19,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_writestream",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_stream_file",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 40,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_writestream",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_filemode",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_flags",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_id",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_mode",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_mode_t",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_path",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_source_repo",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_source",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 12,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_filter_cleanup_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_filter",
+                  "defined_in": "include/git2/sys/filter.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_init",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_init_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_filter",
+                  "defined_in": "include/git2/sys/filter.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_apply_to_blob",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_load",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_mode_t",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_load_ext",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_mode_t",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_options",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_push",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 36,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_list_stream_blob",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 11,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_filter_list",
+                    "defined_in": "src/libgit2/filter.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_writestream",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_lookup",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_options_init",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter_options",
+                    "defined_in": "include/git2/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_register",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 24,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_filter_shutdown_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_filter",
+                    "defined_in": "include/git2/sys/filter.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_filter",
+                  "defined_in": "include/git2/sys/filter.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

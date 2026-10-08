@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "build_commands": {
+    "configure": "cmake -S . -B build -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=RelWithDebInfo",
+    "build": "cmake --build build -j64",
+    "test": "ctest --test-dir build -j64 --output-on-failure -R '^(offline|util)$'"
+  },
+  "variants": {
+    "plain": {
+      "dir": "crustify/builds/plain",
+      "configure": "cmake -S ../../.. -B . -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "build": "cmake --build . -j64"
+    },
+    "coverage": {
+      "dir": "crustify/builds/coverage",
+      "configure": "cmake -S ../../.. -B . -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS='--coverage -O0' -DCMAKE_EXE_LINKER_FLAGS='--coverage' -DCMAKE_SHARED_LINKER_FLAGS='--coverage'",
+      "build": "cmake --build . -j64"
+    },
+    "asan-ubsan": {
+      "dir": "crustify/builds/asan-ubsan",
+      "configure": "cmake -S ../../.. -B . -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined -DSHA1DC_FORCE_ALIGNED_ACCESS' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=address,undefined'",
+      "build": "cmake --build . -j64"
+    },
+    "tsan": {
+      "dir": "crustify/builds/tsan",
+      "configure": "cmake -S ../../.. -B . -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_FLAGS='-fsanitize=thread -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread' -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=thread'",
+      "build": "cmake --build . -j64"
+    },
+    "bsan": {
+      "dir": "crustify/builds/bsan",
+      "configure": "cmake -S ../../.. -B . -G Ninja -DUSE_HTTPS=OpenSSL -DUSE_SHA1=builtin -DUSE_SHA256=HTTPS -DUSE_COMPRESSION=zlib -DUSE_REGEX=pcre2 -DUSE_HTTP_PARSER=builtin -DUSE_SSH=OFF -DUSE_AUTH_NTLM=builtin -DUSE_AUTH_NEGOTIATE=OFF -DUSE_I18N=OFF -DUSE_THREADS=ON -DDEPRECATE_HARD=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=ON -DBUILD_CLI=ON -DBUILD_EXAMPLES=OFF -DBUILD_FUZZERS=OFF -DCMAKE_C_COMPILER=/root/.rustup/toolchains/bsan/bin/clang -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_FLAGS='-fpass-plugin=/root/.rustup/toolchains/bsan/lib/libbsan_plugin.so -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-Wl,--whole-archive /root/.rustup/toolchains/bsan/lib/libclang_rt.bsan-x86_64.a -Wl,--no-whole-archive /root/.rustup/toolchains/bsan/lib/libbsan_rt.a -lgcc_s -lm -lpthread -ldl'",
+      "build": "cmake --build . -j64"
+    }
+  }
+}

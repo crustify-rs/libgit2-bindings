@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Subsystem libgit2/history of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/blame.c",
+    "src/libgit2/blame.h",
+    "src/libgit2/blame_git.c",
+    "src/libgit2/blame_git.h",
+    "src/libgit2/commit_list.c",
+    "src/libgit2/commit_list.h",
+    "src/libgit2/describe.c",
+    "src/libgit2/graph.c",
+    "src/libgit2/notes.c",
+    "src/libgit2/notes.h",
+    "src/libgit2/revparse.c",
+    "src/libgit2/revwalk.c",
+    "src/libgit2/revwalk.h"
+  ],
+  "api_headers": [
+    "include/git2/blame.h",
+    "include/git2/describe.h",
+    "include/git2/graph.h",
+    "include/git2/notes.h",
+    "include/git2/revparse.h",
+    "include/git2/revwalk.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

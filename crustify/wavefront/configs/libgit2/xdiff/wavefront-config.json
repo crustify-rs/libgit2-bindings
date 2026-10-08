@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Subsystem libgit2/xdiff of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "deps/xdiff/git-xdiff.h",
+    "deps/xdiff/xdiff.h",
+    "deps/xdiff/xdiffi.c",
+    "deps/xdiff/xdiffi.h",
+    "deps/xdiff/xemit.c",
+    "deps/xdiff/xemit.h",
+    "deps/xdiff/xhistogram.c",
+    "deps/xdiff/xmerge.c",
+    "deps/xdiff/xpatience.c",
+    "deps/xdiff/xprepare.c",
+    "deps/xdiff/xprepare.h",
+    "deps/xdiff/xtypes.h",
+    "deps/xdiff/xutils.c",
+    "deps/xdiff/xutils.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

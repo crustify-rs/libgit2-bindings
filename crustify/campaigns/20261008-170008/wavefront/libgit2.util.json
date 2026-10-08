@@ -1,0 +1,213 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/util/wavefront-config.json",
+    "sha256": "09a536cca821be3c67b5579710fe3d17f829b03a049805ca304df4b277fb0530"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 9,
+    "layer_count": 2,
+    "batch_count": 4,
+    "file_count": 3
+  },
+  "waves": [
+    {
+      "unit_count": 8,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/alloc.h",
+          "items": [
+            {
+              "name": "git_allocator",
+              "defined_in": "include/git2/sys/alloc.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "gfree",
+                "grealloc",
+                "gmalloc"
+              ]
+            },
+            {
+              "name": "git_error",
+              "defined_in": "include/git2/errors.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 2,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "message",
+                "klass"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/errors.h",
+          "items": [
+            {
+              "name": "git_error_code",
+              "defined_in": "include/git2/errors.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_error_t",
+              "defined_in": "include/git2/errors.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_error_clear",
+              "defined_in": "src/util/errors.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 16,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_error_set",
+              "defined_in": "src/util/errors.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_error_set_oom",
+              "defined_in": "src/util/errors.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 8,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_error_set_str",
+              "defined_in": "src/util/errors.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 20,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 1,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_error_last",
+              "defined_in": "src/util/errors.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_error",
+                    "defined_in": "include/git2/errors.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

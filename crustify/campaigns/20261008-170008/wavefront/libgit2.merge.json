@@ -1,0 +1,1953 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/merge/wavefront-config.json",
+    "sha256": "fa0efa60dbd02903a9e16b87b6bdfb3b47cdf25bbabf660997237d5e9d54b0d9"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 67,
+    "layer_count": 5,
+    "batch_count": 15,
+    "file_count": 6
+  },
+  "waves": [
+    {
+      "unit_count": 11,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/merge.h",
+          "items": [
+            {
+              "name": "git_merge_analysis_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source",
+              "defined_in": "src/libgit2/merge_driver.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 6,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/merge.h",
+          "items": [
+            {
+              "name": "git_merge_file_favor_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file_flag_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/merge.h",
+          "items": [
+            {
+              "name": "git_merge_file_input",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 5,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "size",
+                "version",
+                "path",
+                "mode",
+                "ptr"
+              ]
+            },
+            {
+              "name": "git_merge_file_result",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 5,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "len",
+                "path",
+                "mode",
+                "ptr",
+                "automergeable"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/merge.h",
+          "items": [
+            {
+              "name": "git_merge_flag_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_preference_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/rebase.c",
+          "items": [
+            {
+              "name": "git_rebase",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 20,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/rebase.h",
+          "items": [
+            {
+              "name": "git_rebase_operation_t",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_merge_driver_unregister",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 30,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 26,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/merge.h",
+          "items": [
+            {
+              "name": "git_merge_driver",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "apply",
+                "shutdown",
+                "initialize"
+              ]
+            },
+            {
+              "name": "git_merge_file_options",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_file_favor_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "favor",
+                "marker_size",
+                "their_label",
+                "our_label",
+                "ancestor_label"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/merge.h",
+          "items": [
+            {
+              "name": "git_merge_options",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_similarity_metric",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_favor_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "metric",
+                "rename_threshold",
+                "default_driver",
+                "file_flags",
+                "file_favor",
+                "recursion_limit",
+                "target_limit"
+              ]
+            },
+            {
+              "name": "git_rebase_operation",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase_operation_t",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "type",
+                "id",
+                "exec"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_merge_analysis",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_annotated_commit",
+                    "defined_in": "src/libgit2/annotated_commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_analysis_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_preference_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_analysis_for_ref",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 52,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_annotated_commit",
+                    "defined_in": "src/libgit2/annotated_commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_analysis_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_preference_t",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_reference",
+                    "defined_in": "src/libgit2/refs.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_base",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_base_many",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 19,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_base_octopus",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_bases",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 32,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oidarray",
+                    "defined_in": "include/git2/oidarray.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_bases_many",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 35,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oidarray",
+                    "defined_in": "include/git2/oidarray.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source_ancestor",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source_ours",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source_repo",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source_theirs",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file_input_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_file_input",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file_result_free",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_file_result",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_abort",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 34,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_free",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_inmemory_index",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_onto_id",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_onto_name",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_operation_current",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_operation_entrycount",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_orig_head_id",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_orig_head_name",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 22,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/cherrypick.h",
+          "items": [
+            {
+              "name": "git_cherrypick_options",
+              "defined_in": "include/git2/cherrypick.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 2,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "mainline",
+                "merge_opts"
+              ]
+            },
+            {
+              "name": "git_revert_options",
+              "defined_in": "include/git2/revert.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 2,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "mainline",
+                "merge_opts"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_cherrypick_commit",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 43,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_commit_create_cb",
+              "defined_in": "include/git2/commit.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_signature",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 70,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_annotated_commit",
+                    "defined_in": "src/libgit2/annotated_commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_commits",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_init_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver",
+                    "defined_in": "include/git2/sys/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_merge_driver",
+                  "defined_in": "include/git2/sys/merge.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_lookup",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 39,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver",
+                    "defined_in": "include/git2/sys/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_register",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 24,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver",
+                    "defined_in": "include/git2/sys/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_shutdown_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver",
+                    "defined_in": "include/git2/sys/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_merge_driver",
+                  "defined_in": "include/git2/sys/merge.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_driver_source_file_options",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_driver_source",
+                    "defined_in": "src/libgit2/merge_driver.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_file_input",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_result",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file_from_index",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 46,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_file_result",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_file_options_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_file_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_options_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_merge_trees",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 47,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_commit",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_signature",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_finish",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_signature",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_next",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 18,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase_operation",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_operation_byindex",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase_operation",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_mergehead_foreach",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 50,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_repository_mergehead_foreach_cb",
+                    "defined_in": "include/git2/repository.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_revert_commit",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 43,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 5,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/rebase.h",
+          "items": [
+            {
+              "name": "git_rebase_options",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 3,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_merge_options",
+                    "defined_in": "include/git2/merge.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_commit_create_cb",
+                    "defined_in": "include/git2/commit.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "payload",
+                "version",
+                "reserved",
+                "commit_create_cb",
+                "inmemory",
+                "quiet",
+                "merge_options",
+                "checkout_options",
+                "rewrite_notes_ref"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_cherrypick",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 55,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_cherrypick_options",
+                    "defined_in": "include/git2/cherrypick.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_cherrypick_options_init",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_cherrypick_options",
+                    "defined_in": "include/git2/cherrypick.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_revert",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 54,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_revert_options",
+                    "defined_in": "include/git2/revert.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_revert_options_init",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_revert_options",
+                    "defined_in": "include/git2/revert.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 3,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_rebase_init",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 62,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_annotated_commit",
+                    "defined_in": "src/libgit2/annotated_commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase_options",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_open",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 79,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase",
+                    "defined_in": "src/libgit2/rebase.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_rebase_options",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_rebase_options_init",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_rebase_options",
+                    "defined_in": "include/git2/rebase.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

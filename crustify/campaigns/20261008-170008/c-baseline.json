@@ -1,0 +1,201 @@
+{
+ "_comment": [
+  "C test baseline of campaign 20261008-170008 at the campaign base revision,",
+  "one record per crustify/build.json variant (version 1), from crustify/scripts/c-suites.sh:",
+  "every offline libgit2 clar suite and every util suite run in isolation. Excluded ctest",
+  "targets: invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online,",
+  "online_customcert, proxy, auth_clone, auth_clone_and_push (network, servers or",
+  "invasive filesystem changes). Sanitizer-only nonzero suites are pre-existing C",
+  "findings; post-campaign runs must match this record."
+ ],
+ "build_json_version": 1,
+ "variants": {
+  "plain": {
+   "passed": 3443,
+   "failed": 0,
+   "skipped": 55,
+   "total": 3498,
+   "nonzero_suites": []
+  },
+  "coverage": {
+   "passed": 3444,
+   "failed": 0,
+   "skipped": 54,
+   "total": 3498,
+   "nonzero_suites": []
+  },
+  "asan-ubsan": {
+   "passed": 3443,
+   "failed": 0,
+   "skipped": 55,
+   "total": 3498,
+   "nonzero_suites": []
+  },
+  "tsan": {
+   "passed": 3443,
+   "failed": 0,
+   "skipped": 55,
+   "total": 3498,
+   "nonzero_suites": [
+    {
+     "binary": "libgit2_tests",
+     "suite": "attr::macro",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 4 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "attr::repo",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 9 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "diff::blob",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 14 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "diff::diffiter",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 2 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "diff::parse",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 2 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "diff::tree",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 3 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "pack::filelimit (tiny)",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 14 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "reset::mixed",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: lock-order-inversion",
+      "ThreadSanitizer: reported 1 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "threads::diff",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: data race",
+      "ThreadSanitizer: reported 1 warnings"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "threads::refdb",
+     "exit": 66,
+     "failed_cases": [],
+     "signals": [
+      "ThreadSanitizer: data race",
+      "ThreadSanitizer: reported 1 warnings"
+     ]
+    }
+   ]
+  },
+  "bsan": {
+   "passed": 3432,
+   "failed": 0,
+   "skipped": 55,
+   "total": 3487,
+   "nonzero_suites": [
+    {
+     "binary": "libgit2_tests",
+     "suite": "object::cache (cache all blobs)",
+     "exit": 1,
+     "failed_cases": [],
+     "signals": [
+      "error: Undefined Behavior"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "object::cache (cache no blobs)",
+     "exit": 1,
+     "failed_cases": [],
+     "signals": [
+      "error: Undefined Behavior"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "object::cache (cache no trees)",
+     "exit": 1,
+     "failed_cases": [],
+     "signals": [
+      "error: Undefined Behavior"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "object::cache (cache tiny blobs)",
+     "exit": 1,
+     "failed_cases": [],
+     "signals": [
+      "error: Undefined Behavior"
+     ]
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "pack::threadsafety",
+     "exit": 124,
+     "failed_cases": [],
+     "signals": []
+    },
+    {
+     "binary": "libgit2_tests",
+     "suite": "stress::diff",
+     "exit": 124,
+     "failed_cases": [],
+     "signals": []
+    }
+   ]
+  }
+ }
+}

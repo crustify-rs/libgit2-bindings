@@ -1,0 +1,1506 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/config/wavefront-config.json",
+    "sha256": "8d87a47de89450325228d81df6f6d710cea9028975ef4471471bba7d9982e090"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 56,
+    "layer_count": 6,
+    "batch_count": 13,
+    "file_count": 3
+  },
+  "waves": [
+    {
+      "unit_count": 7,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/config.h",
+          "items": [
+            {
+              "name": "git_config_backend_memory_options",
+              "defined_in": "include/git2/sys/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "backend_type",
+                "origin_path"
+              ]
+            },
+            {
+              "name": "git_config_level_t",
+              "defined_in": "include/git2/config.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/config.h",
+          "items": [
+            {
+              "name": "git_configmap_t",
+              "defined_in": "include/git2/config.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_transaction",
+              "defined_in": "src/libgit2/transaction.c",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_parse_bool",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 12,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_parse_int32",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 18,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_parse_int64",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 44,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 30,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/config.h",
+          "items": [
+            {
+              "name": "git_config_entry",
+              "defined_in": "include/git2/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [
+                {
+                  "name": "git_config_backend_entry",
+                  "defined_in": "include/git2/sys/config.h",
+                  "scope": "wrap"
+                }
+              ],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "name",
+                "level",
+                "value",
+                "backend_type",
+                "origin_path",
+                "include_depth"
+              ]
+            },
+            {
+              "name": "git_configmap",
+              "defined_in": "include/git2/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_configmap_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "type",
+                "map_value",
+                "str_match"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_add_file_ondisk",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 28,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_backend_memory_options_init",
+              "defined_in": "src/libgit2/config_mem.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_backend_memory_options",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_delete_entry",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_delete_multivar",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_find_global",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_find_system",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_find_xdg",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_free",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_bool",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_int32",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_int64",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_path",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_string",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_string_buf",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_lock",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 18,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_transaction",
+                    "defined_in": "src/libgit2/transaction.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_new",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_open_default",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 33,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_open_global",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_open_level",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_open_ondisk",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_parse_path",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_set_bool",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_set_int32",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_set_int64",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_set_multivar",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_set_string",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_set_writeorder",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_snapshot",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 32,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 6,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/config.h",
+          "items": [
+            {
+              "name": "git_config_backend_entry",
+              "defined_in": "include/git2/sys/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 2,
+              "loc": 2,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_entry",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_config_entry",
+                  "defined_in": "include/git2/config.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": [
+                "free",
+                "entry"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_entry_free",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_entry",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_foreach_cb",
+              "defined_in": "include/git2/config.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_entry",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_entry",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_entry",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_mapped",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_configmap",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_lookup_map_value",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 36,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_configmap",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 4,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/config.h",
+          "items": [
+            {
+              "name": "git_config_iterator",
+              "defined_in": "include/git2/sys/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 3,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_backend_entry",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [
+                {
+                  "name": "git_config_backend",
+                  "defined_in": "include/git2/sys/config.h",
+                  "scope": "wrap"
+                }
+              ],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "free",
+                "flags",
+                "next",
+                "backend"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_foreach",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_config_foreach_cb",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_foreach_match",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 22,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_config_foreach_cb",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_get_multivar_foreach",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 27,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_config_foreach_cb",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 6,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/config.h",
+          "items": [
+            {
+              "name": "git_config_backend",
+              "defined_in": "include/git2/sys/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_backend_entry",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [
+                {
+                  "name": "git_config_iterator",
+                  "defined_in": "include/git2/sys/config.h",
+                  "scope": "wrap"
+                }
+              ],
+              "generates": [],
+              "field_anchors": [
+                "free",
+                "version",
+                "iterator",
+                "cfg",
+                "unlock",
+                "open",
+                "lock",
+                "snapshot",
+                "del_multivar",
+                "del",
+                "set_multivar",
+                "set",
+                "get",
+                "readonly"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_iterator_free",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_iterator_glob_new",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 24,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_iterator_new",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_multivar_iterator_new",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 35,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_next",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_entry",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_iterator",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 3,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_config_add_backend",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_backend",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_config_level_t",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_backend_foreach_match",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 36,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_backend",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_config_foreach_cb",
+                    "defined_in": "include/git2/config.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config_init_backend",
+              "defined_in": "src/libgit2/config.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config_backend",
+                    "defined_in": "include/git2/sys/config.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

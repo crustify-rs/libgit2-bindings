@@ -1,0 +1,2192 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/remote/wavefront-config.json",
+    "sha256": "959defdffad9f7ee5c5ccf8b6ca24fd242b3d4e60ab12fa8e0b7e2fcfd57ef44"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 79,
+    "layer_count": 7,
+    "batch_count": 20,
+    "file_count": 6
+  },
+  "waves": [
+    {
+      "unit_count": 15,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/clone.h",
+          "items": [
+            {
+              "name": "git_clone_local_t",
+              "defined_in": "include/git2/clone.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_fetch_depth_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_fetch_prune_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_proxy_t",
+              "defined_in": "include/git2/proxy.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/push.h",
+          "items": [
+            {
+              "name": "git_push",
+              "defined_in": "src/libgit2/push.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 11,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote",
+              "defined_in": "src/libgit2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 17,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_autotag_option_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_capability_t",
+              "defined_in": "include/git2/sys/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_completion_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_flags",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_redirect_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_update_flags",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/transport.h",
+          "items": [
+            {
+              "name": "git_transport",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 14,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_push_update_reference_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_name_is_valid",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 0,
+              "loc": 28,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 39,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/proxy.h",
+          "items": [
+            {
+              "name": "git_proxy_options",
+              "defined_in": "include/git2/proxy.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_proxy_t",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "payload",
+                "version",
+                "type",
+                "certificate_check",
+                "credentials",
+                "url"
+              ]
+            },
+            {
+              "name": "git_push_update",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "src",
+                "dst",
+                "dst_refname",
+                "src_refname"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_create_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "name",
+                "version",
+                "repository",
+                "fetchspec"
+              ]
+            },
+            {
+              "name": "git_remote_head",
+              "defined_in": "include/git2/net.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "oid",
+                "name",
+                "local",
+                "loid",
+                "symref_target"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_remote_add_fetch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_add_push",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_autotag",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_autotag_option_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_connected",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 23,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_anonymous",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_cb",
+              "defined_in": "include/git2/clone.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_detached",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_with_fetchspec",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_default_branch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_delete",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 13,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_disconnect",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_dup",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 47,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_free",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 31,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_get_fetch_refspecs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_get_push_refspecs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_get_refspec",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_refspec",
+                    "defined_in": "src/libgit2/refspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_list",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 26,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_lookup",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 110,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_name",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_oid_type",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 11,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_owner",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_prune_refs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_refspec_count",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_remote_rename",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 38,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_set_autotag",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 36,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote_autotag_option_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_set_instance_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_set_instance_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_set_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_set_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_stats",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_indexer_progress",
+                    "defined_in": "include/git2/indexer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_stop",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_create_cb",
+              "defined_in": "include/git2/clone.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 5,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_proxy_options_init",
+              "defined_in": "src/libgit2/proxy.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_proxy_options",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_push_negotiation",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 2,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_push_update",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_options_init",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote_create_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_create_with_opts",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 112,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_create_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_ls",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_head",
+                    "defined_in": "include/git2/net.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 1,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_callbacks",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 3,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_refspec",
+                    "defined_in": "src/libgit2/refspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_completion_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_transport",
+                    "defined_in": "include/git2/sys/transport.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_packbuilder_progress",
+                    "defined_in": "include/git2/pack.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_push_negotiation",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_push_update_reference_cb",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "payload",
+                "version",
+                "reserved",
+                "update_refs",
+                "remote_ready",
+                "transport",
+                "push_negotiation",
+                "push_update_reference",
+                "push_transfer_progress",
+                "pack_progress",
+                "reserved_update_tips",
+                "transfer_progress",
+                "certificate_check",
+                "credentials",
+                "completion",
+                "sideband_progress"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 7,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_fetch_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_fetch_prune_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_proxy_options",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_autotag_option_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_redirect_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "depth",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks",
+                "download_tags",
+                "update_fetchhead",
+                "prune"
+              ]
+            },
+            {
+              "name": "git_push_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_proxy_options",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_redirect_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "remote_push_options",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks",
+                "pb_parallelism"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/remote.h",
+          "items": [
+            {
+              "name": "git_remote_connect_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_proxy_options",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_redirect_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_remote_connect",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_direction",
+                    "defined_in": "include/git2/net.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_proxy_options",
+                    "defined_in": "include/git2/proxy.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_init_callbacks",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_prune",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 112,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_update_tips",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 49,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_autotag_option_t",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_callbacks",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 10,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/clone.h",
+          "items": [
+            {
+              "name": "git_clone_options",
+              "defined_in": "include/git2/clone.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 5,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_clone_local_t",
+                    "defined_in": "include/git2/clone.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_fetch_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "local",
+                "remote_cb_payload",
+                "remote_cb",
+                "repository_cb_payload",
+                "repository_cb",
+                "checkout_branch",
+                "bare",
+                "fetch_opts"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_fetch_options_init",
+              "defined_in": "src/libgit2/fetch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_fetch_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_push_options_init",
+              "defined_in": "src/libgit2/push.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_push_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_connect_ext",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 50,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_direction",
+                    "defined_in": "include/git2/net.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote_connect_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_connect_options_dispose",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote_connect_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_connect_options_init",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_remote_connect_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_download",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 24,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_fetch_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_fetch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 79,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_fetch_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_push",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_push_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_remote_upload",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 70,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_push_options",
+                    "defined_in": "include/git2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_remote",
+                    "defined_in": "src/libgit2/remote.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 2,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_clone",
+              "defined_in": "src/libgit2/clone.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 6,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_clone_options",
+                    "defined_in": "include/git2/clone.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_clone_options_init",
+              "defined_in": "src/libgit2/clone.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 6,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_clone_options",
+                    "defined_in": "include/git2/clone.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

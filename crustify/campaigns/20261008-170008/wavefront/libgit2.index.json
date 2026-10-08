@@ -1,0 +1,2258 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/index/wavefront-config.json",
+    "sha256": "c53c19b370a6ba98e87bab34a0e119e33bceaed306638970833063fcc9cbcd03"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 91,
+    "layer_count": 3,
+    "batch_count": 15,
+    "file_count": 6
+  },
+  "waves": [
+    {
+      "unit_count": 16,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/diff.h",
+          "items": [
+            {
+              "name": "git_diff",
+              "defined_in": "src/libgit2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 16,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_delta",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 6,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/index.h",
+          "items": [
+            {
+              "name": "git_index_add_option_t",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_capability_t",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/index.h",
+          "items": [
+            {
+              "name": "git_index_conflict_iterator",
+              "defined_in": "src/libgit2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 2,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_entry_extended_flag_t",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/index.h",
+          "items": [
+            {
+              "name": "git_index_entry_flag_t",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_iterator",
+              "defined_in": "src/libgit2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/index.h",
+          "items": [
+            {
+              "name": "git_index_name_entry",
+              "defined_in": "include/git2/sys/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "theirs",
+                "ours",
+                "ancestor"
+              ]
+            },
+            {
+              "name": "git_index_stage_t",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/index.h",
+          "items": [
+            {
+              "name": "git_index_time",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 2,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "nanoseconds",
+                "seconds"
+              ]
+            },
+            {
+              "name": "git_iterator",
+              "defined_in": "src/libgit2/iterator.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 18,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/pathspec.h",
+          "items": [
+            {
+              "name": "git_pathspec",
+              "defined_in": "src/libgit2/pathspec.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 4,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_flag_t",
+              "defined_in": "include/git2/pathspec.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/pathspec.h",
+          "items": [
+            {
+              "name": "git_pathspec_match_list",
+              "defined_in": "src/libgit2/pathspec.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 8,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_index_matched_path_cb",
+              "defined_in": "include/git2/index.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 58,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/index.h",
+          "items": [
+            {
+              "name": "git_index_entry",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_time",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "id",
+                "path",
+                "file_size",
+                "mode",
+                "ctime",
+                "mtime",
+                "gid",
+                "uid",
+                "flags_extended",
+                "ino",
+                "dev"
+              ]
+            },
+            {
+              "name": "git_index_options",
+              "defined_in": "include/git2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 2,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/index.h",
+          "items": [
+            {
+              "name": "git_index_reuc_entry",
+              "defined_in": "include/git2/sys/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "oid",
+                "path",
+                "mode"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_index_add_all",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 32,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_index_matched_path_cb",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_add_bypath",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 54,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_caps",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_clear",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 29,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_cleanup",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_iterator_free",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_conflict_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_iterator_new",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_conflict_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_remove",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_entrycount",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_extension_add",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 34,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_extension_lookup",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_extension_remove",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_find",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 27,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_find_prefix",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_free",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_has_conflicts",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 13,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_iterator_free",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_iterator_new",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_name_add",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_name_clear",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 15,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_name_entrycount",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_name_get_byindex",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_name_entry",
+                    "defined_in": "include/git2/sys/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_new",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_open",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_owner",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_index_path",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_read",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 51,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_remove",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_remove_all",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_index_matched_path_cb",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_remove_bypath",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_remove_directory",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 29,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_add",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_clear",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_entrycount",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_find",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_remove",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_set_caps",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 34,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_set_version",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 13,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_update_all",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_index_matched_path_cb",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_version",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_write",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_write_tree",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_write_tree_to",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_free",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_diff",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 87,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_index",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_list_diff_entry",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_list_entry",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_list_entrycount",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_list_failed_entry",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_pathspec_match_list_failed_entrycount",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_list_free",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_workdir",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_matches_path",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_new",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 17,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_index_add",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 19,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_add_from_buffer",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 45,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_add",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 63,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_get",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_conflict_next",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 34,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_conflict_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_entry_is_conflict",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_entry_stage",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_get_byindex",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_get_bypath",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_iterator_next",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_entry",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_iterator",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_new_ext",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_options",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_open_ext",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 55,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_options",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_options_init",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index_options",
+                    "defined_in": "include/git2/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_read_tree",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 56,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_get_byindex",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_reuc_entry",
+                    "defined_in": "include/git2/sys/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_index_reuc_get_bypath",
+              "defined_in": "src/libgit2/index.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index_reuc_entry",
+                    "defined_in": "include/git2/sys/index.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_pathspec_match_tree",
+              "defined_in": "src/libgit2/pathspec.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_pathspec",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_pathspec_match_list",
+                    "defined_in": "src/libgit2/pathspec.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

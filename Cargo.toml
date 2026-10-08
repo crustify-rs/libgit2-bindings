@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["libgit2-sys", "libgit2"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "GPL-2.0-only WITH GCC-exception-2.0"
+publish = false
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+module_inception = "allow"
