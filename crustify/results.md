@@ -27,7 +27,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 Thin batches with `"objective": "review"`, LLM-as-a-Judge over each landed wave.
 
 - **agent backend** — `claude`
-- **model** — `openrouter/anthropic/claude-opus-5.5`
+- **model** — `openrouter/anthropic/claude-fable-5.1`
 - **`--billing`** — `api`
 - **`--max-types`** — `2`
 - **`--max-syms`** — `25`
