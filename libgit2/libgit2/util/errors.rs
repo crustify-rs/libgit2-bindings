@@ -286,7 +286,8 @@ c_enum! {
     pub struct UnnamedErrorClass("error class");
 }
 
-/// The class as `git_error_t`, the type the setters in [`super::sys::errors`] take.
+/// The class as `git_error_t`, the type of the C constants (the setters in
+/// [`super::sys::errors`] take the [`ErrorClass`] itself).
 impl From<ErrorClass> for ffi::git_error_t {
     fn from(class: ErrorClass) -> ffi::git_error_t {
         // Every class is non-negative, so the value is unchanged.

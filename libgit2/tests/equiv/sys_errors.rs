@@ -21,6 +21,7 @@ use std::process::Command;
 use std::ptr;
 
 use libgit2::ffi;
+use libgit2::libgit2::util::errors::ErrorClass;
 use libgit2::libgit2::util::sys::errors;
 
 const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
@@ -51,10 +52,10 @@ fn isolated(test: &str, body: fn()) {
 enum Step {
     Clear,
     /// `git_error_set` with a message; `errors::set`.
-    Set(ffi::git_error_t, Vec<u8>),
+    Set(ErrorClass, Vec<u8>),
     /// `git_error_set` with a NULL format; `errors::set_without_message`.
-    Bare(ffi::git_error_t),
-    Str(ffi::git_error_t, Vec<u8>),
+    Bare(ErrorClass),
+    Str(ErrorClass, Vec<u8>),
     Oom,
     /// Sets the thread's `errno`.
     Errno(c_int),
@@ -115,14 +116,14 @@ fn c_step(step: &Step) -> Option<c_int> {
             }
             let format = c_string(&format);
             // SAFETY: a format naming no argument, as every `%` is doubled.
-            unsafe { ffi::git_error_set(*class as c_int, format.as_ptr()) }
+            unsafe { ffi::git_error_set(class.raw(), format.as_ptr()) }
         }
         // SAFETY: a NULL format reads no argument.
-        Step::Bare(class) => unsafe { ffi::git_error_set(*class as c_int, ptr::null()) },
+        Step::Bare(class) => unsafe { ffi::git_error_set(class.raw(), ptr::null()) },
         Step::Str(class, message) => {
             let message = c_string(message);
             // SAFETY: a NUL-terminated string, copied during the call.
-            return Some(unsafe { ffi::git_error_set_str(*class as c_int, message.as_ptr()) });
+            return Some(unsafe { ffi::git_error_set_str(class.raw(), message.as_ptr()) });
         }
         // SAFETY: no arguments.
         Step::Oom => unsafe { ffi::git_error_set_oom() },
@@ -155,6 +156,9 @@ fn rust_step(step: &Step) -> Option<c_int> {
 fn run(side: Side, steps: &[Step]) -> Vec<Seen> {
     let steps = steps.to_vec();
     std::thread::spawn(move || {
+        // A fresh thread can start with `errno` already `EAGAIN`: std's thread start
+        // waits on a contended lock before running this closure.
+        set_errno(0);
         steps
             .iter()
             .map(|step| {
@@ -203,8 +207,8 @@ fn text(len: usize, seed: u8) -> Vec<u8> {
         .collect()
 }
 
-fn class(c: ffi::git_error_t) -> c_int {
-    c as c_int
+fn class(c: ErrorClass) -> c_int {
+    c.raw()
 }
 
 // --- the comparisons ------------------------------------------------------------
@@ -218,34 +222,34 @@ fn setters_and_clear_in_sequence() {
     let long = text(4_000, 3);
     let seen = compare(&[
         Clear,
-        Str(ffi::GIT_ERROR_INVALID, b"first".to_vec()),
-        Set(ffi::GIT_ERROR_REFERENCE, b"second".to_vec()),
-        Set(ffi::GIT_ERROR_CONFIG, b"100% sure: %s %d %n %".to_vec()),
-        Str(ffi::GIT_ERROR_CONFIG, b"100% %s verbatim".to_vec()),
+        Str(ErrorClass::Invalid, b"first".to_vec()),
+        Set(ErrorClass::Reference, b"second".to_vec()),
+        Set(ErrorClass::Config, b"100% sure: %s %d %n %".to_vec()),
+        Str(ErrorClass::Config, b"100% %s verbatim".to_vec()),
         Oom,
-        Set(ffi::GIT_ERROR_ODB, b"".to_vec()),
+        Set(ErrorClass::Odb, b"".to_vec()),
         Clear,
         Clear,
         Errno(libc::ENOENT),
-        Set(ffi::GIT_ERROR_OS, b"open".to_vec()),
+        Set(ErrorClass::Os, b"open".to_vec()),
         Errno(0),
-        Set(ffi::GIT_ERROR_OS, b"quiet".to_vec()),
+        Set(ErrorClass::Os, b"quiet".to_vec()),
         Errno(libc::EACCES),
-        Bare(ffi::GIT_ERROR_OS),
-        Bare(ffi::GIT_ERROR_OS),
-        Bare(ffi::GIT_ERROR_INVALID),
+        Bare(ErrorClass::Os),
+        Bare(ErrorClass::Os),
+        Bare(ErrorClass::Invalid),
         Errno(libc::ENOENT),
-        Str(ffi::GIT_ERROR_OS, b"verbatim".to_vec()),
+        Str(ErrorClass::Os, b"verbatim".to_vec()),
         Errno(libc::EPERM),
-        Set(ffi::GIT_ERROR_INVALID, b"not an OS error".to_vec()),
+        Set(ErrorClass::Invalid, b"not an OS error".to_vec()),
         Clear,
-        Str(999, long.clone()),
-        Set(u32::MAX, text(3_000, 9)),
-        Bare(999),
+        Str(ErrorClass::Grafts, long.clone()),
+        Set(ErrorClass::Internal, text(3_000, 9)),
+        Bare(ErrorClass::Grafts),
         Errno(libc::EINTR),
         Oom,
-        Str(ffi::GIT_ERROR_NONE, b"\xff\xfe not UTF-8".to_vec()),
-        Set(ffi::GIT_ERROR_NONE, b"line\nbreak".to_vec()),
+        Str(ErrorClass::None, b"\xff\xfe not UTF-8".to_vec()),
+        Set(ErrorClass::None, b"line\nbreak".to_vec()),
         Clear,
     ]);
     // Spot checks that the sequence reached what it means to.
@@ -253,7 +257,7 @@ fn setters_and_clear_in_sequence() {
     assert_eq!(seen[3].message, b"100% sure: %s %d %n %");
     assert_eq!(
         (seen[5].class, &seen[5].message[..]),
-        (class(ffi::GIT_ERROR_NOMEMORY), &b"Out of memory"[..])
+        (class(ErrorClass::NoMemory), &b"Out of memory"[..])
     );
     assert_eq!(
         (seen[10].message.as_slice(), seen[10].errno),
@@ -269,8 +273,11 @@ fn setters_and_clear_in_sequence() {
         (seen[18].errno, seen[20].errno, seen[21].errno),
         (libc::ENOENT, libc::EPERM, 0)
     );
-    assert_eq!((seen[22].class, &seen[22].message), (999, &long));
-    assert_eq!(seen[23].class, -1);
+    assert_eq!(
+        (seen[22].class, &seen[22].message),
+        (class(ErrorClass::Grafts), &long)
+    );
+    assert_eq!(seen[23].class, class(ErrorClass::Internal));
     assert_eq!(seen[26].errno, libc::EINTR);
     assert!(seen.iter().all(|s| s.ret.is_none_or(|r| r == 0)));
 }
@@ -286,10 +293,10 @@ fn messages_grow_and_shrink() {
         .enumerate()
     {
         let seed = i as u8;
-        steps.push(Str(ffi::GIT_ERROR_INDEX, text(len, seed)));
-        steps.push(Set(ffi::GIT_ERROR_TREE, text(len, seed + 1)));
+        steps.push(Str(ErrorClass::Index, text(len, seed)));
+        steps.push(Set(ErrorClass::Tree, text(len, seed + 1)));
         steps.push(Errno(libc::ENOTDIR));
-        steps.push(Set(ffi::GIT_ERROR_OS, text(len, seed + 2)));
+        steps.push(Set(ErrorClass::Os, text(len, seed + 2)));
     }
     compare(&steps);
 }
@@ -301,7 +308,7 @@ fn messages_grow_and_shrink() {
 fn threads_keep_their_own_errors() {
     init();
     let steps: Vec<Step> = (0..64)
-        .flat_map(|i| [Str(ffi::GIT_ERROR_NET, text(i * 5, i as u8)), Oom, Clear])
+        .flat_map(|i| [Str(ErrorClass::Net, text(i * 5, i as u8)), Oom, Clear])
         .collect();
     let expected = run(Side::C, &steps);
     std::thread::scope(|s| {
@@ -387,8 +394,8 @@ fn allocation_failures() {
         // Pin the Rust side's runtime now, so no step below initialises it.
         errors::set_oom();
 
-        let none = (class(ffi::GIT_ERROR_NONE), b"no error".to_vec());
-        let oom = (class(ffi::GIT_ERROR_NOMEMORY), b"Out of memory".to_vec());
+        let none = (class(ErrorClass::None), b"no error".to_vec());
+        let oom = (class(ErrorClass::NoMemory), b"Out of memory".to_vec());
         let error = |s: &Seen| (s.class, s.message.clone());
 
         // The thread's state cannot be allocated: nothing is set, `clear` keeps
@@ -398,11 +405,11 @@ fn allocation_failures() {
             (seen[2].errno, error(&seen[2])),
             (libc::EPERM, none.clone())
         );
-        let seen = compare(&[FailNext, Str(ffi::GIT_ERROR_INVALID, b"x".to_vec())]);
+        let seen = compare(&[FailNext, Str(ErrorClass::Invalid, b"x".to_vec())]);
         assert_eq!((seen[1].ret, error(&seen[1])), (Some(-1), none.clone()));
-        let seen = compare(&[FailNext, Set(ffi::GIT_ERROR_INVALID, b"x".to_vec())]);
+        let seen = compare(&[FailNext, Set(ErrorClass::Invalid, b"x".to_vec())]);
         assert_eq!(error(&seen[1]), none);
-        let seen = compare(&[FailNext, Errno(libc::ENOENT), Bare(ffi::GIT_ERROR_OS)]);
+        let seen = compare(&[FailNext, Errno(libc::ENOENT), Bare(ErrorClass::Os)]);
         assert_eq!(
             (seen[2].errno, error(&seen[2])),
             (libc::ENOENT, none.clone())
@@ -412,16 +419,16 @@ fn allocation_failures() {
 
         // The message cannot be stored, after which the buffer refuses every message.
         let seen = compare(&[
-            Str(ffi::GIT_ERROR_INVALID, b"warm".to_vec()),
+            Str(ErrorClass::Invalid, b"warm".to_vec()),
             FailNext,
-            Str(ffi::GIT_ERROR_CONFIG, text(1000, 1)),
-            Str(ffi::GIT_ERROR_CONFIG, b"short".to_vec()),
-            Set(ffi::GIT_ERROR_REFERENCE, b"x".to_vec()),
-            Bare(ffi::GIT_ERROR_INVALID),
+            Str(ErrorClass::Config, text(1000, 1)),
+            Str(ErrorClass::Config, b"short".to_vec()),
+            Set(ErrorClass::Reference, b"x".to_vec()),
+            Bare(ErrorClass::Invalid),
             Errno(libc::ENOENT),
-            Bare(ffi::GIT_ERROR_OS),
+            Bare(ErrorClass::Os),
             Clear,
-            Str(ffi::GIT_ERROR_CONFIG, b"again".to_vec()),
+            Str(ErrorClass::Config, b"again".to_vec()),
             Oom,
         ]);
         assert_eq!((seen[2].ret, error(&seen[2])), (Some(-1), oom.clone()));
@@ -437,10 +444,10 @@ fn allocation_failures() {
 
         // The same through `git_error_set`'s formatting.
         let seen = compare(&[
-            Set(ffi::GIT_ERROR_INVALID, b"warm".to_vec()),
+            Set(ErrorClass::Invalid, b"warm".to_vec()),
             FailNext,
-            Set(ffi::GIT_ERROR_CONFIG, text(1000, 2)),
-            Str(ffi::GIT_ERROR_CONFIG, b"short".to_vec()),
+            Set(ErrorClass::Config, text(1000, 2)),
+            Str(ErrorClass::Config, b"short".to_vec()),
         ]);
         assert_eq!(error(&seen[2]), oom);
         assert_eq!((seen[3].ret, error(&seen[3])), (Some(-1), oom));
