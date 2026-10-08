@@ -2,7 +2,7 @@
 //! the crate does not have yet; replace each once its safe counterpart lands.
 #![allow(unsafe_code)]
 
-use std::ffi::{CStr, c_int};
+use std::ffi::{CStr, c_int, c_void};
 use std::mem::MaybeUninit;
 use std::process::Command;
 
@@ -86,4 +86,96 @@ impl PairMut<'_> {
             core::ptr::addr_of_mut!((*p).b).write(b);
         }
     }
+}
+
+// --- `git2/sys/alloc.h` ------------------------------------------------------------
+
+use core::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+
+use libgit2::ffi;
+use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
+
+unsafe extern "C" {
+    fn malloc(n: usize) -> *mut c_void;
+    fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+    fn free(p: *mut c_void);
+}
+
+static MALLOCS: AtomicUsize = AtomicUsize::new(0);
+static REALLOCS: AtomicUsize = AtomicUsize::new(0);
+static FREES: AtomicUsize = AtomicUsize::new(0);
+
+/// libc's allocator behind `Alloc`, counting the calls that reach it. Storage is
+/// libc's either way, so it may be installed while libc-allocated blocks are live.
+///
+/// It refuses [`REFUSED`] bytes: a request libc cannot meet would abort under ASan
+/// (`allocator_may_return_null=0`) instead of failing.
+pub struct Counted;
+
+/// The one request size [`Counted`] refuses.
+pub const REFUSED: usize = 1 << 40;
+
+impl Counted {
+    /// `(malloc, realloc, free)` calls so far, process-wide.
+    pub fn calls() -> (usize, usize, usize) {
+        (
+            MALLOCS.load(SeqCst),
+            REALLOCS.load(SeqCst),
+            FREES.load(SeqCst),
+        )
+    }
+}
+
+// SAFETY: forwards to libc's `malloc` family unchanged, which meets every clause of
+// `Alloc`'s contract; the counters are atomics.
+unsafe impl Alloc for Counted {
+    fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+        MALLOCS.fetch_add(1, SeqCst);
+        if len == REFUSED {
+            return None;
+        }
+        // SAFETY: plain libc allocation.
+        NonNull::new(unsafe { malloc(len) }.cast())
+    }
+
+    unsafe fn realloc(
+        p: Option<NonNull<u8>>,
+        len: usize,
+        _: Option<&CStr>,
+        _: i32,
+    ) -> Option<NonNull<u8>> {
+        REALLOCS.fetch_add(1, SeqCst);
+        if len == REFUSED {
+            return None;
+        }
+        let p = p.map_or(core::ptr::null_mut(), |p| p.as_ptr().cast());
+        // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+        NonNull::new(unsafe { realloc(p, len) }.cast())
+    }
+
+    unsafe fn free(p: NonNull<u8>) {
+        FREES.fetch_add(1, SeqCst);
+        // SAFETY: `p` is a live libc block the caller gives up.
+        unsafe { free(p.as_ptr().cast()) }
+    }
+}
+
+/// A `git_allocator.gfree` that releases nothing, to store in an `Allocator`.
+pub unsafe extern "C" fn leave_free(_: *mut c_void) {}
+
+/// Installs `allocator` as libgit2's allocator (`GIT_OPT_SET_ALLOCATOR`); stands in
+/// for the `git_libgit2_opts` wrapper (`core`), which replaces it.
+///
+/// Callers install a libc-backed family ([`Counted`]) or install before libgit2 has
+/// allocated, so no live block changes family.
+pub fn install(allocator: &Allocator) {
+    let raw = (&raw const *allocator)
+        .cast::<ffi::git_allocator>()
+        .cast_mut();
+    // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, so `raw`
+    // addresses one with every member set; libgit2 copies it (`memcpy`) and keeps no
+    // pointer to it. The family is coherent per this function's contract.
+    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, raw) };
+    assert_eq!(rc, 0);
 }

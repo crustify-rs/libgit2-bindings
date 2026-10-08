@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 mod fixture;
+mod sys_alloc;
 mod sys_errors;
 mod sys_odb_backend;
 
