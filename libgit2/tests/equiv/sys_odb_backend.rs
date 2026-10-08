@@ -7,9 +7,10 @@
 //! NULL, which both routines ignore.
 //!
 //! The string strategies are compared with `git__strdup` and `git_strarray_copy`
-//! rebuilt over the exported routines (neither is exported), and with the C
-//! disposers that release libgit2's strings, `git_strarray_dispose` and
-//! `git_buf_dispose`, on strings either side made or libgit2 handed out.
+//! rebuilt over the exported routines (neither is exported: `git_strarray_copy` is
+//! deprecated and hidden under `GIT_DEPRECATE_HARD`), and with the C disposers that
+//! release libgit2's strings, `git_strarray_dispose` and `git_buf_dispose`, on
+//! strings either side made or libgit2 handed out.
 //!
 //! Documented divergences, outside these comparisons:
 //!
@@ -19,6 +20,9 @@
 //!   a nonexistent TLS key; the strategies pin the runtime first and succeed. The
 //!   corrected behaviour is regression-tested in the module's `unit_tests` and in
 //!   `ub_safe`.
+//! - `git_strarray_copy` silently skips NULL elements of its source (`strarray.c`);
+//!   `OdbDataStrVec::from_raw_parts` refuses to adopt an array holding one, which
+//!   `ub_unsafe` covers.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -30,7 +34,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use libgit2::ffi;
 use libgit2::libgit2::raw::{
-    OdbDataArrayFree, OdbDataBox, OdbDataStr, OdbDataStrFree, OdbDataStrVec, OdbDataVec,
+    OdbDataArrayFree, OdbDataBox, OdbDataStrFree, OdbDataStrVec, OdbDataVec,
 };
 
 #[repr(C)]
@@ -492,7 +496,8 @@ fn traced_string_sequences() {
         }
         string_allocation_failures();
         run_adopted_from_libgit2();
-        str_adopted_from_a_git_buf();
+        str_taken_from_a_git_buf();
+        str_taken_from_an_unowned_git_buf();
         assert_eq!(
             LIVE.load(Ordering::SeqCst),
             0,
@@ -847,9 +852,9 @@ fn run_adopted_from_libgit2() {
     assert_eq!(rc, 0);
 }
 
-/// `GIT_OPT_GET_USER_AGENT` hands out a `git_buf`: its string, adopted, releases as
-/// `git_buf_dispose` would.
-fn str_adopted_from_a_git_buf() {
+/// `GIT_OPT_GET_USER_AGENT` hands out a `git_buf` owning its string: taken, it
+/// releases as `git_buf_dispose` would, and the buffer is left owning nothing.
+fn str_taken_from_a_git_buf() {
     // SAFETY: `GIT_OPT_SET_USER_AGENT` copies the string.
     let rc = unsafe {
         ffi::git_libgit2_opts(
@@ -859,11 +864,7 @@ fn str_adopted_from_a_git_buf() {
     };
     assert_eq!(rc, 0);
     let get = || {
-        let mut out = ffi::git_buf {
-            ptr: ptr::null_mut(),
-            reserved: 0,
-            size: 0,
-        };
+        let mut out = zeroed_buf();
         // SAFETY: `GIT_OPT_GET_USER_AGENT` takes a zeroed `git_buf *`, which it fills.
         let rc =
             unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT as c_int, &raw mut out) };
@@ -872,26 +873,93 @@ fn str_adopted_from_a_git_buf() {
         out
     };
     let mut a = get();
-    let b = get();
-    // SAFETY: `b.ptr` is the buffer's NUL-terminated `git__malloc` string, handed over
-    // whole; `b` is not used again.
-    let s = unsafe { OdbDataStr::from_raw(b.ptr) }.unwrap();
+    let mut b = get();
+    let b_ptr = b.ptr;
+    // SAFETY: `b` is as `GIT_OPT_GET_USER_AGENT` left it.
+    let s = unsafe { OdbDataStrFree::take_buf(&mut b) }.unwrap();
+    assert_eq!(s.as_ptr(), b_ptr.cast_const());
     assert_eq!(c_str(a.ptr), s.as_bytes());
     assert_eq!(a.size, s.len());
     assert_eq!(s.to_str(), Ok("crustify/1.0"));
 
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     c.adopt(a.ptr.cast());
-    r.adopt(b.ptr.cast());
-    // SAFETY: `a` owns its string.
-    c.step(|| unsafe { ffi::git_buf_dispose(&mut a) });
+    r.adopt(b_ptr.cast());
+    c.step(|| dispose_buf(&mut a));
     r.step(|| drop(s));
     assert_eq!(c.steps, r.steps);
     assert!(matches!(c.steps[0][..], [Event::Free { alloc: 0 }]));
+
+    // Both buffers are left owning nothing: disposing them again frees nothing.
+    c.step(|| dispose_buf(&mut a));
+    r.step(|| dispose_buf(&mut b));
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(r.steps[1], []);
+    assert_eq!((a.reserved, a.size, b.reserved, b.size), (0, 0, 0, 0));
 
     // SAFETY: NULL restores the default user agent.
     let rc = unsafe {
         ffi::git_libgit2_opts(ffi::GIT_OPT_SET_USER_AGENT as c_int, ptr::null::<c_char>())
     };
     assert_eq!(rc, 0);
+}
+
+/// `GIT_OPT_GET_TEMPLATE_PATH` with an empty path fills a `git_buf` without
+/// allocating: it points at libgit2's static empty string, which `git_buf_dispose`
+/// leaves alone; `take_buf` takes nothing and frees nothing.
+fn str_taken_from_an_unowned_git_buf() {
+    // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` copies the string.
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_TEMPLATE_PATH as c_int, c"".as_ptr()) };
+    assert_eq!(rc, 0);
+    let (mut c, mut r) = (Recorder::default(), Recorder::default());
+    let get = |rec: &mut Recorder| {
+        let mut out = zeroed_buf();
+        rec.step(|| {
+            // SAFETY: `GIT_OPT_GET_TEMPLATE_PATH` takes a zeroed `git_buf *`, which it
+            // fills.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_TEMPLATE_PATH as c_int, &raw mut out)
+            };
+            assert_eq!(rc, 0);
+        });
+        assert!(!out.ptr.is_null() && out.reserved == 0 && out.size == 0);
+        assert_eq!(c_str(out.ptr), b"");
+        out
+    };
+    let mut a = get(&mut c);
+    let mut b = get(&mut r);
+    assert_eq!(a.ptr, b.ptr, "the one static empty string");
+    assert_eq!(c.steps, [vec![]], "filled without allocating");
+
+    c.step(|| dispose_buf(&mut a));
+    // SAFETY: `b` is as `GIT_OPT_GET_TEMPLATE_PATH` left it.
+    r.step(|| assert!(unsafe { OdbDataStrFree::take_buf(&mut b) }.is_none()));
+    assert_eq!(c.steps, r.steps);
+    assert_eq!(r.steps[1], [], "nothing freed on either side");
+    assert_eq!((a.reserved, a.size, b.reserved, b.size), (0, 0, 0, 0));
+    r.step(|| dispose_buf(&mut b));
+    assert_eq!(r.steps[2], []);
+
+    // SAFETY: NULL restores the guessed template path.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_TEMPLATE_PATH as c_int,
+            ptr::null::<c_char>(),
+        )
+    };
+    assert_eq!(rc, 0);
+}
+
+fn zeroed_buf() -> ffi::git_buf {
+    ffi::git_buf {
+        ptr: ptr::null_mut(),
+        reserved: 0,
+        size: 0,
+    }
+}
+
+fn dispose_buf(buf: &mut ffi::git_buf) {
+    // SAFETY: `buf` is zeroed or as a libgit2 routine left it.
+    unsafe { ffi::git_buf_dispose(buf) }
 }

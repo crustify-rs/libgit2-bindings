@@ -1,10 +1,12 @@
 //! UB tests for the unsafe API of `git2/sys/odb_backend.h`'s string strategies:
 //! `OdbDataStrVec::from_raw_parts`, called within its contract on every kind of
-//! array libgit2 or the safe API hands out, edge cases included.
+//! array libgit2 or the safe API hands out, and `OdbDataStrFree::take_buf` on every
+//! shape of `git_buf` libgit2 leaves behind, edge cases included.
 
 use std::ffi::{CStr, c_char, c_int};
 use std::mem::size_of;
 use std::ptr;
+use std::sync::Mutex;
 use std::thread;
 
 use libgit2::ffi;
@@ -143,4 +145,155 @@ fn adopts_what_libgit2_hands_out() {
     thread::spawn(move || assert!(!strs(&w).contains(&&b"noop"[..])))
         .join()
         .unwrap();
+}
+
+// --- OdbDataStrFree::take_buf -----------------------------------------------------
+
+fn zeroed_buf() -> ffi::git_buf {
+    ffi::git_buf {
+        ptr: ptr::null_mut(),
+        reserved: 0,
+        size: 0,
+    }
+}
+
+fn is_disposed(buf: &ffi::git_buf) -> bool {
+    buf.ptr.is_null() && buf.reserved == 0 && buf.size == 0
+}
+
+/// `GIT_OPT_GET_USER_AGENT` into `buf`: an owned string.
+fn get_user_agent(buf: &mut ffi::git_buf) {
+    // SAFETY: `GIT_OPT_GET_USER_AGENT` takes a `git_buf *` that is zeroed or as a
+    // libgit2 routine left it, which it fills.
+    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT as c_int, &raw mut *buf) };
+    assert_eq!(rc, 0);
+}
+
+/// Serialises the tests that set the template path, a libgit2 global written
+/// without a lock.
+static TEMPLATE_PATH: Mutex<()> = Mutex::new(());
+
+/// `GIT_OPT_GET_TEMPLATE_PATH` into `buf` with the path set to `path`; the empty
+/// path is filled without allocating. Hold [`TEMPLATE_PATH`] around it and the
+/// matching [`reset_template_path`].
+fn get_template_path(buf: &mut ffi::git_buf, path: &CStr) {
+    // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` copies its `const char *`.
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_TEMPLATE_PATH as c_int, path.as_ptr()) };
+    assert_eq!(rc, 0);
+    // SAFETY: as `get_user_agent`.
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_TEMPLATE_PATH as c_int, &raw mut *buf) };
+    assert_eq!(rc, 0);
+}
+
+/// Restores the guessed default template path.
+fn reset_template_path() {
+    // SAFETY: NULL resets the template path.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_TEMPLATE_PATH as c_int,
+            ptr::null::<c_char>(),
+        )
+    };
+    assert_eq!(rc, 0);
+}
+
+fn dispose(buf: &mut ffi::git_buf) {
+    // SAFETY: `buf` is zeroed or as a libgit2 routine left it.
+    unsafe { ffi::git_buf_dispose(buf) }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn take_buf_adopts_what_libgit2_owns() {
+    init();
+    let mut buf = zeroed_buf();
+    get_user_agent(&mut buf);
+    assert!(buf.reserved > 0, "the buffer owns its string");
+    let (ptr, size) = (buf.ptr, buf.size);
+    // SAFETY: `buf` is as `GIT_OPT_GET_USER_AGENT` left it, and is not read again
+    // through its old pointer.
+    let s = unsafe { OdbDataStrFree::take_buf(&mut buf) }.unwrap();
+    assert!(is_disposed(&buf), "the buffer is left disposed");
+    assert_eq!(
+        s.as_ptr(),
+        ptr.cast_const(),
+        "the string is moved, not copied"
+    );
+    assert_eq!(s.len(), size);
+    assert!(s.to_str().unwrap().contains("libgit2"));
+    // A disposed buffer owns nothing: libgit2's disposer frees nothing; ASan flags a
+    // double free, and a leak if `s` is not released.
+    dispose(&mut buf);
+    let t = s.clone();
+    drop(s);
+    assert_eq!(t.len(), size);
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn take_buf_leaves_the_static_empty_string_alone() {
+    init();
+    let _path = TEMPLATE_PATH.lock().unwrap();
+    let mut buf = zeroed_buf();
+    get_template_path(&mut buf, c"");
+    assert!(
+        !buf.ptr.is_null(),
+        "an empty result points at libgit2's static empty string"
+    );
+    assert_eq!(
+        (buf.reserved, buf.size),
+        (0, 0),
+        "which the buffer does not own"
+    );
+    // SAFETY: `buf` is as `GIT_OPT_GET_TEMPLATE_PATH` left it.
+    assert!(unsafe { OdbDataStrFree::take_buf(&mut buf) }.is_none());
+    assert!(is_disposed(&buf));
+    dispose(&mut buf);
+    reset_template_path();
+}
+
+#[test]
+fn take_buf_of_a_zeroed_buffer_is_none() {
+    let mut buf = zeroed_buf();
+    // SAFETY: a zeroed `git_buf` is `GIT_BUF_INIT`.
+    assert!(unsafe { OdbDataStrFree::take_buf(&mut buf) }.is_none());
+    assert!(is_disposed(&buf));
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn take_buf_then_reuse_the_buffer() {
+    init();
+    let _path = TEMPLATE_PATH.lock().unwrap();
+    let mut buf = zeroed_buf();
+    let mut taken = Vec::new();
+    for round in 0..3 {
+        get_user_agent(&mut buf);
+        // SAFETY: `buf` is as libgit2 left it: filled on top of a disposed buffer.
+        let s = unsafe { OdbDataStrFree::take_buf(&mut buf) }.unwrap();
+        assert!(
+            taken.iter().all(|t: &OdbDataStr| t.as_ptr() != s.as_ptr()),
+            "round {round}"
+        );
+        taken.push(s);
+    }
+    // Filled, then taken, then filled by a routine that allocates nothing: the
+    // buffer never holds a stale pointer in between.
+    get_template_path(&mut buf, c"");
+    // SAFETY: as above.
+    assert!(unsafe { OdbDataStrFree::take_buf(&mut buf) }.is_none());
+    get_user_agent(&mut buf);
+    dispose(&mut buf);
+    // `git_buf_dispose` points a disposed buffer at the static empty string.
+    assert!(!buf.ptr.is_null() && buf.reserved == 0 && buf.size == 0);
+    // SAFETY: `buf` is as `git_buf_dispose` left it.
+    assert!(unsafe { OdbDataStrFree::take_buf(&mut buf) }.is_none());
+    reset_template_path();
+    // Taken strings outlive the buffer and cross threads.
+    let n = thread::spawn(move || taken.into_iter().map(|s| s.len()).sum::<usize>())
+        .join()
+        .unwrap();
+    assert!(n > 0);
 }
