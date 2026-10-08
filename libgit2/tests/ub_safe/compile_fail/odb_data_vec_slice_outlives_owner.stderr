@@ -1,0 +1,16 @@
+error[E0505]: cannot move out of `v` because it is borrowed
+ --> tests/ub_safe/compile_fail/odb_data_vec_slice_outlives_owner.rs:7:10
+  |
+5 |     let v = OdbDataVec::<u8>::from_slice(b"odb").unwrap();
+  |         - binding `v` declared here
+6 |     let s = v.as_slice();
+  |             - borrow of `v` occurs here
+7 |     drop(v);
+  |          ^ move out of `v` occurs here
+8 |     let _ = s[0];
+  |             ---- borrow later used here
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+6 |     let s = v.clone().as_slice();
+  |              ++++++++

@@ -2,4 +2,5 @@
 //!
 //! Subsystem modules are declared here as their first batches are scheduled.
 
+pub mod odb;
 pub mod raw;

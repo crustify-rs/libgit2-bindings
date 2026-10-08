@@ -1,6 +1,13 @@
 //! UB tests that target the safe public API. Each tested TU gets a module here,
 //! homed in `tests/ub_safe/<tu>.rs`.
-#![forbid(unsafe_code)]
+//!
+//! `unsafe` is confined to [`fixture`], which stands in for safe constructors the
+//! crate does not have yet; the tests themselves deny it. libgit2's state is
+//! process-global, so tests needing it untouched rerun alone in a child process.
+#![deny(unsafe_code)]
+
+mod fixture;
+mod sys_odb_backend;
 
 /// Illegal safe paths that must fail to compile, one file each under `compile_fail/`.
 #[test]

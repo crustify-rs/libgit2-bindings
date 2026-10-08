@@ -1,0 +1,402 @@
+{
+ "_comment": "Authored analysis: ownership, lifecycle, refcount and locking judgements that no composer can derive, keyed to the C entities they describe. The structural half of each record (field layout, signatures, footprints, casts) is composed from the CodeQL tables on demand and merged in at read time, so a re-extract rewrites nothing here. Written only by `wavefront <repo> <target> query {types,symbols} --update`; read through wavefront.manifests. Hand-edit at your own risk: `--update` validates a submission against the composed skeleton (unknown field, wrong kind, ptr-invariant violation) and this file does not.",
+ "types": [],
+ "symbols": [
+  {
+   "name": "calloc",
+   "defined_in": null,
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "libc calloc: ZEROING; NULL on overflow or failure. Released by free."
+    }
+   }
+  },
+  {
+   "name": "free",
+   "defined_in": null,
+   "lifetime": {
+    "for": "__ptr",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "__ptr",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "libc free: releases malloc/calloc/realloc storage; NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git__calloc",
+   "defined_in": "src/util/alloc.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "git__malloc(nelem*elsize) then memset 0: ZEROING; NULL on multiplication overflow (no error set) or OOM. Internal; released by git__free."
+    }
+   }
+  },
+  {
+   "name": "git__free",
+   "defined_in": "src/util/alloc.h",
+   "lifetime": {
+    "for": "ptr",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "ptr",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git__allocator.gfree(ptr): releases any git__malloc-family storage without reading it; NULL is a no-op (stdalloc free, failalloc no-op). Internal; publicly reachable only through git_odb_backend_data_free."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git__malloc",
+   "defined_in": "src/util/alloc.h",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "git__allocator.gmalloc(len): NON-zeroing; NULL on OOM with git_error_set_oom; always NULL before git_libgit2_init (failalloc). Internal (hidden visibility); publicly reachable only through git_odb_backend_data_alloc. Released by git__free."
+    }
+   }
+  },
+  {
+   "name": "git__mallocarray",
+   "defined_in": "src/util/alloc.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "git__reallocarray(NULL, nelem, elsize): NON-zeroing array storage; NULL on overflow or OOM. Internal; released by git__free."
+    }
+   }
+  },
+  {
+   "name": "git_odb_backend_data_alloc",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "GIT_UNUSED(backend): never read or written, so NULL is accepted on observed behaviour; the header documents it as the allocating backend. Rust policies pass NULL."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "git__malloc(len): plain, NON-zeroing storage from git__allocator.gmalloc (stdalloc malloc by default). NULL on OOM via git_error_set_oom. HAZARD: before git_libgit2_init (and after the last shutdown) failalloc makes every request fail, and git_error_set_oom then reads the error TLS slot under an uninitialised/deleted key (0), writing &oom_error into another component's TLS block (ASan: unknown-crash in git_error_set_oom, errors.c:170). Rust strategies pin the runtime with their own git_libgit2_init reference first. len 0 is malloc(0): implementation-defined NULL or a unique pointer. Released by git_odb_backend_data_free or, once returned from a backend read callback, by libgit2's own git__free. Holds one object or a byte buffer."
+    }
+   }
+  },
+  {
+   "name": "git_odb_backend_data_free",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "data",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "GIT_UNUSED(backend): never read or written, so NULL is accepted on observed behaviour."
+     }
+    },
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object or a buffer) without reading it; NULL is a no-op. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+     }
+    }
+   ]
+  },
+  {
+   "name": "malloc",
+   "defined_in": null,
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "libc malloc: NON-zeroing; NULL on failure. Called directly by the stdalloc/debugalloc backends of git__allocator and by vendored deps (ntlmclient, reftable's default). Released by free."
+    }
+   }
+  },
+  {
+   "name": "reftable_calloc",
+   "defined_in": "deps/reftable/basics.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "reftable_malloc(nelem*elsize) then memset 0: ZEROING; NULL on overflow, zero size or failure. Released by reftable_free."
+    }
+   }
+  },
+  {
+   "name": "reftable_free",
+   "defined_in": "deps/reftable/basics.c",
+   "lifetime": {
+    "for": "p",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "p",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "reftable's free hook or libc free; NULL is a no-op. Releases reftable_malloc-family storage."
+     }
+    }
+   ]
+  },
+  {
+   "name": "reftable_malloc",
+   "defined_in": "deps/reftable/basics.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "reftable's allocator: the hook set by reftable_set_alloc (libgit2 installs git__ wrappers in refdb_reftable.c) or malloc. NON-zeroing; returns NULL for sz == 0 and on failure. Released by reftable_free."
+    }
+   }
+  }
+ ]
+}
