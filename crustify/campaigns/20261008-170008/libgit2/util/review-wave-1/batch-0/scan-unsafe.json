@@ -1,0 +1,69 @@
+{
+  "crate_path": "/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/util/wave-1/batch-0/crustify/rust",
+  "counts": {
+    "unsafe_blocks": 64,
+    "unsafe_block_stmts": 0,
+    "unsafe_block_lines": 64,
+    "unsafe_block_code_lines": 64,
+    "unsafe_blocks_wrapper_impl": 30,
+    "unsafe_blocks_ffi_export": 4,
+    "unsafe_fns": 22,
+    "unsafe_fns_seam": 10,
+    "unsafe_fns_pub": 7,
+    "unsafe_impls": 15,
+    "unsafe_traits": 1,
+    "ffi_calls": 10,
+    "wrapper_newtypes": 3,
+    "wrapper_newtypes_declared": 2,
+    "wrapper_declared_nonconformant": 0,
+    "wrapper_newtypes_undeclared": 1,
+    "raw_ptr_args": 19,
+    "raw_ptr_rets": 14,
+    "raw_ptr_seam": 22,
+    "raw_ptr_wrapped": 0,
+    "raw_ptr_in_wrapper": 1,
+    "ref_to_type_wrapper": 16,
+    "field_ref_wrapped": 0,
+    "field_proj_wrapped": 8,
+    "field_proj_outside_impl": 0,
+    "void_ptr_sanctioned": 10,
+    "void_ptr_smell": 0,
+    "raw_ptr_derefs": 8,
+    "raw_ptr_derefs_outside_impl": 0,
+    "total_stmts": 248,
+    "code_lines": 571,
+    "raw_ptr_sites": [],
+    "void_ptr_sites": [],
+    "field_proj_sites": [],
+    "field_ref_sites": [],
+    "raw_deref_sites": []
+  },
+  "counts_unavailable": null,
+  "seed": "--name git_error_last",
+  "entries": [
+    {
+      "name": "git_error_last",
+      "raw_ptr_sites": [],
+      "raw_deref_sites": [],
+      "deref_impl_sites": [],
+      "deref_mut_impl_sites": [],
+      "slice_ref_sites": [],
+      "slice_mut_sites": [],
+      "crate": "libgit2"
+    }
+  ],
+  "undocumented_unsafe": {
+    "sites": 0,
+    "documented": 0,
+    "undocumented": 0,
+    "per_file": {}
+  },
+  "derived": {
+    "unsafe_fn_pub_ratio": 0.3182,
+    "unsafe_fn_smell": 12,
+    "raw_ptr_smell": 11,
+    "raw_ptr_seam_ratio": 0.6667,
+    "unsafe_loc_ratio": 0.1121,
+    "loc_per_unsafe_block": 8.9
+  }
+}
