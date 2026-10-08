@@ -18,6 +18,12 @@
 //! NUL-terminated string ([`OdbDataStr`]); [`OdbDataStrVec`] a counted run of them,
 //! laid out as a `git_strarray`'s `strings` / `count`.
 //!
+//! Not every string libgit2 hands out is one of its allocations: a `git_buf` owns
+//! its `ptr` only while `reserved > 0`, and otherwise points at a static empty
+//! string that `git_buf_dispose` leaves alone (`buf.c`); an empty result is filled
+//! without allocating. [`OdbDataStrFree::take_buf`] applies that rule, so a
+//! `git_buf`'s `ptr` is never adopted through `from_raw` directly.
+//!
 //! The first allocation pins libgit2's runtime with a `git_libgit2_init` reference
 //! of its own, held for the rest of the process (`runtime_pinned`). C callers
 //! get NULL before initialisation instead, through a path that corrupts foreign
@@ -321,7 +327,10 @@ unsafe fn str_dup_raw(s: *mut c_char) -> *mut c_char {
 ///
 /// [`dup`](Self::dup) and `Clone` copy into the allocator, as `git__strdup` does;
 /// [`CStrBox::into_raw`] hands the string to C, which may release it with any of
-/// those routines.
+/// those routines. A string libgit2 made is adopted with [`CStrBox::from_raw`] only
+/// when libgit2 owns it: a `git_strarray` element or a `git_signature` name always
+/// is, a `git_buf`'s `ptr` only while `reserved > 0` — [`take_buf`](Self::take_buf)
+/// checks that, where `from_raw` would free libgit2's static empty string.
 ///
 /// Wraps: git_odb_backend_data_alloc
 /// Wraps: git_odb_backend_data_free
@@ -342,6 +351,43 @@ impl OdbDataStrFree {
         // SAFETY: `copy` is fresh, uniquely-owned `git__malloc` storage holding `s`
         // with its terminator, which `str_free` releases.
         unsafe { OdbDataStr::from_raw(copy.as_ptr()) }
+    }
+
+    /// Takes the string out of a `git_buf` libgit2 filled, leaving `buf` disposed
+    /// (zeroed, as `GIT_BUF_INIT`): what `git_buf_dispose` would release, owned.
+    ///
+    /// `None` when `buf` owns no allocation (`reserved == 0`): libgit2 fills an
+    /// empty result without allocating, pointing `ptr` at a static empty string
+    /// that `git_buf_dispose` leaves alone, so that is the usual shape of an empty
+    /// output. An owned buffer reads as the string up to its first NUL; a `size`
+    /// beyond it (binary contents) is not represented, though the whole
+    /// allocation is still released.
+    ///
+    /// Raw seam over the unwrapped `git_buf`: the `git_buf` wrapper replaces it.
+    ///
+    /// # Safety
+    ///
+    /// `buf` must be as libgit2 left it — zeroed, disposed, or filled by a libgit2
+    /// routine — so that with `reserved > 0` its `ptr` is a NUL-terminated string in
+    /// libgit2's current allocator that the buffer uniquely owns, and with
+    /// `reserved == 0` it owns nothing. The caller gives the string up; `buf` may be
+    /// reused or passed to `git_buf_dispose` afterwards.
+    pub unsafe fn take_buf(buf: &mut ffi::git_buf) -> Option<OdbDataStr> {
+        let taken = core::mem::replace(
+            buf,
+            ffi::git_buf {
+                ptr: ptr::null_mut(),
+                reserved: 0,
+                size: 0,
+            },
+        );
+        if taken.reserved == 0 {
+            return None;
+        }
+        // SAFETY: per this function's contract, `reserved > 0` means `ptr` is a live
+        // NUL-terminated `git__malloc` string the buffer owned, now handed over
+        // whole; `str_free` releases it.
+        unsafe { OdbDataStr::from_raw(taken.ptr) }
     }
 }
 
@@ -417,7 +463,8 @@ impl OdbDataStrVec {
     ///
     /// NULL with `count == 0` is the empty run, as in a zeroed `git_strarray`. Returns
     /// `None`, leaving ownership with the caller, when `strings` is NULL with a
-    /// nonzero `count` or any of its elements is NULL.
+    /// nonzero `count` or any of its elements is NULL — which `git_strarray_copy`
+    /// would silently skip; libgit2's own outputs hold none.
     ///
     /// # Safety
     ///
@@ -968,6 +1015,60 @@ mod unit_tests {
             },
         );
     }
+
+    /// `Clone` on a failed copy aborts the process, as documented, for a string and
+    /// for a run; nothing is handed back.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn clone_aborts_when_the_copy_fails() {
+        use std::os::unix::process::ExitStatusExt;
+
+        const ABORTING: &str = "CRUSTIFY_UNIT_ABORTING";
+        if let Ok(which) = std::env::var(ABORTING) {
+            let mut allocator = ffi::git_allocator {
+                gmalloc: Some(counting_malloc),
+                grealloc: Some(libc_realloc),
+                gfree: Some(counting_free),
+            };
+            // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
+            // nothing is allocated yet.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+            };
+            assert_eq!(rc, 0);
+            init();
+            let s = OdbDataStrFree::dup(c"keep").unwrap();
+            let v = OdbDataStrVec::dup_all(&[c"a", c"b"]).unwrap();
+            // Warm this thread's error state, which the first failure allocates.
+            FAIL_IN.store(1, SeqCst);
+            assert!(s.try_clone().is_none());
+            FAIL_IN.store(1, SeqCst);
+            let _ = match which.as_str() {
+                "str" => s.clone().len(),
+                "vec" => v.clone().len(),
+                _ => unreachable!(),
+            };
+            unreachable!("clone returned");
+        }
+        for which in ["str", "vec"] {
+            let name = concat!(module_path!(), "::clone_aborts_when_the_copy_fails");
+            let name = name.split_once("::").map_or(name, |(_, rest)| rest);
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(ABORTING, which)
+                .output()
+                .unwrap();
+            assert_eq!(
+                out.status.signal(),
+                Some(SIGABRT),
+                "`{which}` clone: {:?}\n{}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+
+    const SIGABRT: i32 = 6;
 
     #[test]
     fn str_vec_empty_forms_own_nothing() {

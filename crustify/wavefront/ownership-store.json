@@ -183,6 +183,151 @@
    }
   },
   {
+   "name": "git__strdup",
+   "defined_in": "src/util/alloc.c",
+   "lifetime": {
+    "for": "str",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for strlen(str)+1 bytes during the call only; NULL is dereferenced (crash), so not nullable."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": true,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "Fresh git__malloc(strlen(str)+1) storage holding a copy of str with its terminator: the NUL-terminated string cloner behind git_strarray_copy, git_signature_new/dup and most libgit2 string fields. NULL on OOM (git_error_set_oom via git__malloc; before git_libgit2_init every request fails). Internal (hidden visibility): Rust reproduces it as OdbDataStrFree::dup / str_dup over git_odb_backend_data_alloc; released by git__free, publicly git_odb_backend_data_free."
+    }
+   }
+  },
+  {
+   "name": "git__strndup",
+   "defined_in": "src/util/alloc.c",
+   "lifetime": {
+    "for": "str",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for p_strnlen(str, n) bytes during the call only: a NUL within the first n bytes ends the copy, so the input may be an unterminated run of n bytes."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": true,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "Fresh git__malloc(len+1) storage holding the first len = strnlen(str, n) bytes of str plus a terminator: a bounded string cloner. NULL on OOM. Internal; released by git__free (publicly git_odb_backend_data_free)."
+    }
+   }
+  },
+  {
+   "name": "git__substrdup",
+   "defined_in": "src/util/alloc.c",
+   "lifetime": {
+    "for": "str",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": {
+       "by_val": true
+      },
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for exactly n bytes during the call only, NUL or not: the caller bounds the run (a path component, a token)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": true,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "Fresh git__malloc(n+1) storage holding the n bytes at str plus a terminator: a byte-run-to-string cloner. NULL on OOM or when n+1 overflows to 0 only through malloc(0) semantics (no overflow check). Internal; released by git__free (publicly git_odb_backend_data_free)."
+    }
+   }
+  },
+  {
    "name": "git_odb_backend_data_alloc",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {
