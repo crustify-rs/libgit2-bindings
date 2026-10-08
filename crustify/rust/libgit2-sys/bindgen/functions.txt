@@ -10,4 +10,6 @@ git_libgit2_init
 git_libgit2_opts
 git_odb_backend_data_alloc
 git_odb_backend_data_free
+git_reference_normalize_name
+git_repository_open_ext
 git_strarray_dispose

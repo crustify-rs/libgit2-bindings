@@ -44,7 +44,7 @@ fn from_raw_yields_only_valid_codes() {
             assert!(!format!("{code:?}").is_empty());
             seen.insert(code);
         } else {
-            assert_eq!(ErrorCode::try_from(raw), Err(raw));
+            assert_eq!(ErrorCode::try_from(raw).map_err(|e| e.raw()), Err(raw));
         }
     }
     assert_eq!(seen.len(), 35);
@@ -59,7 +59,7 @@ fn from_raw_yields_only_valid_classes() {
             assert!(!format!("{class:?}").is_empty());
             seen.insert(class);
         } else {
-            assert_eq!(ErrorClass::try_from(raw), Err(raw));
+            assert_eq!(ErrorClass::try_from(raw).map_err(|e| e.raw()), Err(raw));
         }
     }
     assert_eq!(seen.len(), 37);

@@ -32,13 +32,16 @@ use crate::ffi;
 
 /// Declares a fieldless enum over a C enum's bindgen constants: each variant's
 /// discriminant is its constant, `from_raw` maps an `int` back to the variant
-/// carrying it, and `raw` gives the `int` C traffics in.
+/// carrying it, and `raw` gives the `int` C traffics in. The second item is the
+/// error `TryFrom<c_int>` reports, carrying the `int` the enum does not name.
 macro_rules! c_enum {
     (
         $(#[$meta:meta])*
         pub enum $name:ident {
             $($(#[$vmeta:meta])* $variant:ident = $c:path,)*
         }
+        $(#[$umeta:meta])*
+        pub struct $unnamed:ident($what:literal);
     ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,11 +68,10 @@ macro_rules! c_enum {
         }
 
         impl TryFrom<c_int> for $name {
-            /// The unrecognised value, handed back.
-            type Error = c_int;
+            type Error = $unnamed;
 
-            fn try_from(raw: c_int) -> Result<Self, c_int> {
-                Self::from_raw(raw).ok_or(raw)
+            fn try_from(raw: c_int) -> Result<Self, $unnamed> {
+                Self::from_raw(raw).ok_or($unnamed(raw))
             }
         }
 
@@ -78,6 +80,25 @@ macro_rules! c_enum {
                 value.raw()
             }
         }
+
+        $(#[$umeta])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub struct $unnamed(c_int);
+
+        impl $unnamed {
+            /// The value, as libgit2 produced it.
+            pub const fn raw(self) -> c_int {
+                self.0
+            }
+        }
+
+        impl fmt::Display for $unnamed {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, concat!("libgit2 ", $what, " {} is not named by git2/errors.h"), self.0)
+            }
+        }
+
+        impl std::error::Error for $unnamed {}
     };
 }
 
@@ -164,6 +185,12 @@ c_enum! {
         /// The subject is read-only.
         ReadOnly = ffi::GIT_EREADONLY,
     }
+
+    /// A return code that this version of libgit2's header does not name: a callback's
+    /// own result handed back, or a code of a later header. [`raw`](Self::raw) has it.
+    ///
+    /// Handwritten
+    pub struct UnnamedErrorCode("error code");
 }
 
 c_enum! {
@@ -251,6 +278,12 @@ c_enum! {
         /// Grafts.
         Grafts = ffi::GIT_ERROR_GRAFTS,
     }
+
+    /// An error class that this version of libgit2's header does not name, which user
+    /// code can set through `git_error_set_str`. [`raw`](Self::raw) has it.
+    ///
+    /// Handwritten
+    pub struct UnnamedErrorClass("error class");
 }
 
 /// The class as `git_error_t`, the type the setters in [`super::sys::errors`] take.
@@ -880,7 +913,7 @@ mod unit_tests {
             c_int::MAX,
         ] {
             assert_eq!(ErrorCode::from_raw(raw), None, "{raw}");
-            assert_eq!(ErrorCode::try_from(raw), Err(raw));
+            assert_eq!(ErrorCode::try_from(raw), Err(UnnamedErrorCode(raw)));
         }
     }
 
@@ -913,8 +946,35 @@ mod unit_tests {
     fn unnamed_classes_are_rejected() {
         for raw in [-1, 37, 1000, c_int::MIN, c_int::MAX] {
             assert_eq!(ErrorClass::from_raw(raw), None, "{raw}");
-            assert_eq!(ErrorClass::try_from(raw), Err(raw));
+            assert_eq!(ErrorClass::try_from(raw), Err(UnnamedErrorClass(raw)));
         }
+    }
+
+    /// The rejected value is a well-behaved error: it keeps the `int`, displays it,
+    /// and converts into a boxed error that crosses threads.
+    #[test]
+    fn unnamed_values_are_errors() {
+        let code = ErrorCode::try_from(-2).unwrap_err();
+        assert_eq!(code.raw(), -2);
+        assert_eq!(
+            code.to_string(),
+            "libgit2 error code -2 is not named by git2/errors.h"
+        );
+        assert_eq!(format!("{code:?}"), "UnnamedErrorCode(-2)");
+        let class = ErrorClass::try_from(1000).unwrap_err();
+        assert_eq!(class.raw(), 1000);
+        assert_eq!(
+            class.to_string(),
+            "libgit2 error class 1000 is not named by git2/errors.h"
+        );
+        let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(class);
+        assert!(boxed.source().is_none());
+        let sent = std::thread::spawn(move || boxed.to_string())
+            .join()
+            .unwrap();
+        assert_eq!(sent, class.to_string());
+        assert_eq!(code, UnnamedErrorCode(-2));
+        assert_eq!(class.clone(), class);
     }
 
     #[test]
