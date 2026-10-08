@@ -12,7 +12,7 @@
     "min_fields": 20
   },
   "summary": {
-    "unit_count": 95,
+    "unit_count": 96,
     "layer_count": 6,
     "batch_count": 22,
     "file_count": 6
@@ -409,7 +409,7 @@
       ]
     },
     {
-      "unit_count": 35,
+      "unit_count": 36,
       "batches": [
         {
           "kind": "type",
@@ -508,6 +508,28 @@
           "kind": "symbol",
           "source_file": null,
           "items": [
+            {
+              "name": "git_apply_hunk_cb",
+              "defined_in": "include/git2/apply.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
             {
               "name": "git_diff_free",
               "defined_in": "src/libgit2/diff.c",
@@ -1095,7 +1117,13 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            },
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
             {
               "name": "git_patch_get_hunk",
               "defined_in": "src/libgit2/patch.c",
@@ -1122,13 +1150,7 @@
               "back_fill": [],
               "generates": [],
               "field_anchors": []
-            }
-          ]
-        },
-        {
-          "kind": "symbol",
-          "source_file": null,
-          "items": [
+            },
             {
               "name": "git_patch_get_line_in_hunk",
               "defined_in": "src/libgit2/patch.c",
@@ -1799,6 +1821,11 @@
                 "symbols": [
                   {
                     "name": "git_apply_delta_cb",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_apply_hunk_cb",
                     "defined_in": "include/git2/apply.h",
                     "scope": "wrap"
                   }
