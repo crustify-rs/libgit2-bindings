@@ -455,6 +455,26 @@
    ]
   },
   {
+   "name": "git_error_last",
+   "defined_in": "src/util/errors.c",
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "other"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "Never NULL. Points at one of four static errors (uninitialized_error before git_libgit2_init / after the last shutdown, tlsdata_error when the thread state cannot be allocated, no_error, oom_error) or at the calling thread's error_threadstate.error, whose message aliases the thread's git_str buffer; the next git_error_set*/git_error_clear on that thread (any failing libgit2 call) rewrites it and may reallocate the message, and thread exit or the last git_libgit2_shutdown frees it. Borrow valid only until the next libgit2 call on the thread: copy out (ErrorBuf). Caller must not free."
+    }
+   }
+  },
+  {
    "name": "git_error_restore",
    "defined_in": "src/util/errors.c",
    "lifetime": {

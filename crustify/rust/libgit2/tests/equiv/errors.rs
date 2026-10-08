@@ -5,13 +5,26 @@
 //! and `git_error_t`, each with its C value, and classify the codes and classes C
 //! hands out: a function's return value, and `git_error_last()->klass` after it,
 //! whether C or the safe setters of `git2/sys/errors.h` set the class.
+//!
+//! [`last`] must read the thread's last error as `git_error_last` does. Each side
+//! runs the same sequence of C calls on a fresh thread of its own, reading the error
+//! after every step through its own reader, and the two are compared step by step:
+//! the class, the message, and `errno` after the read. The Rust side also checks that
+//! its read left the thread's error as C sees it.
+//!
+//! Documented divergence, outside these comparisons: before `git_libgit2_init`, C
+//! reports a static "library has not been initialized" error, while [`last`] pins the
+//! runtime first and reports the thread's error in it; both agree from then on
+//! (`last_agrees_once_it_pins_the_runtime`), and the module's `unit_tests` cover the
+//! corrected behaviour.
 
-use std::ffi::{CString, c_int};
+use std::cell::Cell;
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::process::Command;
 use std::ptr;
 
 use libgit2::ffi;
-use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
 use libgit2::libgit2::util::sys::errors::{clear, set_str};
 
 /// Every `git_error_code` constant, beside the variant that must carry it.
@@ -278,4 +291,412 @@ fn set_classes_round_trip_through_libgit2() {
     assert_eq!(ErrorClass::from_raw(last_klass()), None);
     clear();
     assert_eq!(ErrorClass::from_raw(last_klass()), Some(ErrorClass::None));
+}
+
+// --- `git_error_last` -----------------------------------------------------------
+
+/// A step of a sequence, always taken through C, so the two sides differ only in how
+/// they read the error it leaves.
+#[derive(Clone, Debug)]
+enum Step {
+    /// Nothing: the thread's error as it stands.
+    Read,
+    Clear,
+    Str(c_int, Vec<u8>),
+    /// `git_error_set` of a `GIT_ERROR_OS` error, with `errno` set first.
+    Os(c_int, Vec<u8>),
+    Oom,
+    /// A libgit2 call that fails: an unknown `git_libgit2_opts` key.
+    Fail,
+    /// A libgit2 call that succeeds, leaving the previous error in place.
+    Succeed,
+    /// Sets the thread's `errno`, which reading must keep.
+    Errno(c_int),
+    /// Refuses the thread's next allocation (allocation-failure child only).
+    FailNext,
+}
+
+#[derive(Clone, Copy)]
+enum Side {
+    C,
+    Rust,
+}
+
+/// The class and message a read reports, and `errno` after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Seen {
+    class: c_int,
+    message: Vec<u8>,
+    errno: c_int,
+}
+
+fn set_errno(value: c_int) {
+    // SAFETY: the calling thread's `errno`, valid for writes.
+    unsafe { libc::__errno_location().write(value) }
+}
+
+fn errno() -> c_int {
+    std::io::Error::last_os_error().raw_os_error().unwrap()
+}
+
+/// `git_error_last()`'s class and message, copied out.
+fn c_last() -> (c_int, Vec<u8>) {
+    // SAFETY: `git_error_last` never returns NULL; its message lives until the next
+    // libgit2 call on this thread, and is copied out before one.
+    unsafe {
+        let e = ffi::git_error_last();
+        ((*e).klass, CStr::from_ptr((*e).message).to_bytes().to_vec())
+    }
+}
+
+fn rust_last() -> (c_int, Vec<u8>) {
+    let e = last();
+    (e.raw_class(), e.message().to_bytes().to_vec())
+}
+
+fn c_string(message: &[u8]) -> CString {
+    CString::new(message).expect("test messages hold no NUL")
+}
+
+fn take(step: &Step) {
+    match step {
+        Step::Read => {}
+        // SAFETY: no arguments.
+        Step::Clear => unsafe { ffi::git_error_clear() },
+        Step::Str(class, message) => {
+            let message = c_string(message);
+            // SAFETY: a NUL-terminated string, copied during the call.
+            unsafe { ffi::git_error_set_str(*class, message.as_ptr()) };
+        }
+        Step::Os(errno, message) => {
+            let message = c_string(message);
+            set_errno(*errno);
+            // SAFETY: a `"%s"` format with the one string argument it names.
+            unsafe {
+                ffi::git_error_set(ffi::GIT_ERROR_OS as c_int, c"%s".as_ptr(), message.as_ptr())
+            };
+        }
+        // SAFETY: no arguments.
+        Step::Oom => unsafe { ffi::git_error_set_oom() },
+        Step::Fail => {
+            // SAFETY: an unknown key reads no variadic argument.
+            assert_eq!(unsafe { ffi::git_libgit2_opts(0x7fff) }, -1);
+        }
+        Step::Succeed => {
+            let mut size = 0usize;
+            // SAFETY: GIT_OPT_GET_MWINDOW_SIZE takes one `size_t *`, written once.
+            let ret = unsafe {
+                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_MWINDOW_SIZE as c_int, &raw mut size)
+            };
+            assert_eq!(ret, 0);
+        }
+        Step::Errno(value) => set_errno(*value),
+        Step::FailNext => refuse_next(),
+    }
+}
+
+/// Runs `steps` on a fresh thread, reading the last error through `side` after each
+/// step but [`Step::FailNext`], whose refusal is meant for the next one.
+fn run(side: Side, steps: &[Step]) -> Vec<Option<Seen>> {
+    let steps = steps.to_vec();
+    std::thread::spawn(move || {
+        let mut refusing = false;
+        steps
+            .iter()
+            .map(|step| {
+                take(step);
+                if let Step::FailNext = step {
+                    refusing = true;
+                    return None;
+                }
+                let (class, message) = match side {
+                    Side::C => c_last(),
+                    Side::Rust => rust_last(),
+                };
+                let seen = Seen {
+                    class,
+                    message,
+                    errno: errno(),
+                };
+                // A refused read leaves the state to allocate, which a check would do.
+                if let (Side::Rust, false) = (side, std::mem::take(&mut refusing)) {
+                    assert_eq!(c_last(), (seen.class, seen.message.clone()), "{step:?}");
+                    set_errno(seen.errno);
+                }
+                Some(seen)
+            })
+            .collect()
+    })
+    .join()
+    .unwrap()
+}
+
+/// Runs `steps` on both sides and compares every step.
+fn compare(steps: &[Step]) -> Vec<Option<Seen>> {
+    let (c, rust) = (run(Side::C, steps), run(Side::Rust, steps));
+    for (i, step) in steps.iter().enumerate() {
+        assert_eq!(c[i], rust[i], "step {i}: {step:?}");
+    }
+    c
+}
+
+fn init() {
+    // SAFETY: no arguments; refcounted, never released in this process. The C side
+    // needs it; `last` pins its own reference.
+    assert!(unsafe { ffi::git_libgit2_init() } > 0);
+}
+
+fn text(len: usize, seed: u8) -> Vec<u8> {
+    (0..len)
+        .map(|i| b'a' + (i as u8).wrapping_add(seed) % 26)
+        .collect()
+}
+
+fn expect(class: ffi::git_error_t, message: &[u8], errno: c_int) -> Option<Seen> {
+    Some(Seen {
+        class: class as c_int,
+        message: message.to_vec(),
+        errno,
+    })
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn last_reads_as_c_does_after_each_step() {
+    use Step::*;
+    init();
+    let long = text(8_192, 4);
+    let seen = compare(&[
+        Read,
+        Str(ffi::GIT_ERROR_ODB as c_int, b"first".to_vec()),
+        Read,
+        Succeed,
+        Fail,
+        Errno(libc::EACCES),
+        Oom,
+        Clear,
+        Str(ffi::GIT_ERROR_INDEX as c_int, long.clone()),
+        Str(
+            ffi::GIT_ERROR_NONE as c_int,
+            b"set, yet class none".to_vec(),
+        ),
+        Str(1000, b"\xff\xfe not UTF-8".to_vec()),
+        Str(-1, b"".to_vec()),
+        Os(libc::ENOENT, b"open".to_vec()),
+        Errno(libc::EINTR),
+        Read,
+        Clear,
+        Clear,
+    ]);
+    let none = |errno| expect(ffi::GIT_ERROR_NONE, b"no error", errno);
+    assert_eq!(seen[0], none(0));
+    assert_eq!(seen[1], expect(ffi::GIT_ERROR_ODB, b"first", 0));
+    assert_eq!(seen[3], seen[1], "a success leaves the error in place");
+    assert_eq!(
+        seen[4],
+        expect(ffi::GIT_ERROR_INVALID, b"invalid option key", 0)
+    );
+    assert_eq!(seen[5].as_ref().unwrap().errno, libc::EACCES);
+    assert_eq!(
+        seen[6],
+        expect(ffi::GIT_ERROR_NOMEMORY, b"Out of memory", libc::EACCES)
+    );
+    assert_eq!(seen[7], none(0), "clear resets errno");
+    assert_eq!(seen[8], expect(ffi::GIT_ERROR_INDEX, &long, 0));
+    assert_eq!(
+        seen[9],
+        expect(ffi::GIT_ERROR_NONE, b"set, yet class none", 0)
+    );
+    assert_eq!(seen[10].as_ref().unwrap().class, 1000);
+    assert_eq!(seen[11].as_ref().unwrap().class, -1);
+    assert_eq!(
+        seen[12],
+        expect(ffi::GIT_ERROR_OS, b"open: No such file or directory", 0)
+    );
+    assert_eq!(
+        seen[14],
+        expect(
+            ffi::GIT_ERROR_OS,
+            b"open: No such file or directory",
+            libc::EINTR
+        )
+    );
+    assert_eq!(seen[16], none(0));
+}
+
+/// The message buffer grows, shrinks and is reallocated under the reads.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn last_reads_messages_of_every_size() {
+    init();
+    let mut steps = Vec::new();
+    for (i, len) in [0, 1, 7, 8, 9, 63, 64, 65, 1000, 4095, 4097, 3, 0]
+        .into_iter()
+        .enumerate()
+    {
+        steps.push(Step::Str(ffi::GIT_ERROR_TREE as c_int, text(len, i as u8)));
+        steps.push(Step::Os(libc::ENOTDIR, text(len, i as u8 + 1)));
+    }
+    compare(&steps);
+}
+
+/// Each thread reads only its own error, while other threads set theirs.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn last_reads_each_threads_own_error() {
+    init();
+    let steps: Vec<Step> = (0..64)
+        .flat_map(|i| {
+            [
+                Step::Str(ffi::GIT_ERROR_NET as c_int, text(i * 5, i as u8)),
+                Step::Oom,
+                Step::Clear,
+            ]
+        })
+        .collect();
+    let expected = run(Side::C, &steps);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let steps = &steps;
+                s.spawn(move || run(if t % 2 == 0 { Side::C } else { Side::Rust }, steps))
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), expected);
+        }
+    });
+}
+
+/// Before `git_libgit2_init` C reports its static "not initialized" error, where `last`
+/// pins the runtime and reports the thread's; from then on the two agree.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn last_agrees_once_it_pins_the_runtime() {
+    isolated(
+        concat!(module_path!(), "::last_agrees_once_it_pins_the_runtime"),
+        || {
+            assert_eq!(
+                c_last(),
+                (
+                    ffi::GIT_ERROR_INVALID as c_int,
+                    b"library has not been initialized".to_vec()
+                )
+            );
+            let rust = rust_last();
+            assert_eq!(rust, (ffi::GIT_ERROR_NONE as c_int, b"no error".to_vec()));
+            assert_eq!(c_last(), rust);
+            let seen = compare(&[
+                Step::Read,
+                Step::Str(ffi::GIT_ERROR_CONFIG as c_int, b"pinned".to_vec()),
+                Step::Fail,
+            ]);
+            assert_eq!(seen[1], expect(ffi::GIT_ERROR_CONFIG, b"pinned", 0));
+        },
+    );
+}
+
+// --- allocation failures --------------------------------------------------------
+
+unsafe extern "C" {
+    fn malloc(n: usize) -> *mut c_void;
+    fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+    fn free(p: *mut c_void);
+}
+
+thread_local! {
+    /// Refuses this thread's next allocation when set.
+    static REFUSE: Cell<bool> = const { Cell::new(false) };
+}
+
+fn refuse_next() {
+    REFUSE.with(|r| r.set(true));
+}
+
+fn refused() -> bool {
+    REFUSE.with(|r| r.replace(false))
+}
+
+unsafe extern "C" fn refusing_malloc(n: usize, _: *const c_char, _: c_int) -> *mut c_void {
+    if refused() {
+        ptr::null_mut()
+    } else {
+        // SAFETY: plain libc allocation.
+        unsafe { malloc(n) }
+    }
+}
+
+unsafe extern "C" fn refusing_realloc(
+    p: *mut c_void,
+    n: usize,
+    _: *const c_char,
+    _: c_int,
+) -> *mut c_void {
+    if refused() {
+        ptr::null_mut()
+    } else {
+        // SAFETY: `p` came from this allocator, i.e. libc, or is NULL.
+        unsafe { realloc(p, n) }
+    }
+}
+
+unsafe extern "C" fn libc_free(p: *mut c_void) {
+    // SAFETY: `p` came from this allocator, i.e. libc, or is NULL.
+    unsafe { free(p) }
+}
+
+/// A thread whose error state cannot be allocated reads libgit2's static thread-state
+/// error, and a thread whose message buffer ran out of memory reads the out-of-memory
+/// error from then on.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn last_reads_allocation_failures_as_c_does() {
+    use Step::*;
+    isolated(
+        concat!(module_path!(), "::last_reads_allocation_failures_as_c_does"),
+        || {
+            let mut allocator = ffi::git_allocator {
+                gmalloc: Some(refusing_malloc),
+                grealloc: Some(refusing_realloc),
+                gfree: Some(libc_free),
+            };
+            // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
+            // nothing is allocated yet, so no storage changes allocator.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+            };
+            assert_eq!(rc, 0);
+            init();
+            // Pin the Rust side's runtime now, so no step below initialises it.
+            rust_last();
+
+            // The fresh thread's first read allocates its state, which is refused.
+            let seen = compare(&[FailNext, Read, Read]);
+            assert_eq!(
+                seen[1],
+                expect(
+                    ffi::GIT_ERROR_THREAD,
+                    b"thread-local data initialization failure",
+                    0
+                )
+            );
+            assert_eq!(
+                seen[2],
+                expect(ffi::GIT_ERROR_NONE, b"no error", 0),
+                "the next read allocates the state"
+            );
+
+            let seen = compare(&[
+                Str(ffi::GIT_ERROR_INVALID as c_int, b"warm".to_vec()),
+                FailNext,
+                Str(ffi::GIT_ERROR_CONFIG as c_int, text(1000, 1)),
+                Str(ffi::GIT_ERROR_CONFIG as c_int, b"short".to_vec()),
+                Clear,
+                Str(ffi::GIT_ERROR_CONFIG as c_int, b"again".to_vec()),
+            ]);
+            let oom = expect(ffi::GIT_ERROR_NOMEMORY, b"Out of memory", 0);
+            assert_eq!((&seen[2], &seen[3]), (&oom, &oom));
+            assert_eq!(seen[5], expect(ffi::GIT_ERROR_NONE, b"no error", 0));
+        },
+    );
 }

@@ -11,7 +11,7 @@
 //! So an [`ErrorRef`] is valid only until the next libgit2 call on its thread, which no
 //! Rust lifetime can express across safe calls: whoever builds one must not hand it out
 //! past such a call. [`ErrorBuf`] is the owned copy that outlives it, and crosses
-//! threads; it is what a safe wrapper returns.
+//! threads; it is what a safe wrapper returns, [`last`] among them.
 //!
 //! libgit2 never names its error enums in a signature: functions return a
 //! `git_error_code` as a plain `int`, `git_error.klass` holds a `git_error_t` as one,
@@ -27,6 +27,7 @@ use std::ffi::CString;
 
 use ffibox::define_ctype;
 
+use super::sys::errors::runtime_pinned;
 use crate::ffi;
 
 /// Declares a fieldless enum over a C enum's bindgen constants: each variant's
@@ -403,10 +404,56 @@ impl fmt::Display for ErrorBuf {
 
 impl std::error::Error for ErrorBuf {}
 
+/// The calling thread's last libgit2 error, copied out.
+///
+/// It is the error the last failing libgit2 call on this thread left, or one of
+/// libgit2's static errors: `GIT_ERROR_NONE`, "no error", while the thread has none
+/// (never set, or cleared); `GIT_ERROR_NOMEMORY`, "Out of memory", after an allocation
+/// failure; `GIT_ERROR_THREAD`, "thread-local data initialization failure", when the
+/// thread's error state cannot be allocated. A call that succeeds may leave an older
+/// error in place, so it describes a failure only right after a call reported one:
+/// detect errors by return codes.
+///
+/// libgit2 lends the error only until the next libgit2 call on this thread, so it is
+/// copied: the [`ErrorBuf`] outlives it, and crosses threads.
+///
+/// Like the setters of [`super::sys::errors`], it pins libgit2's runtime first, which
+/// initialises libgit2 on the first call: unpinned, a last `git_libgit2_shutdown` on
+/// another thread could delete the thread-state TLS key between libgit2's check that
+/// it is initialised and its lookup under that key. So where C's `git_error_last`,
+/// called before initialisation, reports `GIT_ERROR_INVALID`, "library has not been
+/// initialized", this one reports the thread's error in the pinned runtime. It returns
+/// that static error only when libgit2 cannot be initialised, without calling
+/// libgit2: a failed initialisation can leave the thread state without a key.
+///
+/// Wraps: git_error_last
+pub fn last() -> ErrorBuf {
+    if !runtime_pinned() {
+        return ErrorBuf {
+            class: ErrorClass::Invalid.raw(),
+            message: c"library has not been initialized".to_owned(),
+        };
+    }
+    // SAFETY: no arguments; the runtime is pinned, so the thread state is looked up
+    // under libgit2's live TLS key.
+    let error = unsafe { ffi::git_error_last() };
+    // SAFETY: `error` is NULL or, as libgit2 always returns, a static `git_error` or this
+    // thread's error state, either with a NUL-terminated message; both stay live and
+    // unchanged until the next libgit2 call on this thread, and the handle is dropped
+    // once copied, before any.
+    let error = unsafe { ErrorRef::from_ptr(error.cast_mut()) };
+    error
+        .expect("git_error_last never returns NULL")
+        .to_error_buf()
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+    use core::ptr::NonNull;
     use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -621,66 +668,67 @@ mod unit_tests {
         );
     }
 
+    static REFUSING: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut core::ffi::c_void;
+        fn realloc(p: *mut core::ffi::c_void, n: usize) -> *mut core::ffi::c_void;
+        fn free(p: *mut core::ffi::c_void);
+    }
+
+    /// libc's allocator, refusing everything while `REFUSING` is set.
+    struct Refusing;
+
+    // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+    unsafe impl Alloc for Refusing {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            // SAFETY: plain libc allocation.
+            NonNull::new(unsafe { malloc(len) }.cast())
+        }
+        unsafe fn realloc(
+            p: Option<NonNull<u8>>,
+            len: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            let p = p.map_or(core::ptr::null_mut(), |p| p.as_ptr().cast());
+            // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+            NonNull::new(unsafe { realloc(p, len) }.cast())
+        }
+        unsafe fn free(p: NonNull<u8>) {
+            // SAFETY: `p` is a live libc block the caller gives up.
+            unsafe { free(p.as_ptr().cast()) }
+        }
+    }
+
+    /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+    fn install_refusing() {
+        let allocator = Allocator::new::<Refusing>();
+        // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
+        // member set; libgit2 copies it before anything is allocated.
+        let rc = unsafe {
+            ffi::git_libgit2_opts(
+                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                allocator.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+    }
+
     /// A thread whose error state cannot be allocated reads a static error.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn thread_state_failure_is_static() {
-        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use core::ptr::NonNull;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-
-        static REFUSING: AtomicBool = AtomicBool::new(false);
-
-        unsafe extern "C" {
-            fn malloc(n: usize) -> *mut core::ffi::c_void;
-            fn realloc(p: *mut core::ffi::c_void, n: usize) -> *mut core::ffi::c_void;
-            fn free(p: *mut core::ffi::c_void);
-        }
-
-        /// libc's allocator, refusing everything while `REFUSING` is set.
-        struct Refusing;
-
-        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
-        unsafe impl Alloc for Refusing {
-            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
-                if REFUSING.load(SeqCst) {
-                    return None;
-                }
-                // SAFETY: plain libc allocation.
-                NonNull::new(unsafe { malloc(len) }.cast())
-            }
-            unsafe fn realloc(
-                p: Option<NonNull<u8>>,
-                len: usize,
-                _: Option<&CStr>,
-                _: i32,
-            ) -> Option<NonNull<u8>> {
-                if REFUSING.load(SeqCst) {
-                    return None;
-                }
-                let p = p.map_or(core::ptr::null_mut(), |p| p.as_ptr().cast());
-                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
-                NonNull::new(unsafe { realloc(p, len) }.cast())
-            }
-            unsafe fn free(p: NonNull<u8>) {
-                // SAFETY: `p` is a live libc block the caller gives up.
-                unsafe { free(p.as_ptr().cast()) }
-            }
-        }
-
         isolated(
             concat!(module_path!(), "::thread_state_failure_is_static"),
             || {
-                let allocator = Allocator::new::<Refusing>();
-                // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
-                // every member set; libgit2 copies it before anything is allocated.
-                let rc = unsafe {
-                    ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_ALLOCATOR as c_int,
-                        allocator.as_ref().as_ptr(),
-                    )
-                };
-                assert_eq!(rc, 0);
+                install_refusing();
                 init();
                 REFUSING.store(true, SeqCst);
                 let buf = std::thread::spawn(|| {
@@ -696,6 +744,50 @@ mod unit_tests {
                 REFUSING.store(false, SeqCst);
                 assert_eq!(buf.message(), c"thread-local data initialization failure");
                 assert_eq!(buf.class(), Some(ErrorClass::Thread));
+            },
+        );
+    }
+
+    /// The first `last` initialises libgit2: where C reports its static "not
+    /// initialized" error (`error_before_init_is_static`), it reports the thread's empty
+    /// state, and C agrees from then on.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn last_before_init_pins_the_runtime() {
+        isolated(
+            concat!(module_path!(), "::last_before_init_pins_the_runtime"),
+            || {
+                let buf = super::last();
+                assert_eq!(buf.class(), Some(ErrorClass::None));
+                assert_eq!(buf.message(), c"no error");
+                assert!(runtime_pinned());
+                let (e, message, klass) = last();
+                assert_eq!(
+                    (e.message(), e.class()),
+                    (c"no error", Some(ErrorClass::None))
+                );
+                assert_eq!((&message[..], klass), (b"no error".as_slice(), 0));
+            },
+        );
+    }
+
+    /// Without a runtime, `last` reports C's static "not initialized" error and leaves
+    /// libgit2's thread state alone.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn last_without_runtime_is_uninitialised() {
+        isolated(
+            concat!(module_path!(), "::last_without_runtime_is_uninitialised"),
+            || {
+                install_refusing();
+                REFUSING.store(true, SeqCst);
+                let buf = super::last();
+                REFUSING.store(false, SeqCst);
+                assert!(!runtime_pinned(), "libgit2 could not initialise");
+                assert_eq!(buf.class(), Some(ErrorClass::Invalid));
+                assert_eq!(buf.raw_class(), ffi::GIT_ERROR_INVALID as c_int);
+                assert_eq!(buf.message(), c"library has not been initialized");
+                assert_eq!(super::last(), buf);
             },
         );
     }

@@ -1,0 +1,11 @@
+error[E0597]: `error` does not live long enough
+ --> tests/ub_safe/compile_fail/error_buf_message_outlives_copy.rs:8:9
+  |
+6 |     let message = {
+  |         ------- borrow later stored here
+7 |         let error = last();
+  |             ----- binding `error` declared here
+8 |         error.message()
+  |         ^^^^^ borrowed value does not live long enough
+9 |     };
+  |     - `error` dropped here while still borrowed
