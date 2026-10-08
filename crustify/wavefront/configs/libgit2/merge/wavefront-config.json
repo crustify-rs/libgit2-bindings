@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Subsystem libgit2/merge of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/cherrypick.c",
+    "src/libgit2/merge.c",
+    "src/libgit2/merge.h",
+    "src/libgit2/merge_driver.c",
+    "src/libgit2/merge_driver.h",
+    "src/libgit2/merge_file.c",
+    "src/libgit2/rebase.c",
+    "src/libgit2/revert.c"
+  ],
+  "api_headers": [
+    "include/git2/cherrypick.h",
+    "include/git2/merge.h",
+    "include/git2/rebase.h",
+    "include/git2/repository.h",
+    "include/git2/revert.h",
+    "include/git2/sys/merge.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

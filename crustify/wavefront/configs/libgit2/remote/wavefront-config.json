@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Subsystem libgit2/remote of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/clone.c",
+    "src/libgit2/clone.h",
+    "src/libgit2/fetch.c",
+    "src/libgit2/fetch.h",
+    "src/libgit2/proxy.c",
+    "src/libgit2/proxy.h",
+    "src/libgit2/push.c",
+    "src/libgit2/push.h",
+    "src/libgit2/remote.c",
+    "src/libgit2/remote.h"
+  ],
+  "api_headers": [
+    "include/git2/clone.h",
+    "include/git2/net.h",
+    "include/git2/proxy.h",
+    "include/git2/remote.h",
+    "include/git2/sys/remote.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

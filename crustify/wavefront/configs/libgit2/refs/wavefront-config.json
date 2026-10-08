@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Subsystem libgit2/refs of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/annotated_commit.c",
+    "src/libgit2/annotated_commit.h",
+    "src/libgit2/branch.c",
+    "src/libgit2/branch.h",
+    "src/libgit2/refdb.c",
+    "src/libgit2/refdb.h",
+    "src/libgit2/refdb_fs.c",
+    "src/libgit2/refdb_reftable.c",
+    "src/libgit2/refdb_reftable.h",
+    "src/libgit2/reflog.c",
+    "src/libgit2/reflog.h",
+    "src/libgit2/refs.c",
+    "src/libgit2/refs.h",
+    "src/libgit2/refspec.c",
+    "src/libgit2/refspec.h",
+    "src/libgit2/transaction.c",
+    "src/libgit2/transaction.h"
+  ],
+  "api_headers": [
+    "include/git2/annotated_commit.h",
+    "include/git2/branch.h",
+    "include/git2/refdb.h",
+    "include/git2/reflog.h",
+    "include/git2/refs.h",
+    "include/git2/refspec.h",
+    "include/git2/sys/refdb_backend.h",
+    "include/git2/sys/refs.h",
+    "include/git2/transaction.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Subsystem libgit2/oid of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/oid.c",
+    "src/libgit2/oid.h",
+    "src/libgit2/oidarray.c",
+    "src/libgit2/oidarray.h"
+  ],
+  "api_headers": [
+    "include/git2/oid.h",
+    "include/git2/oidarray.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

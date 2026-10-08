@@ -1,0 +1,2385 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/repository/wavefront-config.json",
+    "sha256": "28bd9c719395c1a9fca9be33656ffc64cf21c866a9a9b80d32352351775dca71"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 98,
+    "layer_count": 3,
+    "batch_count": 18,
+    "file_count": 11
+  },
+  "waves": [
+    {
+      "unit_count": 20,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/annotated_commit.h",
+          "items": [
+            {
+              "name": "git_annotated_commit",
+              "defined_in": "src/libgit2/annotated_commit.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 9,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/checkout.h",
+          "items": [
+            {
+              "name": "git_checkout_options",
+              "defined_in": "include/git2/checkout.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 20,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/commit.h",
+          "items": [
+            {
+              "name": "git_commitarray",
+              "defined_in": "include/git2/commit.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 2,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_config",
+              "defined_in": "src/libgit2/config.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/index.h",
+          "items": [
+            {
+              "name": "git_index",
+              "defined_in": "src/libgit2/index.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 24,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/odb.h",
+          "items": [
+            {
+              "name": "git_odb",
+              "defined_in": "src/libgit2/odb.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_path_fs",
+              "defined_in": "include/git2/sys/path.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/path.h",
+          "items": [
+            {
+              "name": "git_path_gitfile",
+              "defined_in": "include/git2/sys/path.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_refdb",
+              "defined_in": "src/libgit2/refdb.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/refdb.h",
+          "items": [
+            {
+              "name": "git_refdb_t",
+              "defined_in": "include/git2/refdb.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_reference",
+              "defined_in": "src/libgit2/refs.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/repository.h",
+          "items": [
+            {
+              "name": "git_repository",
+              "defined_in": "src/libgit2/repository.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 29,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/repository.h",
+          "items": [
+            {
+              "name": "git_repository_init_flag_t",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_init_mode_t",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/repository.h",
+          "items": [
+            {
+              "name": "git_repository_item_t",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_open_flag_t",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/repository.h",
+          "items": [
+            {
+              "name": "git_repository_state_t",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree",
+              "defined_in": "src/libgit2/worktree.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/worktree.h",
+          "items": [
+            {
+              "name": "git_worktree_prune_options",
+              "defined_in": "include/git2/worktree.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 2,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version"
+              ]
+            },
+            {
+              "name": "git_worktree_prune_t",
+              "defined_in": "include/git2/worktree.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 71,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/repository.h",
+          "items": [
+            {
+              "name": "git_repository_init_options",
+              "defined_in": "include/git2/repository.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_refdb_t",
+                    "defined_in": "include/git2/refdb.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "description",
+                "mode",
+                "oid_type",
+                "refdb_type",
+                "initial_head",
+                "origin_url",
+                "template_path",
+                "workdir_path"
+              ]
+            },
+            {
+              "name": "git_repository_new_options",
+              "defined_in": "include/git2/sys/repository.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 2,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/worktree.h",
+          "items": [
+            {
+              "name": "git_worktree_add_options",
+              "defined_in": "include/git2/worktree.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_checkout_options",
+                    "defined_in": "include/git2/checkout.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_reference",
+                    "defined_in": "src/libgit2/refs.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "ref",
+                "lock",
+                "checkout_options",
+                "checkout_existing"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_path_is_gitfile",
+              "defined_in": "src/libgit2/path.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 26,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_path_fs",
+                    "defined_in": "include/git2/sys/path.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_path_gitfile",
+                    "defined_in": "include/git2/sys/path.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository__cleanup",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 18,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_commit_parents",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 44,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_commitarray",
+                    "defined_in": "include/git2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_commondir",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_config",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_config_snapshot",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_detach_head",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 37,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_discover",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 13,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_fetchhead_foreach_cb",
+              "defined_in": "include/git2/repository.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_free",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 28,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_get_namespace",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_hashfile",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 70,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_object_t",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_head",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 19,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_reference",
+                    "defined_in": "src/libgit2/refs.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_head_detached",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_head_detached_for_worktree",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_head_for_worktree",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 31,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_reference",
+                    "defined_in": "src/libgit2/refs.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_head_unborn",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_ident",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_index",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_init",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 9,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_is_bare",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_is_empty",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 19,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_is_shallow",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_is_worktree",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_item_path",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository_item_t",
+                    "defined_in": "include/git2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_repository_mergehead_foreach_cb",
+              "defined_in": "include/git2/repository.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_message",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_message_remove",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_new",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_odb",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_odb",
+                    "defined_in": "src/libgit2/odb.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_oid_type",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_open",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_open_bare",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 38,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_open_ext",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 79,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_open_from_worktree",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 30,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_path",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_refdb",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_refdb",
+                    "defined_in": "src/libgit2/refdb.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_reinit_filesystem",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_bare",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 24,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_config",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_config",
+                    "defined_in": "src/libgit2/config.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_head",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 46,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_head_detached",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_head_detached_from_annotated",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_annotated_commit",
+                    "defined_in": "src/libgit2/annotated_commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_ident",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_index",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_namespace",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 10,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_odb",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_odb",
+                    "defined_in": "src/libgit2/odb.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_refdb",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_refdb",
+                    "defined_in": "src/libgit2/refdb.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_set_workdir",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 47,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_state",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 39,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_repository_state_cleanup",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 20,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_submodule_cache_all",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_submodule_cache_clear",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_workdir",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_wrap_odb",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_odb",
+                    "defined_in": "src/libgit2/odb.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_free",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_is_locked",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_is_prunable",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 49,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree_prune_options",
+                    "defined_in": "include/git2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_list",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 39,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_lock",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 29,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_lookup",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 29,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_name",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_open_from_repository",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 30,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_path",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_prune",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 55,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree_prune_options",
+                    "defined_in": "include/git2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_prune_options_init",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree_prune_options",
+                    "defined_in": "include/git2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_unlock",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_validate",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 33,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 7,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_repository_fetchhead_foreach",
+              "defined_in": "src/libgit2/fetchhead.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 54,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_repository_fetchhead_foreach_cb",
+                    "defined_in": "include/git2/repository.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_init_ext",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 127,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository_init_options",
+                    "defined_in": "include/git2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_init_options_init",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository_init_options",
+                    "defined_in": "include/git2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_new_ext",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 32,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository_new_options",
+                    "defined_in": "include/git2/sys/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_repository_new_options_init",
+              "defined_in": "src/libgit2/repository.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository_new_options",
+                    "defined_in": "include/git2/sys/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_add",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 141,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree",
+                    "defined_in": "src/libgit2/worktree.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_worktree_add_options",
+                    "defined_in": "include/git2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_worktree_add_options_init",
+              "defined_in": "src/libgit2/worktree.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_worktree_add_options",
+                    "defined_in": "include/git2/worktree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

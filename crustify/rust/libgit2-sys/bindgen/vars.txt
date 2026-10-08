@@ -1,0 +1,2 @@
+# Agent-owned bindgen allowlist: one regex per line, matched against C vars names.
+# Add only the items a batch needs; keep entries sorted.

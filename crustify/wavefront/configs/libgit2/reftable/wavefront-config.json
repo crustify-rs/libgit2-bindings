@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "Subsystem libgit2/reftable of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "deps/reftable/basics.c",
+    "deps/reftable/basics.h",
+    "deps/reftable/block.c",
+    "deps/reftable/block.h",
+    "deps/reftable/blocksource.c",
+    "deps/reftable/blocksource.h",
+    "deps/reftable/error.c",
+    "deps/reftable/fsck.c",
+    "deps/reftable/iter.c",
+    "deps/reftable/iter.h",
+    "deps/reftable/merged.c",
+    "deps/reftable/merged.h",
+    "deps/reftable/pq.c",
+    "deps/reftable/pq.h",
+    "deps/reftable/record.c",
+    "deps/reftable/record.h",
+    "deps/reftable/reftable-basics.h",
+    "deps/reftable/reftable-block.h",
+    "deps/reftable/reftable-blocksource.h",
+    "deps/reftable/reftable-error.h",
+    "deps/reftable/reftable-fsck.h",
+    "deps/reftable/reftable-iterator.h",
+    "deps/reftable/reftable-merged.h",
+    "deps/reftable/reftable-record.h",
+    "deps/reftable/reftable-stack.h",
+    "deps/reftable/reftable-table.h",
+    "deps/reftable/reftable-writer.h",
+    "deps/reftable/stack.c",
+    "deps/reftable/stack.h",
+    "deps/reftable/system.c",
+    "deps/reftable/system.h",
+    "deps/reftable/table.c",
+    "deps/reftable/table.h",
+    "deps/reftable/tree.c",
+    "deps/reftable/tree.h",
+    "deps/reftable/writer.c",
+    "deps/reftable/writer.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

@@ -1,0 +1,37 @@
+[package]
+name = "libgit2"
+description = "Safe Rust wrappers over libgit2's public API."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = ["libgit2"]
+# One feature per link unit; each gates its module in lib.rs.
+libgit2 = []
+
+[dependencies]
+libgit2-sys = { path = "../libgit2-sys" }
+
+[dev-dependencies]
+libgit2-sys = { path = "../libgit2-sys" }
+trybuild = "1.0"
+
+[lints]
+workspace = true
+
+[[test]]
+name = "ub_safe"
+path = "tests/ub_safe/main.rs"
+
+[[test]]
+name = "ub_unsafe"
+path = "tests/ub_unsafe/main.rs"
+
+[[test]]
+name = "equiv"
+path = "tests/equiv/main.rs"

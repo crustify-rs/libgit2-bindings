@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Subsystem libgit2/ntlmclient of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "deps/ntlmclient/crypt.h",
+    "deps/ntlmclient/crypt_openssl.c",
+    "deps/ntlmclient/crypt_openssl.h",
+    "deps/ntlmclient/ntlm.c",
+    "deps/ntlmclient/ntlm.h",
+    "deps/ntlmclient/ntlmclient.h",
+    "deps/ntlmclient/unicode.h",
+    "deps/ntlmclient/unicode_builtin.c",
+    "deps/ntlmclient/unicode_builtin.h",
+    "deps/ntlmclient/utf8.h",
+    "deps/ntlmclient/util.c",
+    "deps/ntlmclient/util.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

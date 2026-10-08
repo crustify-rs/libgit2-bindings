@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Subsystem libgit2/core of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+  ],
+  "state_dir": "crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/buf.c",
+    "src/libgit2/buf.h",
+    "src/libgit2/common.h",
+    "src/libgit2/libgit2.c",
+    "src/libgit2/parse.c",
+    "src/libgit2/parse.h",
+    "src/libgit2/settings.c",
+    "src/libgit2/settings.h",
+    "src/libgit2/strarray.c",
+    "src/libgit2/strarray.h",
+    "src/libgit2/sysdir.c",
+    "src/libgit2/sysdir.h",
+    "src/libgit2/trace.c",
+    "src/libgit2/trace.h"
+  ],
+  "api_headers": [
+    "include/git2.h",
+    "include/git2/buffer.h",
+    "include/git2/common.h",
+    "include/git2/experimental.h",
+    "include/git2/global.h",
+    "include/git2/strarray.h",
+    "include/git2/trace.h",
+    "include/git2/types.h",
+    "include/git2/version.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "features": []
+  }
+}

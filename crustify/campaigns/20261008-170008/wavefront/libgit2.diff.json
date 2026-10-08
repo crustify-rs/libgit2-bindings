@@ -1,0 +1,2710 @@
+{
+  "schema_version": 3,
+  "oracle_config": {
+    "path": "crustify/wavefront/configs/libgit2/diff/wavefront-config.json",
+    "sha256": "e8ee3bfde3b91e658c1471162ec97a118af7a19ca4bd228180276b383ff7637b"
+  },
+  "api_headers_only": true,
+  "budgets": {
+    "max_syms": 25,
+    "max_loc": 500,
+    "max_types": 2,
+    "min_fields": 20
+  },
+  "summary": {
+    "unit_count": 95,
+    "layer_count": 6,
+    "batch_count": 22,
+    "file_count": 6
+  },
+  "waves": [
+    {
+      "unit_count": 19,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/apply.h",
+          "items": [
+            {
+              "name": "git_apply_flags_t",
+              "defined_in": "include/git2/apply.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_apply_location_t",
+              "defined_in": "include/git2/apply.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_delta_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_binary_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_find_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_flag_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_format_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_hunk",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 6,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "header",
+                "header_len",
+                "new_lines",
+                "new_start",
+                "old_lines",
+                "old_start"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_line",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 7,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "num_lines",
+                "content",
+                "origin",
+                "new_lineno",
+                "content_len",
+                "content_offset",
+                "old_lineno"
+              ]
+            },
+            {
+              "name": "git_diff_line_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_option_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_patchid_options",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 1,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/sys/diff.h",
+          "items": [
+            {
+              "name": "git_diff_perfdata",
+              "defined_in": "include/git2/sys/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 3,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "stat_calls",
+                "oid_calculations"
+              ]
+            },
+            {
+              "name": "git_diff_stats",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 8,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_stats_format_t",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_email_create_flags_t",
+              "defined_in": "include/git2/email.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/hashsig.c",
+          "items": [
+            {
+              "name": "git_hashsig",
+              "defined_in": "src/libgit2/hashsig.c",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 4,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_hashsig_option_t",
+              "defined_in": "include/git2/sys/hashsig.h",
+              "kind": "type",
+              "source_kind": "enum",
+              "layer": 0,
+              "loc": 0,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "src/libgit2/patch.h",
+          "items": [
+            {
+              "name": "git_patch",
+              "defined_in": "src/libgit2/patch.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 0,
+              "loc": 17,
+              "deps": {
+                "types": [],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 35,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_binary_file",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_binary_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "data",
+                "type",
+                "inflatedlen",
+                "datalen"
+              ]
+            },
+            {
+              "name": "git_diff_file",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "size",
+                "flags",
+                "id",
+                "path",
+                "mode",
+                "id_abbrev"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_parse_options",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 1,
+              "loc": 2,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_diff_free",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_from_buffer",
+              "defined_in": "src/libgit2/diff_parse.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_get_perfdata",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_perfdata",
+                    "defined_in": "include/git2/sys/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_get_stats",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 80,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_is_sorted_icase",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_merge",
+              "defined_in": "src/libgit2/diff_tform.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_num_deltas",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_num_deltas_of_type",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 12,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_delta_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_patchid",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 34,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_patchid_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_patchid_options_init",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_patchid_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_progress_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 1,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_stats_deletions",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_stats_files_changed",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_stats_free",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_stats_insertions",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_stats_to_buf",
+              "defined_in": "src/libgit2/diff_stats.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_stats",
+                    "defined_in": "src/libgit2/diff_stats.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_stats_format_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_status_char",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 18,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_delta_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_to_buf",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 17,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_format_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_hashsig_compare",
+              "defined_in": "src/libgit2/hashsig.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 29,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_hashsig",
+                    "defined_in": "src/libgit2/hashsig.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_hashsig_create",
+              "defined_in": "src/libgit2/hashsig.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_hashsig",
+                    "defined_in": "src/libgit2/hashsig.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_hashsig_option_t",
+                    "defined_in": "include/git2/sys/hashsig.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_hashsig_create_fromfile",
+              "defined_in": "src/libgit2/hashsig.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 41,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_hashsig",
+                    "defined_in": "src/libgit2/hashsig.c",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_hashsig_option_t",
+                    "defined_in": "include/git2/sys/hashsig.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_hashsig_free",
+              "defined_in": "src/libgit2/hashsig.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_hashsig",
+                    "defined_in": "src/libgit2/hashsig.c",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_free",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_from_diff",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 6,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_get_hunk",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_patch_get_line_in_hunk",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 21,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_line",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_line_stats",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 31,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_num_hunks",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_num_lines_in_hunk",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_owner",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_size",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 27,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_to_buf",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 1,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 3,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_binary",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 2,
+              "loc": 3,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_binary_file",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "new_file",
+                "old_file",
+                "contains_data"
+              ]
+            },
+            {
+              "name": "git_diff_similarity_metric",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 2,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_file",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "payload",
+                "similarity",
+                "free_signature",
+                "buffer_signature",
+                "file_signature"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_diff_from_buffer_ext",
+              "defined_in": "src/libgit2/diff_parse.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 2,
+              "loc": 45,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_parse_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 12,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/diff.h",
+          "items": [
+            {
+              "name": "git_diff_find_options",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 3,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_similarity_metric",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "metric",
+                "rename_limit",
+                "break_rewrite_threshold",
+                "copy_threshold",
+                "rename_from_rewrite_threshold",
+                "rename_threshold"
+              ]
+            },
+            {
+              "name": "git_diff_options",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 3,
+              "loc": 14,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid_t",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_strarray",
+                    "defined_in": "include/git2/strarray.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_submodule_ignore_t",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "payload",
+                "version",
+                "oid_type",
+                "pathspec",
+                "max_size",
+                "new_prefix",
+                "old_prefix",
+                "id_abbrev",
+                "interhunk_lines",
+                "context_lines",
+                "progress_cb",
+                "notify_cb",
+                "ignore_submodules"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_apply_delta_cb",
+              "defined_in": "include/git2/apply.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_binary_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_binary",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_file_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_get_delta",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_hunk_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_line_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_notify_cb",
+              "defined_in": "include/git2/diff.h",
+              "kind": "callback",
+              "source_kind": "callback",
+              "layer": 3,
+              "loc": 0,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_print_callback__to_buf",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_print_callback__to_file_handle",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 25,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_get_delta",
+              "defined_in": "src/libgit2/patch.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 3,
+              "loc": 4,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_delta",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 20,
+      "batches": [
+        {
+          "kind": "type",
+          "source_file": "include/git2/apply.h",
+          "items": [
+            {
+              "name": "git_apply_options",
+              "defined_in": "include/git2/apply.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [],
+                "symbols": [
+                  {
+                    "name": "git_apply_delta_cb",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "payload",
+                "hunk_cb",
+                "delta_cb",
+                "version"
+              ]
+            },
+            {
+              "name": "git_email_create_options",
+              "defined_in": "include/git2/email.h",
+              "kind": "type",
+              "source_kind": "struct",
+              "layer": 4,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_find_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": [
+                "flags",
+                "version",
+                "diff_opts",
+                "subject_prefix",
+                "start_number",
+                "reroll_number",
+                "diff_find_opts"
+              ]
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_diff_blob_to_buffer",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_binary_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_file_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_blobs",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_binary_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_file_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_buffers",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_binary_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_file_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_find_options_init",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_find_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_find_similar",
+              "defined_in": "src/libgit2/diff_tform.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 330,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_find_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_foreach",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 27,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_binary_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_file_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_hunk_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_index_to_index",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 35,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_index_to_workdir",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 37,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_options_init",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 5,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        },
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_diff_print",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 52,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_format_t",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_tree_to_index",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 41,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_tree_to_tree",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 37,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_tree_to_workdir",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 32,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_diff_tree_to_workdir_with_index",
+              "defined_in": "src/libgit2/diff_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 27,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_from_blob_and_buffer",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_from_blobs",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_blob",
+                    "defined_in": "src/libgit2/blob.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_from_buffers",
+              "defined_in": "src/libgit2/patch_generate.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_diff_options",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_patch_print",
+              "defined_in": "src/libgit2/diff_print.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 4,
+              "loc": 22,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_patch",
+                    "defined_in": "src/libgit2/patch.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": [
+                  {
+                    "name": "git_diff_line_cb",
+                    "defined_in": "include/git2/diff.h",
+                    "scope": "wrap"
+                  }
+                ]
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "unit_count": 6,
+      "batches": [
+        {
+          "kind": "symbol",
+          "source_file": null,
+          "items": [
+            {
+              "name": "git_apply",
+              "defined_in": "src/libgit2/apply.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 91,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_apply_location_t",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_apply_options",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_apply_options_init",
+              "defined_in": "src/libgit2/apply.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 7,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_apply_options",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_apply_to_tree",
+              "defined_in": "src/libgit2/apply.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 61,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_apply_options",
+                    "defined_in": "include/git2/apply.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_index",
+                    "defined_in": "src/libgit2/index.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_repository",
+                    "defined_in": "src/libgit2/repository.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_tree",
+                    "defined_in": "src/libgit2/tree.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_email_create_from_commit",
+              "defined_in": "src/libgit2/email.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 42,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_commit",
+                    "defined_in": "src/libgit2/commit.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_email_create_options",
+                    "defined_in": "include/git2/email.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_email_create_from_diff",
+              "defined_in": "src/libgit2/email.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 16,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_buf",
+                    "defined_in": "include/git2/buffer.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_diff",
+                    "defined_in": "src/libgit2/diff.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_email_create_options",
+                    "defined_in": "include/git2/email.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_oid",
+                    "defined_in": "include/git2/oid.h",
+                    "scope": "wrap"
+                  },
+                  {
+                    "name": "git_signature",
+                    "defined_in": "include/git2/types.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            },
+            {
+              "name": "git_email_create_options_init",
+              "defined_in": "src/libgit2/email.c",
+              "kind": "symbol",
+              "source_kind": "function_exported",
+              "layer": 5,
+              "loc": 8,
+              "deps": {
+                "types": [
+                  {
+                    "name": "git_email_create_options",
+                    "defined_in": "include/git2/email.h",
+                    "scope": "wrap"
+                  }
+                ],
+                "symbols": []
+              },
+              "fallback": [],
+              "back_fill": [],
+              "generates": [],
+              "field_anchors": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

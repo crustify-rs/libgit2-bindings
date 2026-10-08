@@ -1,0 +1,34 @@
+# Example <repo>/crustify/.gitignore.
+
+.providers
+tmp
+.worktrees
+# Prebuilt variants of the target (see build.json).
+builds
+rust/target
+rust.bak
+
+# Campaign plans and the batches projected from them are tracked; the agent
+# stream and usage record a batch produces are not.
+campaigns/**/translator.log
+campaigns/**/translator.usage.json
+campaigns/*/orchestrator-*.log
+campaigns/*/orchestrator-*.usage.json
+
+# Review reproducers are tracked; the cargo trees their builds leave are not.
+reviews/**/target
+
+# The UB auditor's working area, and the cargo trees under its reproducers --
+# typically ~99% of the directory's bytes. Advisories, their reproducer
+# sources and the logs are the deliverable and stay tracked.
+audit/scratch
+audit/**/target
+audit/**/target-*
+
+bak
+stats.md
+evaluation/**/manifests/
+
+# Wavefront-owned CodeQL database/tables and disposable caches.
+wavefront/codeql
+wavefront/.cache
