@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 mod fixture;
+mod sys_errors;
 mod sys_odb_backend;
 
 /// Illegal safe paths that must fail to compile, one file each under `compile_fail/`.

@@ -127,6 +127,7 @@ name = "libgit2"
 version = "0.1.0"
 dependencies = [
  "ffibox",
+ "libc",
  "libgit2-sys",
  "trybuild",
 ]
