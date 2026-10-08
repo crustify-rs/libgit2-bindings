@@ -32,6 +32,14 @@ case $variant in
     export TSAN_OPTIONS=${TSAN_OPTIONS:-halt_on_error=1}
     exec cargo +nightly "$@" -Zbuild-std --target $host ;;
   bsan)
+    # trybuild's nested cargo build does not finish under BorrowSanitizer, and the
+    # compile-fail suite is a compile-time check the plain variant already runs.
+    if [ "${1:-}" = test ]; then
+      case " $* " in
+        *" -- "*) exec cargo bsan "$@" --skip compile_fail ;;
+        *) exec cargo bsan "$@" -- --skip compile_fail ;;
+      esac
+    fi
     exec cargo bsan "$@" ;;
   *)
     echo "unknown variant: $variant" >&2; exit 2 ;;
