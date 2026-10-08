@@ -1,0 +1,7 @@
+{
+ "names": [
+  "string"
+ ],
+ "exit": 1,
+ "stderr": "unsafe: no sites matched --name string"
+}
