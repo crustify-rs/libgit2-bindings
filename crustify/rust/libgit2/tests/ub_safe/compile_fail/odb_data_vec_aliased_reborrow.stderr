@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `v` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/odb_data_vec_aliased_reborrow.rs:7:21
+  |
+6 |     let shared = v.as_slice();
+  |                  - immutable borrow occurs here
+7 |     let exclusive = v.as_mut_slice();
+  |                     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+8 |     exclusive[0] = shared[1];
+  |                    --------- immutable borrow later used here

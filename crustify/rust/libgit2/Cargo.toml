@@ -5,6 +5,7 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "build.rs"
 
 [lib]
 path = "lib.rs"
@@ -15,6 +16,7 @@ default = ["libgit2"]
 libgit2 = []
 
 [dependencies]
+ffibox = { path = "/opt/venv/share/ffibox" }
 libgit2-sys = { path = "../libgit2-sys" }
 
 [dev-dependencies]
