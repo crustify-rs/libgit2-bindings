@@ -134,7 +134,7 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 | sub-campaign | nr types | nr symbols | sub-campaign wall | batch | review | total | $/type | $/sym |
 |---|---:|---:|---|---:|---:|---:|---:|---:|
 | `raw-lifetime-void` | `0` | `2` | `1h54m19s` | `$8.28` | `$7.89` | `$16.17` | — | `$8.09` |
-| `raw-lifetime-string` | `0` | `<n>` | `<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | — | `$<n>` |
+| `raw-lifetime-string` | `0` | `2` | `52m30s` | `$5.49` | `$10.89` | `$16.38` | — | `$8.19` |
 | `<link-unit>/<subsystem>` | `<n>` | `<n>` | `<n>h<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | `$<n>` | `$<n>` |
 | orchestrator | `<n>` | `<n>` | — | — | — | `$<n>`+ | — | — |
 | **Σ recorded agents** | **`<n>`** | **`<n>`** | **`<n>h<n>m`** | **`$<n>`** | **`$<n>`** | **`$<n>`** | **`$<n>`** | **`$<n>`** |
@@ -146,8 +146,8 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 | tier | strategies emitted | $ | wall |
 |---|---|---|---|
 | void | `2` | `$8.28` | `51m29s` |
-| string | `<n>` | `$<n>` | `<n>m<n>s` |
-| **Σ** | **`<n>`** | **`$<n>`** | **`<n>m<n>s`** |
+| string | `2` | `$5.49` | `23m12s` |
+| **Σ** | **`4`** | **`$13.77`** | **`74m41s`** |
 
 ### Review
 
@@ -156,8 +156,8 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 | tier | rv loc | rv $ | rv wall |
 |---|---|---|---|
 | void | `+80/-1` | `$7.89` | `18m36s` |
-| string | `+<n>/-<n>` | `$<n>` | `<n>m<n>s` |
-| **Σ** | **`+<n>/-<n>`** | **`$<n>`** | **`<n>m<n>s`** |
+| string | `+345/-23` | `$10.89` | `22m03s` |
+| **Σ** | **`+425/-24`** | **`$18.78`** | **`40m39s`** |
 
 ## Types
 
@@ -414,3 +414,16 @@ it stands in for are wrapped.
 `trybuild`'s nested cargo build does not finish under BorrowSanitizer, so
 `crustify/rust/scripts/cargo-variant.sh bsan test` skips `compile_fail`; the plain variant
 runs it.
+
+### `raw-lifetime-string`
+
+The batch emitted two string strategies over the same exported pair: `OdbDataStrFree` for
+one NUL-terminated string (`OdbDataStr`) and an owned run of them (`OdbDataStrVec`,
+reproducing `git_strarray_copy`, which `GIT_DEPRECATE_HARD` hides). The review filed two
+reports. `unsafe/odb-data-str-adoption-ignores-git-buf-ownership` held on rerun: on the
+affected commit its reproducer, under ASan against the `asan-ubsan` libgit2 build, frees
+libgit2's static `git_str__initstr`, because a `git_buf` owns its `ptr` only while
+`reserved > 0` and the docs invited adopting any `git_buf` string; the fix documents the
+rule and adds a checked `take_buf` seam. `wavefront/string-cloners-unrecorded` submitted
+the hidden `git__strdup` family as the tier's cloners. No PoC was rejected.
+
