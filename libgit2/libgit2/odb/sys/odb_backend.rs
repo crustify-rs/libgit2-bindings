@@ -484,6 +484,24 @@ mod unit_tests {
     }
 
     #[test]
+    fn policies_are_stateless_values() {
+        // Both policies carry no state, so an owner is pointer-sized (plus length)
+        // and the policy can be named, copied and printed freely.
+        assert_eq!(size_of::<OdbDataBox<Pair>>(), size_of::<*mut pair_st>());
+        assert_eq!(size_of::<Option<OdbDataBox<Pair>>>(), size_of::<*mut pair_st>());
+        assert_eq!(size_of::<OdbDataVec<u8>>(), 2 * size_of::<usize>());
+        let (one, run) = (OdbDataFree, OdbDataArrayFree);
+        let (copy_one, copy_run) = (one, run);
+        assert_eq!(format!("{one:?}{copy_one:?}"), "OdbDataFreeOdbDataFree");
+        assert_eq!(format!("{run:?}{copy_run:?}"), "OdbDataArrayFreeOdbDataArrayFree");
+        let v = OdbDataVec::<u16>::default();
+        assert!(v.is_empty() && v.as_ptr().is_null());
+        assert_eq!(format!("{v:?}"), "CVec { ptr: 0x0, len: 0 }");
+        let (ptr, len) = OdbDataVec::<u16>::empty_with(copy_run).into_raw_parts();
+        assert!(ptr.is_null() && len == 0);
+    }
+
+    #[test]
     fn data_align_covers_libgit2_scalars() {
         assert!(DATA_ALIGN >= align_of::<*const ()>() && DATA_ALIGN >= align_of::<u64>());
         assert!(DATA_ALIGN.is_power_of_two());

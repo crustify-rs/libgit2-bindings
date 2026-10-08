@@ -6,7 +6,7 @@ use std::thread;
 
 use libgit2::libgit2::raw::{OdbDataArrayFree, OdbDataBox, OdbDataVec};
 
-use crate::fixture::{Pair, isolated};
+use crate::fixture::{Pair, filled, isolated};
 
 /// Up to just past a page; whole-slice comparisons keep BSan's per-access cost low.
 const SIZES: [usize; 7] = [1, 2, 7, 16, 63, 4096, 4097];
@@ -16,6 +16,7 @@ fn pattern(len: usize) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_copies_slices_of_every_size() {
     for len in SIZES {
         let src = pattern(len);
@@ -31,6 +32,7 @@ fn vec_copies_slices_of_every_size() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_clone_is_independent_and_outlives_its_source() {
     let src = pattern(100);
     let v = OdbDataVec::<u8>::from_slice(&src).unwrap();
@@ -45,6 +47,7 @@ fn vec_clone_is_independent_and_outlives_its_source() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_zeroed_is_zero_and_writable_to_the_end() {
     for len in SIZES {
         let mut v = OdbDataArrayFree::new_zeroed::<u64>(len).unwrap();
@@ -55,6 +58,7 @@ fn vec_zeroed_is_zero_and_writable_to_the_end() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_uninit_may_drop_partially_filled() {
     for len in SIZES {
         let mut v = OdbDataArrayFree::new_uninit::<u32>(len).unwrap();
@@ -65,6 +69,26 @@ fn vec_uninit_may_drop_partially_filled() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn vec_uninit_clones_as_bytes_before_promotion() {
+    // `MaybeUninit<u32>` is `Copy`, so a buffer still being filled clones as bytes
+    // without reading any element as a `u32`; the copy is promoted on its own.
+    let mut v = OdbDataArrayFree::new_uninit::<u32>(16).unwrap();
+    v.as_mut_slice()[15].write(0x1234_5678);
+    let half = v.clone();
+    assert_eq!(half.len(), 16);
+    drop(half);
+    for (i, slot) in v.as_mut_slice().iter_mut().enumerate() {
+        slot.write(i as u32);
+    }
+    let w = v.clone();
+    drop(v);
+    let w = filled(w);
+    assert_eq!(w.as_slice(), &(0..16).collect::<Vec<u32>>()[..]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_storage_aligns_wide_elements() {
     let v = OdbDataVec::<u64>::from_slice(&[1, 2, 3]).unwrap();
     assert_eq!(v.as_ptr() as usize % align_of::<u64>(), 0);
@@ -91,6 +115,7 @@ fn vec_rejects_oversized_requests_without_panicking() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn box_zeroed_reads_zero_then_takes_writes() {
     let mut pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
     assert_eq!((pair.as_ref().a(), pair.as_ref().b()), (0, 0));
@@ -100,6 +125,7 @@ fn box_zeroed_reads_zero_then_takes_writes() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn box_uninit_may_drop_unfilled() {
     for _ in 0..64 {
         let mut slot = OdbDataBox::<Pair>::new_uninit().unwrap();
@@ -108,6 +134,7 @@ fn box_uninit_may_drop_unfilled() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn owners_cross_threads() {
     let src = pattern(4096);
     let v = OdbDataVec::<u8>::from_slice(&src).unwrap();
@@ -139,6 +166,7 @@ fn owners_cross_threads() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn owners_work_before_any_init() {
     isolated(concat!(module_path!(), "::owners_work_before_any_init"), || {
         // Nothing has initialised libgit2: an unpinned allocation would fail through
@@ -155,6 +183,7 @@ fn owners_work_before_any_init() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn first_allocations_race_to_pin_the_runtime() {
     isolated(concat!(module_path!(), "::first_allocations_race_to_pin_the_runtime"), || {
         let barrier = std::sync::Barrier::new(8);

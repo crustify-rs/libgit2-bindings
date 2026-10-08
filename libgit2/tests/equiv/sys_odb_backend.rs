@@ -218,6 +218,7 @@ fn pattern(len: usize) -> Vec<u8> {
 // --- the comparisons ------------------------------------------------------------
 
 #[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
 fn traced_allocator_sequences() {
     isolated(concat!(module_path!(), "::traced_allocator_sequences"), || {
         install_tracing_allocator();

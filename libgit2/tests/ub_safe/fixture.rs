@@ -2,7 +2,10 @@
 //! the crate does not have yet; replace each once its safe counterpart lands.
 #![allow(unsafe_code)]
 
+use std::mem::MaybeUninit;
 use std::process::Command;
+
+use libgit2::libgit2::raw::OdbDataVec;
 
 const CHILD: &str = "CRUSTIFY_UB_SAFE_CHILD";
 
@@ -24,6 +27,13 @@ pub fn isolated(test: &str, body: fn()) {
         "child `{name}` failed:\n{stdout}\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// Promotes a run every element of which the test wrote; stands in for the typed
+/// constructors that fill a run in one safe call.
+pub fn filled<T>(v: OdbDataVec<MaybeUninit<T>>) -> OdbDataVec<T> {
+    // SAFETY: the caller wrote every element, which is this fixture's contract.
+    unsafe { v.assume_init() }
 }
 
 /// A plain C struct to place in an `OdbDataBox`; the crate wraps no C type yet.

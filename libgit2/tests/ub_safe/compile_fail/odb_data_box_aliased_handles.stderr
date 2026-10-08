@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `pair` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/odb_data_box_aliased_handles.rs:15:21
+   |
+14 |     let shared = pair.as_ref();
+   |                  ---- immutable borrow occurs here
+15 |     let exclusive = pair.as_mut();
+   |                     ^^^^^^^^^^^^^ mutable borrow occurs here
+16 |     let _ = (shared, exclusive);
+   |              ------ immutable borrow later used here
