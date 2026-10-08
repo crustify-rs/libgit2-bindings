@@ -110,6 +110,31 @@ fn malloc_member_accepts_zero_bytes() {
     unsafe { free(p) };
 }
 
+/// Zero-byte requests, through either allocating member, are allocations of their own:
+/// resized and released like any other. A live block is never resized to zero bytes,
+/// which the contract excludes (glibc would release it and return NULL).
+#[test]
+fn zero_byte_requests_are_allocations() {
+    let (malloc, realloc, free) = members();
+    // SAFETY: NULL `file`; each non-NULL result is a block released below.
+    let (a, b) = unsafe {
+        (
+            malloc(0, ptr::null(), 0),
+            realloc(ptr::null_mut(), 0, c"".as_ptr(), 0),
+        )
+    };
+    // SAFETY: `a` is NULL or a live block of this family, given up on success.
+    let grown = unsafe { realloc(a, 8, ptr::null(), 0) };
+    assert!(!grown.is_null());
+    // SAFETY: `grown` holds 8 writable bytes.
+    unsafe { scribble(grown, 8, 3) };
+    // SAFETY: `grown` is a live block; `b` is NULL or one; each given up once.
+    unsafe {
+        free(grown);
+        free(b);
+    }
+}
+
 #[test]
 fn malloc_member_reports_failure_as_null() {
     let (malloc, _, _) = members();

@@ -413,6 +413,17 @@ fn workload() -> Vec<Step> {
         step(&mut || set_str(ffi::GIT_ERROR_INDEX, c"shrinks back"));
         // An allocation libgit2 makes and frees for the caller.
         step(&mut || OdbDataStrFree::dup(c"a string").map_or(-1, |s| s.len() as c_int));
+        // A zero-byte request, which libgit2 makes and releases like any other.
+        step(&mut || {
+            // SAFETY: the routines ignore `backend`; a NULL result owns nothing, and a
+            // block is released once.
+            unsafe {
+                let p = ffi::git_odb_backend_data_alloc(ptr::null_mut(), 0);
+                let got = !p.is_null();
+                ffi::git_odb_backend_data_free(ptr::null_mut(), p);
+                got as c_int
+            }
+        });
         // A refused allocation, reported as out of memory.
         step(&mut || {
             // SAFETY: the routine ignores `backend`; a NULL result owns nothing.
@@ -496,7 +507,20 @@ fn libgit2_drives_both_allocators_alike() {
                 all.iter()
                     .any(|e| matches!(e, Event::Free { block: Some(_) }))
             );
-            assert_eq!(c_steps[4].error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
+            // The zero-byte request was an allocation of its own, released once.
+            assert_eq!(c_steps[4].result, 1);
+            assert!(
+                matches!(
+                    c_steps[4].events[..],
+                    [
+                        Event::Malloc { len: 0, got: Some(n), .. },
+                        Event::Free { block: Some(m) }
+                    ] if n == m
+                ),
+                "{:?}",
+                c_steps[4].events
+            );
+            assert_eq!(c_steps[5].error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
         },
     );
 }

@@ -4,6 +4,8 @@
 //! on the loader path.
 
 fn main() {
+    // `cargo bsan` compiles with `--cfg bsan`; tests use it to skip paths it cannot run.
+    println!("cargo:rustc-check-cfg=cfg(bsan)");
     println!("cargo:rerun-if-env-changed=DEP_GIT2_BUILD_DIR");
     let dir = std::env::var("DEP_GIT2_BUILD_DIR").expect("libgit2-sys exports build_dir");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
