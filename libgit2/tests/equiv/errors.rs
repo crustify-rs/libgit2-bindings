@@ -24,7 +24,9 @@ use std::process::Command;
 use std::ptr;
 
 use libgit2::ffi;
-use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+use libgit2::libgit2::util::errors::{
+    ErrorClass, ErrorCode, UnnamedErrorClass, UnnamedErrorCode, last,
+};
 use libgit2::libgit2::util::sys::errors::{clear, set_str};
 
 /// Every `git_error_code` constant, beside the variant that must carry it.
@@ -126,7 +128,11 @@ fn from_raw_names_exactly_the_c_codes() {
     for raw in probes() {
         let c = CODES.iter().find(|(c, _)| *c == raw).map(|&(_, code)| code);
         assert_eq!(ErrorCode::from_raw(raw), c, "{raw}");
-        assert_eq!(ErrorCode::try_from(raw), c.ok_or(raw), "{raw}");
+        assert_eq!(
+            ErrorCode::try_from(raw).map_err(UnnamedErrorCode::raw),
+            c.ok_or(raw),
+            "{raw}"
+        );
     }
 }
 
@@ -146,7 +152,11 @@ fn from_raw_names_exactly_the_c_classes() {
             .find(|(c, _)| *c as c_int == raw)
             .map(|&(_, class)| class);
         assert_eq!(ErrorClass::from_raw(raw), c, "{raw}");
-        assert_eq!(ErrorClass::try_from(raw), c.ok_or(raw), "{raw}");
+        assert_eq!(
+            ErrorClass::try_from(raw).map_err(UnnamedErrorClass::raw),
+            c.ok_or(raw),
+            "{raw}"
+        );
     }
 }
 
@@ -259,6 +269,69 @@ fn classifies_what_libgit2_reports() {
             // `git_buf_dispose` leaves unfreed.
             unsafe { ffi::git_buf_dispose(&raw mut buf) };
         },
+    );
+}
+
+/// Codes libgit2 produces besides `GIT_OK` and `GIT_ERROR`, from calls that need no
+/// repository: a reference name that is not valid (`GIT_EINVALIDSPEC`), a buffer too
+/// short for its normalisation (`GIT_EBUFS`), and a repository that does not exist
+/// (`GIT_ENOTFOUND`); each with the class the call leaves. The rest of the codes
+/// need repository state to reach.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn classifies_codes_libgit2_produces() {
+    // SAFETY: no arguments; the first reference initialises the runtime.
+    assert!(unsafe { ffi::git_libgit2_init() } >= 0);
+    let mut out = [0 as c_char; 64];
+    let normalize = |out: &mut [c_char], name: &CStr| {
+        // SAFETY: `out` is writable for its length, which is passed as the buffer
+        // size; `name` is NUL-terminated and read during the call only.
+        unsafe {
+            ffi::git_reference_normalize_name(
+                out.as_mut_ptr(),
+                out.len(),
+                name.as_ptr(),
+                ffi::GIT_REFERENCE_FORMAT_NORMAL,
+            )
+        }
+    };
+
+    let ret = normalize(&mut out, c"refs/heads/main");
+    assert_eq!(ErrorCode::from_raw(ret), Some(ErrorCode::Ok));
+    // SAFETY: a successful normalisation NUL-terminates `out`.
+    assert_eq!(unsafe { CStr::from_ptr(out.as_ptr()) }, c"refs/heads/main");
+
+    let ret = normalize(&mut out, c"refs/heads/bad..name");
+    assert_classified(
+        ret,
+        ErrorCode::InvalidSpec,
+        ffi::GIT_ERROR_REFERENCE,
+        ErrorClass::Reference,
+    );
+
+    let ret = normalize(&mut out[..4], c"refs/heads/main");
+    assert_classified(
+        ret,
+        ErrorCode::BufSize,
+        ffi::GIT_ERROR_REFERENCE,
+        ErrorClass::Reference,
+    );
+
+    let missing = c"/nonexistent/crustify/repository";
+    // SAFETY: a NULL `out` only checks for the repository; `missing` is
+    // NUL-terminated and read during the call only; no ceiling directories.
+    let ret = unsafe {
+        ffi::git_repository_open_ext(
+            ptr::null_mut(),
+            missing.as_ptr(),
+            ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+            ptr::null(),
+        )
+    };
+    assert_classified(ret, ErrorCode::NotFound, ffi::GIT_ERROR_OS, ErrorClass::Os);
+    assert_eq!(
+        last().message(),
+        c"failed to resolve path '/nonexistent/crustify/repository': No such file or directory"
     );
 }
 
@@ -397,9 +470,13 @@ fn take(step: &Step) {
 
 /// Runs `steps` on a fresh thread, reading the last error through `side` after each
 /// step but [`Step::FailNext`], whose refusal is meant for the next one.
+///
+/// A new thread's `errno` is unspecified (a spawned thread occasionally starts with
+/// `EAGAIN` left by thread setup), so the sequence starts from 0 on both sides.
 fn run(side: Side, steps: &[Step]) -> Vec<Option<Seen>> {
     let steps = steps.to_vec();
     std::thread::spawn(move || {
+        set_errno(0);
         let mut refusing = false;
         steps
             .iter()
