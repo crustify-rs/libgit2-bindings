@@ -1,0 +1,10 @@
+[package]
+name = "odb-data-str-adoption-ignores-git-buf-ownership"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libgit2 = { path = "../../../../../../../../rust/libgit2" }
