@@ -16,12 +16,14 @@ git_oid
 git_oid_shorten
 git_oid_t
 git_oidarray
+git_pathspec_flag_t
 git_reference_format_t
 git_reference_t
 git_repository_init_flag_t
 git_repository_init_options
 git_repository_open_flag_t
 git_strarray
+git_submodule_ignore_t
 git_submodule_recurse_t
 git_submodule_update_t
 git_time

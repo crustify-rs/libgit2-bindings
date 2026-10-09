@@ -77,6 +77,22 @@
 //!
 //! Then `git_writestream`, in `write_streams`: C blob streams written through the
 //! wrappers, and Rust streams driven by libgit2, against their C counterparts.
+//!
+//! Then [`SubmoduleIgnore`], against the `git_submodule_ignore_t` values libgit2's
+//! submodule routines produce and consume.
+//!
+//! - Producer: `git_submodule_ignore` over a submodule whose `.gitmodules` entry spells
+//!   each value C's config map accepts. [`SubmoduleIgnore::from_raw`] must name every
+//!   value C returns and convert it back unchanged.
+//! - Consumer: `git_submodule_set_ignore` with each raw value in and around the named
+//!   range, on two independent repositories: C passes the raw value, Rust passes the
+//!   variant's [`raw`](SubmoduleIgnore::raw) or, for a value without one, cannot call C
+//!   at all. Both record the return, the error, `.gitmodules` and the value read back.
+//!
+//! Documented divergences, outside these comparisons: `git_submodule_set_ignore`
+//! refuses `GIT_SUBMODULE_IGNORE_UNSPECIFIED` like any unnamed value, but `Unspecified`
+//! is a variant (status queries take it), so a typed setter wrapper must refuse it
+//! itself.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -87,8 +103,9 @@ use std::ptr;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
-    SubmoduleUpdate, Time, UnnamedFileMode, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
+    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleIgnore,
+    SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedFileMode, UnnamedSubmoduleRecurse,
+    UnnamedSubmoduleUpdate,
 };
 
 /// Every `git_submodule_recurse_t` constant, beside the variant that must carry it.
@@ -2163,6 +2180,183 @@ mod write_streams {
             .join()
             .unwrap();
             assert_eq!(rust, c, "{plan:?}");
+        }
+    }
+}
+
+// --- `git_submodule_ignore_t` --------------------------------------------
+
+/// A working-tree repository of its own under the temp dir, removed when dropped, with
+/// one submodule `sm` declared in `.gitmodules`.
+struct IgnoreRepo {
+    path: PathBuf,
+    repo: *mut ffi::git_repository,
+}
+
+impl IgnoreRepo {
+    fn new(tag: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "crustify-types-equiv-ignore-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let mut opts = ffi::git_repository_init_options::default();
+        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+        let rc = unsafe {
+            ffi::git_repository_init_options_init(
+                &mut opts,
+                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(rc, 0);
+        opts.flags = ffi::GIT_REPOSITORY_INIT_MKDIR;
+        let mut repo = ptr::null_mut();
+        // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` live, all
+        // read for the call only.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        assert_eq!(rc, 0);
+        let this = Self { path, repo };
+        this.declare("none");
+        this
+    }
+
+    /// Rewrites `.gitmodules` with `sm`'s `ignore` spelled `value`.
+    fn declare(&self, value: &str) {
+        fs::write(
+            self.path.join(".gitmodules"),
+            format!(
+                "[submodule \"sm\"]\n\tpath = sm\n\turl = https://example.invalid/sm\n\tignore = {value}\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn gitmodules(&self) -> String {
+        fs::read_to_string(self.path.join(".gitmodules")).unwrap()
+    }
+
+    /// `git_submodule_lookup("sm")` then `git_submodule_ignore`: the return of the
+    /// lookup and, on success, the value.
+    fn ignore(&self) -> (c_int, Option<ffi::git_submodule_ignore_t>) {
+        let mut sm = ptr::null_mut();
+        // SAFETY: `sm` is a live slot, `repo` open, the name NUL-terminated.
+        let rc = unsafe { ffi::git_submodule_lookup(&mut sm, self.repo, c"sm".as_ptr()) };
+        if rc != 0 {
+            return (rc, None);
+        }
+        // SAFETY: `sm` is a live submodule, released once after the read.
+        let value = unsafe {
+            let value = ffi::git_submodule_ignore(sm);
+            ffi::git_submodule_free(sm);
+            value
+        };
+        (rc, Some(value))
+    }
+
+    /// `git_submodule_set_ignore("sm", raw)`.
+    fn set_ignore(&self, raw: ffi::git_submodule_ignore_t) -> c_int {
+        // SAFETY: `repo` is open and the name NUL-terminated.
+        unsafe { ffi::git_submodule_set_ignore(self.repo, c"sm".as_ptr(), raw) }
+    }
+}
+
+impl Drop for IgnoreRepo {
+    fn drop(&mut self) {
+        // SAFETY: `repo` is open and released once.
+        unsafe { ffi::git_repository_free(self.repo) };
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+/// The thread's last error, copied out: class and message.
+fn ignore_error() -> (c_int, String) {
+    // SAFETY: libgit2 is initialised (a repository is open); the error, when there is
+    // one, stays valid until the next libgit2 call on this thread, and is copied out.
+    let err = unsafe { ffi::git_error_last() };
+    assert!(!err.is_null());
+    // SAFETY: as above.
+    let (class, message) = unsafe { ((*err).klass, CStr::from_ptr((*err).message)) };
+    (class, message.to_string_lossy().into_owned())
+}
+
+/// What one `set_ignore` left behind: its return, its error on failure, the
+/// `.gitmodules` text and the value read back.
+type SetRecord = (
+    c_int,
+    Option<(c_int, String)>,
+    String,
+    (c_int, Option<ffi::git_submodule_ignore_t>),
+);
+
+fn set_record(repo: &IgnoreRepo, rc: c_int) -> SetRecord {
+    let err = (rc != 0).then(ignore_error);
+    (rc, err, repo.gitmodules(), repo.ignore())
+}
+
+/// Every spelling C's config map accepts yields a named value, which converts back
+/// unchanged; a spelling it rejects fails the lookup in C, before any value exists.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn configured_ignore_values_are_named() {
+    let repo = IgnoreRepo::new("configured");
+    let cases = [
+        ("none", SubmoduleIgnore::None),
+        ("untracked", SubmoduleIgnore::Untracked),
+        ("dirty", SubmoduleIgnore::Dirty),
+        ("all", SubmoduleIgnore::All),
+        ("true", SubmoduleIgnore::All),
+        ("false", SubmoduleIgnore::None),
+    ];
+    for (text, expected) in cases {
+        repo.declare(text);
+        let (rc, raw) = repo.ignore();
+        assert_eq!(rc, 0, "{text}");
+        let raw = raw.unwrap();
+        let named = SubmoduleIgnore::from_raw(raw);
+        assert_eq!(named, Some(expected), "{text}: {raw}");
+        assert_eq!(named.unwrap().raw(), raw);
+    }
+    repo.declare("bogus");
+    assert!(repo.ignore().0 < 0);
+}
+
+/// `git_submodule_set_ignore` sees the same value from the variant as from the raw C
+/// value, step after step on one repository per side; every value without a variant
+/// is one C refuses too.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn set_ignore_takes_the_variants_values() {
+    let c = IgnoreRepo::new("set-c");
+    let rust = IgnoreRepo::new("set-rust");
+    let sequence: [ffi::git_submodule_ignore_t; 12] = [3, 1, 4, 2, -1, 0, 5, -2, 4, 100, 1, 3];
+    for (step, raw) in sequence.into_iter().enumerate() {
+        let c_rec = set_record(&c, c.set_ignore(raw));
+        match SubmoduleIgnore::from_raw(raw) {
+            Some(variant) => {
+                let rust_rec = set_record(&rust, rust.set_ignore(variant.raw()));
+                assert_eq!(c_rec, rust_rec, "step {step}: {variant:?}");
+                if variant == SubmoduleIgnore::Unspecified {
+                    assert_eq!(c_rec.0, -1, "C refuses Unspecified");
+                } else {
+                    assert_eq!(c_rec.0, 0);
+                    assert_eq!(c_rec.3, (0, Some(raw)), "read back as written");
+                }
+            }
+            None => {
+                // No variant, no call: C itself refuses the value and leaves the
+                // repository as the other side's.
+                assert_eq!(c_rec.0, -1, "step {step}: {raw}");
+                assert_eq!(
+                    c_rec.1,
+                    Some((
+                        ffi::GIT_ERROR_SUBMODULE as c_int,
+                        "invalid value for ignore".into()
+                    ))
+                );
+                assert_eq!(c_rec.2, rust.gitmodules(), "step {step}");
+                assert_eq!(c_rec.3, rust.ignore(), "step {step}");
+            }
         }
     }
 }

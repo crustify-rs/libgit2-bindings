@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `array` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/strarray_string_held_across_set.rs:8:5
+  |
+7 |     let s = array.as_ref().get(0);
+  |             ----- immutable borrow occurs here
+8 |     array.as_mut().set_strings(OdbDataStrVec::new());
+  |     ^^^^^^^^^^^^^^ mutable borrow occurs here
+9 |     let _ = s;
+  |             - immutable borrow later used here

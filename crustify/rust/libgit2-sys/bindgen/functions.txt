@@ -49,6 +49,9 @@ git_oid_streq
 git_oid_tostr
 git_oid_tostr_s
 git_oidarray_dispose
+git_pathspec_free
+git_pathspec_matches_path
+git_pathspec_new
 git_reference_create
 git_reference_free
 git_reference_lookup
@@ -67,9 +70,11 @@ git_signature_new
 git_strarray_dispose
 git_submodule_fetch_recurse_submodules
 git_submodule_free
+git_submodule_ignore
 git_submodule_init
 git_submodule_lookup
 git_submodule_set_fetch_recurse_submodules
+git_submodule_set_ignore
 git_submodule_set_update
 git_submodule_update_strategy
 git_trace_set

@@ -1,0 +1,11 @@
+error[E0597]: `owned` does not live long enough
+  --> tests/ub_safe/compile_fail/strarray_view_outlives_strings.rs:9:27
+   |
+ 7 |     let view = {
+   |         ---- borrow later stored here
+ 8 |         let owned = vec![CString::new("x").unwrap()];
+   |             ----- binding `owned` declared here
+ 9 |         StrArrayView::new(&owned)
+   |                           ^^^^^^ borrowed value does not live long enough
+10 |     };
+   |     - `owned` dropped here while still borrowed

@@ -14,6 +14,7 @@ mod errors;
 mod fixture;
 mod oid;
 mod oidarray;
+mod strarray;
 mod sys_alloc;
 mod sys_errors;
 mod sys_odb_backend;

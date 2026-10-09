@@ -186,6 +186,41 @@
    "fields": []
   },
   {
+   "name": "git_strarray",
+   "defined_in": "include/git2/strarray.h",
+   "_comment_agent": "Wrapped in core/strarray.rs (core wave 0 batch 4) as StrArray + StrArrayVal = CVal<StrArray, StrArrayDispose> for the owned form (strings move as OdbDataStrVec), and StrArrayView<'a> for the borrowed input form, which hands out StrArrayRef only. git_strarray_copy (the deep cloner) is hidden under DEPRECATE_HARD, so copies go through OdbDataStrVec::dup_all. git_strarray_dispose is skipped for a NULL `strings` (empty state; see the first-init allocator race).",
+   "fields": [
+    {
+     "name": "strings",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": {
+         "lifetime": "other"
+        }
+       }
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "A buffer of `count` NUL-terminated `char *` elements. Two statically distinct contracts, decided by API direction. (1) OUTPUT (git_reference_list, git_tag_list(_match), git_remote_list, git_worktree_list, git_remote_get_fetch/push_refspecs via copy_refspecs, git_remote_rename problems, GIT_OPT_GET_EXTENSIONS, store_refs): libgit2 writes `strings`/`count` without disposing what the struct held, from a git_vector (git_vector_detach / .contents, i.e. git__reallocarray storage with spare capacity) whose elements are git__strdup'd; the struct owns the array and every string, and git_strarray_dispose frees strings[0..count) then the array with git__free, then zeroes the struct. git_vector_init(&v, 8) allocates eagerly, so an empty result is often a NON-NULL array with count 0 (refs.c, tag.c, remote.c, repository.c extensions); worktree.c and the error paths leave NULL/0. Producers never store a NULL element. (2) INPUT (`const git_strarray *` args: git_index_add_all/remove_all/update_all, git_remote_fetch/push/upload/download/connect, git_reset_default, git_pathspec_new, git_stash_save_with_opts, and by-value option fields: git_diff_options.pathspec, git_checkout_options.paths, custom_headers, remote_push_options): libgit2 only reads strings[0..count) (pathspec/iterator/headers deref every element, so NULL elements are invalid), copies what it keeps (git_strarray_copy, git__strdup), and never frees or writes the caller's array: borrowed for the call / the options' lifetime. git_remote_connect memcpys the caller's struct into its options and copies it via git_remote_connect_options_dup before use. NULL `strings` means empty only with count 0; git_strarray_dispose with NULL strings and count > 0 derefs NULL. Owned arrays are written (dispose zeroes, producers fill), borrowed ones are const."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_submodule_ignore_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "Values -1 (UNSPECIFIED), 1 NONE, 2 UNTRACKED, 3 DIRTY, 4 ALL; 0 is unnamed (the old GIT_SUBMODULE_IGNORE_DEFAULT the types.h comment still mentions is gone). Consumers: git_submodule_status / git_submodule__status read UNSPECIFIED as 'the submodule's configured value' and compare the rest for equality (any other value behaves like UNTRACKED). git_diff_options.ignore_submodules: `<= 0` (0 from a zeroed struct, or UNSPECIFIED from GIT_DIFF_OPTIONS_INIT) means 'read diff.ignoreSubmodules' (diff_generate.c:561). git_submodule_set_ignore maps through _sm_ignore_map, so UNSPECIFIED, 0 and anything outside 1..4 fail with GIT_ERROR_SUBMODULE 'invalid value for ignore'. Producers (git_submodule_ignore, git_submodule_parse_ignore from config strings none/untracked/dirty/all/true/false) only return 1..4, plus UNSPECIFIED from git_submodule_ignore(NULL) via GIT_ASSERT_ARG_WITH_RETVAL. Wrapped as core::types::SubmoduleIgnore (repr(i32)), converted fallibly with from_raw.",
+   "fields": []
+  },
+  {
    "name": "git_submodule_recurse_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Fieldless C enum (GIT_SUBMODULE_RECURSE_NO = 0, _YES = 1, _ONDEMAND = 2, include/git2/types.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. Producers: submodule_parse_recurse (submodule.c:2034) maps .gitmodules/config fetchRecurseSubmodules through _sm_recurse_map (bool false->NO, true->YES, 'on-demand' case-insensitive->ONDEMAND); an unreadable spelling writes YES to *out then fails git_submodule_lookup with GIT_EINVALID 'invalid value for submodule 'recurse' property: '<v>''; an unset setting leaves the alloc default NO (submodule.c:1962). git_submodule_fetch_recurse_submodules returns sm->fetch_recurse unchanged (only named values; NULL sm -> GIT_ASSERT_ARG, NO in release, abort in the Debug/coverage build). Consumer: git_submodule_set_fetch_recurse_submodules -> write_mapped_var -> git_config_lookup_map_enum: unnamed values fail -1 GIT_ERROR_SUBMODULE 'invalid value for fetchRecurseSubmodules'; YES writes 'true', ONDEMAND 'on-demand', NO (CONFIGMAP_FALSE, str NULL) DELETES the .gitmodules key and so fails GIT_ENOTFOUND (GIT_ERROR_CONFIG 'could not find key 'submodule.<name>.fetchRecurseSubmodules' to delete') when the key is absent, although the submodule already reads NO. Rust: SubmoduleRecurse in core/types.rs, converted fallibly (from_raw/TryFrom -> UnnamedSubmoduleRecurse), Default = No (unset). The submodule symbol batch should treat that ENOTFOUND as success or pre-check, and route returned values through from_raw.",
@@ -1824,6 +1859,86 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller storage filled in place: sets all three members to the stdalloc malloc/realloc/free forwarders and returns 0. Not exported from libgit2.so (declared in git2/sys/alloc.h without GIT_EXTERN, hidden), so it cannot be bound; git_allocator_global_init applies it to git__allocator."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_strarray_copy",
+   "defined_in": "src/libgit2/strarray.c",
+   "lifetime": {
+    "for": "src",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "src",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only. NULL elements of src->strings are skipped silently, so the copy's count can be smaller than src->count (with spare calloc'd slots). Declared only in deprecated.h and compiled hidden under GIT_DEPRECATE_HARD: not in libgit2.so's dynamic symbols, so Rust copies go through OdbDataStrVec::dup_all instead (same order: array first, then each string; a failure releases the partial copy)."
+     }
+    },
+    {
+     "name": "tgt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage, memset to zero first (not disposed: anything it held leaks), then filled with a git__calloc'd array of git__strdup copies; on a failed strdup the partial copy is disposed and `tgt` re-zeroed. GIT_ASSERT_ARG on NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_strarray_dispose",
+   "defined_in": "src/libgit2/strarray.c",
+   "lifetime": {
+    "for": "array",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "array",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The caller's struct, borrowed for the call (libgit2 never allocates a git_strarray). NULL returns. Frees strings[0..count) and then `strings` with git__free, then memsets the struct to zero, leaving it reusable. Requires the struct to own its array and strings (the OUTPUT contract of git_strarray.strings); a NULL `strings` with count > 0 derefs NULL. With NULL `strings` and count 0 it still calls git__free(NULL), which reads git__allocator unsynchronised against a concurrent first git_libgit2_init, so the Rust policy skips C for that empty state."
      }
     }
    ]

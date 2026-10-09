@@ -33,6 +33,11 @@
 //!
 //! Then `git_writestream`, in `write_streams`: Rust and C streams, their owners and
 //! handles, lent to and freed by libgit2.
+//!
+//! Then the enum `SubmoduleIgnore` (`git_submodule_ignore_t`, signed, `-1` and
+//! `1..=4`): converting C values is checked before any variant exists, so no value can
+//! reach an invalid discriminant. Rust only, so Miri runs it; the sweep stays small
+//! for BSan.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -43,8 +48,8 @@ use std::thread;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
-    SubmoduleUpdate, Time, TimeMut, TimeRef,
+    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleIgnore,
+    SubmoduleRecurse, SubmoduleUpdate, Time, TimeMut, TimeRef,
 };
 
 /// Every value around the declared ones, then a coarse stride across the whole
@@ -951,4 +956,37 @@ mod write_streams {
             }
         });
     }
+}
+
+// --- `git_submodule_ignore_t` --------------------------------------------
+
+/// Every value in and around the named range, and the extremes, converts to a valid
+/// variant or to `None`, and a variant always converts back to its own value.
+#[test]
+fn submodule_ignore_conversions_never_build_an_invalid_variant() {
+    let values = (-260..260).chain([i32::MIN, i32::MIN + 1, i32::MAX - 1, i32::MAX]);
+    let mut named = 0;
+    for raw in values {
+        let raw: ffi::git_submodule_ignore_t = raw;
+        if let Some(v) = SubmoduleIgnore::from_raw(raw) {
+            named += 1;
+            assert_eq!(v.raw(), raw);
+            // A match over every variant reads the discriminant: Miri rejects an
+            // invalid one.
+            let rank = match v {
+                SubmoduleIgnore::Unspecified => 0,
+                SubmoduleIgnore::None => 1,
+                SubmoduleIgnore::Untracked => 2,
+                SubmoduleIgnore::Dirty => 3,
+                SubmoduleIgnore::All => 4,
+                _ => unreachable!("no other variant"),
+            };
+            assert_eq!(rank, raw.max(0));
+        } else {
+            assert_eq!(SubmoduleIgnore::try_from(raw).unwrap_err().raw(), raw);
+        }
+    }
+    assert_eq!(named, 5);
+    let none: Option<SubmoduleIgnore> = SubmoduleIgnore::from_raw(0);
+    assert!(none.is_none());
 }
