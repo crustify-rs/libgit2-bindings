@@ -72,8 +72,13 @@ the campaign's.
   symbols it was scheduled for; `—` where it was scheduled for none
 - `+LoC` — the landed batch's Rust-source insertions/deletions relative to its
   wave's base
-- `+UB safe tests` / `+UB unsafe tests` / `+equiv tests` / `+unit tests` — tests
-  added by that landed batch; each parenthesized pair is its C/Rust
+- `cov (C/Rust)` — in a `Batches` table, the absolute line coverage right after
+  that batch landed, from ONE run of all four test workloads together (their
+  union): C over the sub-campaign link unit's TUs in the `coverage` prebuild,
+  Rust over the authored non-test sources. Its **Σ** cell is the coverage at the
+  table's last landing, not a sum
+- `+UB safe tests` / `+UB unsafe tests` / `+equiv tests` / `+unit tests` — in a
+  `Batches …: tests` table, the tests added by that landed batch; each parenthesized pair is its C/Rust
   line-coverage change in percentage points. Negative coverage deltas are valid
   when the landed source adds more executable lines than the new tests cover
 - `+lifecycle` … `+misc` — in a `Batches — review: PoC + reports` table, the
@@ -166,36 +171,71 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 `openrouter/anthropic/claude-opus-5.5` via `claude`.
 
-| wave | batch | types | fields | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`util/0`|`0`| `2` | `5` |`+1934/-2`|`+4` (`—`/`—` pp)|`+7` (`—`/`—` pp)|`+2` (`—`/`—` pp)|`+14` (`—`/`—` pp)| `—` | `—` | `$7.55` | `33m43s` | `$3.77` | `$1.51` |
-|`util/0`|`1`| `2` | `0` |`+849/-26`|`+4` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+6` (`—`/`—` pp)|`+10` (`—`/`—` pp)| `—` | `—` | `$5.25` | `38m51s` | `$2.62` | — |
-|`oid/0`|`0`| `2` | `2` |`+1514/-4`|`+11` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+6` (`—`/`—` pp)|`+11` (`—`/`—` pp)| `—` | `—` | `$9.89` | `49m08s` | `$4.95` | `$4.95` |
-|`oid/0`|`1`| `1` | `0` |`+488/-0`|`+4` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+7` (`—`/`—` pp)|`+5` (`—`/`—` pp)| `—` | `—` | `$2.87` | `14m31s` | `$2.87` | — |
-|`oid/1`|`0`| `1` | `2` |`+1397/-0`|`+8` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+2` (`—`/`—` pp)|`+8` (`—`/`—` pp)| `—` | `—` | `$5.30` | `19m02s` | `$5.30` | `$2.65` |
-| **Σ** |  | **`8`** | **`9`** | **`+6182/-32`** | **`+31` (`—`/`—` pp)** | **`+7` (`—`/`—` pp)** | **`+23` (`—`/`—` pp)** | **`+48` (`—`/`—` pp)** | **`—`** | **`—`** | **`$30.86`** | — | **`$3.86`** | **`$3.43`** |
+| wave | batch | types | fields | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+|`util/0`|`0`| `2` | `5` |`+1934/-2`| `1.30`% / `95.76`% | `+1` | `+1` | `$7.55` | `33m43s` | `$3.77` | `$1.51` |
+|`util/0`|`1`| `2` | `0` |`+849/-26`| `1.35`% / `96.22`% | `+0` | `+0` | `$5.25` | `38m51s` | `$2.62` | — |
+|`oid/0`|`0`| `2` | `2` |`+1514/-4`| `1.73`% / `96.25`% | `+1` | `+0` | `$9.89` | `49m08s` | `$4.95` | `$4.95` |
+|`oid/0`|`1`| `1` | `0` |`+488/-0`| `1.68`% / `95.42`% | `+0` | `+0` | `$2.87` | `14m31s` | `$2.87` | — |
+|`oid/1`|`0`| `1` | `2` |`+1397/-0`| `5.89`% / `96.82`% | `+1` | `+0` | `$5.30` | `19m02s` | `$5.30` | `$2.65` |
+| **Σ** |  | **`8`** | **`9`** | **`+6182/-32`** | **`5.89`% / `96.82`%** | **`+3`** | **`+1`** | **`$30.86`** | — | **`$3.86`** | **`$3.43`** |
+
+### Batches — wrap: tests
+
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
+
+| wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
+|---|---|---|---|---|---|
+|`util/0`|`0`|`+4` (`+0.02`/`-6.50` pp)|`+7` (`+0.00`/`-7.18` pp)|`+2` (`+0.00`/`-8.45` pp)|`+14` (`+0.04`/`+3.56` pp)|
+|`util/0`|`1`|`+4` (`+0.00`/`-1.55` pp)|`+0` (`+0.00`/`-1.95` pp)|`+6` (`+0.05`/`-1.12` pp)|`+10` (`+0.00`/`+0.87` pp)|
+|`oid/0`|`0`|`+11` (`+0.09`/`+0.88` pp)|`+0` (`+0.00`/`-2.63` pp)|`+6` (`+0.04`/`-0.37` pp)|`+11` (`+0.09`/`+1.19` pp)|
+|`oid/0`|`1`|`+4` (`+0.00`/`+0.87` pp)|`+0` (`+0.00`/`-0.69` pp)|`+7` (`+0.06`/`+1.05` pp)|`+5` (`+0.00`/`+0.33` pp)|
+|`oid/1`|`0`|`+8` (`+0.01`/`-0.01` pp)|`+0` (`+0.00`/`-1.62` pp)|`+2` (`+4.15`/`-0.16` pp)|`+8` (`+0.00`/`+0.83` pp)|
+| **Σ** |  | **`+31` (`+0.12`/`-6.31` pp)** | **`+7` (`+0.00`/`-14.07` pp)** | **`+23` (`+4.30`/`-9.05` pp)** | **`+48` (`+0.13`/`+6.78` pp)** |
 
 ### Batches — port
 
 `openrouter/anthropic/claude-opus-5.5` via `claude`.
 
-| wave | batch | types | fields | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`<n>`|`<n>`| `<n>` | `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `$<n>` | `<n>m<n>s` | `$<n>` | `$<n>` |
-| **Σ** |  | **`<n>`** | **`<n>`** | **`+<n>/-<n>`** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`±<n>`** | **`±<n>`** | **`$<n>`** | — | **`$<n>`** | **`$<n>`** |
+| wave | batch | types | fields | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+|`<n>`|`<n>`| `<n>` | `<n>` |`+<n>/-<n>`| `<n>`% / `<n>`% | `±<n>` | `±<n>` | `$<n>` | `<n>m<n>s` | `$<n>` | `$<n>` |
+| **Σ** |  | **`<n>`** | **`<n>`** | **`+<n>/-<n>`** | **`<n>`% / `<n>`%** | **`±<n>`** | **`±<n>`** | **`$<n>`** | — | **`$<n>`** | **`$<n>`** |
+
+### Batches — port: tests
+
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
+
+| wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
+|---|---|---|---|---|---|
+|`<n>`|`<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|
+| **Σ** |  | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** |
 
 ### Batches — review
 
 `openrouter/anthropic/claude-fable-5.1` via `claude`.
 
-| wave | batch | types | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/type |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`util/0`|`0`| `2` |`+172/-15`|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+2` (`—`/`—` pp)| `—` | `—` | `+172/-15` | `$20.66` | `48m16s` | `$10.33` |
-|`util/0`|`1`| `2` |`+149/-12`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+1` (`—`/`—` pp)| `—` | `—` | `+149/-12` | `$7.58` | `18m18s` | `$3.79` |
-|`oid/0`|`0`| `2` |`+224/-6`|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+4` (`—`/`—` pp)| `—` | `—` | `+224/-6` | `$14.93` | `29m10s` | `$7.46` |
-|`oid/0`|`1`| `1` |`+185/-8`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)| `—` | `—` | `+185/-8` | `$7.16` | `19m44s` | `$7.16` |
-|`oid/1`|`0`| `1` |`+235/-18`|`+2` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+2` (`—`/`—` pp)| `—` | `—` | `+235/-18` | `$11.49` | `22m41s` | `$11.49` |
-| **Σ** |  | **`8`** | **`+965/-59`** | **`+3` (`—`/`—` pp)** | **`+1` (`—`/`—` pp)** | **`+3` (`—`/`—` pp)** | **`+9` (`—`/`—` pp)** | **`—`** | **`—`** | **`+965/-59`** | **`$61.82`** | — | **`$7.73`** |
+| wave | batch | types | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/type |
+|---|---|---|---|---|---|---|---|---|---|---|
+|`util/0`|`0`| `2` |`+172/-15`| `1.63`% / `95.18`% | `+0` | `+0` | `+172/-15` | `$20.66` | `48m16s` | `$10.33` |
+|`util/0`|`1`| `2` |`+149/-12`| `1.63`% / `96.51`% | `+0` | `+0` | `+149/-12` | `$7.58` | `18m18s` | `$3.79` |
+|`oid/0`|`0`| `2` |`+224/-6`| `7.81`% / `96.25`% | `+0` | `+0` | `+224/-6` | `$14.93` | `29m10s` | `$7.46` |
+|`oid/0`|`1`| `1` |`+185/-8`| `7.81`% / `96.12`% | `+0` | `+0` | `+185/-8` | `$7.16` | `19m44s` | `$7.16` |
+|`oid/1`|`0`| `1` |`+235/-18`| `7.80`% / `96.36`% | `+0` | `+0` | `+235/-18` | `$11.49` | `22m41s` | `$11.49` |
+| **Σ** |  | **`8`** | **`+965/-59`** | **`7.80`% / `96.36`%** | **`+0`** | **`+0`** | **`+965/-59`** | **`$61.82`** | — | **`$7.73`** |
+
+### Batches — review: tests
+
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
+
+| wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
+|---|---|---|---|---|---|
+|`util/0`|`0`|`+0` (`+0.00`/`-0.99` pp)|`+1` (`+0.00`/`-0.64` pp)|`+0` (`+0.00`/`-1.02` pp)|`+2` (`+0.00`/`-0.77` pp)|
+|`util/0`|`1`|`+0` (`+0.00`/`-0.26` pp)|`+0` (`+0.00`/`-0.32` pp)|`+1` (`+0.27`/`-0.28` pp)|`+1` (`+0.00`/`+0.14` pp)|
+|`oid/0`|`0`|`+1` (`+0.00`/`-0.39` pp)|`+0` (`+0.00`/`-0.28` pp)|`+1` (`+0.00`/`-0.66` pp)|`+4` (`+0.00`/`+0.36` pp)|
+|`oid/0`|`1`|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+1` (`+1.74`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|
+|`oid/1`|`0`|`+2` (`+0.00`/`+0.49` pp)|`+0` (`+0.00`/`-0.23` pp)|`+0` (`+0.00`/`-0.16` pp)|`+2` (`+4.32`/`+0.20` pp)|
+| **Σ** |  | **`+3` (`+0.00`/`-1.15` pp)** | **`+1` (`+0.00`/`-1.47` pp)** | **`+3` (`+2.01`/`-2.12` pp)** | **`+9` (`+4.32`/`-0.07` pp)** |
 
 ### Batches — review: PoC + reports
 
@@ -216,25 +256,49 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 `openrouter/anthropic/claude-opus-5.5` via `claude`.
 
-| wave | batch | objective | symbols | loc | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/symbol | $/loc |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`util/0`|`2`| wrap | `4` | `51` |`+1008/-26`|`+11` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+4` (`—`/`—` pp)|`+4` (`—`/`—` pp)| `—` | `—` | `$4.00` | `21m23s` | `$1.00` | `$0.08` |
-|`util/1`|`0`| wrap | `1` | `15` |`+756/-71`|`+6` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+5` (`—`/`—` pp)|`+3` (`—`/`—` pp)| `—` | `—` | `$3.06` | `15m41s` | `$3.06` | `$0.20` |
-|`oid/1`|`1`| wrap | `18` | `252` |`+1351/-11`|`+8` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+5` (`—`/`—` pp)|`+7` (`—`/`—` pp)| `—` | `—` | `$8.55` | `40m06s` | `$0.48` | `$0.03` |
-|`oid/2`|`0`| wrap | `1` | `3` |`+0/-0`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)| `—` | `—` | `$0.64` | `4m17s` | `$0.64` | `$0.21` |
-| **Σ** |  |  | **`24`** | **`321`** | **`+3115/-108`** | **`+25` (`—`/`—` pp)** | **`+0` (`—`/`—` pp)** | **`+14` (`—`/`—` pp)** | **`+14` (`—`/`—` pp)** | **`—`** | **`—`** | **`$16.25`** | — | **`$0.68`** | **`$0.05`** |
+| wave | batch | objective | symbols | loc | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/symbol | $/loc |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+|`util/0`|`2`| wrap | `4` | `51` |`+1008/-26`| `1.30`% / `95.11`% | `+0` | `+0` | `$4.00` | `21m23s` | `$1.00` | `$0.08` |
+|`util/1`|`0`| wrap | `1` | `15` |`+756/-71`| `1.36`% / `96.43`% | `+0` | `+0` | `$3.06` | `15m41s` | `$3.06` | `$0.20` |
+|`oid/1`|`1`| wrap | `18` | `252` |`+1351/-11`| `6.07`% / `96.12`% | `+0` | `+0` | `$8.55` | `40m06s` | `$0.48` | `$0.03` |
+|`oid/2`|`0`| wrap | `1` | `3` |`+0/-0`| `6.07`% / `96.12`% | `+0` | `+0` | `$0.64` | `4m17s` | `$0.64` | `$0.21` |
+| **Σ** |  |  | **`24`** | **`321`** | **`+3115/-108`** | **`6.07`% / `96.12`%** | **`+0`** | **`+0`** | **`$16.25`** | — | **`$0.68`** | **`$0.05`** |
+
+### Batches: tests
+
+`openrouter/anthropic/claude-opus-5.5` via `claude`.
+
+| wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
+|---|---|---|---|---|---|
+|`util/0`|`2`|`+11` (`+0.18`/`-1.10` pp)|`+0` (`+0.00`/`-4.37` pp)|`+4` (`+0.12`/`-1.47` pp)|`+4` (`+0.07`/`-2.41` pp)|
+|`util/1`|`0`|`+6` (`+0.00`/`+2.09` pp)|`+0` (`+0.00`/`-0.60` pp)|`+5` (`+0.00`/`+1.57` pp)|`+3` (`+0.01`/`+0.35` pp)|
+|`oid/1`|`1`|`+8` (`+0.17`/`+1.77` pp)|`+0` (`+0.00`/`-1.12` pp)|`+5` (`+0.18`/`+2.35` pp)|`+7` (`+0.10`/`-2.56` pp)|
+|`oid/2`|`0`|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|
+| **Σ** |  | **`+25` (`+0.35`/`+2.76` pp)** | **`+0` (`+0.00`/`-6.09` pp)** | **`+14` (`+0.30`/`+2.45` pp)** | **`+14` (`+0.18`/`-4.62` pp)** |
 
 ### Batches — review
 
 `openrouter/anthropic/claude-fable-5.1` via `claude`.
 
-| wave | batch | symbols | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/symbol |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`util/0`|`2`| `4` |`+281/-117`|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)| `—` | `—` | `+281/-117` | `$12.00` | `28m49s` | `$3.00` |
-|`util/1`|`0`| `1` |`+0/-0`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)| `—` | `—` | `+0/-0` | `$6.26` | `23m51s` | `$6.26` |
-|`oid/1`|`1`| `18` |`+181/-10`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+1` (`—`/`—` pp)| `—` | `—` | `+181/-10` | `$11.62` | `34m10s` | `$0.65` |
-|`oid/2`|`0`| `1` |`+0/-0`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)| `—` | `—` | `+0/-0` | `$3.39` | `8m46s` | `$3.39` |
-| **Σ** |  | **`24`** | **`+462/-127`** | **`+1` (`—`/`—` pp)** | **`+0` (`—`/`—` pp)** | **`+1` (`—`/`—` pp)** | **`+2` (`—`/`—` pp)** | **`—`** | **`—`** | **`+462/-127`** | **`$33.27`** | — | **`$1.39`** |
+| wave | batch | symbols | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/symbol |
+|---|---|---|---|---|---|---|---|---|---|---|
+|`util/0`|`2`| `4` |`+281/-117`| `1.63`% / `96.03`% | `+0` | `+0` | `+281/-117` | `$12.00` | `28m49s` | `$3.00` |
+|`util/1`|`0`| `1` |`+0/-0`| `1.63`% / `95.18`% | `+0` | `+0` | `+0/-0` | `$6.26` | `23m51s` | `$6.26` |
+|`oid/1`|`1`| `18` |`+181/-10`| `7.80`% / `96.39`% | `+0` | `+0` | `+181/-10` | `$11.62` | `34m10s` | `$0.65` |
+|`oid/2`|`0`| `1` |`+0/-0`| `7.80`% / `96.39`% | `+0` | `+0` | `+0/-0` | `$3.39` | `8m46s` | `$3.39` |
+| **Σ** |  | **`24`** | **`+462/-127`** | **`7.80`% / `96.39`%** | **`+0`** | **`+0`** | **`+462/-127`** | **`$33.27`** | — | **`$1.39`** |
+
+### Batches — review: tests
+
+`openrouter/anthropic/claude-fable-5.1` via `claude`.
+
+| wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
+|---|---|---|---|---|---|
+|`util/0`|`2`|`+1` (`+0.00`/`-1.18` pp)|`+0` (`+0.00`/`-0.60` pp)|`+0` (`+0.00`/`-1.19` pp)|`+1` (`+0.00`/`+0.88` pp)|
+|`util/1`|`0`|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|
+|`oid/1`|`1`|`+0` (`+0.00`/`-0.15` pp)|`+0` (`+0.00`/`-0.06` pp)|`+1` (`+0.00`/`-0.15` pp)|`+1` (`+0.00`/`+0.12` pp)|
+|`oid/2`|`0`|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|`+0` (`+0.00`/`+0.00` pp)|
+| **Σ** |  | **`+1` (`+0.00`/`-1.33` pp)** | **`+0` (`+0.00`/`-0.66` pp)** | **`+1` (`+0.00`/`-1.34` pp)** | **`+2` (`+0.00`/`+1.00` pp)** |
 
 ### Batches — review: PoC + reports
 
@@ -453,15 +517,29 @@ the hidden `git__strdup` family as the tier's cloners. No PoC was rejected.
 
 Batch rows from every sub-campaign share one table per kind, so the `wave` cell names the
 sub-campaign as `<subsystem>/<wave index>`; the Overview row of that subsystem joins them.
-Two column groups are not measured per batch and read `—` throughout: the per-batch C/Rust
-coverage deltas (pp) beside each test count, and the `+unsafe fn smell` / `+raw-ptr smell`
-deltas. The unseeded scan of every wave and sub-campaign, and the seeded scan of every
-batch, are kept beside its artifacts as `scan-unsafe.json`. Test counts are `#[test]`
-functions the landing commits add, by directory; trybuild `compile_fail` cases are not
-counted. `+LoC` and `rv loc` count `.rs` lines under `crustify/rust/`, so review
-reproducer crates under `crustify/reviews/` are excluded. A wrap campaign has no port
-batches, so `Types — Batches — port` stays unfilled. A `wavefront` report category, for
-ownership findings the review resubmitted, is counted under `+misc`.
+A wrap campaign has no port batches, so the two `Types — Batches — port` tables stay
+unfilled. A `wavefront` report category, for ownership findings the review resubmitted, is
+counted under `+misc`.
+
+Each batch is measured on two tree states: just before its first landing commit (the wave
+base or the previous batch's landing) and its last landing commit. `cov (C/Rust)` is the
+latter, from one instrumented build per state: the four workloads (`--lib` unit tests,
+`ub_safe`, `ub_unsafe`, `equiv`) each run alone into their own profile directory against
+the `coverage` prebuild, and their union is the cell. C is lcov line coverage over the 196
+translation units `libgit2.so` links, with a zero baseline from the `.gcno` files so that
+untouched TUs count; Rust is cargo-llvm-cov line coverage over `crustify/rust/libgit2`'s
+non-`tests/` sources. Inline `#[cfg(test)] mod unit_tests` code lives in those sources, so
+the Rust figure includes it. A Σ `cov` cell is the state after the table's chronologically
+last landing. The `(+C/+Rust pp)` pairs in the `…: tests` tables are each workload's own
+coverage after minus before, so a batch that adds code its workload does not reach shows a
+negative Rust delta. Smell deltas are the crate-wide `unsafe_fn_smell` and `raw_ptr_smell`
+of an unseeded `crustify scan-unsafe` over the same two states.
+
+Test counts are `#[test]` functions the landing commits add, by directory; trybuild
+`compile_fail` cases are not counted. `+LoC` and `rv loc` count `.rs` lines under
+`crustify/rust/`, so review reproducer crates under `crustify/reviews/` are excluded. The
+measurement scripts live outside the repository, beside the orchestrator's other helpers;
+per-batch seeded scans stay beside each batch as `scan-unsafe.json`.
 
 ### `libgit2/util`
 
@@ -503,9 +581,14 @@ and `internal/format-cstr-empty-buffer-told-by-address`, a panic in
 `Hash` for `Oid`, the header's typed null-id initializers, two wavefront note corrections,
 an accessor inconsistency). No PoC was rejected.
 
-### BorrowSanitizer runs tests on one thread
+### BorrowSanitizer's GC hang threshold
 
-In `oid`'s final gate BorrowSanitizer's garbage collector waited past its 10 s hang
-threshold for an exited test thread while the parallel `equiv` suite ran; run on one thread
-the suite passed (42 passed, 1 ignored) with no report. `cargo-variant.sh bsan test` now
-passes `--test-threads=1`, which makes the BSan gate the slowest (about 11 minutes for `oid`).
+In `oid`'s final gate BorrowSanitizer aborted the parallel `equiv` suite: its garbage
+collector waited past its default 10 s `gc_hang_threshold_ms` for a test thread to reach a
+safepoint, which is a runtime abort, not an undefined-behaviour report. Serialized, the suite
+passed. With the threshold at 120 s it also passes in parallel (42 passed, 1 ignored, 298 s
+against 380 s serialized), so the stall is slow collection under thread churn, not a
+deadlock. `cargo-variant.sh bsan` keeps tests parallel and sets
+`BSAN_OPTIONS=gc_hang_threshold_ms=120000`; the full workspace gate then passes in 431 s
+(244 passed) against 641 s serialized.
+
