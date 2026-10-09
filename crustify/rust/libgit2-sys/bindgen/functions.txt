@@ -1,5 +1,6 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C functions names.
 # Add only the items a batch needs; keep entries sorted.
+crustify_GIT_OID_DEFAULT
 git_buf_dispose
 git_error_clear
 git_error_last
@@ -10,6 +11,9 @@ git_libgit2_init
 git_libgit2_opts
 git_odb_backend_data_alloc
 git_odb_backend_data_free
+git_oid_from_prefix
+git_oid_from_raw
+git_oid_from_string
 git_reference_normalize_name
 git_repository_open_ext
 git_strarray_dispose

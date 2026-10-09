@@ -1,0 +1,11 @@
+error[E0605]: non-primitive cast: `u32` as `OidType`
+ --> tests/ub_safe/compile_fail/oid_type_from_int_cast.rs:7:13
+  |
+7 |     let _ = raw as OidType;
+  |             ^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `i32` as `OidType`
+ --> tests/ub_safe/compile_fail/oid_type_from_int_cast.rs:8:13
+  |
+8 |     let _ = 3 as OidType;
+  |             ^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

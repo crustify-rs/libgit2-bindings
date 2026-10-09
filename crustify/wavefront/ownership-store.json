@@ -92,6 +92,12 @@
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Plain C enum of error classes (bindgen: c_uint constants 0..=36, contiguous). No storage, no pointer, no lifecycle. Consumers carry it as int: git_error.klass (int, @type git_error_t) and git_error_set/git_error_set_str(int error_class, ...), which accept any int from user code, so git_error_last()->klass may hold a value outside the enum. Wrapped as a Rust enum with discriminants from the bindgen constants, converted from int fallibly (from_raw -> Option).",
    "fields": []
+  },
+  {
+   "name": "git_oid_t",
+   "defined_in": "include/git2/oid.h",
+   "_comment_agent": "Fieldless C enum (GIT_OID_SHA1 = 1, GIT_OID_SHA256 = 2, both unconditional in include/git2/oid.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. Unnamed values flow through it: 0 means 'unset, use GIT_OID_DEFAULT (SHA1)' in every *_options.oid_type (repository.c:356/364, odb.c:307, index.c:447, commit_graph.c:431, midx.c:537, indexer.c:178, object.c:633, diff_generate.c:502) and is git_oid_type_fromstr's 'unknown' result; git_oid_size/hexsize/type_is_valid reject anything but 1 and 2 (oid.h:27-54), so git_oid_from_* return -1 'unknown type'. git_oid.type stores it narrowed to unsigned char. Rust side: never transmute; convert fallibly (OidType::from_raw / TryFrom<git_oid_t>), option-field accessors should map 0 to None.",
+   "fields": []
   }
  ],
  "symbols": [

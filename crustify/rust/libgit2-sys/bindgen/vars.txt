@@ -1,2 +1,6 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C vars names.
 # Add only the items a batch needs; keep entries sorted.
+GIT_OID_SHA1_HEXSIZE
+GIT_OID_SHA1_SIZE
+GIT_OID_SHA256_HEXSIZE
+GIT_OID_SHA256_SIZE
