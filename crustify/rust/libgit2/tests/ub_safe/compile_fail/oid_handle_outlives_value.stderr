@@ -1,0 +1,11 @@
+error[E0597]: `oid` does not live long enough
+ --> tests/ub_safe/compile_fail/oid_handle_outlives_value.rs:8:9
+  |
+6 |     let handle = {
+  |         ------ borrow later stored here
+7 |         let oid = Oid::zeroed();
+  |             --- binding `oid` declared here
+8 |         oid.as_ref()
+  |         ^^^ borrowed value does not live long enough
+9 |     };
+  |     - `oid` dropped here while still borrowed

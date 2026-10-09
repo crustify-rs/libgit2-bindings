@@ -6,6 +6,8 @@ git_error
 git_error_code
 git_error_t
 git_libgit2_opt_t
+git_oid
+git_oid_shorten
 git_oid_t
 git_reference_format_t
 git_repository_open_flag_t

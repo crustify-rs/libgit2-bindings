@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `oid` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/oid_copy_from_itself.rs:8:5
+  |
+7 |     let src = oid.as_ref();
+  |               --- immutable borrow occurs here
+8 |     oid.as_mut().copy_from(src);
+  |     ^^^^^^^^^^^^           --- immutable borrow later used here
+  |     |
+  |     mutable borrow occurs here

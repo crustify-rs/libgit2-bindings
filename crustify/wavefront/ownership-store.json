@@ -94,6 +94,34 @@
    "fields": []
   },
   {
+   "name": "git_oid",
+   "defined_in": "include/git2/oid.h",
+   "_comment_agent": "Plain value type with no pointer fields: `type` (unsigned char holding a git_oid_t value, 0 = GIT_OID_NONE/unset) and `id` (32-byte inline array, GIT_OID_MAX_SIZE). Never heap-allocated by libgit2's public API on its own; callers hold it by value or receive `const git_oid *` into a parent object. Nothing to release. Every bit pattern is accepted by oid.c: an unknown `type` makes git_oid_size/hexsize return 0 and the formatters report 'unknown type' (git_oid_nfmt/pathfmt) - BUT git_oid_tostr_s then returns its per-thread buffer without writing it (uninitialised on the thread's first call, no NUL: ASan heap-buffer-overflow in strlen confirmed with a zeroed oid), so its wrapper must reject unknown types. All-zero is libgit2's own GIT_OID_NONE. Constructors (init into caller storage): git_oid_from_string, git_oid_from_prefix, git_oid_from_raw; cloner: git_oid_cpy (memcpy of the whole struct; overlapping out/src would be UB).",
+   "fields": []
+  },
+  {
+   "name": "git_oid_shorten",
+   "defined_in": "src/libgit2/oid.c",
+   "_comment_agent": "Opaque in the public API (forward-declared in git2/oid.h, defined in oid.c); only oid.c touches its fields. Constructor git_oid_shorten_new (git__calloc + 16-node trie; NULL on OOM or when min_length does not fit an int - a hard assert(3) in _DEBUG builds), dropper git_oid_shorten_free (NULL-safe). No cloner. git_oid_shorten_add keeps borrowed pointers into its text_oid argument and validates only the characters it walks, so a short or non-hex id stored as a tail later yields git__fromhex == -1 and push_leaf writes children[-1], silently corrupting the preceding trie node (in bounds of the buffer, so ASan does not flag it; probe: add(\"azzz\") then add(\"ab0...0\") both succeed): its wrapper must accept only full 40-char hex ids, borrowed for the shortener's lifetime.",
+   "fields": [
+    {
+     "name": "nodes",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Trie buffer of `size` trie_node unions, allocated by resize_trie through git__reallocarray and released by git_oid_shorten_free (git__free). Each node is either 16 child indices or a leaf whose `tail` is a BORROWED `const char *` into a text id the caller passed to git_oid_shorten_add (retained after the call: the shortener reads the tail again when a later id shares the prefix), so the shortener must not outlive any string added to it. NULL after a failed resize inside git_oid_shorten_add: resize_trie assigns the realloc result before checking it, leaking the old buffer and leaving nodes == NULL with size unchanged, so the next add dereferences NULL; only git_oid_shorten_free remains safe on such an object."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_oid_t",
    "defined_in": "include/git2/oid.h",
    "_comment_agent": "Fieldless C enum (GIT_OID_SHA1 = 1, GIT_OID_SHA256 = 2, both unconditional in include/git2/oid.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. Unnamed values flow through it: 0 means 'unset, use GIT_OID_DEFAULT (SHA1)' in every *_options.oid_type (repository.c:356/364, odb.c:307, index.c:447, commit_graph.c:431, midx.c:537, indexer.c:178, object.c:633, diff_generate.c:502) and is git_oid_type_fromstr's 'unknown' result; git_oid_size/hexsize/type_is_valid reject anything but 1 and 2 (oid.h:27-54), so git_oid_from_* return -1 'unknown type'. git_oid.type stores it narrowed to unsigned char. Rust side: never transmute; convert fallibly (OidType::from_raw / TryFrom<git_oid_t>), option-field accessors should map 0 to None.",
@@ -689,6 +717,298 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_oid_cpy",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "src",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "memcpy destination, the whole sizeof(git_oid); must not overlap src."
+     }
+    },
+    {
+     "name": "src",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:src"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "memcpy source, read for the call only; must not overlap out (memcpy)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_from_prefix",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage filled in place after the length/type checks (memset then nibbles); partially written when a later character is invalid. Never retained."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Counted run of `len` hex characters, not NUL-terminated; read only after the type and 1 <= len <= hexsize checks, stopping at the first non-hex one. GIT_ASSERT_ARG(str) (abort in _DEBUG builds) rejects NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_from_raw",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage filled in place (memset, type, memcpy of git_oid_size(type) bytes); untouched when the type is unknown."
+     }
+    },
+    {
+     "name": "raw",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:raw"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Exactly git_oid_size(type) bytes are read (20 for SHA1, 32 for SHA256) with no length argument: the caller must supply that many. Not read for an unknown type."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_from_string",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage filled in place: from_prefix memsets it and sets type and id; on failure it may be left partially written (zeroed + some nibbles). Never retained."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated hex text read for the call only: hexsize chars, stopping at the first non-hex one (NUL included), then str[hexsize] only once all hexsize were hex, so any C string is read in bounds."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_shorten_add",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "os",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:os"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Mutated in place (trie grown via resize_trie/push_leaf, min_length raised, `full` set at SHRT_MAX nodes). Dereferenced unconditionally. After a failed resize nodes is NULL and a further add crashes."
+     }
+    },
+    {
+     "name": "text_oid",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:os"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "RETAINED: push_leaf stores &text_oid[i+1] as a leaf tail that later adds read, so the string must outlive the shortener (despite the header's 'owned by the user'). NULL returns min_length without reading. Only the characters walked are validated: a short or non-hex id is stored as a tail whose first char later gives git__fromhex == -1, and push_leaf then writes node->children[-1], corrupting the preceding trie node without any sanitizer report. Callers must pass full 40-char hex ids."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_shorten_free",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "os",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "os",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Frees nodes then the shortener (git__free); NULL is a no-op. Does not touch the borrowed text ids its leaves point at. Safe even after a failed add left nodes NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_shorten_new",
+   "defined_in": "src/libgit2/oid.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "Fresh git__calloc'd shortener with a 16-node zeroed trie, node_count 1; released by git_oid_shorten_free. NULL on allocation failure, or when min_length does not round-trip through int (GIT_ASSERT_ARG_WITH_RETVAL: error set in release builds, assert(3) abort in _DEBUG builds)."
+    }
+   }
   },
   {
    "name": "git_stdalloc_init_allocator",
