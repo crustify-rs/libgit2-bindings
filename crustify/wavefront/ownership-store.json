@@ -214,6 +214,43 @@
    "fields": []
   },
   {
+   "name": "git_signature",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "git_signature is a heap object owned by a single holder: CBox<Signature, SignatureFree> (git_signature_free drops it with both strings; git_signature_dup deep-copies it, refusing NULL fields that C would strdup). Public consumers otherwise receive `const git_signature *` borrowed from a parent (git_commit_author/committer, git_tag_tagger, git_note_author/committer, git_reflog_entry_committer, git_blame_hunk fields) and only read it; every `const git_signature *` argument (commit/tag/note/reflog/stash/rebase creation) is only read and copied, so a caller-built struct over borrowed strings (SignatureView) is a valid argument. `when` is an embedded git_time value. No refcount, no lock. Constructors: git_signature_new, git_signature_now, git_signature_from_buffer (alloc through out-param), git_signature_default / git_signature_default_from_env (need a git_repository; left to the object/signature symbol batch). C defects: git_signature_new leaks p (and p->name) when a string allocation fails; git_signature_dup leaks the partial copy on OOM; git_signature_default_from_env frees author/committer with git__free on error, leaking their strings.",
+   "fields": [
+    {
+     "name": "email",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NUL-terminated author email; same ownership as `name`: allocated by git_signature_new / from_buffer / dup from libgit2's allocator and freed by git_signature_free with git__free; pool-borrowed only in git_transaction's internal git_signature__pdup copies. NULL after an allocation failure inside git_signature__parse (unchecked extract_trimmed), which git_signature_dup and the commit writer then dereference. Never written through."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NUL-terminated author name. Owned on every public path: git_signature_new / git_signature_from_buffer (git__substrdup via extract_trimmed) and git_signature_dup (git__strdup) allocate it from libgit2's allocator, and git_signature_free releases it with git__free (also called by git_commit__free, git_tag__free, git_reflog_entry__free, git_note_free, free_hunk on the signatures those objects own). Borrowed only in the internal git_signature__pdup copies a git_transaction keeps in its pool (transaction.c copy_common / dup_reflog), which are never freed individually and never reach a public consumer. Nullable: git_signature__parse does not check extract_trimmed's result, so an allocation failure leaves it NULL while the parse (git_signature_from_buffer, commit/tag/reflog parsing) still succeeds; refdb_reftable_log_fill checks for that, git_signature_dup (strdup(NULL)) and git_signature__writebuf (%s) do not. A calloc'd signature is NULL before parse. Never written through; libgit2 only reads, copies or frees it. Rust: Option<&CStr> getter on SignatureRef, replacement setters taking an OdbDataStr (git__malloc storage released by git__free) on SignatureMut."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_strarray",
    "defined_in": "include/git2/strarray.h",
    "_comment_agent": "Wrapped in core/strarray.rs (core wave 0 batch 4) as StrArray + StrArrayVal = CVal<StrArray, StrArrayDispose> for the owned form (strings move as OdbDataStrVec), and StrArrayView<'a> for the borrowed input form, which hands out StrArrayRef only. git_strarray_copy (the deep cloner) is hidden under DEPRECATE_HARD, so copies go through OdbDataStrVec::dup_all. git_strarray_dispose is skipped for a NULL `strings` (empty state; see the first-init allocator race).",
@@ -2011,6 +2048,396 @@
       "nullable": false,
       "mutable": true,
       "note": "The caller's git_oidarray, borrowed for the call: its ids buffer is released with git__free, the struct itself is not (the caller holds it inline). Dereferenced unconditionally, so NULL crashes. The fields are left as they were: ids dangles afterwards, so the struct must not be read or disposed again without reinitialising it. Accepts {NULL, 0} and any ids from libgit2's allocator."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_default",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: written only on success with a git_signature_now result owned by the caller."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": null,
+      "note": "The repository whose config snapshot supplies user.name / user.email; only used for the call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_default_from_env",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "author_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "author_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Optional out slot (author_out || committer_out is asserted): written only on success with a fresh signature owned by the caller. On error both temporaries are released with git__free, leaking their strings."
+     }
+    },
+    {
+     "name": "committer_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional out slot, as author_out, from the GIT_COMMITTER_* variables."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": null,
+      "note": "The repository whose config snapshot supplies user.name / user.email; only used for the call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_dup",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "source",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "dest",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written only on success with a fresh git__calloc'd copy owned by the caller (git_signature_free). Left untouched when source is NULL (returns 0) or an allocation fails (returns -1, leaking the partial copy and any string already duplicated)."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Only read: name and email are git__strdup'd (strdup(NULL) crashes, so a signature whose parse lost a string to OOM cannot be copied), when copied field by field. NULL source returns 0 without writing dest (blame's dup_hunk relies on it)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_free",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "sig",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "sig",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "NULL is a no-op. Frees name and email with git__free (either may be NULL after an allocation failure in git_signature__parse), NULLs them, then frees the struct with git__free. Every public owned signature (new/now/default/default_from_env/from_buffer/dup) is released here; commits, tags, notes, reflog entries and blame hunks call it on the signatures they own. Pool copies (git_signature__pdup) must never reach it."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_from_buffer",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "buf",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; the whole NUL-terminated signature line `Name <email> secs zone`, read for the call and never retained."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, NULLed first: on success a fresh git__calloc'd signature owned by the caller (git_signature_free). Its name or email is NULL when the unchecked extract_trimmed allocation failed, yet 0 is returned. On a parse error (GIT_EINVALID) the struct is freed and out stays NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_new",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "sig_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "email",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call and copied (trimmed) into fresh libgit2-allocated strings, never retained."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call and copied (trimmed) into fresh libgit2-allocated strings, never retained."
+     }
+    },
+    {
+     "name": "sig_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, set to NULL once the arguments pass their asserts: receives a fresh git__calloc'd signature with trimmed git__substrdup copies of name and email (sign derived from the offset), owned by the caller (git_signature_free). Stays NULL on failure (angle brackets, empty trimmed name/email, OOM); an allocation failure for a string leaks the half-built signature."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_signature_now",
+   "defined_in": "src/libgit2/signature.c",
+   "lifetime": {
+    "for": "sig_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "email",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call and copied (trimmed) into fresh libgit2-allocated strings, never retained."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call and copied (trimmed) into fresh libgit2-allocated strings, never retained."
+     }
+    },
+    {
+     "name": "sig_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot; as git_signature_new, with the current time and local UTC offset (time(), gmtime_r, mktime)."
      }
     }
    ]

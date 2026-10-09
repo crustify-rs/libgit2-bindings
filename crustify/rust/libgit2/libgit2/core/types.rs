@@ -85,6 +85,45 @@
 //! that writes into it (libgit2's `git_filter_list_stream_*` take one as their target,
 //! write into it and close it, but never free it), or becomes a [`WriteStreamBox`] to
 //! hand over to libgit2 (a filter's `stream` callback returns one, which libgit2 frees).
+//!
+//! # Signatures
+//!
+//! A `git_signature` is a name, an email and a [`Time`]: who did something, and when.
+//! libgit2 hands signatures out in two ways:
+//!
+//! - **Owned.** `git_signature_new`, `git_signature_now`, `git_signature_from_buffer` and
+//!   `git_signature_dup` allocate the struct and copies of both strings from libgit2's
+//!   allocator, and `git_signature_free` releases all three. Rust holds such a signature
+//!   as a [`SignatureBox`] ([`Signature::new`], [`Signature::now`], [`Signature::parse`],
+//!   `Clone`). Its strings move in and out as [`OdbDataStr`]s, which the same `git__free`
+//!   releases.
+//! - **Borrowed.** Commits, tags, notes, reflog entries and blame hunks own the signatures
+//!   they record and lend them as `const git_signature *`, valid while their holder lives:
+//!   a [`SignatureRef`] tied to that holder.
+//!
+//! Every `const git_signature *` libgit2 takes (commit, tag, note, reflog and stash
+//! creation, rebase commits) is only read, and what libgit2 keeps of it is copied. Rust
+//! builds one over borrowed strings as a [`SignatureView`], as C code builds one on the
+//! stack.
+//!
+//! Every handle upholds one invariant, which the safe constructors and setters keep and a
+//! crate-internal `from_ptr` must vouch for: `name` and `email` are each NULL or a
+//! NUL-terminated string that outlives the handle, and behind a [`SignatureMut`] each is
+//! NULL or an allocation of libgit2's allocator that the signature owns. Rust never
+//! writes NULL. libgit2's parser leaves it when it runs out of memory copying a string,
+//! and still reports success, in `git_signature_from_buffer` and in the commits, tags and
+//! reflogs it parses: [`Signature::parse`] refuses such a signature, the getters read the
+//! lost string as `None`, and copies refuse it, since `git_signature_dup` would
+//! `strdup(NULL)`. Wrappers that pass a borrowed signature to libgit2's writers must
+//! refuse it too: they print both strings with `%s`.
+//!
+//! libgit2 never checks a signature it is given. [`Signature::new`] and [`Signature::now`]
+//! trim the strings and refuse angle brackets and empty ones, but a [`SignatureView`] and
+//! the setters take their strings as they are, and a name or email holding a bracket or a
+//! newline is written into objects git cannot parse back.
+//!
+//! `git_signature_default` and `git_signature_default_from_env` read the identity from a
+//! repository's configuration, so they are wrapped with the repository.
 
 use core::ffi::{CStr, c_char, c_int};
 use core::fmt;
@@ -92,14 +131,15 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 use core::ops::BitOr;
-use core::ptr::{NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use std::ffi::CString;
 
-use ffibox::{CBox, CZeroable, define_ctype, impl_cdrop};
+use ffibox::{CBox, CZeroable, define_ctype, impl_cdrop, impl_cdupclone};
 
 use crate::ffi;
+use crate::libgit2::raw::OdbDataStr;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 /// The type of a Git object: what its content is, which fixes how libgit2 parses it.
 ///
@@ -949,6 +989,456 @@ impl Hash for Time {
 const _: () = assert!(
     size_of::<Time>() == size_of::<ffi::git_time>()
         && align_of::<Time>() == align_of::<ffi::git_time>()
+);
+
+define_ctype!(
+    /// An action signature (`git_signature`): who did something, as a name and an
+    /// email, and when, as a [`Time`]; what commits, tags, notes and reflog entries
+    /// record of their authors.
+    ///
+    /// Only ever behind a pointer (see the [module docs](self#signatures)): owned as a
+    /// [`SignatureBox`], which [`new`](Self::new), [`now`](Self::now) and
+    /// [`parse`](Self::parse) build; borrowed as a [`SignatureRef`] from whatever holds
+    /// it, or from a [`SignatureView`] over borrowed strings. Only an owned signature
+    /// has a [`SignatureMut`], whose setters free the strings they replace.
+    ///
+    /// There is no bare value to hold: one would leak its strings when dropped.
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::core::types::Signature;
+    ///
+    /// let _ = <Signature as ffibox::CZeroable>::zeroed();
+    /// ```
+    ///
+    /// Wraps: git_signature
+    Signature, SignatureRef, SignatureMut, ffi::git_signature
+);
+
+// SAFETY: an owned signature is a struct and its two strings, all allocations of
+// libgit2's allocator that the struct owns exclusively; `git__free` releases them on any
+// thread, and no libgit2 routine keeps thread-local state about them, so moving the owner
+// moves sole ownership of them.
+unsafe impl Send for Signature {}
+// SAFETY: `SignatureMut` is an exclusive borrow of such a signature, as `&mut Signature`.
+unsafe impl Send for SignatureMut<'_> {}
+
+// SAFETY: shared access only reads the struct and the strings it addresses: every write
+// goes through `SignatureMut`, which excludes other handles, and no libgit2 routine
+// writes through a `const git_signature *`.
+unsafe impl Sync for Signature {}
+// SAFETY: as above; `SignatureRef` is a shared borrow, as `&Signature`. The signature it
+// reads may also be a `SignatureView`'s, over strings borrowed as `&CStr`, which is `Sync`.
+unsafe impl Send for SignatureRef<'_> {}
+// SAFETY: as above.
+unsafe impl Sync for SignatureRef<'_> {}
+// SAFETY: `&SignatureMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for SignatureMut<'_> {}
+
+/// Releases a signature through `git_signature_free`, which hands its name and email,
+/// then the struct, to `git__free`; copies one through `git_signature_dup`.
+///
+/// A copy needs both strings: `git_signature_dup` hands each to `strdup`, which a NULL
+/// one (left by an allocation failure while libgit2 parsed the signature) would crash.
+/// The policy refuses such a copy instead, so [`try_clone`](CBox::try_clone) gives
+/// `None` and `Clone` aborts, as it does when the copy runs out of memory;
+/// [`SignatureRef::to_signature`] reports it as an error.
+///
+/// Wraps: git_signature_free
+/// Wraps: git_signature_dup
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SignatureFree;
+
+/// An owned [`Signature`], freed by `git_signature_free` on drop; `Clone` copies it
+/// through `git_signature_dup`.
+pub type SignatureBox = CBox<Signature, SignatureFree>;
+
+impl_cdrop!(SignatureFree, Signature, ffi::git_signature_free);
+impl_cdupclone!(SignatureFree, Signature, signature_dup);
+
+/// `git_signature_dup` in `impl_cdupclone!`'s shape: a fresh copy, or NULL when the
+/// copy fails, libgit2 cannot be initialised, or `sig` lacks its name or its email.
+///
+/// # Safety
+///
+/// `sig` must address a live `git_signature` whose `name` and `email` are each NULL or
+/// a NUL-terminated string, none of them written during the call.
+unsafe fn signature_dup(sig: *mut ffi::git_signature) -> *mut ffi::git_signature {
+    // SAFETY: per this function's contract `sig` addresses a live `git_signature`.
+    let (name, email) = unsafe { (addr_of!((*sig).name).read(), addr_of!((*sig).email).read()) };
+    if name.is_null() || email.is_null() || !runtime_pinned() {
+        return ptr::null_mut();
+    }
+    let mut copy = ptr::null_mut();
+    // SAFETY: `copy` is a writable slot; `sig` is a live signature with two
+    // NUL-terminated strings, only read. libgit2 writes the slot only on success, with a
+    // fresh signature the caller owns. The runtime is pinned, so a failure is reported on
+    // live thread-local state.
+    let rc = unsafe { ffi::git_signature_dup(&mut copy, sig) };
+    if rc < 0 { ptr::null_mut() } else { copy }
+}
+
+/// The signature a constructor returning `rc` handed out, or libgit2's error.
+///
+/// A signature without its name or its email is refused, with the out-of-memory error
+/// that lost it: `git_signature_from_buffer` reports success when it could not allocate
+/// one of them.
+fn constructed(rc: c_int, signature: Option<SignatureBox>) -> Result<SignatureBox, ErrorBuf> {
+    let signature = signature.filter(|_| rc >= 0).ok_or_else(last)?;
+    let complete = {
+        let r = signature.as_ref();
+        r.name().is_some() && r.email().is_some()
+    };
+    if complete { Ok(signature) } else { Err(last()) }
+}
+
+impl Signature {
+    /// A signature of `name` and `email` at `seconds` since the epoch, in the zone
+    /// `offset_minutes` east of UTC, signed as [`Time::new`] signs it.
+    ///
+    /// libgit2 fails, with its error, when either string contains `<` or `>`; otherwise
+    /// it trims both of the bytes git drops at their ends (every byte up to and including
+    /// the space, and `,:;"\'`), and fails when either is then empty. Any time is
+    /// accepted; see the [module docs](self) for what libgit2 then writes of a time
+    /// outside `u32` seconds or at `i32::MIN` minutes.
+    ///
+    /// When libgit2 runs out of memory copying a string, it leaks the half-built
+    /// signature before reporting the error.
+    ///
+    /// Wraps: git_signature_new
+    pub fn new(
+        name: &CStr,
+        email: &CStr,
+        seconds: i64,
+        offset_minutes: i32,
+    ) -> Result<SignatureBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; `name` and `email` are non-NULL
+        // NUL-terminated strings, as libgit2 asserts, read for the call and copied, never
+        // retained. The runtime is pinned, so a failure is reported on live thread-local
+        // state.
+        let rc = unsafe {
+            ffi::git_signature_new(
+                &mut out,
+                name.as_ptr(),
+                email.as_ptr(),
+                seconds,
+                offset_minutes,
+            )
+        };
+        // SAFETY: `git_signature_new` leaves `out` NULL on failure (adopted as `None`), or
+        // writes a fresh signature from libgit2's allocator that the caller owns alone,
+        // released by `git_signature_free` as `SignatureFree` does.
+        constructed(rc, unsafe { SignatureBox::from_c(out) })
+    }
+
+    /// As [`new`](Self::new), at the current time in the local timezone: the system
+    /// clock's seconds, and the offset C's `mktime` derives for them.
+    ///
+    /// Concurrent calls are sound: glibc serialises its timezone state under a lock of
+    /// its own. ThreadSanitizer cannot see that lock, and reports them as a race on
+    /// glibc's copy of `TZ`.
+    ///
+    /// Wraps: git_signature_now
+    pub fn now(name: &CStr, email: &CStr) -> Result<SignatureBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `new`.
+        let rc = unsafe { ffi::git_signature_now(&mut out, name.as_ptr(), email.as_ptr()) };
+        // SAFETY: `git_signature_now` leaves `out` NULL on failure (adopted as `None`), or
+        // writes a fresh signature from libgit2's allocator that the caller owns alone,
+        // released by `git_signature_free` as `SignatureFree` does.
+        constructed(rc, unsafe { SignatureBox::from_c(out) })
+    }
+
+    /// Parses the signature line `buf`, as git writes one after `author `: a name, an
+    /// email between `<` and `>`, then optionally the seconds and the zone, as in
+    /// `A U Thor <author@example.com> 1700000000 +0130`.
+    ///
+    /// The name and email are trimmed as [`new`](Self::new) trims them, but may contain
+    /// angle brackets or be empty. A missing time leaves the epoch, and the zone is kept
+    /// as libgit2 reads it, a malformed one included (see [`Time`]). Fails, with
+    /// libgit2's error, without an email in angle brackets or with seconds that do not
+    /// parse.
+    ///
+    /// libgit2 reports success when it runs out of memory copying the name or the
+    /// email, leaving it NULL; that signature is refused here, with the out-of-memory
+    /// error, so every signature this builds has both.
+    ///
+    /// Wraps: git_signature_from_buffer
+    pub fn parse(buf: &CStr) -> Result<SignatureBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `buf` a non-NULL NUL-terminated string, as
+        // libgit2 asserts, read up to its NUL for the call only. The runtime is pinned.
+        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        // SAFETY: `git_signature_from_buffer` leaves `out` NULL on failure (adopted as `None`), or
+        // writes a fresh signature from libgit2's allocator that the caller owns alone,
+        // released by `git_signature_free` as `SignatureFree` does.
+        constructed(rc, unsafe { SignatureBox::from_c(out) })
+    }
+}
+
+impl<'a> SignatureRef<'a> {
+    /// The name, borrowed in place for as long as the signature is; `None` only where
+    /// libgit2 ran out of memory copying it while it parsed the signature (a commit's,
+    /// say); every signature this crate builds has one.
+    ///
+    /// Field: git_signature.name
+    pub fn name(&self) -> Option<&'a CStr> {
+        // SAFETY: a read through the shared handle's pointer to a live `git_signature`.
+        let name = unsafe { addr_of!((*self.as_ptr()).name).read() };
+        // SAFETY: per the handles' invariant a non-NULL name is a NUL-terminated string
+        // that outlives the handle, i.e. `'a`; nothing writes or frees it while a shared
+        // handle lives, since that needs the exclusive one.
+        (!name.is_null()).then(|| unsafe { CStr::from_ptr(name) })
+    }
+
+    /// The email, borrowed in place for as long as the signature is; `None` only where
+    /// libgit2 ran out of memory copying it, as for [`name`](Self::name).
+    ///
+    /// Field: git_signature.email
+    pub fn email(&self) -> Option<&'a CStr> {
+        // SAFETY: a read through the shared handle's pointer to a live `git_signature`.
+        let email = unsafe { addr_of!((*self.as_ptr()).email).read() };
+        // SAFETY: as in `name`.
+        (!email.is_null()).then(|| unsafe { CStr::from_ptr(email) })
+    }
+
+    /// When the action happened, borrowed in place for as long as the signature is.
+    ///
+    /// Field: git_signature.when
+    pub fn when(&self) -> TimeRef<'a> {
+        // SAFETY: a projection, without a read, of a live `git_signature`'s field.
+        let when = unsafe { addr_of!((*self.as_ptr()).when) };
+        // SAFETY: `when` is the embedded `git_time` of a signature that lives for `'a`,
+        // initialised as every field is, and only read through the shared handle.
+        unsafe { TimeRef::from_ptr(when.cast_mut()) }.expect("a field's address is not NULL")
+    }
+
+    /// A copy of the signature in libgit2's allocator, its strings copied, as
+    /// `git_signature_dup` makes one. [`SignatureView`]s and the signatures libgit2's
+    /// objects hold become owned this way; an owner also copies with `Clone`.
+    ///
+    /// Fails with libgit2's error when it runs out of memory, or cannot be initialised;
+    /// and, with a `GIT_ERROR_INVALID` error set on the thread, for a signature without
+    /// its name or its email, which `git_signature_dup` would crash on.
+    ///
+    /// Wraps: git_signature_dup
+    pub fn to_signature(&self) -> Result<SignatureBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        if self.name().is_none() || self.email().is_none() {
+            set(
+                ErrorClass::Invalid,
+                c"failed to copy signature - missing name or email",
+            );
+            return Err(last());
+        }
+        // SAFETY: the handle addresses a live signature whose name and email are
+        // NUL-terminated strings (checked non-NULL above), which nothing writes while
+        // the shared handle lives; `git_signature_dup` only reads it.
+        let copy = unsafe { signature_dup(self.as_ptr().cast_mut()) };
+        // SAFETY: NULL, or a fresh signature from `git_signature_dup` the caller owns,
+        // released by `git_signature_free` as `SignatureFree` does.
+        unsafe { SignatureBox::from_c(copy) }.ok_or_else(last)
+    }
+}
+
+impl SignatureMut<'_> {
+    /// Replaces the name, releasing the one held before.
+    ///
+    /// Any string is accepted, as a C caller writing the field may: libgit2 writes a
+    /// name into commits and tags as it is, so one holding `<`, `>` or a newline is
+    /// written into an object git cannot parse back. [`Signature::new`] refuses those
+    /// brackets.
+    ///
+    /// Field: git_signature.name
+    pub fn set_name(&mut self, name: OdbDataStr) {
+        drop(self.replace_name(name));
+    }
+
+    /// Replaces the name, handing back the one held before (`None` where libgit2 had
+    /// lost it, as [`SignatureRef::name`] reads it).
+    ///
+    /// Field: git_signature.name
+    pub fn replace_name(&mut self, name: OdbDataStr) -> Option<OdbDataStr> {
+        // SAFETY: a projection, without a read, of a live `git_signature`'s field
+        // through the exclusive handle's pointer.
+        let field = unsafe { addr_of_mut!((*self.as_mut_ptr()).name) };
+        // SAFETY: `field` is the live, exclusively borrowed `name` slot.
+        unsafe { replace_string(field, name) }
+    }
+
+    /// Replaces the email, releasing the one held before. Any string is accepted, as
+    /// for [`set_name`](Self::set_name); an email holding `>` or a newline breaks the
+    /// objects libgit2 writes it into.
+    ///
+    /// Field: git_signature.email
+    pub fn set_email(&mut self, email: OdbDataStr) {
+        drop(self.replace_email(email));
+    }
+
+    /// Replaces the email, handing back the one held before (`None` where libgit2 had
+    /// lost it).
+    ///
+    /// Field: git_signature.email
+    pub fn replace_email(&mut self, email: OdbDataStr) -> Option<OdbDataStr> {
+        // SAFETY: as in `replace_name`.
+        let field = unsafe { addr_of_mut!((*self.as_mut_ptr()).email) };
+        // SAFETY: `field` is the live, exclusively borrowed `email` slot.
+        unsafe { replace_string(field, email) }
+    }
+
+    /// When the action happened, for its setters, borrowed in place.
+    ///
+    /// Field: git_signature.when
+    pub fn when_mut(&mut self) -> TimeMut<'_> {
+        // SAFETY: a projection, without a read, of a live `git_signature`'s field
+        // through the exclusive handle's pointer.
+        let when = unsafe { addr_of_mut!((*self.as_mut_ptr()).when) };
+        // SAFETY: `when` is the embedded `git_time` of a signature this handle borrows
+        // exclusively for the result's lifetime, which the result reborrows.
+        unsafe { TimeMut::from_ptr(when) }.expect("a field's address is not NULL")
+    }
+
+    /// Replaces when the action happened.
+    ///
+    /// Field: git_signature.when
+    pub fn set_when(&mut self, when: Time) {
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_signature`; `git_time` is plain data, with nothing to release.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).when).write(when.into()) }
+    }
+}
+
+/// Stores `new` in the string slot `field` and hands back what it held.
+///
+/// # Safety
+///
+/// `field` must be the `name` or `email` slot of a live signature behind a
+/// [`SignatureMut`], borrowed exclusively for the call: per the handles' invariant it
+/// holds NULL or a string from libgit2's allocator that the signature owns.
+unsafe fn replace_string(field: *mut *mut c_char, new: OdbDataStr) -> Option<OdbDataStr> {
+    // SAFETY: per this function's contract the slot is live and exclusively borrowed;
+    // its old string's ownership leaves the signature as the new one's enters it.
+    let old = unsafe { field.replace(new.into_raw()) };
+    // SAFETY: `old` is NULL or a string from libgit2's allocator the signature owned and
+    // no longer refers to, released by `git__free` as `OdbDataStrFree` does.
+    unsafe { OdbDataStr::from_raw(old) }
+}
+
+impl fmt::Debug for SignatureRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Signature")
+            .field("name", &self.name())
+            .field("email", &self.email())
+            .field("when", &self.when())
+            .finish()
+    }
+}
+
+impl fmt::Debug for SignatureMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'b> PartialEq<SignatureRef<'b>> for SignatureRef<'_> {
+    /// Field by field, as `git_signature__equal` compares signatures: the strings by
+    /// their bytes, the times as [`TimeRef`] compares them.
+    fn eq(&self, other: &SignatureRef<'b>) -> bool {
+        self.name() == other.name() && self.email() == other.email() && self.when() == other.when()
+    }
+}
+
+impl Eq for SignatureRef<'_> {}
+
+/// A signature (`git_signature`) over borrowed strings, for the `const git_signature *`
+/// parameters libgit2 only reads: what C code builds on the stack as
+/// `git_signature sig = { name, email, when }`.
+///
+/// The struct is Rust's own, and the strings stay the caller's: nothing is allocated from
+/// libgit2, nothing reaches `git_signature_free`, and the view only hands out the shared
+/// [`SignatureRef`], so no setter can free what it borrows.
+/// [`SignatureRef::to_signature`] copies it into an owned signature.
+///
+/// Unlike [`Signature::new`], a view takes its strings as they are: libgit2 writes them
+/// into commits and tags without checking them, so a name or email holding angle
+/// brackets or a newline makes an object git cannot parse back.
+///
+/// There is no exclusive handle:
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::core::types::{SignatureView, Time};
+///
+/// let mut view = SignatureView::new(c"A", c"a@b", Time::new(0, 0));
+/// let _ = view.as_mut();
+/// ```
+///
+/// Wraps: git_signature
+/// Handwritten
+pub struct SignatureView<'a> {
+    /// `name` and `email` address the borrowed strings.
+    signature: Signature,
+    _strs: PhantomData<&'a CStr>,
+}
+
+// SAFETY: a view is a `git_signature` over two strings borrowed as `&'a CStr`, which is
+// `Send` and `Sync`, and a plain `git_time`; nothing writes it after construction, and
+// the strings are never freed through it.
+unsafe impl Send for SignatureView<'_> {}
+// SAFETY: as above: shared access only reads.
+unsafe impl Sync for SignatureView<'_> {}
+
+impl<'a> SignatureView<'a> {
+    /// A view of `name` and `email`, at `when`.
+    pub fn new(name: &'a CStr, email: &'a CStr, when: Time) -> Self {
+        let raw = ffi::git_signature {
+            name: name.as_ptr().cast_mut(),
+            email: email.as_ptr().cast_mut(),
+            when: when.into(),
+        };
+        Self {
+            signature: Signature(raw, PhantomData),
+            _strs: PhantomData,
+        }
+    }
+
+    /// The shared handle, for reading the signature or passing it to C.
+    pub fn as_ref(&self) -> SignatureRef<'_> {
+        self.signature.as_ref()
+    }
+}
+
+impl Clone for SignatureView<'_> {
+    fn clone(&self) -> Self {
+        Self {
+            signature: Signature(self.signature.0, PhantomData),
+            _strs: PhantomData,
+        }
+    }
+}
+
+impl fmt::Debug for SignatureView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `Signature` is a `git_signature`, so C reads one in place, and owns one through a
+// `SignatureBox`; a view's `Signature` is held by value.
+const _: () = assert!(
+    size_of::<Signature>() == size_of::<ffi::git_signature>()
+        && align_of::<Signature>() == align_of::<ffi::git_signature>()
 );
 
 define_ctype!(
@@ -2356,5 +2846,342 @@ mod unit_tests {
     fn branch_enum_is_the_c_enum() {
         assert_eq!(size_of::<BranchType>(), size_of::<ffi::git_branch_t>());
         assert_eq!(align_of::<BranchType>(), align_of::<ffi::git_branch_t>());
+    }
+
+    mod signatures {
+        use super::super::*;
+        use crate::libgit2::raw::{OdbDataBox, OdbDataStrFree};
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// Refuses every request while set.
+        static REFUSE_ALL: AtomicBool = AtomicBool::new(false);
+        /// Requests still granted before one is refused; negative grants all.
+        static GRANTS: AtomicIsize = AtomicIsize::new(-1);
+
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut core::ffi::c_void;
+            fn realloc(p: *mut core::ffi::c_void, n: usize) -> *mut core::ffi::c_void;
+            fn free(p: *mut core::ffi::c_void);
+        }
+
+        /// libc's allocator, refusing everything under `REFUSE_ALL`, and the one request
+        /// `GRANTS` counts down to.
+        struct Failing;
+
+        impl Failing {
+            fn refuse() -> bool {
+                REFUSE_ALL.load(SeqCst) || GRANTS.fetch_sub(1, SeqCst) == 0
+            }
+        }
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Failing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if Self::refuse() {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if Self::refuse() {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        /// Installs [`Failing`] as libgit2's allocator, before anything is allocated.
+        fn install_failing() {
+            let allocator = Allocator::new::<Failing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
+            // every member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+
+        /// A signature holding `name` and `email` as they are, NULL included, as
+        /// libgit2's parser leaves one after losing a string; built in libgit2's
+        /// allocator and released by `git_signature_free`.
+        fn raw_signature(name: Option<&CStr>, email: Option<&CStr>) -> SignatureBox {
+            let dup = |s: Option<&CStr>| {
+                s.map_or(ptr::null_mut(), |s| {
+                    OdbDataStrFree::dup(s).unwrap().into_raw()
+                })
+            };
+            let mut storage = OdbDataBox::<Signature>::new_uninit().unwrap();
+            // SAFETY: `storage` is fresh, writable storage for one `git_signature`.
+            unsafe {
+                storage.as_c_ptr().write(ffi::git_signature {
+                    name: dup(name),
+                    email: dup(email),
+                    when: Time::new(5, -90).into(),
+                })
+            };
+            // SAFETY: the storage now holds a signature whose strings are NULL or
+            // libgit2-allocated strings it owns, which `git_signature_free` releases with
+            // the struct, through the allocator `OdbDataFree` used.
+            unsafe { storage.assume_init().with_policy(SignatureFree).0 }
+        }
+
+        #[test]
+        fn layout_matches_c() {
+            assert_eq!(size_of::<Signature>(), size_of::<ffi::git_signature>());
+            assert_eq!(align_of::<Signature>(), align_of::<ffi::git_signature>());
+            assert_eq!(
+                size_of::<SignatureRef<'_>>(),
+                size_of::<*const ffi::git_signature>()
+            );
+            assert_eq!(
+                size_of::<SignatureMut<'_>>(),
+                size_of::<*const ffi::git_signature>()
+            );
+            assert_eq!(
+                size_of::<SignatureBox>(),
+                size_of::<*mut ffi::git_signature>()
+            );
+            assert_eq!(
+                size_of::<Option<SignatureBox>>(),
+                size_of::<*mut ffi::git_signature>()
+            );
+        }
+
+        /// A view lends its strings in place, never copies them, and reads its time back.
+        #[test]
+        fn view_reads_its_borrowed_strings() {
+            let name = c"A U Thor".to_owned();
+            let email = c"author@example.com".to_owned();
+            let view = SignatureView::new(&name, &email, Time::new(1_700_000_000, -90));
+            let r = view.as_ref();
+            assert_eq!(r.name().unwrap().as_ptr(), name.as_ptr());
+            assert_eq!(r.email().unwrap().as_ptr(), email.as_ptr());
+            assert_eq!(r.when().to_time(), Time::new(1_700_000_000, -90));
+            assert_eq!(r.when().sign(), b'-');
+            let copy = view.clone();
+            assert_eq!(copy.as_ref(), r);
+            assert_eq!(copy.as_ref().name().unwrap().as_ptr(), name.as_ptr());
+            assert_eq!(
+                format!("{view:?}"),
+                r#"Signature { name: Some("A U Thor"), email: Some("author@example.com"), when: Time { seconds: 1700000000, offset_minutes: -90, sign: '-' } }"#
+            );
+        }
+
+        /// Equality is field by field: strings by bytes, times by their three fields.
+        #[test]
+        fn views_compare_field_by_field() {
+            let base = SignatureView::new(c"A", c"a@b", Time::new(1, 60));
+            assert_eq!(
+                base.as_ref(),
+                SignatureView::new(c"A", c"a@b", Time::new(1, 60)).as_ref()
+            );
+            let different = [
+                SignatureView::new(c"B", c"a@b", Time::new(1, 60)),
+                SignatureView::new(c"A", c"a@c", Time::new(1, 60)),
+                SignatureView::new(c"A", c"a@b", Time::new(2, 60)),
+                SignatureView::new(c"A", c"a@b", Time::new(1, -60)),
+            ];
+            for other in &different {
+                assert_ne!(base.as_ref(), other.as_ref(), "{other:?}");
+            }
+            let mut signed = Time::new(1, 60);
+            signed.as_mut().set_sign(b'x');
+            assert_ne!(
+                base.as_ref(),
+                SignatureView::new(c"A", c"a@b", signed).as_ref()
+            );
+        }
+
+        #[test]
+        fn auto_traits() {
+            fn send_sync<T: Send + Sync>() {}
+            send_sync::<SignatureBox>();
+            send_sync::<SignatureView<'static>>();
+            send_sync::<SignatureRef<'static>>();
+            send_sync::<SignatureMut<'static>>();
+        }
+
+        /// The replacement setters move the new string in and the old one out, without
+        /// copying either.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn replacing_moves_the_strings() {
+            let mut sig = Signature::new(c"A", c"a@b", 7, 30).unwrap();
+            let name = OdbDataStrFree::dup(c"B").unwrap();
+            let name_at = name.as_ptr();
+            let old_at = sig.as_ref().name().unwrap().as_ptr();
+            let old = sig.as_mut().replace_name(name).unwrap();
+            assert_eq!(old.as_ptr(), old_at);
+            assert_eq!(old.to_str(), Ok("A"));
+            assert_eq!(sig.as_ref().name().unwrap().as_ptr(), name_at);
+            let email = OdbDataStrFree::dup(c"b@c").unwrap();
+            let email_at = email.as_ptr();
+            sig.as_mut().set_email(email);
+            assert_eq!(sig.as_ref().email().unwrap().as_ptr(), email_at);
+            assert_eq!(sig.as_ref().email(), Some(c"b@c"));
+            assert_eq!(sig.as_ref().when().to_time(), Time::new(7, 30));
+        }
+
+        /// A signature without its strings reads them as `None`, takes new ones, refuses
+        /// to be copied (C would `strdup(NULL)`), and is freed by `git_signature_free`.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn lost_strings_read_as_none_and_refuse_copies() {
+            for (name, email) in [(None, Some(c"a@b")), (Some(c"A"), None), (None, None)] {
+                let mut sig = raw_signature(name, email);
+                let r = sig.as_ref();
+                assert_eq!((r.name(), r.email()), (name, email));
+                assert_eq!(r.when().to_time(), Time::new(5, -90));
+                assert!(sig.try_clone().is_none());
+                let error = sig.as_ref().to_signature().unwrap_err();
+                assert_eq!(error.class(), Some(ErrorClass::Invalid));
+                assert_eq!(
+                    error.message(),
+                    c"failed to copy signature - missing name or email"
+                );
+                assert!(format!("{:?}", sig.as_ref()).contains("None"));
+
+                // Filling the lost strings makes it whole, and copyable.
+                let lost_name = sig
+                    .as_mut()
+                    .replace_name(OdbDataStrFree::dup(c"N").unwrap());
+                assert_eq!(lost_name.as_ref().map(|s| s.as_c_str()), name);
+                if sig.as_ref().email().is_none() {
+                    sig.as_mut().set_email(OdbDataStrFree::dup(c"n@m").unwrap());
+                }
+                let copy = sig.try_clone().unwrap();
+                assert_eq!(copy.as_ref(), sig.as_ref());
+            }
+        }
+
+        /// `git_signature_from_buffer` reports success when it cannot copy the name or
+        /// the email, leaving it NULL; `Signature::parse` refuses that signature with the
+        /// out-of-memory error, and frees what C built (LSan, in the asan variant).
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn parse_refuses_a_signature_libgit2_lost_a_string_of() {
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::parse_refuses_a_signature_libgit2_lost_a_string_of"
+                ),
+                || {
+                    install_failing();
+                    assert!(runtime_pinned());
+                    // Allocate the thread's error state before allocations start failing.
+                    set(ErrorClass::Invalid, c"primed");
+                    let line = c"A U Thor <a@b> 12 +0100";
+
+                    // The C defect: one request granted (the struct), the name refused.
+                    GRANTS.store(1, SeqCst);
+                    let mut out = ptr::null_mut();
+                    // SAFETY: a writable slot and a NUL-terminated line, read for the call.
+                    let rc = unsafe { ffi::git_signature_from_buffer(&mut out, line.as_ptr()) };
+                    GRANTS.store(-1, SeqCst);
+                    assert_eq!(rc, 0);
+                    // SAFETY: `out` is the signature C returned, read, then freed once.
+                    unsafe {
+                        assert!((*out).name.is_null());
+                        assert!(!(*out).email.is_null());
+                        ffi::git_signature_free(out);
+                    }
+
+                    // The struct, the name, then the email refused: always an error.
+                    for grants in 0..3 {
+                        set(ErrorClass::Invalid, c"primed");
+                        GRANTS.store(grants, SeqCst);
+                        let error = Signature::parse(line).unwrap_err();
+                        GRANTS.store(-1, SeqCst);
+                        assert_eq!(error.class(), Some(ErrorClass::NoMemory), "{grants}");
+                        assert_eq!(error.message(), c"Out of memory");
+                    }
+                    let sig = Signature::parse(line).unwrap();
+                    assert_eq!(sig.as_ref().name(), Some(c"A U Thor"));
+
+                    // A copy that runs out of memory fails cleanly. C leaks its partial
+                    // copy, so only the struct itself is refused here.
+                    set(ErrorClass::Invalid, c"primed");
+                    GRANTS.store(0, SeqCst);
+                    assert!(sig.try_clone().is_none());
+                    GRANTS.store(0, SeqCst);
+                    let error = sig.as_ref().to_signature().unwrap_err();
+                    GRANTS.store(-1, SeqCst);
+                    assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                },
+            );
+        }
+
+        /// When libgit2 cannot be initialised, every constructor and copy reports C's
+        /// static "not initialized" error without calling it; a view still works.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructors_without_runtime_fail_cleanly() {
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::constructors_without_runtime_fail_cleanly"
+                ),
+                || {
+                    install_failing();
+                    REFUSE_ALL.store(true, SeqCst);
+                    let view = SignatureView::new(c"A", c"a@b", Time::new(0, 0));
+                    let errors = [
+                        Signature::new(c"A", c"a@b", 0, 0).unwrap_err(),
+                        Signature::now(c"A", c"a@b").unwrap_err(),
+                        Signature::parse(c"A <a@b> 0 +0000").unwrap_err(),
+                        view.as_ref().to_signature().unwrap_err(),
+                    ];
+                    REFUSE_ALL.store(false, SeqCst);
+                    assert!(!runtime_pinned(), "libgit2 could not initialise");
+                    for e in errors {
+                        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+                        assert_eq!(e.message(), c"library has not been initialized");
+                    }
+                    // SAFETY: the view's live signature, which the adapter only reads; it
+                    // refuses before calling libgit2.
+                    let copy = unsafe { signature_dup(view.as_ref().as_ptr().cast_mut()) };
+                    assert!(copy.is_null());
+                    assert_eq!(view.as_ref().name(), Some(c"A"));
+                },
+            );
+        }
     }
 }

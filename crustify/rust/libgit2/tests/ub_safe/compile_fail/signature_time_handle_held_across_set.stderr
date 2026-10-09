@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `m` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/signature_time_handle_held_across_set.rs:10:5
+   |
+ 9 |     let mut when = m.when_mut();
+   |                    - first mutable borrow occurs here
+10 |     m.set_name(OdbDataStrFree::dup(c"B").unwrap());
+   |     ^ second mutable borrow occurs here
+11 |     when.set_seconds(1);
+   |     ---- first borrow later used here
