@@ -9,6 +9,7 @@
 //! there; the Rust-only paths (empty buffers, rejected sizes) still run.
 #![deny(unsafe_code)]
 
+mod common;
 mod errors;
 mod fixture;
 mod oid;
