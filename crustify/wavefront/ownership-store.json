@@ -2134,9 +2134,9 @@
       "borrowed": {
        "lifetime": "other"
       },
-      "nullable": false,
+      "nullable": true,
       "mutable": true,
-      "note": "Optional out slot (author_out || committer_out is asserted): written only on success with a fresh signature owned by the caller. On error both temporaries are released with git__free, leaking their strings."
+      "note": "Optional out slot: NULL is accepted (GIT_ASSERT_ARG(author_out || committer_out) only refuses both NULL), in which case no author is built. Written only on success with a fresh git_signature_new result owned by the caller (git_signature_free). On error both temporaries are released with git__free, leaking their strings; a NULL author_out leaves the slot untouched."
      }
     },
     {

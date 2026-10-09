@@ -139,7 +139,7 @@ use ffibox::{CBox, CZeroable, define_ctype, impl_cdrop, impl_cdupclone};
 use crate::ffi;
 use crate::libgit2::raw::OdbDataStr;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
-use crate::libgit2::util::sys::errors::{runtime_pinned, set};
+use crate::libgit2::util::sys::errors::{runtime_pinned, set, set_oom};
 
 /// The type of a Git object: what its content is, which fixes how libgit2 parses it.
 ///
@@ -1082,14 +1082,21 @@ unsafe fn signature_dup(sig: *mut ffi::git_signature) -> *mut ffi::git_signature
 ///
 /// A signature without its name or its email is refused, with the out-of-memory error
 /// that lost it: `git_signature_from_buffer` reports success when it could not allocate
-/// one of them.
+/// one of them. That error is set again here, since the parser may have replaced it
+/// before succeeding: `git__strntol32` reports a malformed timezone (`+abc`) as a
+/// conversion error, which the parser then ignores.
 fn constructed(rc: c_int, signature: Option<SignatureBox>) -> Result<SignatureBox, ErrorBuf> {
     let signature = signature.filter(|_| rc >= 0).ok_or_else(last)?;
     let complete = {
         let r = signature.as_ref();
         r.name().is_some() && r.email().is_some()
     };
-    if complete { Ok(signature) } else { Err(last()) }
+    if complete {
+        Ok(signature)
+    } else {
+        set_oom();
+        Err(last())
+    }
 }
 
 impl Signature {
@@ -2858,16 +2865,30 @@ mod unit_tests {
 
         /// Runs `body` alone in a child process, where nothing has initialised libgit2.
         fn isolated(test: &str, body: fn()) {
+            isolated_with(test, body, true);
+        }
+
+        /// As [`isolated`], with LeakSanitizer off in the child when `detect_leaks` is
+        /// false: for bodies that drive libgit2 down a path on which it leaks.
+        fn isolated_with(test: &str, body: fn(), detect_leaks: bool) {
             let name = test.split_once("::").map_or(test, |(_, rest)| rest);
             if std::env::var(CHILD).as_deref() == Ok(name) {
                 body();
                 return;
             }
-            let out = std::process::Command::new(std::env::current_exe().unwrap())
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
                 .args([name, "--exact", "--test-threads=1", "--nocapture"])
-                .env(CHILD, name)
-                .output()
-                .unwrap();
+                .env(CHILD, name);
+            if !detect_leaks {
+                let inherited = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+                let separator = if inherited.is_empty() { "" } else { ":" };
+                command.env(
+                    "ASAN_OPTIONS",
+                    format!("{inherited}{separator}detect_leaks=0"),
+                );
+            }
+            let out = command.output().unwrap();
             let stdout = String::from_utf8_lossy(&out.stdout);
             assert!(
                 out.status.success() && stdout.contains("1 passed"),
@@ -3136,6 +3157,18 @@ mod unit_tests {
                     let sig = Signature::parse(line).unwrap();
                     assert_eq!(sig.as_ref().name(), Some(c"A U Thor"));
 
+                    // A malformed timezone makes the parser set a conversion error of its
+                    // own after the lost string, and still succeed: the refusal reports
+                    // the allocation failure, not that later, stale error.
+                    for malformed in [c"A U Thor <a@b> 12 +abc", c"A U Thor <a@b> 12 +99999999999"] {
+                        set(ErrorClass::Invalid, c"primed");
+                        GRANTS.store(1, SeqCst);
+                        let error = Signature::parse(malformed).unwrap_err();
+                        GRANTS.store(-1, SeqCst);
+                        assert_eq!(error.class(), Some(ErrorClass::NoMemory), "{malformed:?}");
+                        assert_eq!(error.message(), c"Out of memory", "{malformed:?}");
+                    }
+
                     // A copy that runs out of memory fails cleanly. C leaks its partial
                     // copy, so only the struct itself is refused here.
                     set(ErrorClass::Invalid, c"primed");
@@ -3146,6 +3179,64 @@ mod unit_tests {
                     GRANTS.store(-1, SeqCst);
                     assert_eq!(error.class(), Some(ErrorClass::NoMemory));
                 },
+            );
+        }
+
+        /// `git_signature_new` fails with the out-of-memory error at each of its three
+        /// allocations (the struct, the trimmed name, the trimmed email), and
+        /// `git_signature_dup` at each of its two string copies; `Signature::new`,
+        /// `try_clone` and `to_signature` report it, and the next request succeeds.
+        ///
+        /// libgit2 leaks the half-built struct (and the name) when a string allocation
+        /// fails, so the child runs without LeakSanitizer.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructors_report_each_allocation_failure() {
+            isolated_with(
+                concat!(
+                    module_path!(),
+                    "::constructors_report_each_allocation_failure"
+                ),
+                || {
+                    install_failing();
+                    assert!(runtime_pinned());
+                    let expect_oom = |error: ErrorBuf, grants: isize| {
+                        assert_eq!(error.class(), Some(ErrorClass::NoMemory), "{grants}");
+                        assert_eq!(error.message(), c"Out of memory", "{grants}");
+                    };
+
+                    // The struct, the name, then the email refused.
+                    for grants in 0..3 {
+                        // Allocate the thread's error state before requests start failing.
+                        set(ErrorClass::Invalid, c"primed");
+                        GRANTS.store(grants, SeqCst);
+                        let result = Signature::new(c" A ", c"a@b", 1, 60);
+                        GRANTS.store(-1, SeqCst);
+                        expect_oom(result.unwrap_err(), grants);
+                    }
+                    let sig = Signature::new(c" A ", c"a@b", 1, 60).unwrap();
+                    assert_eq!(sig.as_ref().name(), Some(c"A"));
+
+                    // The copy's name, then its email refused (its struct is refused by
+                    // `parse_refuses_a_signature_libgit2_lost_a_string_of`).
+                    for grants in 1..3 {
+                        set(ErrorClass::Invalid, c"primed");
+                        GRANTS.store(grants, SeqCst);
+                        let clone = sig.try_clone();
+                        GRANTS.store(-1, SeqCst);
+                        assert!(clone.is_none(), "{grants}");
+
+                        set(ErrorClass::Invalid, c"primed");
+                        GRANTS.store(grants, SeqCst);
+                        let copy = sig.as_ref().to_signature();
+                        GRANTS.store(-1, SeqCst);
+                        expect_oom(copy.unwrap_err(), grants);
+                    }
+                    let copy = sig.as_ref().to_signature().unwrap();
+                    assert_eq!(copy.as_ref(), sig.as_ref());
+                    assert_eq!(sig.try_clone().unwrap().as_ref(), sig.as_ref());
+                },
+                false,
             );
         }
 
