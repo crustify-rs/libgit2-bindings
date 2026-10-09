@@ -1,0 +1,13 @@
+error[E0597]: `text` does not live long enough
+  --> tests/ub_safe/compile_fail/oid_shortener_outlives_strings.rs:13:34
+   |
+10 |     let shortener = {
+   |         --------- borrow later stored here
+11 |         let text = CString::new("a94a8fe5ccb19ba61c4c0873d391e987982fbbd3").unwrap();
+   |             ---- binding `text` declared here
+12 |         let mut shortener = OidShortener::new(0).unwrap();
+13 |         keep(shortener.as_mut(), &text);
+   |                                  ^^^^^ borrowed value does not live long enough
+14 |         shortener
+15 |     };
+   |     - `text` dropped here while still borrowed

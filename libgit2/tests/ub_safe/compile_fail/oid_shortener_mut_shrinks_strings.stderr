@@ -1,0 +1,11 @@
+error: lifetime may not live long enough
+ --> tests/ub_safe/compile_fail/oid_shortener_mut_shrinks_strings.rs:6:5
+  |
+5 | fn shrink<'a, 's>(m: OidShortenerMut<'a, 'static>) -> OidShortenerMut<'a, 's> {
+  |               -- lifetime `'s` defined here
+6 |     m
+  |     ^ returning this value requires that `'s` must outlive `'static`
+  |
+  = note: requirement occurs because of the type `OidShortenerMut<'_, '_>`, which makes the generic argument `'_` invariant
+  = note: the struct `OidShortenerMut<'a, 's>` is invariant over the parameter `'s`
+  = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance

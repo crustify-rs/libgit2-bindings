@@ -1,0 +1,11 @@
+error[E0597]: `shortener` does not live long enough
+ --> tests/ub_safe/compile_fail/oid_shortener_handle_outlives_box.rs:7:9
+  |
+5 |     let handle = {
+  |         ------ borrow later stored here
+6 |         let mut shortener = OidShortener::new(0).unwrap();
+  |             ------------- binding `shortener` declared here
+7 |         shortener.as_mut()
+  |         ^^^^^^^^^ borrowed value does not live long enough
+8 |     };
+  |     - `shortener` dropped here while still borrowed
