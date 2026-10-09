@@ -17,7 +17,13 @@
 //! `from_ptr` over a C-owned struct must vouch for: `ids` is NULL with `count == 0`, or
 //! a live buffer of at least `count` ids from libgit2's allocator that the struct owns.
 //! libgit2's own producers leave `ids` NULL for an empty result; an empty run built in
-//! Rust is NULL too.
+//! Rust is NULL too. A NULL `ids` reads as the empty array whatever `count` says, and
+//! is never handed to C.
+//!
+//! An empty array never reaches libgit2: nothing allocated it, so nothing has
+//! initialised the library on its behalf, and even `git__free(NULL)` reads the
+//! allocator a concurrent first `git_libgit2_init` writes. Every other array carries
+//! a buffer from libgit2's allocator, whose allocation initialised the library first.
 //!
 //! There is no public `OidArray` value outside an owner: one holding ids would leak
 //! them when dropped, so the constructors return an [`OidArrayVal`], and `OidArray` is
@@ -28,7 +34,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CSlice, CSliceMut, CVal, define_ctype, impl_cdispose};
+use ffibox::{CDispose, CSlice, CSliceMut, CVal, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::oid::oid::Oid;
@@ -71,16 +77,37 @@ unsafe impl Sync for OidArrayMut<'_> {}
 /// Releases an array's ids through `git_oidarray_dispose`, which hands `ids` to
 /// `git__free` and leaves the struct, Rust's storage, alone.
 ///
+/// An empty array (`ids` NULL) is not passed to C: it owns nothing, and the call
+/// would be `git__free(NULL)`, which reads `git__allocator` without synchronisation
+/// against the first `git_libgit2_init` another thread may be running. Nothing orders
+/// an empty array after that initialisation, since nothing allocated for it.
+///
 /// Wraps: git_oidarray_dispose
+/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OidArrayDispose;
 
-// `git_oidarray_dispose` frees `ids` exactly once and never the struct. It accepts
-// every state the safe API reaches: the empty array (`git__free(NULL)`, a no-op even
-// before `git_libgit2_init`, when the allocator is `failalloc`), and a buffer
-// `set_ids` stored from an `OdbDataVec`, i.e. from libgit2's allocator; `truncate` only
-// lowers `count`, which the free ignores, and `take_ids` leaves the empty array.
-impl_cdispose!(OidArrayDispose, OidArray, ffi::git_oidarray_dispose);
+// SAFETY: `git_oidarray_dispose` frees `ids` exactly once and never the struct. It
+// accepts every state the safe API reaches: a buffer `set_ids` stored from an
+// `OdbDataVec`, i.e. from libgit2's allocator (whose allocation initialised the
+// library, so the allocator it reads is settled); `truncate` only lowers `count`,
+// which the free ignores. The empty array, which `new`, `take_ids` and `set_ids` of an
+// empty run leave, owns nothing and is released without C.
+unsafe impl CDispose<OidArray> for OidArrayDispose {
+    #[inline]
+    unsafe fn c_dispose(&self, ptr: NonNull<OidArray>) {
+        let raw: *mut ffi::git_oidarray = ptr.as_ptr().cast();
+        // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_oidarray`.
+        let ids = unsafe { addr_of!((*raw).ids).read() };
+        if ids.is_null() {
+            return;
+        }
+        // SAFETY: `raw` is live and, per the handles' invariant, owns `ids`, a buffer
+        // from libgit2's allocator; the caller gives the value up, so it is released
+        // once.
+        unsafe { ffi::git_oidarray_dispose(raw) }
+    }
+}
 
 /// An owned [`OidArray`], held inline; its ids are released by `git_oidarray_dispose`
 /// on drop.
@@ -118,13 +145,21 @@ impl OidArray {
 }
 
 impl<'a> OidArrayRef<'a> {
-    /// The number of ids.
+    /// The number of ids; 0 without a buffer, whatever `count` says, as
+    /// [`ids`](Self::ids) reads it.
     ///
     /// Field: git_oidarray.count
     pub fn len(&self) -> usize {
-        // SAFETY: a read through the shared handle's pointer to a live `git_oidarray`;
+        let array = self.as_ptr();
+        // SAFETY: reads through the shared handle's pointer to a live `git_oidarray`;
         // any `size_t` is a valid `usize`.
-        unsafe { addr_of!((*self.as_ptr()).count).read() }
+        let (ids, count) = unsafe {
+            (
+                addr_of!((*array).ids).read(),
+                addr_of!((*array).count).read(),
+            )
+        };
+        if ids.is_null() { 0 } else { count }
     }
 
     /// Whether the array holds no ids.
@@ -413,6 +448,31 @@ mod unit_tests {
         assert!(raw.ids.is_null() && raw.count == 0);
     }
 
+    /// Without a buffer the array is empty and owns nothing, whatever `count` says:
+    /// every accessor agrees, and the dispose policy never calls libgit2 (Miri aborts
+    /// on any foreign call, so this proves the empty array's drop makes none).
+    #[test]
+    fn null_buffer_is_empty_and_disposes_without_c() {
+        let mut bare = OidArray::new().into_inner();
+        // SAFETY: `bare` is a live array Rust owns; the policy's contract accepts the
+        // empty array, which owns nothing.
+        unsafe { OidArrayDispose.c_dispose(NonNull::from(&mut bare)) };
+        assert!(bare.as_ref().is_empty());
+
+        let mut broken = ffi::git_oidarray {
+            ids: ptr::null_mut(),
+            count: 3,
+        };
+        // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
+        let mut m = unsafe { OidArrayMut::from_ptr(&mut broken) }.unwrap();
+        assert_eq!(m.as_ref().len(), 0);
+        assert!(m.as_ref().ids().is_empty() && m.ids_mut().is_empty());
+        assert_eq!(format!("{m:?}"), "[]");
+        // SAFETY: `broken` is live and holds no buffer; nothing is released.
+        unsafe { OidArrayDispose.c_dispose(NonNull::from(&mut broken).cast::<OidArray>()) };
+        assert_eq!((broken.ids, broken.count), (ptr::null_mut(), 3));
+    }
+
     /// The handles' projections, runs and moves over a buffer Rust allocated, so Miri
     /// checks them; every buffer leaves through `into_raw_parts`, so nothing reaches
     /// libgit2's free.
@@ -526,6 +586,76 @@ mod unit_tests {
         unsafe { OidArrayDispose.c_dispose(NonNull::from(&mut bare)) };
     }
 
+    /// libgit2 fills an owner's storage in place, as the `git_merge_bases` wrapper
+    /// will through the crate-internal seam: the `git_array` buffer it hands over is
+    /// read through the handles and released by the owner's drop (LSan flags a leak,
+    /// ASan an allocator mismatch, BSan a foreign write the handles do not cover).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_fills_an_owner_in_place() {
+        assert!(runtime_pinned());
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git\0"
+        );
+        let mut repo = ptr::null_mut();
+        // SAFETY: `repo` receives the repository; `path` is NUL-terminated; no ceiling
+        // directories.
+        let rc = unsafe {
+            ffi::git_repository_open_ext(
+                &mut repo,
+                path.as_ptr().cast(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let parse = |hex: &CStr| {
+            let mut oid = ffi::git_oid::default();
+            // SAFETY: `oid` is writable and `hex` NUL-terminated.
+            let rc = unsafe { ffi::git_oid_from_string(&mut oid, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+            assert_eq!(rc, 0);
+            oid
+        };
+        let one = parse(c"a4a7dce85cf63874e984719f4fdd239f5145052f");
+        let two = parse(c"be3563ae3f795b2b4353bcce3a527ad0a4f7f644");
+
+        let mut array = OidArray::new();
+        // SAFETY: `out` is the owner's live storage, reached through its exclusive
+        // handle for the call; `repo` is open, `one` and `two` live ids. On success
+        // `out` owns a buffer from libgit2's allocator, which keeps the handles'
+        // invariant and the owner's drop releases.
+        let rc = unsafe { ffi::git_merge_bases(array.as_mut().as_mut_ptr(), repo, &one, &two) };
+        assert_eq!(rc, 0);
+        let r = array.as_ref();
+        assert_eq!(r.len(), 2);
+        let hex: Vec<String> = r
+            .ids()
+            .iter()
+            .map(|id| id.to_hex_string().unwrap())
+            .collect();
+        assert_eq!(
+            hex,
+            [
+                "c47800c7266a2be04c571c04d5a6614691ea99bd",
+                "9fd738e8f7967c078dceed8190330fc8648ee56a"
+            ]
+        );
+        // The result edits and copies like any other array.
+        array
+            .as_mut()
+            .ids_mut()
+            .get_mut(0)
+            .unwrap()
+            .copy_from(oid(1).as_ref());
+        let copy = array.as_ref().to_oid_array().unwrap();
+        assert_eq!(contents(copy.as_ref())[0], bytes(oid(1).as_ref()));
+        assert_eq!(contents(copy.as_ref())[1], contents(array.as_ref())[1]);
+        drop(array);
+        // SAFETY: `repo` is open and released once.
+        unsafe { ffi::git_repository_free(repo) };
+    }
+
     /// Handles over a C-owned `git_oidarray`, as libgit2 hands a callback one: the
     /// setters' buffers are what `git_oidarray_dispose` releases, and C's buffers what
     /// they release (ASan flags an allocator mismatch, LSan a leak).
@@ -560,16 +690,21 @@ mod unit_tests {
         unsafe { ffi::git_oidarray_dispose(&mut raw) };
 
         // An array that breaks the invariant with a NULL `ids` and a count reads as
-        // empty, and is reset without a free, rather than dereferencing NULL.
+        // empty through every accessor, and is reset without a free, rather than
+        // dereferencing NULL.
         let mut broken = ffi::git_oidarray {
             ids: ptr::null_mut(),
             count: 3,
         };
         // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
         let mut m = unsafe { OidArrayMut::from_ptr(&mut broken) }.unwrap();
-        assert_eq!(m.as_ref().len(), 3);
+        assert_eq!(m.as_ref().len(), 0);
+        assert!(m.as_ref().is_empty());
         assert!(m.as_ref().ids().is_empty());
         assert!(m.ids_mut().is_empty());
+        assert_eq!(format!("{m:?}"), "[]");
+        m.truncate(0);
+        assert_eq!(broken.count, 3, "nothing to shorten");
         assert!(m.take_ids().is_empty());
         assert_eq!((broken.ids, broken.count), (ptr::null_mut(), 0));
     }
@@ -608,7 +743,7 @@ mod unit_tests {
     }
 
     /// Without libgit2's runtime nothing can be allocated, but the empty array needs
-    /// none, and disposing it is `failalloc`'s no-op free.
+    /// none, and disposing it never reaches libgit2.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn copies_without_runtime_fail_cleanly() {

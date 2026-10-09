@@ -19,8 +19,10 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - `free(NULL)` is not recorded: replacing an empty array's ids in Rust never calls
-//!   the allocator, where C code disposing first passes NULL to `git__free`, a no-op.
+//! - `free(NULL)` is not recorded: replacing or disposing an empty array in Rust never
+//!   calls libgit2 (`OidArrayDispose` skips a NULL `ids`, which would otherwise read
+//!   the allocator unsynchronised against a concurrent first `git_libgit2_init`),
+//!   where C code passes NULL to `git__free`, a no-op the allocator still sees.
 //! - A handle over an array whose `ids` is NULL with a non-zero `count` (no libgit2
 //!   path produces one) reads as empty in Rust; C code would dereference NULL. The
 //!   module's `unit_tests` cover it.

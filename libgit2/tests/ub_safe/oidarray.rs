@@ -7,9 +7,10 @@
 //! borrows are in `compile_fail/`. Only the empty array is built without libgit2, so
 //! little runs under Miri.
 
+use std::sync::Barrier;
 use std::thread;
 
-use ffibox::CZeroable;
+use ffibox::{CVal, CZeroable};
 use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
 use libgit2::libgit2::oid::oidarray::{OidArray, OidArrayMut, OidArrayRef, OidArrayVal};
 use libgit2::libgit2::raw::OdbDataVec;
@@ -65,7 +66,7 @@ fn empty_bare_array_in_rust_storage() {
 }
 
 /// Before `git_libgit2_init` the empty array needs nothing from libgit2 (its dispose
-/// is `failalloc`'s no-op free), and a copy pins the runtime first.
+/// never calls it), and a copy pins the runtime first.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn arrays_before_init() {
@@ -78,6 +79,42 @@ fn arrays_before_init() {
         let array = OidArray::from_slice(&src).unwrap();
         assert_eq!(contents(array.as_ref()), expected(&src));
     });
+}
+
+/// Empty arrays, which never initialise libgit2, dropped while another thread's first
+/// allocation initialises it: their dispose must not reach `git__free`, which reads
+/// the allocator that initialisation writes (TSan). Alone in a child, so the
+/// initialisation is really the process's first.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn empty_array_drops_do_not_race_the_first_init() {
+    isolated(
+        concat!(
+            module_path!(),
+            "::empty_array_drops_do_not_race_the_first_init"
+        ),
+        || {
+            let start = Barrier::new(2);
+            thread::scope(|s| {
+                s.spawn(|| {
+                    start.wait();
+                    for _ in 0..64 {
+                        drop(OidArray::new());
+                        drop(OidArray::from_slice(&[]).unwrap());
+                        let mut emptied = OidArray::new();
+                        drop(emptied.as_mut().take_ids());
+                        emptied.as_mut().set_ids(OdbDataVec::empty());
+                        drop(emptied);
+                    }
+                });
+                s.spawn(|| {
+                    start.wait();
+                    let array = OidArray::from_slice(&oids(1)).unwrap();
+                    assert_eq!(array.as_ref().len(), 1);
+                });
+            });
+        },
+    );
 }
 
 #[test]
@@ -143,6 +180,49 @@ fn replacements_release_each_buffer_once() {
     short.as_mut().truncate(0);
     assert!(short.as_ref().ids().is_empty());
     drop(short);
+}
+
+/// Buffers moved between live arrays, through bare values and cloned runs are each
+/// released exactly once, and read within bounds wherever they end up.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn buffers_move_between_arrays_and_owners() {
+    let src = oids(6);
+    let mut first = OidArray::from_slice(&src).unwrap();
+    let mut second = OidArray::from_slice(&oids(2)).unwrap();
+
+    // The buffer moves from one live array to another, which releases its own.
+    let moved = first.as_mut().take_ids();
+    second.as_mut().set_ids(moved);
+    assert!(first.as_ref().is_empty());
+    assert_eq!(contents(second.as_ref()), expected(&src));
+    assert_eq!(
+        format!("{:?}", second.as_ref()),
+        format!("{:?}", src.iter().map(|o| o.as_ref()).collect::<Vec<_>>())
+    );
+
+    // A cloned run is a buffer of its own.
+    let run = second.as_mut().take_ids();
+    let twin = run.clone();
+    assert_ne!(run.as_ptr(), twin.as_ptr());
+    first.as_mut().set_ids(run);
+    second.as_mut().set_ids(twin);
+    second
+        .as_mut()
+        .ids_mut()
+        .get_mut(5)
+        .unwrap()
+        .set_id([7; 32]);
+    assert_eq!(contents(first.as_ref()), expected(&src));
+    assert_eq!(contents(second.as_ref())[5].1, [7; 32]);
+
+    // The bare value leaves its owner and is adopted by a new one, which releases it.
+    let bare = first.into_inner();
+    assert_eq!(bare.as_ref().len(), 6);
+    let again: OidArrayVal = CVal::new(bare);
+    assert_eq!(contents(again.as_ref()), expected(&src));
+    drop(again);
+    drop(second);
 }
 
 /// A copy owns a buffer of its own: dropping the source first leaves it readable, and
