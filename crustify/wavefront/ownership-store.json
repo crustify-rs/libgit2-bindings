@@ -2577,6 +2577,29 @@
    ]
   },
   {
+   "name": "git_trace_set",
+   "defined_in": "src/libgit2/trace.c",
+   "ptr_args": [
+    {
+     "name": "callback",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
    "name": "malloc",
    "defined_in": null,
    "lifetime": {

@@ -14,6 +14,10 @@
 //! the traced operation (today only the HTTP client traces). A [`TraceCallback`] is
 //! such a function: Rust builds one over a [`Tracer`], a type whose associated
 //! function receives the messages, and calling one is safe.
+//!
+//! [`set`] installs a callback at a level and [`clear`] removes it (`git_trace_set`).
+//! libgit2 keeps both in one global that its traced routines read without a lock, so
+//! both are `unsafe`: no other thread may be inside libgit2 meanwhile.
 
 use core::ffi::{CStr, c_char};
 use core::fmt;
@@ -161,7 +165,7 @@ pub trait Tracer {
 }
 
 /// A trace callback (`git_trace_cb`): the C function libgit2 calls with each trace
-/// message, the value `git_trace_set` installs.
+/// message, the value [`set`] installs.
 ///
 /// Built over a [`Tracer`] with [`new`](Self::new), whose `extern "C"` trampoline
 /// adapts libgit2's call to it, or over a C function with
@@ -221,9 +225,9 @@ impl TraceCallback {
     /// reentrantly, with no obligation beyond [`TraceFn`]'s, and must not unwind. Those
     /// are the calls [`call`](Self::call) and libgit2 make, and the obligation cannot
     /// end with this value: it is `Copy`, [`as_fn`](Self::as_fn) hands the function
-    /// out again, and [`raw`](Self::raw) feeds `git_trace_set`, after which libgit2
-    /// calls `f` from any thread for as long as it stays installed, with no
-    /// `TraceCallback` left to tie that to.
+    /// out again, and [`set`] installs it, after which libgit2 calls `f` from any
+    /// thread for as long as it stays installed, with no `TraceCallback` left to tie
+    /// that to.
     pub const unsafe fn from_fn(f: TraceFn) -> Self {
         Self(f)
     }
@@ -271,6 +275,59 @@ unsafe extern "C" fn trace_with<T: Tracer>(level: ffi::git_trace_level_t, msg: *
     // call; the borrow handed to `T` ends with it.
     let message = unsafe { CStr::from_ptr(msg) };
     T::trace(level, message);
+}
+
+// --- Configuration -------------------------------------------------------------------
+
+/// Installs `callback` as libgit2's tracer, reporting each message at `level` or a
+/// less verbose one; [`TraceLevel::None`] reports nothing but leaves `callback`
+/// installed. Replaces the level and callback set before.
+///
+/// libgit2 calls `callback` from whichever thread runs a traced operation until the
+/// next `set` or [`clear`], which a [`TraceCallback`] allows for the rest of the
+/// process. A level above `None` always comes with a callback here: C refuses the
+/// pair without one (`-1`, or an abort in a debug build), which is [`clear`]'s state
+/// at `None` only.
+///
+/// ```compile_fail,E0308
+/// use libgit2::libgit2::core::trace::{self, TraceLevel};
+///
+/// // SAFETY: (not reached) no other thread calls into libgit2.
+/// unsafe { trace::set(TraceLevel::Debug, None) };
+/// ```
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the level and the callback in a global that its traced
+/// routines read without synchronisation, the level first and the callback twice.
+/// A traced call on the same thread, `callback` included, may.
+///
+/// Wraps: git_trace_set
+pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
+    // SAFETY: a named level with a callback, which `git_trace_set` accepts without
+    // touching the error state, so before `git_libgit2_init` too; `callback` is safe
+    // to call from any thread for the rest of the process, as libgit2 will call it.
+    // The caller excludes every concurrent reader and writer of the global.
+    let rc = unsafe { ffi::git_trace_set(level.raw(), callback.raw()) };
+    debug_assert_eq!(rc, 0, "git_trace_set refused a callback");
+}
+
+/// Removes libgit2's tracer: nothing is reported until the next [`set`].
+///
+/// # Safety
+///
+/// As [`set`]'s: no other thread may call into libgit2 while this runs. A thread
+/// tracing meanwhile could read the callback as set before its check and as NULL
+/// at the call (libgit2 reads it twice), and call NULL.
+///
+/// Wraps: git_trace_set
+pub unsafe fn clear() {
+    // SAFETY: `GIT_TRACE_NONE` without a callback, which `git_trace_set` accepts
+    // without touching the error state. The caller excludes every concurrent reader
+    // and writer of the global, so no traced call sees the NULL after its check.
+    let rc = unsafe { ffi::git_trace_set(TraceLevel::None.raw(), None) };
+    debug_assert_eq!(rc, 0, "git_trace_set refused to clear");
 }
 
 #[cfg(test)]

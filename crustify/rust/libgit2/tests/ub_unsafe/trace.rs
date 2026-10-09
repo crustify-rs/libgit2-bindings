@@ -1,5 +1,6 @@
-//! UB tests for the unsafe API of `git2/trace.h`: `TraceCallback::from_fn`, called
-//! within its contract, edge cases included.
+//! UB tests for the unsafe API of `git2/trace.h`: `TraceCallback::from_fn`, then
+//! `trace::set` and `trace::clear` (`config` below), called within their contracts,
+//! edge cases included.
 //!
 //! Its contract is that the adopted C function may be called with any named level
 //! and any C string live for the call, from any thread, concurrently and reentrantly,
@@ -15,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::thread;
 
 use libgit2::ffi;
-use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel, Tracer};
+use libgit2::libgit2::core::trace::{self, TraceCallback, TraceLevel, Tracer};
 
 const CHILD: &str = "CRUSTIFY_UB_UNSAFE_CHILD";
 
@@ -242,19 +243,16 @@ fn from_fn_installed_in_libgit2() {
             assert!(connect(&url) < 0);
             // SAFETY: `c_logging` meets the contract (see its doc).
             let cb = unsafe { TraceCallback::from_fn(c_logging) };
-            // SAFETY: a named level with a callback that libgit2 may call from any thread
-            // for the life of the process; no other thread touches the trace state now.
-            let rc = unsafe { ffi::git_trace_set(TraceLevel::Debug.raw(), cb.raw()) };
-            assert_eq!(rc, 0);
+            // SAFETY: no other thread is inside libgit2 now.
+            unsafe { trace::set(TraceLevel::Debug, cb) };
             let threads = if cfg!(bsan) { 2 } else { 4 };
             thread::scope(|s| {
                 for _ in 0..threads {
                     s.spawn(|| assert!(connect(&url) < 0, "the server answers 404"));
                 }
             });
-            // SAFETY: `None` without a callback; the connecting threads have ended.
-            let rc = unsafe { ffi::git_trace_set(TraceLevel::None.raw(), None) };
-            assert_eq!(rc, 0);
+            // SAFETY: the connecting threads have ended.
+            unsafe { trace::clear() };
             let connecting = take_mine(b"Connecting to remote 127.0.0.1");
             assert_eq!(connecting.len(), threads);
             assert!(
@@ -283,23 +281,19 @@ fn from_fn_installed_function_outlives_every_callback_value() {
             assert!(unsafe { ffi::git_libgit2_init() } > 0);
             let url = serve_404();
             assert!(connect(&url) < 0);
-            let raw = {
+            {
                 // SAFETY: `c_logging` meets the contract (see its doc): its state is
                 // static, so it stays callable for the process.
                 let cb = unsafe { TraceCallback::from_fn(c_logging) };
-                cb.raw()
-            };
-            // SAFETY: a named level with a function libgit2 may call from any thread
-            // for the life of the process; this thread is alone with the trace state.
-            let rc = unsafe { ffi::git_trace_set(TraceLevel::Debug.raw(), raw) };
-            assert_eq!(rc, 0);
+                // SAFETY: this thread is alone in libgit2.
+                unsafe { trace::set(TraceLevel::Debug, cb) };
+            }
             // Every `TraceCallback` is gone; libgit2 still calls the function.
             for _ in 0..3 {
                 assert!(connect(&url) < 0, "the server answers 404");
             }
-            // SAFETY: `None` without a callback; nothing else touches the trace state.
-            let rc = unsafe { ffi::git_trace_set(TraceLevel::None.raw(), None) };
-            assert_eq!(rc, 0);
+            // SAFETY: this thread is alone in libgit2.
+            unsafe { trace::clear() };
             let connecting = take_mine(b"Connecting to remote 127.0.0.1");
             assert_eq!(connecting.len(), 3);
             assert!(
@@ -309,4 +303,292 @@ fn from_fn_installed_function_outlives_every_callback_value() {
             );
         },
     );
+}
+
+// --- `trace::set` / `trace::clear` -----------------------------------------------------
+//
+// Their contract: no other thread is inside libgit2 while they run; a traced call on the
+// same thread may run them. Within it, libgit2's threads that trace afterwards must
+// read the configuration without racing its write (TSan), reach only a callback still
+// installed (never NULL after `clear`), and hand it messages it may read for the call
+// (ASan). `set` before `git_libgit2_init` must not reach libgit2's error state (the
+// pre-init TLS hazard, ASan).
+
+mod config {
+    use std::ffi::CStr;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::trace::{self, TraceCallback, TraceLevel, Tracer};
+
+    use super::{connect, isolated, serve_404};
+
+    fn init() {
+        // SAFETY: no arguments; the reference dies with the child.
+        assert!(unsafe { ffi::git_libgit2_init() } > 0);
+    }
+
+    /// Connections from `threads` threads at once, each `per` times; the URL's server
+    /// answers 404.
+    fn connect_from(threads: usize, per: usize, url: &CStr) {
+        thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| {
+                    for _ in 0..per {
+                        assert!(connect(url) < 0, "the server answers 404");
+                    }
+                });
+            }
+        });
+    }
+
+    type Log = Mutex<Vec<(TraceLevel, Vec<u8>)>>;
+
+    fn take(log: &Log) -> Vec<(TraceLevel, Vec<u8>)> {
+        std::mem::take(&mut *log.lock().unwrap())
+    }
+
+    fn connecting(log: &[(TraceLevel, Vec<u8>)]) -> usize {
+        log.iter()
+            .filter(|(_, m)| m.starts_with(b"Connecting to remote 127.0.0.1"))
+            .count()
+    }
+
+    static FIRST: Log = Mutex::new(Vec::new());
+    static SECOND: Log = Mutex::new(Vec::new());
+
+    /// Copies each message into `FIRST`.
+    struct First;
+
+    impl Tracer for First {
+        fn trace(level: TraceLevel, message: &CStr) {
+            FIRST
+                .lock()
+                .unwrap()
+                .push((level, message.to_bytes().to_vec()));
+        }
+    }
+
+    /// Copies each message into `SECOND`.
+    struct Second;
+
+    impl Tracer for Second {
+        fn trace(level: TraceLevel, message: &CStr) {
+            SECOND
+                .lock()
+                .unwrap()
+                .push((level, message.to_bytes().to_vec()));
+        }
+    }
+
+    fn threads() -> usize {
+        if cfg!(bsan) { 2 } else { 4 }
+    }
+
+    /// Set on this thread, then traced from several, which libgit2 reads the
+    /// configuration on; then replaced, lowered, set to `None` and cleared between
+    /// rounds, after every connecting thread has ended.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_then_traced_from_many_threads() {
+        isolated(
+            concat!(module_path!(), "::set_then_traced_from_many_threads"),
+            || {
+                init();
+                let url = serve_404();
+                // Untraced, on this thread first: the HTTP client's lazy parser
+                // settings race on concurrent first connections.
+                assert!(connect(&url) < 0);
+                let n = threads();
+
+                // SAFETY: no other thread is inside libgit2.
+                unsafe { trace::set(TraceLevel::Trace, TraceCallback::new::<First>()) };
+                connect_from(n, 2, &url);
+                let first = take(&FIRST);
+                assert_eq!(connecting(&first), n * 2);
+                assert!(first.iter().any(|(l, _)| *l == TraceLevel::Trace));
+
+                // Replaced: the old callback receives nothing more.
+                // SAFETY: the connecting threads have ended.
+                unsafe { trace::set(TraceLevel::Debug, TraceCallback::new::<Second>()) };
+                connect_from(n, 2, &url);
+                let second = take(&SECOND);
+                assert_eq!(take(&FIRST), []);
+                assert_eq!(connecting(&second), n * 2);
+                assert!(second.iter().all(|(l, _)| *l == TraceLevel::Debug));
+
+                // Below the HTTP client's levels, and `None` with the callback kept.
+                for level in [TraceLevel::Info, TraceLevel::Fatal, TraceLevel::None] {
+                    // SAFETY: as above.
+                    unsafe { trace::set(level, TraceCallback::new::<Second>()) };
+                    connect_from(n, 1, &url);
+                    assert_eq!(take(&SECOND), [], "{level:?}");
+                }
+
+                // Cleared: libgit2 sees no callback and calls nothing.
+                // SAFETY: as above.
+                unsafe { trace::clear() };
+                connect_from(n, 2, &url);
+                assert_eq!(take(&FIRST), []);
+                assert_eq!(take(&SECOND), []);
+            },
+        );
+    }
+
+    /// Set and cleared from one thread after another, each joined before the next
+    /// starts, and traced from yet others: nothing but the joins orders them.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_from_successive_threads() {
+        isolated(
+            concat!(module_path!(), "::set_and_clear_from_successive_threads"),
+            || {
+                init();
+                let url = serve_404();
+                assert!(connect(&url) < 0);
+                let rounds = if cfg!(bsan) { 2 } else { 4 };
+                for round in 0..rounds {
+                    thread::spawn(|| {
+                        // SAFETY: every other thread that called into libgit2 has
+                        // been joined.
+                        unsafe { trace::set(TraceLevel::Debug, TraceCallback::new::<First>()) };
+                    })
+                    .join()
+                    .unwrap();
+                    connect_from(2, 1, &url);
+                    assert_eq!(connecting(&take(&FIRST)), 2, "round {round}");
+                    thread::spawn(|| {
+                        // SAFETY: as above.
+                        unsafe { trace::clear() };
+                    })
+                    .join()
+                    .unwrap();
+                    connect_from(2, 1, &url);
+                    assert_eq!(take(&FIRST), [], "round {round}");
+                }
+            },
+        );
+    }
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Counts its call and clears the configuration it was called under, from the
+    /// thread libgit2 traces on.
+    struct ClearingItself;
+
+    impl Tracer for ClearingItself {
+        fn trace(_: TraceLevel, message: &CStr) {
+            CALLS.fetch_add(1, SeqCst);
+            std::hint::black_box(message.to_bytes().len());
+            // SAFETY: called by libgit2 on the one thread inside it.
+            unsafe { trace::clear() };
+        }
+    }
+
+    /// Replaces itself with `First`, from the thread libgit2 traces on.
+    struct ReplacingItself;
+
+    impl Tracer for ReplacingItself {
+        fn trace(level: TraceLevel, message: &CStr) {
+            CALLS.fetch_add(1, SeqCst);
+            std::hint::black_box((level, message.to_bytes().len()));
+            // SAFETY: called by libgit2 on the one thread inside it.
+            unsafe { trace::set(TraceLevel::Trace, TraceCallback::new::<First>()) };
+        }
+    }
+
+    /// The configuration changed from inside the callback: libgit2 finishes the call
+    /// with the message it formatted, and the rest of the connection follows the new
+    /// configuration. Clearing there leaves later checks a NULL they skip, not call.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_from_inside_the_callback() {
+        isolated(
+            concat!(module_path!(), "::set_and_clear_from_inside_the_callback"),
+            || {
+                init();
+                let url = serve_404();
+                // SAFETY: this thread is alone in libgit2.
+                unsafe { trace::set(TraceLevel::Trace, TraceCallback::new::<ClearingItself>()) };
+                for _ in 0..2 {
+                    assert!(connect(&url) < 0);
+                }
+                // Only the first message of the first connection: it cleared.
+                assert_eq!(CALLS.swap(0, SeqCst), 1);
+
+                // SAFETY: as above.
+                unsafe { trace::set(TraceLevel::Trace, TraceCallback::new::<ReplacingItself>()) };
+                assert!(connect(&url) < 0);
+                assert_eq!(CALLS.swap(0, SeqCst), 1);
+                let rest = take(&FIRST);
+                // The rest of the connection reached the replacement.
+                assert!(!rest.is_empty());
+                assert!(rest.iter().any(|(_, m)| m.starts_with(b"Received:\n")));
+                // SAFETY: as above.
+                unsafe { trace::clear() };
+            },
+        );
+    }
+
+    /// Before `git_libgit2_init`, with no error state allocated: `set` and `clear` only
+    /// write the configuration, which holds once libgit2 starts.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_before_init() {
+        isolated(
+            concat!(module_path!(), "::set_and_clear_before_init"),
+            || {
+                // SAFETY: libgit2 is not initialised and this thread is alone.
+                unsafe { trace::clear() };
+                // SAFETY: as above.
+                unsafe { trace::set(TraceLevel::Debug, TraceCallback::new::<Second>()) };
+                init();
+                let url = serve_404();
+                assert!(connect(&url) < 0);
+                assert_eq!(connecting(&take(&SECOND)), 1);
+                // SAFETY: this thread is alone in libgit2.
+                unsafe { trace::clear() };
+            },
+        );
+    }
+
+    /// Cleared repeatedly, before and after a `set`, and set at every level with each
+    /// kind of callback: every call is accepted and none leaves a message behind.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn clear_and_set_at_every_level() {
+        isolated(
+            concat!(module_path!(), "::clear_and_set_at_every_level"),
+            || {
+                init();
+                let url = serve_404();
+                // SAFETY: `c_logging` meets `from_fn`'s contract (see its doc).
+                let adopted = unsafe { TraceCallback::from_fn(super::c_logging) };
+                let callbacks = [TraceCallback::new::<First>(), adopted];
+                for level in super::LEVELS {
+                    for cb in callbacks {
+                        // SAFETY: this thread is alone in libgit2.
+                        unsafe { trace::clear() };
+                        // SAFETY: as above.
+                        unsafe { trace::clear() };
+                        // SAFETY: as above.
+                        unsafe { trace::set(level, cb) };
+                        assert!(connect(&url) < 0);
+                        let reported = take(&FIRST).len()
+                            + super::take_mine(b"Connecting").len()
+                            + super::take_mine(b"Sending").len()
+                            + super::take_mine(b"Received").len();
+                        assert_eq!(reported > 0, level >= TraceLevel::Debug, "{level:?}");
+                    }
+                }
+                // SAFETY: as above.
+                unsafe { trace::clear() };
+                assert!(connect(&url) < 0);
+                assert_eq!(take(&FIRST), []);
+                assert_eq!(super::take_mine(b"").len(), 0);
+            },
+        );
+    }
 }
