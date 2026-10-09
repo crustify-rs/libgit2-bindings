@@ -1,0 +1,130 @@
+{
+  "crate_path": "/target/crustify/.worktrees/crustify/batches/20261008-170008/libgit2/core/wave-0/batch-7/crustify/rust",
+  "counts": {
+    "unsafe_blocks": 165,
+    "unsafe_block_stmts": 9,
+    "unsafe_block_lines": 198,
+    "unsafe_block_code_lines": 183,
+    "unsafe_blocks_wrapper_impl": 99,
+    "unsafe_blocks_ffi_export": 8,
+    "unsafe_fns": 43,
+    "unsafe_fns_seam": 25,
+    "unsafe_fns_pub": 10,
+    "unsafe_impls": 47,
+    "unsafe_traits": 1,
+    "ffi_calls": 30,
+    "wrapper_newtypes": 9,
+    "wrapper_newtypes_declared": 7,
+    "wrapper_declared_nonconformant": 0,
+    "wrapper_newtypes_undeclared": 2,
+    "raw_ptr_args": 37,
+    "raw_ptr_rets": 33,
+    "raw_ptr_seam": 56,
+    "raw_ptr_wrapped": 3,
+    "raw_ptr_in_wrapper": 1,
+    "ref_to_type_wrapper": 38,
+    "field_ref_wrapped": 0,
+    "field_proj_wrapped": 38,
+    "field_proj_outside_impl": 2,
+    "void_ptr_sanctioned": 22,
+    "void_ptr_smell": 0,
+    "raw_ptr_derefs": 41,
+    "raw_ptr_derefs_outside_impl": 3,
+    "total_stmts": 505,
+    "code_lines": 2081,
+    "raw_ptr_sites": [
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 3,
+        "lines": [
+          857,
+          1014,
+          1092
+        ]
+      }
+    ],
+    "void_ptr_sites": [],
+    "field_proj_sites": [
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 2,
+        "lines": [
+          859,
+          1094
+        ]
+      }
+    ],
+    "field_ref_sites": [],
+    "raw_deref_sites": [
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 2,
+        "lines": [
+          859,
+          1094
+        ]
+      }
+    ]
+  },
+  "counts_unavailable": null,
+  "seed": "--name git_writestream",
+  "entries": [
+    {
+      "name": "git_writestream",
+      "raw_ptr_sites": [
+        {
+          "file": "/opt/venv/share/ffibox/src/macros.rs",
+          "count": 4,
+          "lines": [
+            203,
+            215,
+            256,
+            267
+          ]
+        },
+        {
+          "file": "libgit2/libgit2/core/types.rs",
+          "count": 6,
+          "lines": [
+            857,
+            1014,
+            1092,
+            1115,
+            1139,
+            1151
+          ]
+        }
+      ],
+      "raw_deref_sites": [
+        {
+          "file": "libgit2/libgit2/core/types.rs",
+          "count": 3,
+          "lines": [
+            806,
+            831,
+            859
+          ]
+        }
+      ],
+      "deref_impl_sites": [],
+      "deref_mut_impl_sites": [],
+      "slice_ref_sites": [],
+      "slice_mut_sites": [],
+      "crate": "libgit2"
+    }
+  ],
+  "undocumented_unsafe": {
+    "sites": 0,
+    "documented": 0,
+    "undocumented": 0,
+    "per_file": {}
+  },
+  "derived": {
+    "unsafe_fn_pub_ratio": 0.2326,
+    "unsafe_fn_smell": 18,
+    "raw_ptr_smell": 14,
+    "raw_ptr_seam_ratio": 0.8,
+    "unsafe_loc_ratio": 0.0879,
+    "loc_per_unsafe_block": 12.6
+  }
+}

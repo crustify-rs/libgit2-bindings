@@ -1,0 +1,339 @@
+
+running 186 tests
+test libgit2::core::buffer::unit_tests::empty_buffer_accessors_in_rust_storage ... ok
+test libgit2::core::buffer::unit_tests::layout_matches_c ... ok
+test libgit2::core::buffer::unit_tests::handles_over_rust_storage ... ok
+test libgit2::core::buffer::unit_tests::unowned_buffer_reads_empty_and_disposes_without_c ... ok
+test libgit2::core::common::unit_tests::cached_memory_defaults_to_zero ... ok
+test libgit2::core::common::unit_tests::build_info_conversions_round_trip ... ok
+test libgit2::core::common::unit_tests::feature_bits_are_distinct_single_bits ... ok
+test libgit2::core::common::unit_tests::features_iter_is_fused_and_bounded ... ok
+test libgit2::core::common::unit_tests::features_debug_lists_names_then_unnamed_bits ... ok
+test libgit2::core::common::unit_tests::feature_conversions_round_trip ... ok
+test libgit2::core::common::unit_tests::features_set_operations ... ok
+test libgit2::core::common::unit_tests::keys_past_the_header_are_unnamed ... ok
+test libgit2::core::common::unit_tests::negative_keys_are_refused_before_conversion ... ok
+test libgit2::core::common::unit_tests::keys_are_dense_and_round_trip ... ok
+test libgit2::core::common::unit_tests::search_path_levels_are_the_config_levels ... ok
+test libgit2::core::common::unit_tests::features_retain_unnamed_bits ... ok
+test libgit2::core::common::unit_tests::status_reads_the_thread_error ... ok
+test libgit2::core::common::unit_tests::buf_string_covers_every_outcome ... ok
+test libgit2::core::common::unit_tests::unnamed_key_displays_its_value ... ok
+test libgit2::core::buffer::unit_tests::owned_buffers_copy_move_and_release ... ok
+test libgit2::core::common::unit_tests::version_displays_dotted ... ok
+test libgit2::core::global::unit_tests::errors_report_themselves ... ok
+test libgit2::core::global::unit_tests::runtime_debug_shows_its_count ... ok
+test libgit2::core::strarray::unit_tests::c_fills_an_owner_in_place ... ok
+test libgit2::core::strarray::unit_tests::dispose_policy_releases_the_strings ... ok
+test libgit2::core::strarray::unit_tests::empty_array_accessors_in_rust_storage ... ok
+test libgit2::core::strarray::unit_tests::c_reads_a_view_as_an_argument_array ... ok
+test libgit2::core::common::unit_tests::variants_are_distinct ... ok
+test libgit2::core::strarray::unit_tests::handles_over_a_c_owned_array ... ok
+test libgit2::core::strarray::unit_tests::exclusive_handle_moves_over_rust_storage ... ok
+test libgit2::core::strarray::unit_tests::layout_matches_c ... ok
+test libgit2::core::strarray::unit_tests::null_buffer_is_empty_and_disposes_without_c ... ok
+test libgit2::core::strarray::unit_tests::iterator_is_exact_double_ended_and_fused ... ok
+test libgit2::core::trace::unit_tests::layout_is_the_c_value ... ok
+test libgit2::core::trace::unit_tests::order_is_verbosity ... ok
+test libgit2::core::strarray::unit_tests::views_point_at_the_borrowed_strings ... ok
+test libgit2::core::strarray::unit_tests::shared_handle_over_rust_storage ... ok
+test libgit2::core::trace::unit_tests::raw_round_trips ... ok
+test libgit2::core::types::unit_tests::branch_enum_is_the_c_enum ... ok
+test libgit2::core::types::unit_tests::branch_raw_values_round_trip ... ok
+test libgit2::core::trace::unit_tests::unnamed_values_are_refused_without_panicking ... ok
+test libgit2::core::types::unit_tests::branch_union_and_containment_follow_the_bits ... ok
+test libgit2::core::strarray::unit_tests::owned_arrays_copy_edit_and_release ... ok
+test libgit2::core::types::unit_tests::conversions_round_trip ... ok
+test libgit2::core::types::unit_tests::debug_names_the_variant ... ok
+test libgit2::core::types::unit_tests::branch_unnamed_values_are_rejected ... ok
+test libgit2::core::types::unit_tests::defaults_are_what_an_unconfigured_submodule_reports ... ok
+test libgit2::core::types::unit_tests::debug_shows_the_fields ... ok
+test libgit2::core::types::unit_tests::eq_and_hash_follow_every_field ... ok
+test libgit2::core::types::unit_tests::layout_matches_c ... ok
+test libgit2::core::types::unit_tests::modes_hash_and_compare_by_variant ... ok
+test libgit2::core::types::unit_tests::mut_handle_reborrows ... ok
+test libgit2::core::types::unit_tests::new_signs_by_offset ... ok
+test libgit2::core::types::unit_tests::not_a_reference_type_reports_the_value ... ok
+test libgit2::core::types::unit_tests::object_filter_spells_any_as_none ... ok
+test libgit2::core::types::unit_tests::not_an_object_type_reports_the_value ... ok
+test libgit2::core::types::unit_tests::raw_conversions_round_trip ... ok
+test libgit2::core::types::unit_tests::object_variants_carry_their_c_values ... ok
+test libgit2::core::types::unit_tests::reference_variants_carry_their_c_values ... ok
+test libgit2::core::types::unit_tests::setters_write_one_field_each ... ok
+test libgit2::core::types::unit_tests::submodule_ignore_layout_matches_c ... ok
+test libgit2::core::types::unit_tests::submodule_ignore_named_values_round_trip ... ok
+test libgit2::core::types::unit_tests::to_time_copies_the_fields ... ok
+test libgit2::core::types::unit_tests::unnamed_mode_displays_in_octal ... ok
+test libgit2::core::types::unit_tests::unnamed_modes_keep_their_value ... ok
+test libgit2::core::types::unit_tests::unnamed_values_report_themselves ... ok
+test libgit2::core::types::unit_tests::variants_carry_the_octal_modes ... ok
+test libgit2::core::types::unit_tests::write_streams::auto_traits_follow_the_writer ... ok
+test libgit2::core::types::unit_tests::write_streams::borrowed_writer_is_kept_by_the_caller ... ok
+test libgit2::core::types::unit_tests::write_streams::box_frees_through_the_member ... ok
+test libgit2::core::types::unit_tests::write_streams::close_runs_close_then_free ... ok
+test libgit2::core::types::unit_tests::write_streams::handles_designate_the_header ... ok
+test libgit2::core::types::unit_tests::write_streams::missing_free_member_is_left_alone ... ok
+test libgit2::core::types::unit_tests::write_streams::null_buffer_is_empty_only_when_len_is_zero ... ok
+test libgit2::core::types::unit_tests::write_streams::owner_drops_the_writer_once ... ok
+test libgit2::core::types::unit_tests::write_streams::stream_error_from_another_wrapper ... ok
+test libgit2::core::types::unit_tests::write_streams::typed_stream_lent_to_c_as_a_target ... ok
+test libgit2::core::types::unit_tests::write_streams::vec_writer_collects_writes_through_the_header ... ok
+test libgit2::core::types::unit_tests::write_streams::stream_error_builds_and_formats ... ok
+test libgit2::core::types::unit_tests::zeroed_is_epoch_without_sign ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::box_adopts_and_returns_a_c_allocation ... ok
+test libgit2::core::types::unit_tests::write_streams::writer_errors_cross_the_member_as_c_errors ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::box_uninit_filled_through_the_c_pointer ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::data_align_covers_libgit2_scalars ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::dup_copies_and_never_asks_for_zero_bytes ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::empty_runs_allocate_nothing ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::oversized_runs_are_rejected_before_allocating ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::policies_are_stateless_values ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_adopts_a_c_allocation_and_returns_it ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_dup_copies_the_terminator ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_dup_raw_matches_the_source ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_owners_are_pointer_sized ... ok
+test libgit2::core::buffer::unit_tests::without_runtime_only_empty_buffers_exist ... ok
+test libgit2::core::types::unit_tests::reference_from_raw_refuses_every_other_value ... ok
+test libgit2::core::buffer::unit_tests::out_of_memory_leaves_buffers_alone ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_vec_adopts_its_own_raw_parts ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_vec_empty_forms_own_nothing ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_vec_into_vec_releases_only_the_array ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::vec_adopts_a_c_allocation ... ok
+test libgit2::core::buffer::unit_tests::adopts_what_libgit2_fills ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::vec_into_raw_parts_is_released_by_c ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::vec_uninit_promoted_after_filling ... ok
+test libgit2::oid::oid::unit_tests::accessors_round_trip_in_rust_storage ... ok
+test libgit2::oid::oid::unit_tests::adopted_shorteners_are_freed_once ... ok
+test libgit2::oid::oid::unit_tests::constructors_parse_what_c_parses ... ok
+test libgit2::core::strarray::unit_tests::copies_without_runtime_fail_cleanly ... ok
+test libgit2::oid::oid::unit_tests::add_refuses_malformed_ids_before_ffi ... ok
+test libgit2::oid::oid::unit_tests::copy_from_and_to_oid_copy_every_byte ... ok
+test libgit2::oid::oid::unit_tests::default_is_sha1_and_debug_names_the_variant ... ok
+test libgit2::core::global::unit_tests::a_failed_initialisation_poisons_later_ones ... ok
+test libgit2::oid::oid::unit_tests::format_cstr_tells_an_empty_buffer_by_its_length ... ok
+test libgit2::oid::oid::unit_tests::from_raw_refuses_a_wrong_length_before_ffi ... ok
+test libgit2::oid::oid::unit_tests::from_raw_round_trips_every_variant ... ok
+test libgit2::oid::oid::unit_tests::layout_matches_c ... ok
+test libgit2::oid::oid::unit_tests::oid_is_a_copyable_value ... ok
+test libgit2::oid::oid::unit_tests::hash_follows_the_compared_bytes ... ok
+test libgit2::oid::oid::unit_tests::oid_values_order_like_their_handles ... ok
+test libgit2::oid::oid::unit_tests::option_uses_a_niche ... ok
+test libgit2::core::strarray::unit_tests::allocated_empty_results_are_released ... ok
+test libgit2::oid::oid::unit_tests::shortener_refuses_an_oversized_min_length_before_ffi ... ok
+test libgit2::core::global::unit_tests::shutdown_and_drop_release_one_each ... ok
+test libgit2::oid::oid::unit_tests::oids_key_hashed_collections ... ok
+test libgit2::oid::oid::unit_tests::sizes_follow_the_header ... ok
+test libgit2::oid::oid::unit_tests::debug_shows_kind_and_hex_id ... ok
+test libgit2::core::strarray::unit_tests::copies_out_of_memory_are_none ... ok
+test libgit2::core::global::unit_tests::the_count_stops_at_the_ceiling ... ok
+test libgit2::oid::oid::unit_tests::to_hex_string_refuses_unknown_types_before_ffi ... ok
+test libgit2::oid::oid::unit_tests::zero_formats_as_hexzero_and_is_zero ... ok
+test libgit2::oid::oid::unit_tests::unnamed_values_are_rejected_with_their_value ... ok
+test libgit2::oid::oid::unit_tests::zero_is_the_typed_null_id ... ok
+test libgit2::oid::oidarray::unit_tests::c_fills_an_owner_in_place ... ok
+test libgit2::oid::oidarray::unit_tests::dispose_policy_releases_the_ids ... ok
+test libgit2::oid::oidarray::unit_tests::empty_array_accessors_in_rust_storage ... ok
+test libgit2::oid::oidarray::unit_tests::layout_matches_c ... ok
+test libgit2::core::types::unit_tests::object_from_raw_refuses_every_other_value ... ok
+test libgit2::oid::oidarray::unit_tests::null_buffer_is_empty_and_disposes_without_c ... ok
+test libgit2::oid::oidarray::unit_tests::handles_over_rust_storage ... ok
+test libgit2::oid::oidarray::unit_tests::handles_over_a_c_owned_array ... ok
+test libgit2::util::errors::unit_tests::classes_are_contiguous_from_none_to_grafts ... ok
+test libgit2::util::errors::unit_tests::classes_convert_to_git_error_t_unchanged ... ok
+test libgit2::util::errors::unit_tests::codes_have_distinct_values ... ok
+test libgit2::core::types::unit_tests::write_streams::writer_error_without_a_runtime_keeps_its_code ... ok
+test libgit2::util::errors::unit_tests::copy_crosses_threads ... ok
+test libgit2::util::errors::unit_tests::copy_survives_the_next_error ... ok
+test libgit2::util::errors::unit_tests::copy_matches_and_outlives_the_borrowed_error ... ok
+test libgit2::util::errors::unit_tests::debug_names_the_variant ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::failure_before_init_lands_on_live_thread_state ... ok
+test libgit2::util::errors::unit_tests::enums_are_int_sized ... ok
+test libgit2::util::errors::unit_tests::from_raw_is_usable_in_const_context ... ok
+test libgit2::util::errors::unit_tests::every_code_round_trips_through_from_raw ... ok
+test libgit2::util::errors::unit_tests::non_utf8_message_displays_lossily ... ok
+test libgit2::util::errors::unit_tests::null_message_reads_as_empty ... ok
+test libgit2::util::errors::unit_tests::static_errors_read_as_c_does ... ok
+test libgit2::oid::oidarray::unit_tests::owned_arrays_copy_edit_and_release ... ok
+test libgit2::util::errors::unit_tests::thread_error_reads_as_c_does ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::str_vec_failed_copy_releases_what_it_made ... ok
+test libgit2::util::errors::unit_tests::unnamed_class_is_kept_raw ... ok
+test libgit2::util::errors::unit_tests::unnamed_classes_are_rejected ... ok
+test libgit2::util::errors::unit_tests::unnamed_codes_are_rejected ... ok
+test libgit2::oid::oid::unit_tests::constructors_without_runtime_fail_cleanly ... ok
+test libgit2::util::errors::unit_tests::unnamed_values_are_errors ... ok
+test libgit2::util::sys::alloc::unit_tests::from_fns_sets_every_member ... ok
+test libgit2::util::sys::alloc::unit_tests::panic_in_the_implementation_aborts ... ignored, the child's abort path spins under BorrowSanitizer
+test libgit2::util::sys::alloc::unit_tests::debug_lists_member_addresses ... ok
+test libgit2::util::sys::alloc::unit_tests::setters_replace_one_member_each ... ok
+test libgit2::oid::oid::unit_tests::formatters_without_runtime_fail_cleanly ... ok
+test libgit2::util::sys::alloc::unit_tests::trampolines_forward_to_the_implementation ... ok
+test libgit2::util::sys::alloc::unit_tests::value_is_copy_send_and_sync ... ok
+test libgit2::util::sys::alloc::unit_tests::zero_byte_requests_are_allocations ... ok
+test libgit2::util::sys::errors::unit_tests::later_pins_keep_errno ... ok
+test libgit2::util::sys::errors::unit_tests::message_not_stored_reports_itself ... ok
+test libgit2::oid::oid::unit_tests::add_aborts_when_the_trie_cannot_grow ... ok
+test libgit2::oid::oid::unit_tests::to_hex_string_out_of_memory_is_an_error ... ok
+test libgit2::oid::oid::unit_tests::shortener_out_of_memory_is_an_error ... ok
+test libgit2::oid::oidarray::unit_tests::copies_without_runtime_fail_cleanly ... ok
+test libgit2::oid::oidarray::unit_tests::copies_out_of_memory_are_none ... ok
+test libgit2::util::errors::unit_tests::error_before_init_is_static ... ok
+test libgit2::util::errors::unit_tests::last_before_init_pins_the_runtime ... ok
+test libgit2::util::errors::unit_tests::last_without_runtime_is_uninitialised ... ok
+test libgit2::util::errors::unit_tests::thread_state_failure_is_static ... ok
+test libgit2::util::sys::errors::unit_tests::racing_first_pins_keep_each_errno ... ok
+test libgit2::util::sys::errors::unit_tests::without_a_runtime_nothing_reaches_libgit2 ... ok
+test libgit2::core::types::unit_tests::submodule_ignore_unnamed_values_are_rejected ... ok
+test libgit2::util::sys::errors::unit_tests::first_pin_keeps_errno ... ok
+test libgit2::odb::sys::odb_backend::unit_tests::clone_aborts_when_the_copy_fails ... ok
+test libgit2::oid::oid::unit_tests::shortenable_ids_start_with_forty_hex_digits ... ok
+
+test result: ok. 185 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 9.71s
+
+
+running 109 tests
+test common::options::features_match_c ... ok
+test common::git_libgit2_features_reads_back_through_features ... ok
+test common::options::prerelease_matches_c ... ok
+test common::options::version_matches_c ... ok
+test common::options_carry_their_c_values ... ok
+test errors::classes_carry_their_c_values ... ok
+test errors::classifies_codes_libgit2_produces ... ok
+test errors::codes_carry_their_c_values ... ok
+test errors::set_classes_round_trip_through_libgit2 ... ok
+test oid::default_is_git_oid_default ... ok
+test oid::field_writes_and_copies_match_c ... ok
+test common::git_libgit2_buildinfo_answers_exactly_the_named_items ... ok
+test oid::from_raw_parses_as_c ... ok
+test oid::parses_into_one_oid_follow_the_rust_type ... ok
+test oid::mixed_sequences_leave_the_same_error_state ... ok
+test oid::shortener_fills_up_like_c ... ignored, tens of thousands of additions stall BorrowSanitizer; the other variants run it
+test oid::types_carry_their_c_values ... ok
+test common::options::search_paths_match_c ... ok
+test common::build_info_from_raw_names_exactly_the_c_constants ... ok
+test oid::shortener_new_matches_c ... ok
+test errors::last_reads_as_c_does_after_each_step ... ok
+test sys_alloc::member_writes_match_a_raw_allocator ... ok
+test common::options::ssl_cert_locations_match_c ... ok
+test common::git_libgit2_feature_backend_answers_only_named_features ... ok
+test buffer::rust_built_buffers_match_libgit2_shaped_ones ... ok
+test common::options::cache_sizes_match_c ... ok
+test oid::from_prefix_parses_as_c ... ok
+test common::options::windows_sharemode_matches_c ... ok
+test common::options::setters_without_getters_match_c ... ok
+test common::opts_refuses_exactly_the_unnamed_keys ... ok
+test oid::from_raw_names_exactly_the_c_types ... ok
+test oid::comparisons_follow_edits_like_c ... ok
+test common::options::owner_validation_matches_c ... ok
+test trace::git_trace_set_accepts_every_level_with_a_callback ... ok
+test trace::levels_carry_their_c_values ... ok
+test buffer::contents_taken_from_libgit2_results ... ok
+test trace::order_is_libgit2s_report_rule ... ok
+test common::options::size_options_match_c ... ok
+test common::options::timeouts_match_c ... ok
+test types::getters_read_what_git_signature_from_buffer_parses ... ok
+test common::setters_write_what_their_getters_read ... ok
+test trace::from_raw_names_exactly_the_c_levels ... ok
+test types::modes_carry_their_c_values ... ok
+test oid::from_string_parses_as_c ... ok
+test buffer::libgit2_results_read_reuse_and_release_alike ... ok
+test errors::last_reads_messages_of_every_size ... ok
+test oid::repository_oid_types_follow_the_rust_type ... ok
+test errors::last_agrees_once_it_pins_the_runtime ... ok
+test types::new_matches_git_signature_new ... ok
+test common::options::extensions_match_c ... ok
+test common::options::string_options_match_c ... ok
+test global::c_init_fails_without_memory ... ok
+test types::setters_write_what_git_signature_dup_copies ... ok
+test global::mixed_references_count_together ... ok
+test common::opts_dispatches_every_named_key ... ok
+test types::configured_ignore_values_are_named ... ok
+test common::feature_from_raw_names_exactly_the_c_constants ... ok
+test types::reference_types_follow_c ... ok
+test errors::last_reads_allocation_failures_as_c_does ... ok
+test types::odb_write_of_type_zero_stores_an_unreadable_blob ... ok
+test types::object_types_round_trip_through_the_odb ... ok
+test types::variants_carry_the_c_values ... ok
+test types::zeroed_is_what_a_zoneless_parse_leaves ... ok
+test types::unconfigured_settings_read_as_the_defaults ... ok
+test errors::classifies_what_libgit2_reports ... ok
+test global::rust_init_fails_without_memory ... ok
+test types::treebuilder_checks_the_object_a_mode_names ... ok
+test global::counts_match_c ... ok
+test types::unreadable_settings_fail_the_lookup ... ok
+test strarray::extension_results_read_copy_edit_and_release_alike ... ok
+test types::treebuilder_accepts_exactly_the_insertable_modes ... ok
+test oidarray::built_arrays_match_c_built_ones ... ok
+test strarray::copies_build_edit_and_release_alike ... ok
+test types::init_copies_the_update_setting_by_name ... ok
+test trace::git_trace_set_needs_a_callback_above_none ... ok
+test types::write_streams::blob_stream_free_and_close_match_c ... ok
+test types::write_streams::handle_calls_match_member_calls ... ok
+test sys_errors::allocation_failures ... ok
+test sys_odb_backend::traced_allocator_sequences ... ok
+test oidarray::merge_base_results_read_edit_and_release_alike ... ok
+test types::set_ignore_takes_the_variants_values ... ok
+test sys_odb_backend::traced_string_sequences ... ok
+test oid::zero_ids_match_c ... ok
+test types::update_writes_round_trip ... ok
+test types::recurse_writes_round_trip ... ok
+test strarray::allocated_empty_results_release_alike ... ok
+test sys_alloc::libgit2_drives_both_allocators_alike ... ok
+test strarray::views_read_and_copy_as_argument_arrays ... ok
+test types::branch_iterators_filter_and_report_as_branch_type_says ... ok
+test types::object_types_are_what_libgit2_accepts ... ok
+test errors::from_raw_names_exactly_the_c_classes ... ok
+test oid::git_oid_from_raw_accepts_exactly_the_named_types ... ok
+test errors::from_raw_names_exactly_the_c_codes ... ok
+test types::configured_settings_read_as_the_rust_type ... ok
+test errors::last_reads_each_threads_own_error ... ok
+test oid::git_oid_from_string_takes_exactly_hex_size_digits ... ok
+test sys_errors::setters_and_clear_in_sequence ... ok
+test oid::git_oid_from_prefix_takes_hex_size_digits ... ok
+test sys_errors::threads_keep_their_own_errors ... ok
+test types::write_streams::rust_targets_match_c_targets_under_libgit2 ... ok
+test types::parsed_trees_keep_any_16_bit_mode ... ok
+test common::from_raw_names_exactly_the_c_keys ... ok
+test types::write_streams::blob_stream_writes_and_commit_match_c ... ok
+test oid::comparisons_match_c has been running for over 60 seconds
+test oid::formatters_match_c has been running for over 60 seconds
+test oid::seeded_random_inputs_match_c has been running for over 60 seconds
+test oid::shortener_adds_match_c has been running for over 60 seconds
+test oid::seeded_random_inputs_match_c ... ok
+test sys_errors::messages_grow_and_shrink has been running for over 60 seconds
+test types::from_raw_names_exactly_the_c_modes has been running for over 60 seconds
+test oid::comparisons_match_c ... ok
+test oid::formatters_match_c ... ok
+test sys_errors::messages_grow_and_shrink ... ok
+test oid::shortener_adds_match_c ... ok
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+15 ~ cc = "1.2"
+16 + [lints]
+17 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+15 ~ cc = "1.2"
+16 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+   Compiling libgit2 v0.1.0 (/target/crustify/rust/libgit2)
+   Compiling libgit2-sys v0.1.0 (/target/crustify/rust/libgit2-sys)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.27s
+     Running unittests lib.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/4e6bf93dce848249/out/libgit2-4e6bf93dce848249)
+     Running tests/equiv/main.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/513596211f61704a/out/equiv-513596211f61704a)
