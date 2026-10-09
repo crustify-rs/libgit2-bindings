@@ -1041,6 +1041,97 @@
    ]
   },
   {
+   "name": "git_libgit2_features",
+   "defined_in": "src/libgit2/libgit2.c"
+  },
+  {
+   "name": "git_libgit2_init",
+   "defined_in": "src/libgit2/libgit2.c"
+  },
+  {
+   "name": "git_libgit2_opts",
+   "defined_in": "src/libgit2/settings.c"
+  },
+  {
+   "name": "git_libgit2_prerelease",
+   "defined_in": "src/libgit2/libgit2.c",
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "static"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "LIBGIT2_VERSION_PRERELEASE string literal in libgit2.so's rodata (\"alpha\", \"beta\", \"rcN\"), or NULL for a final release. Never freed; needs no initialisation."
+    }
+   }
+  },
+  {
+   "name": "git_libgit2_shutdown",
+   "defined_in": "src/libgit2/libgit2.c"
+  },
+  {
+   "name": "git_libgit2_version",
+   "defined_in": "src/libgit2/libgit2.c",
+   "ptr_args": [
+    {
+     "name": "major",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:major"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-param, written unconditionally with LIBGIT2_VERSION_MAJOR; NULL dereferenced."
+     }
+    },
+    {
+     "name": "minor",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:minor"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-param, written unconditionally with LIBGIT2_VERSION_MINOR; NULL dereferenced."
+     }
+    },
+    {
+     "name": "rev",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:rev"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-param, written unconditionally with LIBGIT2_VERSION_REVISION; NULL dereferenced. Always returns 0; needs no initialisation."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_odb_backend_data_alloc",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {

@@ -24,6 +24,9 @@ git_libgit2_feature_backend
 git_libgit2_features
 git_libgit2_init
 git_libgit2_opts
+git_libgit2_prerelease
+git_libgit2_shutdown
+git_libgit2_version
 git_merge_bases
 git_object_string2type
 git_object_type2string

@@ -886,3 +886,739 @@ fn setters_write_what_their_getters_read() {
         },
     );
 }
+
+// --- Version and global options ----------------------------------------------------
+//
+// `version`, `prerelease` and `features` against the raw routines; each option against
+// `git_libgit2_opts` itself. Options are process-global, so each sequence runs in a
+// child process: every step sets a value through C and then the same value through
+// Rust, and after each both C's and Rust's getter must read it back, a refused value
+// failing both ways with the same error and leaving the setting alone.
+
+mod options {
+    use std::ffi::{CStr, CString, c_char, c_int, c_ulong};
+    use std::process::Command;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::common::{self, CachedMemory, SearchPathLevel, Version};
+    use libgit2::libgit2::util::errors::ErrorBuf;
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+    /// Runs `body` alone in a child process, so no other test shares libgit2's globals.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.strip_prefix("equiv::").unwrap_or(test);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The raw calls allocate and report errors, which needs an initialised libgit2;
+    /// the reference dies with the child.
+    fn c_init() {
+        // SAFETY: no arguments; counted under libgit2's own mutex.
+        assert!(unsafe { ffi::git_libgit2_init() } > 0);
+    }
+
+    /// `git_error_last()`'s class and message, copied out.
+    fn c_last() -> (c_int, CString) {
+        // SAFETY: never NULL; copied out before the next libgit2 call.
+        unsafe {
+            let e = ffi::git_error_last();
+            ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+        }
+    }
+
+    /// A C status, with its error when it failed, as Rust reports it.
+    fn c_result(rc: c_int) -> Result<(), (c_int, CString)> {
+        if rc < 0 { Err(c_last()) } else { Ok(()) }
+    }
+
+    fn rust_result(r: Result<(), ErrorBuf>) -> Result<(), (c_int, CString)> {
+        r.map_err(|e| (e.raw_class(), e.message().to_owned()))
+    }
+
+    /// A `git_buf` key's result, through C.
+    fn c_buf(key: ffi::git_libgit2_opt_t, level: Option<c_int>) -> CString {
+        let mut buf = ffi::git_buf {
+            ptr: ptr::null_mut(),
+            reserved: 0,
+            size: 0,
+        };
+        // SAFETY: the key reads an optional `int` level and a `git_buf *`, a zeroed
+        // local it fills; disposed below.
+        let rc = unsafe {
+            match level {
+                Some(level) => ffi::git_libgit2_opts(key as c_int, level, &raw mut buf),
+                None => ffi::git_libgit2_opts(key as c_int, &raw mut buf),
+            }
+        };
+        assert_eq!(rc, 0);
+        // SAFETY: libgit2 filled the buffer: `size` bytes and a NUL at `ptr`.
+        let s = unsafe { CStr::from_ptr(buf.ptr) }.to_owned();
+        assert_eq!(s.as_bytes().len(), buf.size);
+        // SAFETY: as libgit2 left it.
+        unsafe { ffi::git_buf_dispose(&raw mut buf) };
+        s
+    }
+
+    fn c_ptr(s: Option<&CStr>) -> *const c_char {
+        s.map_or(ptr::null(), CStr::as_ptr)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn version_matches_c() {
+        let (mut major, mut minor, mut rev) = (-1, -1, -1);
+        // SAFETY: three live out-parameters.
+        let rc = unsafe { ffi::git_libgit2_version(&raw mut major, &raw mut minor, &raw mut rev) };
+        assert_eq!(rc, 0);
+        let v = common::version();
+        assert_eq!(
+            v,
+            Version {
+                major,
+                minor,
+                revision: rev
+            }
+        );
+        assert_eq!(v.to_string(), format!("{major}.{minor}.{rev}"));
+        // The library loaded is the one the bindings were generated from.
+        assert_eq!(
+            (v.major as u32, v.minor as u32, v.revision as u32),
+            (
+                ffi::LIBGIT2_VERSION_MAJOR,
+                ffi::LIBGIT2_VERSION_MINOR,
+                ffi::LIBGIT2_VERSION_REVISION
+            )
+        );
+        for _ in 0..3 {
+            assert_eq!(common::version(), v);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn prerelease_matches_c() {
+        // SAFETY: no arguments.
+        let c = unsafe { ffi::git_libgit2_prerelease() };
+        let rust = common::prerelease();
+        assert_eq!(
+            rust.map_or(ptr::null(), CStr::as_ptr),
+            c,
+            "the same literal"
+        );
+        assert_eq!(rust, None, "1.9.0 is a final release");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn features_match_c() {
+        // SAFETY: no arguments.
+        let c = unsafe { ffi::git_libgit2_features() };
+        assert_eq!(common::features().bits(), c);
+        assert_eq!(common::features(), common::features());
+    }
+
+    type SizeOption = (
+        ffi::git_libgit2_opt_t,
+        ffi::git_libgit2_opt_t,
+        fn() -> usize,
+        unsafe fn(usize),
+    );
+
+    const SIZES: [SizeOption; 5] = [
+        (
+            ffi::GIT_OPT_GET_MWINDOW_SIZE,
+            ffi::GIT_OPT_SET_MWINDOW_SIZE,
+            common::mwindow_size,
+            common::set_mwindow_size,
+        ),
+        (
+            ffi::GIT_OPT_GET_MWINDOW_MAPPED_LIMIT,
+            ffi::GIT_OPT_SET_MWINDOW_MAPPED_LIMIT,
+            common::mwindow_mapped_limit,
+            common::set_mwindow_mapped_limit,
+        ),
+        (
+            ffi::GIT_OPT_GET_MWINDOW_FILE_LIMIT,
+            ffi::GIT_OPT_SET_MWINDOW_FILE_LIMIT,
+            common::mwindow_file_limit,
+            common::set_mwindow_file_limit,
+        ),
+        (
+            ffi::GIT_OPT_GET_PACK_MAX_OBJECTS,
+            ffi::GIT_OPT_SET_PACK_MAX_OBJECTS,
+            common::pack_max_objects,
+            common::set_pack_max_objects,
+        ),
+        (
+            ffi::GIT_OPT_GET_PACK_MAX_OBJECT_SIZE,
+            ffi::GIT_OPT_SET_PACK_MAX_OBJECT_SIZE,
+            common::pack_max_object_size,
+            common::set_pack_max_object_size,
+        ),
+    ];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn size_options_match_c() {
+        isolated(concat!(module_path!(), "::size_options_match_c"), || {
+            for (get_key, set_key, get, set) in SIZES {
+                let c_get = || {
+                    let mut v = 0usize;
+                    // SAFETY: the key writes one `size_t` through a live local.
+                    let rc = unsafe { ffi::git_libgit2_opts(get_key as c_int, &raw mut v) };
+                    assert_eq!(rc, 0);
+                    v
+                };
+                assert_eq!(get(), c_get(), "defaults of key {get_key}");
+                for n in [0, 1, 12345, usize::MAX, 4096] {
+                    // SAFETY: the key reads one `size_t`; this child runs one thread.
+                    assert_eq!(unsafe { ffi::git_libgit2_opts(set_key as c_int, n) }, 0);
+                    assert_eq!((c_get(), get()), (n, n));
+                    // SAFETY: this child runs one thread.
+                    unsafe { set(n) };
+                    assert_eq!((c_get(), get()), (n, n));
+                    // SAFETY: as above.
+                    unsafe { set(n / 2) };
+                    assert_eq!((c_get(), get()), (n / 2, n / 2));
+                }
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owner_validation_matches_c() {
+        isolated(
+            concat!(module_path!(), "::owner_validation_matches_c"),
+            || {
+                let c_get = || {
+                    let mut v: c_int = -1;
+                    // SAFETY: the key writes one `int` through a live local.
+                    let rc = unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_GET_OWNER_VALIDATION as c_int,
+                            &raw mut v,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    v != 0
+                };
+                assert_eq!(common::owner_validation(), c_get());
+                for raw in [0, 1, 7, -1, 0] {
+                    // SAFETY: the key reads one `int`; this child runs one thread.
+                    unsafe {
+                        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_OWNER_VALIDATION as c_int, raw)
+                    };
+                    assert_eq!((c_get(), common::owner_validation()), (raw != 0, raw != 0));
+                    // SAFETY: this child runs one thread.
+                    unsafe { common::set_owner_validation(!(raw != 0)) };
+                    assert_eq!((c_get(), common::owner_validation()), (raw == 0, raw == 0));
+                }
+            },
+        );
+    }
+
+    /// Timeouts: non-negative values stick; negative ones fail with the same error in
+    /// C and Rust, and leave the value alone.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn timeouts_match_c() {
+        isolated(concat!(module_path!(), "::timeouts_match_c"), || {
+            c_init();
+            type Timeout = (
+                ffi::git_libgit2_opt_t,
+                ffi::git_libgit2_opt_t,
+                fn() -> c_int,
+                unsafe fn(c_int) -> Result<(), ErrorBuf>,
+            );
+            let options: [Timeout; 2] = [
+                (
+                    ffi::GIT_OPT_GET_SERVER_CONNECT_TIMEOUT,
+                    ffi::GIT_OPT_SET_SERVER_CONNECT_TIMEOUT,
+                    common::server_connect_timeout,
+                    common::set_server_connect_timeout,
+                ),
+                (
+                    ffi::GIT_OPT_GET_SERVER_TIMEOUT,
+                    ffi::GIT_OPT_SET_SERVER_TIMEOUT,
+                    common::server_timeout,
+                    common::set_server_timeout,
+                ),
+            ];
+            for (get_key, set_key, get, set) in options {
+                let c_get = || {
+                    let mut v: c_int = -7;
+                    // SAFETY: the key writes one `int` through a live local.
+                    let rc = unsafe { ffi::git_libgit2_opts(get_key as c_int, &raw mut v) };
+                    assert_eq!(rc, 0);
+                    v
+                };
+                assert_eq!(get(), c_get());
+                let mut current = c_get();
+                for ms in [5, 0, -1, c_int::MAX, c_int::MIN, 30_000, -30_000] {
+                    // SAFETY: the key reads one `int`; this child runs one thread.
+                    let c = c_result(unsafe { ffi::git_libgit2_opts(set_key as c_int, ms) });
+                    let c_after = (c_get(), get());
+                    // SAFETY: this child runs one thread.
+                    let rust = rust_result(unsafe { set(ms) });
+                    assert_eq!(rust, c, "{ms}");
+                    assert_eq!((c_get(), get()), c_after);
+                    if ms >= 0 {
+                        current = ms;
+                    }
+                    assert_eq!(c_after, (current, current));
+                }
+            }
+        });
+    }
+
+    /// Off Windows, C writes no share mode at all.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn windows_sharemode_matches_c() {
+        isolated(
+            concat!(module_path!(), "::windows_sharemode_matches_c"),
+            || {
+                for mode in [3, 0, c_ulong::MAX] {
+                    // SAFETY: off Windows the key reads nothing; this child runs one thread.
+                    unsafe {
+                        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_WINDOWS_SHAREMODE as c_int, mode)
+                    };
+                    let mut c: c_ulong = 0xdead;
+                    // SAFETY: off Windows the key writes nothing through the live local.
+                    unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_GET_WINDOWS_SHAREMODE as c_int,
+                            &raw mut c,
+                        )
+                    };
+                    assert_eq!(c, 0xdead, "untouched");
+                    assert_eq!(common::windows_sharemode(), None);
+                    // SAFETY: this child runs one thread.
+                    unsafe { common::set_windows_sharemode(mode) };
+                    assert_eq!(common::windows_sharemode(), None);
+                }
+            },
+        );
+    }
+
+    /// The string settings: each value set through C and then through Rust reads back
+    /// the same through both getters, `None` restoring the default.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn string_options_match_c() {
+        isolated(concat!(module_path!(), "::string_options_match_c"), || {
+            c_init();
+            type Get = fn() -> Result<CString, ErrorBuf>;
+            type Set = unsafe fn(Option<&CStr>) -> Result<(), ErrorBuf>;
+            let options: [(ffi::git_libgit2_opt_t, ffi::git_libgit2_opt_t, Get, Set); 4] = [
+                (
+                    ffi::GIT_OPT_GET_TEMPLATE_PATH,
+                    ffi::GIT_OPT_SET_TEMPLATE_PATH,
+                    common::template_path,
+                    common::set_template_path,
+                ),
+                (
+                    ffi::GIT_OPT_GET_HOMEDIR,
+                    ffi::GIT_OPT_SET_HOMEDIR,
+                    common::homedir,
+                    common::set_homedir,
+                ),
+                (
+                    ffi::GIT_OPT_GET_USER_AGENT,
+                    ffi::GIT_OPT_SET_USER_AGENT,
+                    common::user_agent,
+                    common::set_user_agent,
+                ),
+                (
+                    ffi::GIT_OPT_GET_USER_AGENT_PRODUCT,
+                    ffi::GIT_OPT_SET_USER_AGENT_PRODUCT,
+                    common::user_agent_product,
+                    common::set_user_agent_product,
+                ),
+            ];
+            let values: [Option<&CStr>; 6] = [
+                Some(c"/a/b"),
+                None,
+                Some(c""),
+                Some(c"$PATH:x"),
+                Some(c"\xff\xfe"),
+                None,
+            ];
+            for (get_key, set_key, get, set) in options {
+                assert_eq!(
+                    get().unwrap(),
+                    c_buf(get_key, None),
+                    "default of key {get_key}"
+                );
+                for value in values {
+                    let before = c_buf(get_key, None);
+                    // SAFETY: the key reads one `const char *`, NULL or a C string it
+                    // copies; this child runs one thread.
+                    let c =
+                        c_result(unsafe { ffi::git_libgit2_opts(set_key as c_int, c_ptr(value)) });
+                    let after_c = c_buf(get_key, None);
+                    assert_eq!(get().unwrap(), after_c);
+                    // Back to the same starting point (`$PATH` expands the previous
+                    // path), then the same step through Rust.
+                    // SAFETY: as above.
+                    unsafe { ffi::git_libgit2_opts(set_key as c_int, before.as_ptr()) };
+                    // SAFETY: this child runs one thread.
+                    assert_eq!(rust_result(unsafe { set(value) }), c);
+                    assert_eq!(
+                        (c_buf(get_key, None), get().unwrap()),
+                        (after_c.clone(), after_c)
+                    );
+                }
+            }
+        });
+    }
+
+    /// The search paths, per level, `$PATH` expanding the previous value.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn search_paths_match_c() {
+        isolated(concat!(module_path!(), "::search_paths_match_c"), || {
+            c_init();
+            let values: [Option<&CStr>; 6] = [
+                Some(c"/one"),
+                Some(c"/zero:$PATH:/two"),
+                Some(c"$PATH"),
+                None,
+                Some(c""),
+                Some(c"pre$PATH"),
+            ];
+            for level in [
+                SearchPathLevel::System,
+                SearchPathLevel::Xdg,
+                SearchPathLevel::Global,
+            ] {
+                let raw = level.raw();
+                let c_get = || c_buf(ffi::GIT_OPT_GET_SEARCH_PATH, Some(raw));
+                assert_eq!(common::search_path(level).unwrap(), c_get());
+                // Two identical histories, one per side, so `$PATH` expands alike.
+                for value in values {
+                    let before = c_get();
+                    // SAFETY: the key reads an `int` level and a `const char *`; this
+                    // child runs one thread.
+                    let c = c_result(unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_SEARCH_PATH as c_int,
+                            raw,
+                            c_ptr(value),
+                        )
+                    });
+                    let after_c = c_get();
+                    assert_eq!(common::search_path(level).unwrap(), after_c);
+                    // Back to the same starting point, then the same step through Rust.
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_SEARCH_PATH as c_int,
+                            raw,
+                            before.as_ptr(),
+                        )
+                    };
+                    // SAFETY: this child runs one thread.
+                    let rust = unsafe { common::set_search_path(level, value) };
+                    assert_eq!(rust_result(rust), c);
+                    assert_eq!(
+                        (c_get(), common::search_path(level).unwrap()),
+                        (after_c.clone(), after_c)
+                    );
+                }
+            }
+            // C refuses levels the Rust enum cannot express.
+            for raw in [0, 1, 5, 6, 7, -1] {
+                // SAFETY: an `int` level and a C string.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_SET_SEARCH_PATH as c_int,
+                        raw,
+                        c"/x".as_ptr(),
+                    )
+                };
+                assert_eq!(
+                    c_result(rc).unwrap_err().1.as_bytes(),
+                    format!("invalid config path selector {raw}").as_bytes()
+                );
+            }
+        });
+    }
+
+    fn c_extensions() -> Vec<CString> {
+        let mut out = ffi::git_strarray {
+            strings: ptr::null_mut(),
+            count: 0,
+        };
+        // SAFETY: the key fills one `git_strarray *`, an empty local; disposed below.
+        let rc =
+            unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+        assert_eq!(rc, 0);
+        let v = (0..out.count)
+            // SAFETY: `count` NUL-terminated strings at `strings`.
+            .map(|i| unsafe { CStr::from_ptr(*out.strings.add(i)) }.to_owned())
+            .collect();
+        // SAFETY: as libgit2 filled it.
+        unsafe { ffi::git_strarray_dispose(&raw mut out) };
+        v
+    }
+
+    fn rust_extensions() -> Vec<CString> {
+        let e = common::extensions().unwrap();
+        e.as_ref().iter().map(CStr::to_owned).collect()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn extensions_match_c() {
+        isolated(concat!(module_path!(), "::extensions_match_c"), || {
+            c_init();
+            let lists: [&[&CStr]; 7] = [
+                &[],
+                &[c"newext"],
+                &[c"b", c"a", c"b", c"noop"],
+                &[c"!noop", c"!objectformat", c"!worktreeconfig"],
+                &[c"!noop", c"x"],
+                &[c"!unknown", c"objectformat"],
+                &[],
+            ];
+            assert_eq!(rust_extensions(), c_extensions());
+            for list in lists {
+                let ptrs: Vec<*const c_char> = list.iter().map(|s| s.as_ptr()).collect();
+                // SAFETY: the key reads a `const char **` of `len` C strings, copied.
+                let c = c_result(unsafe {
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+                        ptrs.as_ptr(),
+                        ptrs.len(),
+                    )
+                });
+                let after_c = c_extensions();
+                assert_eq!(rust_extensions(), after_c);
+                // SAFETY: this child runs one thread.
+                assert_eq!(rust_result(unsafe { common::set_extensions(list) }), c);
+                assert_eq!(
+                    (c_extensions(), rust_extensions()),
+                    (after_c.clone(), after_c)
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cache_sizes_match_c() {
+        isolated(concat!(module_path!(), "::cache_sizes_match_c"), || {
+            let c_get = || {
+                let (mut current, mut allowed) = (-1isize, -1isize);
+                // SAFETY: two live `ssize_t` out-parameters; no repository is open.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_GET_CACHED_MEMORY as c_int,
+                        &raw mut current,
+                        &raw mut allowed,
+                    )
+                };
+                assert_eq!(rc, 0);
+                CachedMemory { current, allowed }
+            };
+            // SAFETY: this child runs one thread and opens no repository.
+            assert_eq!(unsafe { common::cached_memory() }, c_get());
+            for bytes in [0, -5, isize::MAX, 1 << 20] {
+                // SAFETY: the key reads one `ssize_t`; this child runs one thread.
+                unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_CACHE_MAX_SIZE as c_int, bytes) };
+                // SAFETY: as above.
+                assert_eq!(unsafe { common::cached_memory() }, c_get());
+                assert_eq!(c_get().allowed, bytes);
+                // SAFETY: as above.
+                unsafe { common::set_cache_max_size(bytes / 2) };
+                // SAFETY: as above.
+                assert_eq!(unsafe { common::cached_memory() }, c_get());
+                assert_eq!(c_get().allowed, bytes / 2);
+            }
+        });
+    }
+
+    /// TLS certificate locations: a loadable file and directory succeed, a missing
+    /// file and no location at all fail with the same error.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ssl_cert_locations_match_c() {
+        isolated(
+            concat!(module_path!(), "::ssl_cert_locations_match_c"),
+            || {
+                c_init();
+                let dir = std::env::temp_dir()
+                    .join(format!("crustify-equiv-certs-{}", std::process::id()));
+                std::fs::create_dir_all(&dir).unwrap();
+                let file = dir.join("ca.pem");
+                std::fs::write(&file, include_str!("../ub_unsafe/cert.pem")).unwrap();
+                use std::os::unix::ffi::OsStrExt;
+                let file = CString::new(file.as_os_str().as_bytes()).unwrap();
+                let path = CString::new(dir.as_os_str().as_bytes()).unwrap();
+                let cases: [(Option<&CStr>, Option<&CStr>); 5] = [
+                    (Some(&file), None),
+                    (None, Some(&path)),
+                    (Some(&file), Some(&path)),
+                    (Some(c"/nonexistent/crustify.pem"), None),
+                    (None, None),
+                ];
+                for (f, p) in cases {
+                    // SAFETY: two `const char *`, NULL or C strings; this child runs one
+                    // thread.
+                    let c = c_result(unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_SSL_CERT_LOCATIONS as c_int,
+                            c_ptr(f),
+                            c_ptr(p),
+                        )
+                    });
+                    // SAFETY: as above.
+                    let rust = rust_result(unsafe { common::set_ssl_cert_locations(f, p) });
+                    // OpenSSL appends the first error on its per-thread queue, where a
+                    // failed load leaves more than one: C's call consumed the first, so
+                    // compare up to OpenSSL's part.
+                    let libgit2_part = |r: Result<(), (c_int, CString)>| {
+                        r.map_err(|(class, m)| {
+                            let m = m.to_bytes();
+                            let end = m
+                                .windows(8)
+                                .position(|w| w == b": error:")
+                                .unwrap_or(m.len());
+                            (class, m[..end].to_vec())
+                        })
+                    };
+                    assert_eq!(libgit2_part(rust), libgit2_part(c), "{f:?} {p:?}");
+                }
+                std::fs::remove_dir_all(dir).unwrap();
+            },
+        );
+    }
+
+    /// The options with no getter: both sides accept every value, with status 0.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn setters_without_getters_match_c() {
+        isolated(
+            concat!(module_path!(), "::setters_without_getters_match_c"),
+            || {
+                c_init();
+                type Switch = (ffi::git_libgit2_opt_t, unsafe fn(bool));
+                let switches: [Switch; 9] = [
+                    (ffi::GIT_OPT_ENABLE_CACHING, common::enable_caching),
+                    (
+                        ffi::GIT_OPT_ENABLE_STRICT_OBJECT_CREATION,
+                        common::enable_strict_object_creation,
+                    ),
+                    (
+                        ffi::GIT_OPT_ENABLE_STRICT_SYMBOLIC_REF_CREATION,
+                        common::enable_strict_symbolic_ref_creation,
+                    ),
+                    (ffi::GIT_OPT_ENABLE_OFS_DELTA, common::enable_ofs_delta),
+                    (
+                        ffi::GIT_OPT_ENABLE_FSYNC_GITDIR,
+                        common::enable_fsync_gitdir,
+                    ),
+                    (
+                        ffi::GIT_OPT_ENABLE_STRICT_HASH_VERIFICATION,
+                        common::enable_strict_hash_verification,
+                    ),
+                    (
+                        ffi::GIT_OPT_ENABLE_UNSAVED_INDEX_SAFETY,
+                        common::enable_unsaved_index_safety,
+                    ),
+                    (
+                        ffi::GIT_OPT_DISABLE_PACK_KEEP_FILE_CHECKS,
+                        common::disable_pack_keep_file_checks,
+                    ),
+                    (
+                        ffi::GIT_OPT_ENABLE_HTTP_EXPECT_CONTINUE,
+                        common::enable_http_expect_continue,
+                    ),
+                ];
+                for (key, set) in switches {
+                    for on in [false, true, true, false] {
+                        // SAFETY: the key reads one `int`; this child runs one thread.
+                        let rc = unsafe { ffi::git_libgit2_opts(key as c_int, c_int::from(on)) };
+                        assert_eq!(rc, 0);
+                        // SAFETY: this child runs one thread.
+                        unsafe { set(on) };
+                    }
+                }
+                for p in [0, -3, c_int::MAX] {
+                    for (key, set) in [
+                        (
+                            ffi::GIT_OPT_SET_ODB_PACKED_PRIORITY,
+                            common::set_odb_packed_priority as unsafe fn(c_int),
+                        ),
+                        (
+                            ffi::GIT_OPT_SET_ODB_LOOSE_PRIORITY,
+                            common::set_odb_loose_priority,
+                        ),
+                    ] {
+                        // SAFETY: the key reads one `int`; this child runs one thread.
+                        assert_eq!(unsafe { ffi::git_libgit2_opts(key as c_int, p) }, 0);
+                        // SAFETY: this child runs one thread.
+                        unsafe { set(p) };
+                    }
+                }
+                for kind in [
+                    libgit2::libgit2::core::types::ObjectType::Commit,
+                    libgit2::libgit2::core::types::ObjectType::Blob,
+                ] {
+                    // SAFETY: an `int` type and a `size_t`; this child runs one thread.
+                    let rc = unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_CACHE_OBJECT_LIMIT as c_int,
+                            kind.raw(),
+                            100usize,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    // SAFETY: this child runs one thread.
+                    unsafe { common::set_cache_object_limit(kind, 100) };
+                }
+                // C refuses the types `ObjectType` cannot express.
+                for raw in [-2, -1, 8, 100] {
+                    // SAFETY: as above.
+                    let rc = unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_CACHE_OBJECT_LIMIT as c_int,
+                            raw,
+                            1usize,
+                        )
+                    };
+                    assert_eq!(c_result(rc).unwrap_err().1.as_bytes(), b"type out of range");
+                }
+                for ciphers in [c"HIGH", c""] {
+                    // SAFETY: the key reads one C string, copied; this child runs one thread.
+                    let c = c_result(unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_SSL_CIPHERS as c_int,
+                            ciphers.as_ptr(),
+                        )
+                    });
+                    // SAFETY: this child runs one thread.
+                    assert_eq!(rust_result(unsafe { common::set_ssl_ciphers(ciphers) }), c);
+                }
+            },
+        );
+    }
+}

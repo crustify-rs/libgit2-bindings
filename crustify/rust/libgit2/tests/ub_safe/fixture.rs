@@ -153,20 +153,17 @@ unsafe impl Alloc for Counted {
 /// A `git_allocator.gfree` that releases nothing, to store in an `Allocator`.
 pub unsafe extern "C" fn leave_free(_: *mut c_void) {}
 
-/// Installs `allocator` as libgit2's allocator (`GIT_OPT_SET_ALLOCATOR`); stands in
-/// for the `git_libgit2_opts` wrapper (`core`), which replaces it.
+/// Installs `allocator` as libgit2's allocator through the unsafe
+/// [`common::set_allocator`](libgit2::libgit2::core::common::set_allocator), whose
+/// contract the tests meet as below.
 ///
 /// Callers install a libc-backed family ([`Counted`]) or install before libgit2 has
-/// allocated, so no live block changes family.
+/// allocated, so no live block changes family, and run single-threaded around it.
 pub fn install(allocator: &Allocator) {
-    let raw = (&raw const *allocator)
-        .cast::<ffi::git_allocator>()
-        .cast_mut();
-    // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, so `raw`
-    // addresses one with every member set; libgit2 copies it (`memcpy`) and keeps no
-    // pointer to it. The family is coherent per this function's contract.
-    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, raw) };
-    assert_eq!(rc, 0);
+    // SAFETY: `allocator` is a coherent family (an `Allocator::new` value over an
+    // `Alloc` implementation); live blocks stay releasable and no other thread calls
+    // libgit2 meanwhile, per this function's contract.
+    unsafe { libgit2::libgit2::core::common::set_allocator(Some(allocator.as_ref())) }
 }
 
 // --- `git2/types.h`: `git_writestream` ---------------------------------------------
@@ -180,8 +177,7 @@ use libgit2::libgit2::util::errors::{ErrorCode, last};
 
 /// Takes a `git_libgit2_init` reference that is never released.
 pub fn init() {
-    // SAFETY: no arguments; the reference is kept for the rest of the process.
-    assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
 }
 
 /// A fresh bare repository in a temporary directory, freed and removed on drop; stands
@@ -462,45 +458,14 @@ pub fn refused_filter() -> *mut ffi::git_filter {
 
 // --- `git2/strarray.h` -------------------------------------------------------------
 
-use libgit2::libgit2::core::strarray::{StrArray, StrArrayVal};
-use libgit2::libgit2::raw::OdbDataStrVec;
 
-/// libgit2's extension list (`GIT_OPT_GET_EXTENSIONS`), adopted as libgit2 hands it
-/// out: a detached `git_vector` of `git__strdup` copies, with spare capacity. Stands in
-/// for the `git_libgit2_opts` wrapper (`core`), which replaces it.
-pub fn libgit2_extensions() -> StrArrayVal {
-    let mut out = ffi::git_strarray {
-        strings: core::ptr::null_mut(),
-        count: 0,
-    };
-    // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills; `out`
-    // held nothing.
-    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
-    assert_eq!(rc, 0);
-    // SAFETY: on success `out` owns an array of libgit2's allocator holding `count`
-    // non-NULL strings from the same allocator, handed over whole.
-    let strings = unsafe { OdbDataStrVec::from_raw_parts(out.strings, out.count) }.unwrap();
-    StrArray::from_strings(strings)
-}
-
-/// Sets libgit2's user extensions (`GIT_OPT_SET_EXTENSIONS`), which `!name` entries
-/// disable, after initialising libgit2 (pre-init its allocations fail through a path
-/// that corrupts foreign TLS); stands in for the `git_libgit2_opts` and
-/// `git_libgit2_init` wrappers (`core`). Process-global: call it in an isolated child.
+/// Sets libgit2's user extensions, which `!name` entries disable, through the unsafe
+/// [`common::set_extensions`](libgit2::libgit2::core::common::set_extensions).
+/// Process-global: call it in an isolated child, single-threaded.
 pub fn set_extensions(names: &[&CStr]) {
-    let ptrs: Vec<*const core::ffi::c_char> = names.iter().map(|s| s.as_ptr()).collect();
-    // SAFETY: no arguments; the reference is never released, so the copies below are
-    // made by an initialised library.
-    assert!(unsafe { ffi::git_libgit2_init() } > 0);
-    // SAFETY: `GIT_OPT_SET_EXTENSIONS` takes an array of `len` strings, which it copies.
-    let rc = unsafe {
-        ffi::git_libgit2_opts(
-            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
-            ptrs.as_ptr(),
-            ptrs.len(),
-        )
-    };
-    assert_eq!(rc, 0);
+    // SAFETY: callers run alone in an isolated child, so no other thread calls into
+    // libgit2 while the setting changes.
+    unsafe { libgit2::libgit2::core::common::set_extensions(names) }.unwrap();
 }
 
 // --- `git2/buffer.h` ---------------------------------------------------------------

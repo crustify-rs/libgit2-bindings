@@ -14,12 +14,13 @@ use std::ffi::{CStr, CString};
 use std::sync::Barrier;
 use std::thread;
 
+use libgit2::libgit2::core::common;
 use libgit2::libgit2::core::strarray::{
     Iter, StrArray, StrArrayMut, StrArrayRef, StrArrayVal, StrArrayView,
 };
 use libgit2::libgit2::raw::{OdbDataStrFree, OdbDataStrVec};
 
-use crate::fixture::{isolated, libgit2_extensions, set_extensions};
+use crate::fixture::{isolated, set_extensions};
 
 /// `n` distinct strings of lengths 0, 1, 2, ..., so each allocation's size differs.
 fn strings(n: usize) -> Vec<CString> {
@@ -167,7 +168,7 @@ fn owned_arrays_stay_in_bounds() {
         drop(array);
         read_all(copy.as_ref(), n);
     }
-    let ext = libgit2_extensions();
+    let ext = common::extensions().unwrap();
     let n = ext.as_ref().len();
     read_all(ext.as_ref(), n);
 }
@@ -195,14 +196,14 @@ fn replacements_release_each_string_once() {
     // The truncated array still holds its buffer, released with the next replacement.
     array
         .as_mut()
-        .set_strings(libgit2_extensions().as_mut().take_strings());
+        .set_strings(common::extensions().unwrap().as_mut().take_strings());
     let n = array.as_ref().len();
     array.as_mut().truncate(n / 2);
     assert_eq!(array.as_ref().len(), n / 2);
     drop(array);
 
     // A libgit2 result replaced in place frees libgit2's strings and array.
-    let mut ext = libgit2_extensions();
+    let mut ext = common::extensions().unwrap();
     ext.as_mut()
         .set_strings(OdbDataStrVec::dup_all(&[c"one"]).unwrap());
     assert_eq!(contents(ext.as_ref()), expected(&[c"one"]));
@@ -322,7 +323,7 @@ fn libgit2_results_edit_and_release() {
         concat!(module_path!(), "::libgit2_results_edit_and_release"),
         || {
             set_extensions(&[c"zeta", c"alpha", c"!noop"]);
-            let mut ext = libgit2_extensions();
+            let mut ext = common::extensions().unwrap();
             let names = contents(ext.as_ref());
             assert!(names.contains(&b"zeta".to_vec()) && !names.contains(&b"noop".to_vec()));
             let copy = ext.as_ref().to_str_array().unwrap();
@@ -338,14 +339,14 @@ fn libgit2_results_edit_and_release() {
                 c"!refstorage",
                 c"!relativeworktrees",
             ]);
-            let mut none = libgit2_extensions();
+            let mut none = common::extensions().unwrap();
             read_all(none.as_ref(), 0);
             none.as_mut().truncate(0);
             assert!(none.as_ref().to_str_array().unwrap().as_ref().is_empty());
             let taken = none.as_mut().take_strings();
             assert!(taken.is_empty() && !taken.as_ptr().is_null());
             drop(taken);
-            drop(libgit2_extensions());
+            drop(common::extensions().unwrap());
         },
     );
 }
