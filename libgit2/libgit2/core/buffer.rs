@@ -176,9 +176,11 @@ impl Buf {
     ///
     /// When `raw.reserved > 0`, `raw.ptr` must be a live allocation of at least
     /// `raw.reserved` bytes from libgit2's current allocator, which `raw` owns and the
-    /// caller gives up, with `raw.size < raw.reserved` and a NUL at `raw.ptr[raw.size]`:
-    /// as libgit2's routines leave a buffer they filled. With `raw.reserved == 0` there is
-    /// no requirement.
+    /// caller gives up, with `raw.size < raw.reserved`, its first `raw.size` bytes
+    /// initialised and a NUL at `raw.ptr[raw.size]`: as libgit2's routines leave a buffer
+    /// they filled. Nothing else may read or write the allocation while the result lives.
+    /// With `raw.reserved == 0` there is no requirement: `raw.ptr` and `raw.size` are
+    /// never read through.
     pub unsafe fn from_raw(raw: ffi::git_buf) -> BufVal {
         CVal::new(Self(raw, PhantomData))
     }
