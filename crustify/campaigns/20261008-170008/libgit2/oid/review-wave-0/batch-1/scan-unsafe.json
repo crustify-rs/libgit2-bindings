@@ -1,0 +1,7 @@
+{
+ "names": [
+  "git_oid_t"
+ ],
+ "exit": 1,
+ "stderr": "unsafe: no sites matched --name git_oid_t"
+}
