@@ -298,10 +298,13 @@ unsafe extern "C" fn trace_with<T: Tracer>(level: ffi::git_trace_level_t, msg: *
 ///
 /// # Safety
 ///
-/// No other thread may call into libgit2 — through this crate or otherwise — while
-/// this runs: libgit2 keeps the level and the callback in a global that its traced
-/// routines read without synchronisation, the level first and the callback twice.
-/// A traced call on the same thread, `callback` included, may.
+/// No other thread may be inside libgit2 — in a call through this crate or any
+/// other — while this runs, whether it entered libgit2 before this call began or
+/// during it; and a thread that calls into libgit2 afterwards must do so after
+/// synchronising with this call (a join, a lock, a spawn). libgit2 keeps the level
+/// and the callback in a global that its traced routines read without
+/// synchronisation, the level first and the callback twice. The calling thread
+/// itself may be inside libgit2, in a traced call or in `callback`.
 ///
 /// Wraps: git_trace_set
 pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
@@ -317,9 +320,11 @@ pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
 ///
 /// # Safety
 ///
-/// As [`set`]'s: no other thread may call into libgit2 while this runs. A thread
-/// tracing meanwhile could read the callback as set before its check and as NULL
-/// at the call (libgit2 reads it twice), and call NULL.
+/// As [`set`]'s: no other thread may be inside libgit2 while this runs, whether it
+/// entered before or during, and a thread calling into libgit2 afterwards must
+/// synchronise with this call first. A thread tracing meanwhile could read the
+/// callback as set before its check and as NULL at the call (libgit2 reads it
+/// twice), and call NULL.
 ///
 /// Wraps: git_trace_set
 pub unsafe fn clear() {
