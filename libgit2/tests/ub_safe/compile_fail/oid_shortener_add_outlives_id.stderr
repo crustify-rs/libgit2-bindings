@@ -1,0 +1,11 @@
+error[E0597]: `id` does not live long enough
+  --> tests/ub_safe/compile_fail/oid_shortener_add_outlives_id.rs:8:32
+   |
+ 7 |         let id = String::from("a94a8fe5ccb19ba61c4c0873d391e987982fbbd3");
+   |             -- binding `id` declared here
+ 8 |         shortener.as_mut().add(&id).unwrap();
+   |                                ^^^ borrowed value does not live long enough
+ 9 |     }
+   |     - `id` dropped here while still borrowed
+10 |     drop(shortener);
+   |          --------- borrow later used here

@@ -1,0 +1,9 @@
+error[E0506]: cannot assign to `buf[_]` because it is borrowed
+  --> tests/ub_safe/compile_fail/oid_format_aliases_buffer.rs:10:5
+   |
+ 9 |     let hex = oid.as_ref().format(&mut buf).unwrap();
+   |                                   -------- `buf[_]` is borrowed here
+10 |     buf[0] = b'x';
+   |     ^^^^^^^^^^^^^ `buf[_]` is assigned to here but it was already borrowed
+11 |     println!("{hex} {}", buf[0]);
+   |                --- borrow later used here
