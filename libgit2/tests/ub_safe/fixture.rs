@@ -503,20 +503,26 @@ pub fn fill_from_option(option: u32, buf: &mut BufVal) {
 
 // --- `git2/trace.h` ----------------------------------------------------------------
 
-use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel};
+use libgit2::libgit2::core::trace::{self, TraceCallback, TraceLevel};
 
-/// Installs `callback` as libgit2's tracer at `level` (`None`: no tracer); stands in
-/// for the `git_trace_set` wrapper (`core`), which replaces it.
-///
-/// libgit2 keeps the trace state in globals written without a lock: callers run in an
-/// isolated child, single-threaded around the call.
+/// Installs `callback` as libgit2's tracer at `level` (`None`: no tracer), through
+/// `trace::set` / `trace::clear`, which stay `unsafe`: libgit2 keeps the trace state in
+/// a global its traced routines read without a lock. Callers run in an isolated child,
+/// single-threaded around the call, which meets their contract.
 pub fn set_trace(level: TraceLevel, callback: Option<TraceCallback>) {
-    let callback = callback.and_then(TraceCallback::raw);
-    // SAFETY: a named level with a callback, or `None` without one, which libgit2
-    // accepts; a callback is a `TraceCallback`, safe to call from any thread for the
-    // life of the process; no other thread reads or writes the state meanwhile, per
-    // this function's contract.
-    assert_eq!(unsafe { ffi::git_trace_set(level.raw(), callback) }, 0);
+    match callback {
+        // SAFETY: per this function's contract, no other thread is inside libgit2.
+        Some(callback) => unsafe { trace::set(level, callback) },
+        None => {
+            assert_eq!(
+                level,
+                TraceLevel::None,
+                "a level above `None` needs a callback"
+            );
+            // SAFETY: as above.
+            unsafe { trace::clear() }
+        }
+    }
 }
 
 /// An HTTP server on loopback answering every request `404`, for the life of the

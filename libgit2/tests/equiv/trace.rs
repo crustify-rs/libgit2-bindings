@@ -12,7 +12,12 @@
 //! skipped under the `coverage` variant, the one debug build.
 //!
 //! Then the trace callback, [`TraceCallback`], against a C function receiving the same
-//! messages (`callback` below).
+//! messages (`callback` below), and [`trace::set`] / [`trace::clear`] against
+//! `git_trace_set` (`config` below).
+//!
+//! [`TraceCallback`]: libgit2::libgit2::core::trace::TraceCallback
+//! [`trace::set`]: libgit2::libgit2::core::trace::set
+//! [`trace::clear`]: libgit2::libgit2::core::trace::clear
 
 use std::ffi::{CStr, c_char};
 use std::sync::Mutex;
@@ -164,7 +169,7 @@ mod callback {
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
     /// Runs `body` alone in a child process, so no other test shares the trace state.
-    fn isolated(test: &str, body: fn()) {
+    pub(super) fn isolated(test: &str, body: fn()) {
         let name = test.strip_prefix("equiv::").unwrap_or(test);
         if std::env::var(CHILD).as_deref() == Ok(name) {
             body();
@@ -212,7 +217,7 @@ mod callback {
         }
     }
 
-    fn init() {
+    pub(super) fn init() {
         // SAFETY: no arguments; the reference dies with the child.
         assert!(unsafe { ffi::git_libgit2_init() } > 0);
     }
@@ -225,7 +230,7 @@ mod callback {
 
     /// An HTTP server on loopback answering every request `404`, for the life of the
     /// child; its URL.
-    fn serve() -> CString {
+    pub(super) fn serve() -> CString {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
@@ -249,7 +254,7 @@ mod callback {
 
     /// The outcome of connecting to `url` for a fetch: the status and, on failure, the
     /// error's class and message.
-    fn connect(url: &CStr) -> (c_int, Option<(c_int, CString)>) {
+    pub(super) fn connect(url: &CStr) -> (c_int, Option<(c_int, CString)>) {
         let mut remote = ptr::null_mut();
         // SAFETY: a live out-parameter and a C string, copied by libgit2.
         let rc = unsafe { ffi::git_remote_create_detached(&raw mut remote, url.as_ptr()) };
@@ -362,5 +367,258 @@ mod callback {
                 }
             },
         );
+    }
+}
+
+// --- Configuration -------------------------------------------------------------------
+//
+// `trace::set` / `trace::clear` against `git_trace_set` over the same sequences of
+// configurations. libgit2 has one trace state, observable only through the messages it
+// reports and the thread's error state, so each step installs a configuration through
+// C, connects to a local HTTP server and records what reached the callback, then
+// installs the same configuration through Rust and does the same, and compares the
+// two after every step. The Rust side runs twice: over the C recorder adopted through
+// `from_fn`, so both sides call the very same function, and over a `Tracer`. The whole
+// sequence runs alone in a child process.
+
+mod config {
+    use std::ffi::{CStr, CString, c_char, c_int};
+    use std::sync::Mutex;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::trace::{self, TraceCallback, TraceLevel, Tracer};
+
+    use super::callback::{connect, init, isolated, serve};
+
+    type Message = (ffi::git_trace_level_t, Vec<u8>);
+
+    static C_LOG: Mutex<Vec<Message>> = Mutex::new(Vec::new());
+    static RUST_LOG: Mutex<Vec<Message>> = Mutex::new(Vec::new());
+
+    fn take(log: &Mutex<Vec<Message>>) -> Vec<Message> {
+        std::mem::take(&mut *log.lock().unwrap())
+    }
+
+    /// The reference callback, installed by both sides.
+    unsafe extern "C" fn c_record(level: ffi::git_trace_level_t, msg: *const c_char) {
+        // SAFETY: libgit2 passes a C string live for the call.
+        let bytes = unsafe { CStr::from_ptr(msg) }.to_bytes().to_vec();
+        C_LOG.lock().unwrap().push((level, bytes));
+    }
+
+    struct RustRecord;
+
+    impl Tracer for RustRecord {
+        fn trace(level: TraceLevel, message: &CStr) {
+            RUST_LOG
+                .lock()
+                .unwrap()
+                .push((level.raw(), message.to_bytes().to_vec()));
+        }
+    }
+
+    /// One configuration: a level with the callback, or no callback (`Clear`).
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Set(TraceLevel),
+        Clear,
+    }
+
+    /// Marks the thread's error state, so a step that touches it shows.
+    fn mark_error() {
+        // SAFETY: a class and a C string, which libgit2 copies; libgit2 is initialised.
+        let rc =
+            unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_CALLBACK as c_int, c"mark".as_ptr()) };
+        assert_eq!(rc, 0);
+    }
+
+    /// The thread's last error: its class and message.
+    fn last_error() -> (c_int, CString) {
+        // SAFETY: never NULL; copied out before the next libgit2 call.
+        unsafe {
+            let e = ffi::git_error_last();
+            ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+        }
+    }
+
+    /// The C step: its status, the error state after it, and what one connection then
+    /// reported to `c_record`.
+    fn c_step(step: Step, url: &CStr) -> (c_int, (c_int, CString), Vec<Message>) {
+        mark_error();
+        let rc = match step {
+            // SAFETY: the child runs one thread while it changes the trace state;
+            // `c_record` is valid for the process and callable from any thread.
+            Step::Set(level) => unsafe { ffi::git_trace_set(level.raw(), Some(c_record)) },
+            // SAFETY: as above, with no callback at `GIT_TRACE_NONE`.
+            Step::Clear => unsafe { ffi::git_trace_set(ffi::GIT_TRACE_NONE, None) },
+        };
+        let error = last_error();
+        assert!(connect(url).0 < 0, "the server answers 404");
+        (rc, error, take(&C_LOG))
+    }
+
+    /// The Rust step over `callback`: the status C's call has when it succeeds (Rust's
+    /// returns nothing), the error state after it, and what one connection then
+    /// reported to `log`.
+    fn rust_step(
+        step: Step,
+        callback: TraceCallback,
+        log: &Mutex<Vec<Message>>,
+        url: &CStr,
+    ) -> (c_int, (c_int, CString), Vec<Message>) {
+        mark_error();
+        match step {
+            // SAFETY: the child runs one thread while it changes the trace state.
+            Step::Set(level) => unsafe { trace::set(level, callback) },
+            // SAFETY: as above.
+            Step::Clear => unsafe { trace::clear() },
+        }
+        let error = last_error();
+        assert!(connect(url).0 < 0, "the server answers 404");
+        (0, error, take(log))
+    }
+
+    const SEQUENCE: [Step; 14] = [
+        Step::Clear,
+        Step::Set(TraceLevel::Debug),
+        Step::Set(TraceLevel::Trace),
+        Step::Set(TraceLevel::Trace),
+        Step::Set(TraceLevel::None),
+        Step::Set(TraceLevel::Info),
+        Step::Set(TraceLevel::Fatal),
+        Step::Clear,
+        Step::Clear,
+        Step::Set(TraceLevel::Warn),
+        Step::Set(TraceLevel::Debug),
+        Step::Set(TraceLevel::Error),
+        Step::Set(TraceLevel::Trace),
+        Step::Clear,
+    ];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_configure_libgit2_as_git_trace_set_does() {
+        isolated(
+            "trace::config::set_and_clear_configure_libgit2_as_git_trace_set_does",
+            || {
+                init();
+                let url = serve();
+                // SAFETY: `c_record` reads `msg` only during the call, from any thread
+                // (its log is a `Mutex`), and never unwinds for a live C string.
+                let adopted = unsafe { TraceCallback::from_fn(c_record) };
+                let tracer = TraceCallback::new::<RustRecord>();
+                for (i, step) in SEQUENCE.into_iter().enumerate() {
+                    let c = c_step(step, &url);
+                    let r = rust_step(step, adopted, &C_LOG, &url);
+                    assert_eq!(r, c, "step {i}: {step:?}, adopted");
+                    let c = c_step(step, &url);
+                    let r = rust_step(step, tracer, &RUST_LOG, &url);
+                    assert_eq!(r, c, "step {i}: {step:?}, tracer");
+                    assert_eq!(take(&C_LOG), [], "step {i}: C received a Rust step");
+
+                    assert_eq!(c.0, 0);
+                    assert_eq!(c.1, (ffi::GIT_ERROR_CALLBACK as c_int, c"mark".to_owned()));
+                    let level = match step {
+                        Step::Set(level) => level,
+                        Step::Clear => TraceLevel::None,
+                    };
+                    assert!(c.2.iter().all(|(l, _)| *l <= level.raw()), "{step:?}");
+                    // The HTTP client traces at `Debug` and `Trace`.
+                    assert_eq!(c.2.is_empty(), level < TraceLevel::Debug, "{step:?}");
+                }
+            },
+        );
+    }
+
+    /// The same sequence with each step's configuration changed from inside the
+    /// callback, on the thread libgit2 traces from: the first message installs the next
+    /// step's configuration, so the rest of that connection runs under it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_from_the_callback_as_git_trace_set_does() {
+        isolated(
+            "trace::config::set_and_clear_from_the_callback_as_git_trace_set_does",
+            || {
+                init();
+                let url = serve();
+                for side in [Side::C, Side::Rust] {
+                    *SIDE.lock().unwrap() = Some(side);
+                    // SAFETY: as in `c_step`; one thread.
+                    let rc = unsafe { ffi::git_trace_set(ffi::GIT_TRACE_TRACE, Some(switching)) };
+                    assert_eq!(rc, 0);
+                    assert!(connect(&url).0 < 0);
+                    // A second connection runs under whatever the first one left.
+                    assert!(connect(&url).0 < 0);
+                    let log = take(&C_LOG);
+                    LOGS.lock().unwrap().push(log);
+                    // SAFETY: as above.
+                    unsafe { ffi::git_trace_set(ffi::GIT_TRACE_NONE, None) };
+                }
+                let logs = std::mem::take(&mut *LOGS.lock().unwrap());
+                assert_eq!(logs.len(), 2);
+                assert_eq!(logs[1], logs[0]);
+                // The switch on the first message took effect for the rest: from
+                // `Trace` to `Debug`, so the connection's `Received` reached no one.
+                assert!(!logs[0].is_empty());
+                assert!(
+                    logs[0]
+                        .iter()
+                        .all(|(l, _)| *l == ffi::GIT_TRACE_DEBUG || *l == ffi::GIT_TRACE_TRACE)
+                );
+                assert!(!logs[0].iter().any(|(_, m)| m.starts_with(b"Received:\n")));
+            },
+        );
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Side {
+        C,
+        Rust,
+    }
+
+    static SIDE: Mutex<Option<Side>> = Mutex::new(None);
+    static LOGS: Mutex<Vec<Vec<Message>>> = Mutex::new(Vec::new());
+
+    /// Records the message, then lowers the level to `Debug` with `c_record` as the
+    /// callback, through the side under test.
+    unsafe extern "C" fn switching(level: ffi::git_trace_level_t, msg: *const c_char) {
+        // SAFETY: libgit2 passes a C string live for the call.
+        unsafe { c_record(level, msg) };
+        let side = SIDE.lock().unwrap().expect("a side");
+        match side {
+            // SAFETY: on the thread libgit2 traces from, the only one in libgit2.
+            Side::C => unsafe {
+                ffi::git_trace_set(ffi::GIT_TRACE_DEBUG, Some(c_record));
+            },
+            Side::Rust => {
+                // SAFETY: `c_record` meets `from_fn`'s contract (see the test above).
+                let cb = unsafe { TraceCallback::from_fn(c_record) };
+                // SAFETY: on the thread libgit2 traces from, the only one in libgit2:
+                // a traced call on the same thread may change the configuration.
+                unsafe { trace::set(TraceLevel::Debug, cb) };
+            }
+        }
+    }
+
+    /// Reached before `git_libgit2_init`, as `git_trace_set` may be: the configuration
+    /// holds once libgit2 starts, as C's installed after it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_before_init_holds_after_it() {
+        isolated("trace::config::set_before_init_holds_after_it", || {
+            // SAFETY: `c_record` meets `from_fn`'s contract (see above).
+            let cb = unsafe { TraceCallback::from_fn(c_record) };
+            // SAFETY: libgit2 is not initialised yet and this thread is alone.
+            unsafe { trace::set(TraceLevel::Debug, cb) };
+            init();
+            let url = serve();
+            assert!(connect(&url).0 < 0);
+            let r = take(&C_LOG);
+            let c = c_step(Step::Set(TraceLevel::Debug), &url);
+            assert_eq!(r, c.2);
+            assert!(!r.is_empty());
+            // SAFETY: one thread.
+            unsafe { trace::clear() };
+        });
     }
 }
