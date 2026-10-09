@@ -117,6 +117,9 @@
 //! (the local one first under [`BranchType::All`]), fail with `GIT_ENOTFOUND` where it
 //! names none, and refuse every selection without a variant through its internal
 //! assertion (skipped under the debug `coverage` build, where that assertion aborts).
+//!
+//! Then `git_signature`, in `signatures`: the `Signature` constructors, setters, copies
+//! and views against the signatures libgit2 builds, copies and writes into commits.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -2709,4 +2712,509 @@ fn branch_lookup_takes_exactly_the_named_selections() {
 
     // SAFETY: `repo` is open, released once.
     unsafe { ffi::git_repository_free(repo) };
+}
+
+mod signatures {
+    //! Equivalence of [`Signature`] and its handles with the `git_signature`s libgit2
+    //! builds, copies, and writes into commits.
+    //!
+    //! - [`Signature::new`] must succeed exactly where `git_signature_new` does, with the
+    //!   same trimmed strings and time, and fail with its error class and message
+    //!   elsewhere; [`Signature::now`] likewise against `git_signature_now`, whose time
+    //!   is compared to the clock it read.
+    //! - [`Signature::parse`] must match `git_signature_from_buffer` over a corpus of
+    //!   well-formed and malformed lines: outcome, every field, and the error.
+    //! - The setters must leave an owned signature as C code writing the same fields
+    //!   leaves its own: one sequence of writes runs on a `SignatureBox` and on a C
+    //!   signature independently, and after every step the two are compared field by
+    //!   field, through their copies (`Clone` and [`SignatureRef::to_signature`] against
+    //!   `git_signature_dup`), and through the commit `git_commit_create_buffer` writes
+    //!   with each as author and committer, byte for byte.
+    //! - A [`SignatureView`] must read as the stack `git_signature` C code builds over the
+    //!   same strings, and copy and write as it does.
+    //!
+    //! Documented divergences, outside these comparisons: the error codes are not
+    //! carried (`git_signature_new` fails with -1, `git_signature_from_buffer` with
+    //! `GIT_EINVALID`; the wrappers return libgit2's class and message only), and
+    //! `git_signature_from_buffer`'s success with a NULL name or email after an
+    //! allocation failure is refused by [`Signature::parse`] (pinned in the crate's unit
+    //! tests, which can make libgit2's allocator fail).
+
+    use super::*;
+    use libgit2::libgit2::core::types::{Signature, SignatureBox, SignatureRef, SignatureView};
+    use libgit2::libgit2::raw::OdbDataStrFree;
+
+    /// A signature's fields as owned values: name, email, seconds, offset, sign.
+    type Fields = (Option<CString>, Option<CString>, i64, i32, u8);
+
+    /// A failure: the error's class and message.
+    type Failure = (c_int, CString);
+
+    /// A C-allocated signature, freed by `git_signature_free` on drop.
+    struct CSig(*mut ffi::git_signature);
+
+    impl Drop for CSig {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` came from a `git_signature_*` constructor, freed once.
+            unsafe { ffi::git_signature_free(self.0) }
+        }
+    }
+
+    /// `out` after a constructor returned `rc`, or the error it left.
+    fn c_outcome(rc: c_int, out: *mut ffi::git_signature) -> Result<CSig, Failure> {
+        if rc < 0 {
+            assert!(out.is_null());
+            return Err(last_error());
+        }
+        assert_eq!(rc, 0);
+        assert!(!out.is_null());
+        Ok(CSig(out))
+    }
+
+    fn c_new(name: &CStr, email: &CStr, seconds: i64, offset: i32) -> Result<CSig, Failure> {
+        clear();
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot and two NUL-terminated strings, read for the call.
+        let rc = unsafe {
+            ffi::git_signature_new(&mut out, name.as_ptr(), email.as_ptr(), seconds, offset)
+        };
+        c_outcome(rc, out)
+    }
+
+    fn c_parse(buf: &CStr) -> Result<CSig, Failure> {
+        clear();
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated line, read for the call.
+        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        c_outcome(rc, out)
+    }
+
+    /// `git_signature_dup` of a live signature.
+    fn c_dup(sig: *const ffi::git_signature) -> CSig {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot and a live signature with both strings, only read.
+        let rc = unsafe { ffi::git_signature_dup(&mut out, sig) };
+        c_outcome(rc, out).unwrap()
+    }
+
+    /// The fields of a live C signature.
+    fn c_fields(sig: *const ffi::git_signature) -> Fields {
+        let string = |s: *mut c_char| {
+            if s.is_null() {
+                return None;
+            }
+            // SAFETY: a signature's non-NULL strings are NUL-terminated, live with it.
+            Some(unsafe { CStr::from_ptr(s) }.to_owned())
+        };
+        // SAFETY: `sig` is live; read by value.
+        let raw = unsafe { *sig };
+        (
+            string(raw.name),
+            string(raw.email),
+            raw.when.time,
+            raw.when.offset,
+            raw.when.sign as u8,
+        )
+    }
+
+    /// The fields of a signature, as the Rust getters read them.
+    fn fields(sig: SignatureRef<'_>) -> Fields {
+        let when = sig.when();
+        (
+            sig.name().map(CStr::to_owned),
+            sig.email().map(CStr::to_owned),
+            when.seconds(),
+            when.offset_minutes(),
+            when.sign(),
+        )
+    }
+
+    fn failure(error: libgit2::libgit2::util::errors::ErrorBuf) -> Failure {
+        (error.raw_class(), error.message().to_owned())
+    }
+
+    fn rust_outcome(
+        r: Result<SignatureBox, libgit2::libgit2::util::errors::ErrorBuf>,
+    ) -> Result<Fields, Failure> {
+        r.map(|s| fields(s.as_ref())).map_err(failure)
+    }
+
+    /// The commit `git_commit_create_buffer` writes for `author` and `committer` over the
+    /// empty tree, with no parent, or its error.
+    fn commit_lines(
+        repo: &TreeRepo,
+        author: *const ffi::git_signature,
+        committer: *const ffi::git_signature,
+    ) -> Result<Vec<u8>, Failure> {
+        let mut tree = ptr::null_mut();
+        // SAFETY: a live slot, a live repository and the id of a tree it holds.
+        let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.repo, &repo.empty_tree) };
+        assert_eq!(rc, 0);
+        let mut raw = ffi::git_buf {
+            ptr: ptr::null_mut(),
+            reserved: 0,
+            size: 0,
+        };
+        clear();
+        // SAFETY: `raw` is `GIT_BUF_INIT`, filled by the call; the signatures, tree and
+        // message are live and only read; no parents.
+        let rc = unsafe {
+            ffi::git_commit_create_buffer(
+                &mut raw,
+                repo.repo,
+                author,
+                committer,
+                ptr::null(),
+                c"m\n".as_ptr(),
+                tree,
+                0,
+                ptr::null_mut(),
+            )
+        };
+        // SAFETY: the tree looked up above, released once.
+        unsafe { ffi::git_tree_free(tree) };
+        if rc < 0 {
+            return Err(last_error());
+        }
+        // SAFETY: `raw` is as libgit2 left it.
+        let buf = unsafe { Buf::from_raw(raw) };
+        // Signatures may hold any bytes, newlines included, so the whole buffer is
+        // compared, as bytes.
+        Ok(buf.as_ref().as_bytes().to_vec())
+    }
+
+    const NAMES: [&CStr; 13] = [
+        c"A U Thor",
+        c"  padded\t",
+        c"\"quoted\"",
+        c";:,crud,:;",
+        c"in<side",
+        c"in>side",
+        c"",
+        c"   ",
+        c"'\\",
+        c"\xff\xfe bytes",
+        c"line\nbreak",
+        c"\x01ctl\x7f",
+        c"x",
+    ];
+
+    const EMAILS: [&CStr; 8] = [
+        c"author@example.com",
+        c" spaced@example.com ",
+        c"<a@b>",
+        c"a@b>",
+        c"",
+        c";",
+        c"\xc3\xa9@b",
+        c"y",
+    ];
+
+    const TIMES: [(i64, i32); 6] = [
+        (0, 0),
+        (1_700_000_000, 90),
+        (-1, -90),
+        (i64::MIN, i32::MIN),
+        (i64::MAX, i32::MAX),
+        (5, -1),
+    ];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_git_signature_new() {
+        init();
+        for (i, name) in NAMES.iter().enumerate() {
+            for (j, email) in EMAILS.iter().enumerate() {
+                let (seconds, offset) = TIMES[(i + j) % TIMES.len()];
+                let c = c_new(name, email, seconds, offset).map(|s| c_fields(s.0));
+                clear();
+                let rust = rust_outcome(Signature::new(name, email, seconds, offset));
+                assert_eq!(rust, c, "{name:?} {email:?}");
+            }
+        }
+    }
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+    /// Runs `body` alone in a child process.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// `git_signature_now` reads the clock and the local zone; both sides must agree on
+    /// everything but the instant, which lies within the clock reads around them.
+    ///
+    /// Alone in a child: the zone is read through glibc's `mktime` and `gmtime_r`, which
+    /// serialise on a lock of glibc's own that TSan cannot see, so concurrent calls from
+    /// other tests would read as a race on glibc's copy of `TZ`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn now_matches_git_signature_now() {
+        isolated(
+            concat!(module_path!(), "::now_matches_git_signature_now"),
+            now_body,
+        );
+    }
+
+    fn now_body() {
+        init();
+        let clock = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        };
+        for (name, email) in [
+            (c"A U Thor", c"a@b"),
+            (c" x ", c";y;"),
+            (c"in<", c"a@b"),
+            (c"", c"a@b"),
+        ] {
+            clear();
+            let mut out = ptr::null_mut();
+            let before = clock();
+            // SAFETY: a writable slot and two NUL-terminated strings, read for the call.
+            let rc = unsafe { ffi::git_signature_now(&mut out, name.as_ptr(), email.as_ptr()) };
+            let c = c_outcome(rc, out).map(|s| c_fields(s.0));
+            clear();
+            let rust = rust_outcome(Signature::now(name, email));
+            let after = clock();
+            match (rust, c) {
+                (Ok(r), Ok(c)) => {
+                    assert_eq!((&r.0, &r.1, r.3, r.4), (&c.0, &c.1, c.3, c.4), "{name:?}");
+                    assert!((before..=after).contains(&r.2) && (before..=after).contains(&c.2));
+                }
+                (r, c) => assert_eq!(r, c, "{name:?} {email:?}"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn parse_matches_git_signature_from_buffer() {
+        init();
+        let corpus: [&CStr; 28] = [
+            c"A U Thor <author@example.com> 1700000000 +0130",
+            c"A <a@b>",
+            c"A <a@b> 5",
+            c"<a@b> 5 +0000",
+            c"A <> 5 +0000",
+            c"A a@b 5 +0000",
+            c"A >a@b< 5",
+            c"A <a@b",
+            c"A a@b>",
+            c"",
+            c"A <a@b> notanumber +0100",
+            c"A <a@b> 99999999999999999999 +0000",
+            c"A <a@b> -5 -0500",
+            c"A <a@b> 5 +01",
+            c"A <a@b> 5 +",
+            c"A <a@b> 5 ",
+            c"A <a@b>x",
+            c"A <b> <c@d> 5 +0100",
+            c"  \"Crud\";  <  a@b ; > 5 +0100",
+            c"A <a@b> 5 +0100 trailing",
+            c"A <a@b> 5 +0100\n",
+            c"A <a@b> 1234 x0130",
+            c"A <a@b> 1234 +-130",
+            c"A <a@b> 1234 +1500",
+            c"A <a@b> 1234 -0000",
+            c"A <a@b> 1234 +2147483647",
+            c"\xff <\xfe> 1 +0000",
+            c"A\nB <a@b> 1 +0000",
+        ];
+        for buf in corpus {
+            let c = c_parse(buf).map(|s| c_fields(s.0));
+            clear();
+            let rust = rust_outcome(Signature::parse(buf));
+            assert_eq!(rust, c, "{buf:?}");
+        }
+    }
+
+    /// One write, applied to both sides.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Name(&'static CStr),
+        Email(&'static CStr),
+        When(i64, i32),
+        Seconds(i64),
+        Offset(i32),
+        Sign(u8),
+    }
+
+    /// A copy of `s` in libgit2's allocator, through the exported routine, as C code
+    /// using the same allocator makes one.
+    fn c_strdup(s: &CStr) -> *mut c_char {
+        let bytes = s.to_bytes_with_nul();
+        // SAFETY: the routine ignores its backend; it returns fresh storage or NULL.
+        let copy = unsafe { ffi::git_odb_backend_data_alloc(ptr::null_mut(), bytes.len()) };
+        let copy: *mut c_char = copy.cast();
+        assert!(!copy.is_null());
+        // SAFETY: `copy` holds `bytes.len()` fresh bytes.
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr().cast(), copy, bytes.len()) };
+        copy
+    }
+
+    /// Applies `step` to the C signature as C code holding it would: a string is freed
+    /// with `git__free` and replaced by a fresh copy; times are written in place.
+    fn c_apply(sig: &mut CSig, step: Step) {
+        let raw = sig.0;
+        // SAFETY: `raw` is a live signature owned by `sig`, which is borrowed exclusively;
+        // its strings are libgit2 allocations, released through the same allocator.
+        unsafe {
+            match step {
+                Step::Name(s) => {
+                    ffi::git_odb_backend_data_free(ptr::null_mut(), (*raw).name.cast());
+                    (*raw).name = c_strdup(s);
+                }
+                Step::Email(s) => {
+                    ffi::git_odb_backend_data_free(ptr::null_mut(), (*raw).email.cast());
+                    (*raw).email = c_strdup(s);
+                }
+                Step::When(seconds, offset) => {
+                    (*raw).when = ffi::git_time {
+                        time: seconds,
+                        offset,
+                        sign: if offset < 0 { b'-' } else { b'+' } as c_char,
+                    }
+                }
+                Step::Seconds(v) => (*raw).when.time = v,
+                Step::Offset(v) => (*raw).when.offset = v,
+                Step::Sign(v) => (*raw).when.sign = v as c_char,
+            }
+        }
+    }
+
+    fn rust_apply(sig: &mut SignatureBox, step: Step) {
+        let mut m = sig.as_mut();
+        match step {
+            Step::Name(s) => m.set_name(OdbDataStrFree::dup(s).unwrap()),
+            Step::Email(s) => {
+                let before = m.as_ref().email().map(CStr::to_owned);
+                let old = m.replace_email(OdbDataStrFree::dup(s).unwrap());
+                assert_eq!(old.map(|o| o.as_c_str().to_owned()), before);
+            }
+            Step::When(seconds, offset) => m.set_when(Time::new(seconds, offset)),
+            Step::Seconds(v) => m.when_mut().set_seconds(v),
+            Step::Offset(v) => m.when_mut().set_offset_minutes(v),
+            Step::Sign(v) => m.when_mut().set_sign(v),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn setters_write_what_c_writes() {
+        let repo = TreeRepo::new("signature-setters");
+        // `i32::MIN` minutes is left out: the commit writer negates it, which is UB.
+        let steps = [
+            Step::Name(c"B"),
+            Step::Email(c"b@c"),
+            Step::Offset(-60),
+            Step::Sign(b'-'),
+            Step::Offset(0),
+            Step::Sign(b'x'),
+            Step::Name(c"  untrimmed  "),
+            Step::Seconds(-1),
+            Step::When(1_700_000_000, 330),
+            Step::Email(c""),
+            Step::Name(c"bracket <in> name"),
+            Step::Sign(0),
+            Step::Seconds(i64::MAX),
+            Step::Offset(i32::MAX),
+            Step::Email(c"\xff@\xfe"),
+            Step::When(-86_400, -899),
+        ];
+        let mut c = c_new(c"A", c"a@b", 10, 60).unwrap();
+        let mut rust = Signature::new(c"A", c"a@b", 10, 60).unwrap();
+        assert_eq!(fields(rust.as_ref()), c_fields(c.0));
+        for step in steps {
+            c_apply(&mut c, step);
+            rust_apply(&mut rust, step);
+            let expected = c_fields(c.0);
+            assert_eq!(fields(rust.as_ref()), expected, "{step:?}");
+            // Copies: C's of its own, Rust's both ways, and C's of Rust's.
+            assert_eq!(c_fields(c_dup(c.0).0), expected, "{step:?}");
+            assert_eq!(fields(rust.clone().as_ref()), expected, "{step:?}");
+            assert_eq!(
+                fields(rust.as_ref().to_signature().unwrap().as_ref()),
+                expected,
+                "{step:?}"
+            );
+            assert_eq!(c_fields(c_dup(rust.as_c_ptr()).0), expected, "{step:?}");
+            // What libgit2 writes of each, as author and committer.
+            assert_eq!(
+                commit_lines(&repo, rust.as_c_ptr(), rust.as_c_ptr()),
+                commit_lines(&repo, c.0, c.0),
+                "{step:?}"
+            );
+        }
+    }
+
+    /// A view reads, copies and writes as the stack `git_signature` C code builds over
+    /// the same strings and time.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn views_match_c_stack_signatures() {
+        let repo = TreeRepo::new("signature-views");
+        for (i, name) in NAMES.iter().enumerate() {
+            let email = EMAILS[i % EMAILS.len()];
+            let (seconds, offset) = TIMES[i % TIMES.len()];
+            let offset = offset.max(-899);
+            let mut time = Time::new(seconds, offset);
+            time.as_mut().set_sign([b'+', b'-', b'x', 0][i % 4]);
+            let stack = ffi::git_signature {
+                name: name.as_ptr().cast_mut(),
+                email: email.as_ptr().cast_mut(),
+                when: time.into(),
+            };
+            let view = SignatureView::new(name, email, time);
+            assert_eq!(fields(view.as_ref()), c_fields(&stack), "{name:?}");
+            let copy = view.as_ref().to_signature().unwrap();
+            assert_eq!(fields(copy.as_ref()), c_fields(c_dup(&stack).0), "{name:?}");
+            assert_eq!(copy.as_ref(), view.as_ref());
+            assert_eq!(
+                commit_lines(&repo, copy.as_c_ptr(), copy.as_c_ptr()),
+                commit_lines(&repo, &stack, &stack),
+                "{name:?}"
+            );
+        }
+    }
+
+    /// The signatures C and Rust build from the same arguments write the same commit
+    /// lines, mixed as author and committer either way round.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owned_signatures_write_what_c_writes() {
+        let repo = TreeRepo::new("signature-owned");
+        let parsed = c"Parsed <p@q> 1700000000 -0000";
+        let c_author = c_parse(parsed).unwrap();
+        let rust_author = Signature::parse(parsed).unwrap();
+        for (seconds, offset) in TIMES.into_iter().filter(|&(_, o)| o != i32::MIN) {
+            let c = c_new(c" Comm ", c"c@d", seconds, offset).unwrap();
+            let rust = Signature::new(c" Comm ", c"c@d", seconds, offset).unwrap();
+            assert_eq!(
+                commit_lines(&repo, rust_author.as_c_ptr(), rust.as_c_ptr()),
+                commit_lines(&repo, c_author.0, c.0)
+            );
+            assert_eq!(
+                commit_lines(&repo, rust.as_c_ptr(), rust_author.as_c_ptr()),
+                commit_lines(&repo, c.0, c_author.0)
+            );
+        }
+    }
 }

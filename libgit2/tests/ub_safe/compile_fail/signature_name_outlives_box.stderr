@@ -1,0 +1,11 @@
+error[E0597]: `sig` does not live long enough
+ --> tests/ub_safe/compile_fail/signature_name_outlives_box.rs:7:9
+  |
+5 |     let name = {
+  |         ---- borrow later stored here
+6 |         let sig = Signature::new(c"A", c"a@b", 0, 0).unwrap();
+  |             --- binding `sig` declared here
+7 |         sig.as_ref().name()
+  |         ^^^ borrowed value does not live long enough
+8 |     };
+  |     - `sig` dropped here while still borrowed

@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `sig` as mutable more than once at a time
+ --> tests/ub_safe/compile_fail/signature_mut_aliased.rs:7:17
+  |
+6 |     let mut a = sig.as_mut();
+  |                 --- first mutable borrow occurs here
+7 |     let mut b = sig.as_mut();
+  |                 ^^^ second mutable borrow occurs here
+8 |     a.set_when(Time::new(1, 0));
+  |     - first borrow later used here

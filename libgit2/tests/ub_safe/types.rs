@@ -42,6 +42,9 @@
 //! Then `BranchType` (`git_branch_t`): its raw conversions yield only valid variants
 //! for every input, so a C value can never make an invalid enum; pure Rust, so Miri runs
 //! it.
+//!
+//! Then `git_signature`, in `signatures`: owned signatures, views over borrowed strings,
+//! and the handles both lend, including to libgit2, which copies and writes them.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -1030,4 +1033,345 @@ fn branch_types_cross_threads() {
         .join()
         .unwrap();
     assert_eq!(kind, BranchType::All);
+}
+
+mod signatures {
+    //! UB tests for `git2/types.h`'s `git_signature`: `SignatureBox` built by every
+    //! constructor and copy, `SignatureView` over borrowed strings, the handles both lend,
+    //! and the `TimeRef` / `TimeMut` they project out of `when`.
+    //!
+    //! Every getter and setter runs on every holder, through reborrows, over strings up
+    //! to a page long; replaced strings, copies and views outlive what they came from
+    //! (ASan flags a use after free, LSan a leaked string, Miri the view's projections);
+    //! libgit2 reads a signature while Rust holds borrowed strings out of it, and C's
+    //! copies are read after Rust's reborrows (BSan); owners and views cross threads
+    //! under the `Send` / `Sync` the crate asserts, and race the process's first
+    //! initialisation (TSan). Handles that outlive their owner or strings, strings
+    //! held across a setter, aliased exclusive handles and setters on the shared handle
+    //! do not compile (`compile_fail/`). Only the view tests avoid libgit2, so only they
+    //! run under Miri.
+
+    use std::ffi::{CStr, CString};
+    use std::sync::Barrier;
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{
+        Signature, SignatureBox, SignatureMut, SignatureRef, SignatureView, Time,
+    };
+    use libgit2::libgit2::raw::{OdbDataStr, OdbDataStrFree};
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    use crate::fixture::{init, isolated};
+
+    /// Lengths up to just past a page.
+    const LENS: [usize; 6] = [1, 2, 7, 63, 4096, 4097];
+
+    /// `len` printable bytes, none trimmed or refused by `git_signature_new`.
+    fn text(len: usize, seed: u8) -> CString {
+        let bytes = (0..len)
+            .map(|i| b'a' + ((i as u8).wrapping_add(seed) % 26))
+            .collect::<Vec<_>>();
+        CString::new(bytes).unwrap()
+    }
+
+    fn dup(s: &CStr) -> OdbDataStr {
+        OdbDataStrFree::dup(s).unwrap()
+    }
+
+    /// Reads every field and every byte of both strings, as owned values.
+    fn read(sig: SignatureRef<'_>) -> (CString, CString, Time) {
+        let name = sig.name().unwrap();
+        let email = sig.email().unwrap();
+        assert_eq!(name.to_bytes().len(), name.count_bytes());
+        let when = sig.when();
+        let _ = (when.seconds(), when.offset_minutes(), when.sign());
+        assert!(!format!("{sig:?}").is_empty());
+        (name.to_owned(), email.to_owned(), when.to_time())
+    }
+
+    /// Exercises every setter through `m` and its reborrows.
+    fn write_all(mut m: SignatureMut<'_>, name: &CStr, email: &CStr) {
+        m.set_name(dup(name));
+        let old = m.as_mut().replace_email(dup(email)).unwrap();
+        assert!(old.as_bytes().len() <= 4097);
+        m.when_mut().set_seconds(-1);
+        m.as_mut().when_mut().set_offset_minutes(-899);
+        m.when_mut().set_sign(b'x');
+        assert_eq!(m.as_ref().when().sign(), b'x');
+        m.set_when(Time::new(1, 2));
+        assert_eq!(m.as_ref().name(), Some(name));
+        assert_eq!(m.as_ref().email(), Some(email));
+        assert!(!format!("{m:?}").is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owned_signatures_stay_in_bounds() {
+        init();
+        for (i, &len) in LENS.iter().enumerate() {
+            let (name, email) = (text(len, i as u8), text(len, 7));
+            let mut sig = Signature::new(&name, &email, i as i64, -60).unwrap();
+            assert_eq!(
+                read(sig.as_ref()),
+                (name.clone(), email.clone(), Time::new(i as i64, -60))
+            );
+            write_all(sig.as_mut(), &email, &name);
+            assert_eq!(read(sig.as_ref()).0, email);
+
+            let line =
+                CString::new([name.as_bytes(), b" <", email.as_bytes(), b"> 12 +0130"].concat())
+                    .unwrap();
+            let parsed = Signature::parse(&line).unwrap();
+            assert_eq!(read(parsed.as_ref()).0, name);
+        }
+    }
+
+    /// What a signature hands out survives it: a replaced string, a copy, a clone.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn handed_out_values_outlive_the_signature() {
+        init();
+        let mut sig = Signature::new(c"First", c"first@x", 1, 1).unwrap();
+        let old_name = sig.as_mut().replace_name(dup(c"Second")).unwrap();
+        let clone = sig.clone();
+        let copy = sig.as_ref().to_signature().unwrap();
+        let when = sig.as_ref().when().to_time();
+        drop(sig);
+        assert_eq!(old_name.as_c_str(), c"First");
+        assert_eq!(read(clone.as_ref()).0, c"Second".to_owned());
+        assert_eq!(read(copy.as_ref()).1, c"first@x".to_owned());
+        assert_eq!(clone.as_ref(), copy.as_ref());
+        assert_eq!(when, Time::new(1, 1));
+        // Clones of clones, dropped in either order.
+        let a = clone.clone();
+        drop(clone);
+        let b = a.clone();
+        drop(a);
+        assert_eq!(read(b.as_ref()).0, c"Second".to_owned());
+    }
+
+    /// Repeated replacement releases each string once (ASan: double free; LSan: leak).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn repeated_replacement_releases_each_string_once() {
+        init();
+        let mut sig = Signature::new(c"N", c"e@x", 0, 0).unwrap();
+        let mut kept = Vec::new();
+        for i in 0..64 {
+            let s = text(1 + i % 9, i as u8);
+            if i % 2 == 0 {
+                sig.as_mut().set_name(dup(&s));
+                sig.as_mut().set_email(dup(&s));
+            } else {
+                kept.push(sig.as_mut().replace_name(dup(&s)).unwrap());
+                kept.push(sig.as_mut().replace_email(dup(&s)).unwrap());
+            }
+            assert_eq!(sig.as_ref().name(), Some(s.as_c_str()));
+        }
+        drop(sig);
+        assert_eq!(kept.len(), 64);
+        assert!(kept.iter().all(|s| !s.as_bytes().is_empty()));
+    }
+
+    /// Views read borrowed strings in place, and copies of them own theirs: the copy
+    /// outlives the strings the view borrowed.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn view_copies_outlive_the_borrowed_strings() {
+        init();
+        for (i, &len) in LENS.iter().enumerate() {
+            let (name, email) = (text(len, i as u8), text(len, 3));
+            let copy = {
+                let view = SignatureView::new(&name, &email, Time::new(-5, 90));
+                let r = view.as_ref();
+                assert_eq!(read(r), (name.clone(), email.clone(), Time::new(-5, 90)));
+                r.to_signature().unwrap()
+            };
+            let expected = (name.clone(), email.clone(), Time::new(-5, 90));
+            drop((name, email));
+            assert_eq!(read(copy.as_ref()), expected);
+        }
+    }
+
+    /// Views alone: no libgit2, so this runs under Miri too.
+    #[test]
+    fn views_read_in_place() {
+        let name = c"View".to_owned();
+        let email = c"view@x".to_owned();
+        // The clone outlives the view it was made from.
+        let clone = SignatureView::new(&name, &email, Time::new(3, -30)).clone();
+        let r = clone.as_ref();
+        assert_eq!(r.name(), Some(name.as_c_str()));
+        assert_eq!(r.email(), Some(email.as_c_str()));
+        assert_eq!(r.when().to_time(), Time::new(3, -30));
+        assert_eq!(format!("{clone:?}"), format!("{r:?}"));
+        let empty = SignatureView::new(c"", c"", Time::new(0, 0));
+        assert_eq!(empty.as_ref().name(), Some(c""));
+        assert_eq!(empty.as_ref().when().sign(), b'+');
+    }
+
+    /// libgit2 reads a signature (copying it, writing it into a commit through the
+    /// copy) while Rust holds strings borrowed out of it, and Rust reads C's copies
+    /// after reborrowing the original (BSan: foreign reads under Rust borrows).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn libgit2_reads_while_strings_are_borrowed() {
+        init();
+        let mut sig = Signature::parse(c"Held <held@x> 9 -0100").unwrap();
+        {
+            let r = sig.as_ref();
+            let name = r.name().unwrap();
+            let email = r.email().unwrap();
+            let copies: Vec<SignatureBox> = (0..4).map(|_| sig.try_clone().unwrap()).collect();
+            let more = r.to_signature().unwrap();
+            assert_eq!(name, c"Held");
+            assert_eq!(email, c"held@x");
+            for c in &copies {
+                assert_eq!(c.as_ref(), more.as_ref());
+            }
+        }
+        let mut m = sig.as_mut();
+        m.when_mut().set_seconds(10);
+        let copy = m.as_ref().to_signature().unwrap();
+        m.set_name(dup(c"After"));
+        assert_eq!(copy.as_ref().name(), Some(c"Held"));
+        assert_eq!(sig.as_ref().name(), Some(c"After"));
+        assert_eq!(copy.as_ref().when().seconds(), 10);
+    }
+
+    /// Constructor failures hand out nothing, and leave no allocation behind (LSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_constructions_leave_nothing() {
+        init();
+        for (name, email) in [(c"a<", c"b"), (c"a", c">"), (c"", c"b"), (c"a", c" ; ")] {
+            let error = Signature::new(name, email, 0, 0).unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+        }
+        for line in [c"", c"A", c"A >a< 1", c"A <a@b> x"] {
+            assert!(Signature::parse(line).is_err());
+        }
+    }
+
+    /// `Signature::now`, alone in a child: libgit2 reads the local zone through glibc's
+    /// `mktime` and `gmtime_r`, which serialise on a lock of glibc's own that TSan
+    /// cannot see, so two concurrent calls (from any two tests) read as a race on
+    /// glibc's copy of `TZ`. The calls are sound; they only run where nothing else does.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn now_stays_in_bounds() {
+        isolated(concat!(module_path!(), "::now_stays_in_bounds"), || {
+            for (i, &len) in LENS.iter().enumerate() {
+                let (name, email) = (text(len, i as u8), text(len, 7));
+                let mut now = Signature::now(&name, &email).unwrap();
+                assert_eq!(read(now.as_ref()).1, email);
+                write_all(now.as_mut(), &email, &name);
+            }
+            for (name, email) in [(c"a<", c"b"), (c"a", c">"), (c"", c"b"), (c"a", c" ; ")] {
+                let error = Signature::now(name, email).unwrap_err();
+                assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            }
+        });
+    }
+
+    /// Owners move to other threads and drop there; shared handles and views are read
+    /// from many at once, and copied concurrently (TSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_cross_threads() {
+        init();
+        let sig = Signature::new(c"Shared", c"shared@x", 1, 60).unwrap();
+        let name = c"Viewed".to_owned();
+        let view = SignatureView::new(&name, c"viewed@x", Time::new(2, -60));
+        let owned: Vec<SignatureBox> = thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let (sig, view) = (&sig, &view);
+                    s.spawn(move || {
+                        let r: SignatureRef<'_> = if i % 2 == 0 {
+                            sig.as_ref()
+                        } else {
+                            view.as_ref()
+                        };
+                        read(r);
+                        let copy = if i % 4 < 2 {
+                            r.to_signature().unwrap()
+                        } else {
+                            sig.clone()
+                        };
+                        read(copy.as_ref());
+                        copy
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        // Moved out, written and dropped on threads other than their makers'.
+        let handles: Vec<_> = owned
+            .into_iter()
+            .map(|mut copy| {
+                thread::spawn(move || {
+                    write_all(copy.as_mut(), c"moved", c"moved@x");
+                    drop(copy);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let mut sig = sig;
+        let m = sig.as_mut();
+        thread::scope(|s| {
+            s.spawn(move || write_all(m, c"m", c"m@x"));
+        });
+        assert_eq!(sig.as_ref().name(), Some(c"m"));
+    }
+
+    /// Before `git_libgit2_init`, constructors and copies pin the runtime first, and
+    /// views need nothing from libgit2.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_before_init() {
+        isolated(concat!(module_path!(), "::signatures_before_init"), || {
+            let view = SignatureView::new(c"Early", c"early@x", Time::new(0, 0));
+            assert_eq!(view.as_ref().name(), Some(c"Early"));
+            let copy = view.as_ref().to_signature().unwrap();
+            assert_eq!(copy.as_ref(), view.as_ref());
+        });
+    }
+
+    /// Views read and dropped, and copies made of them, while another thread's first
+    /// constructor initialises libgit2: every path into libgit2 is ordered after the
+    /// initialisation by the runtime pin (TSan). Alone in a child, so the
+    /// initialisation is really the process's first.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_do_not_race_the_first_init() {
+        isolated(
+            concat!(module_path!(), "::signatures_do_not_race_the_first_init"),
+            || {
+                let start = Barrier::new(3);
+                thread::scope(|s| {
+                    s.spawn(|| {
+                        start.wait();
+                        for _ in 0..64 {
+                            let view = SignatureView::new(c"v", c"v@x", Time::new(1, 1));
+                            read(view.as_ref());
+                        }
+                    });
+                    s.spawn(|| {
+                        start.wait();
+                        let view = SignatureView::new(c"c", c"c@x", Time::new(1, 1));
+                        let copy = view.as_ref().to_signature().unwrap();
+                        drop(copy);
+                    });
+                    s.spawn(|| {
+                        start.wait();
+                        let sig = Signature::new(c"first", c"first@x", 0, 0).unwrap();
+                        drop(sig.clone());
+                    });
+                });
+            },
+        );
+    }
 }

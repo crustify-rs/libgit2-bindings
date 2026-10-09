@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `sig` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/signature_name_held_across_set.rs:8:5
+  |
+7 |     let name = sig.as_ref().name();
+  |                --- immutable borrow occurs here
+8 |     sig.as_mut().set_name(OdbDataStrFree::dup(c"B").unwrap());
+  |     ^^^^^^^^^^^^ mutable borrow occurs here
+9 |     let _ = name;
+  |             ---- immutable borrow later used here
