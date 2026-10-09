@@ -30,6 +30,9 @@
 //! without a variant rather than produce an invalid discriminant (which Miri and
 //! UBSan would flag on the next read); an `as` cast to it does not compile
 //! (`compile_fail/`). None of these calls libgit2, so they also run under Miri.
+//!
+//! Then `git_writestream`, in `write_streams`: Rust and C streams, their owners and
+//! handles, lent to and freed by libgit2.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -500,4 +503,452 @@ fn modes_cross_threads() {
             assert_eq!(h.join().unwrap(), Some(*mode));
         }
     });
+}
+
+mod write_streams {
+    //! UB tests for `git2/types.h`'s `git_writestream`: `RustWriteStream` and its
+    //! `StreamWriter`s, `WriteStreamBox` over Rust and C streams, and the handles both lend,
+    //! including to libgit2, which writes, closes and frees them.
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{RustWriteStream, StreamError, StreamWriter, WriteStream};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+
+    use crate::fixture::{
+        Filters, TempRepo, blob_stream, commit_blob, init, isolated, stream_buffer, upper_streams,
+    };
+
+    /// Up to just past a page; whole-slice comparisons keep BSan's per-access cost low.
+    const SIZES: [usize; 7] = [0, 1, 2, 7, 63, 4096, 4097];
+
+    fn pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i * 31 + 7) as u8).collect()
+    }
+
+    /// What a writer saw, in order.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum Call {
+        Write(Vec<u8>),
+        Close,
+        Drop,
+    }
+
+    type Log = Rc<RefCell<Vec<Call>>>;
+
+    /// A writer logging into a log the test keeps, failing on request.
+    struct Logged {
+        log: Log,
+        fail_write: Option<StreamError>,
+        fail_close: Option<StreamError>,
+    }
+
+    fn logged() -> (Logged, Log) {
+        let log = Log::default();
+        let writer = Logged {
+            log: log.clone(),
+            fail_write: None,
+            fail_close: None,
+        };
+        (writer, log)
+    }
+
+    impl StreamWriter for Logged {
+        fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+            self.log.borrow_mut().push(Call::Write(data.to_vec()));
+            self.fail_write.clone().map_or(Ok(()), Err)
+        }
+
+        fn close(&mut self) -> Result<(), StreamError> {
+            self.log.borrow_mut().push(Call::Close);
+            self.fail_close.clone().map_or(Ok(()), Err)
+        }
+    }
+
+    impl Drop for Logged {
+        fn drop(&mut self) {
+            self.log.borrow_mut().push(Call::Drop);
+        }
+    }
+
+    // --- Rust streams, Rust callers ----------------------------------------------------
+
+    #[test]
+    fn rust_stream_takes_writes_of_every_size() {
+        let mut stream = RustWriteStream::new(Vec::new());
+        let mut expected = Vec::new();
+        for len in SIZES {
+            let data = pattern(len);
+            stream.as_mut().write(&data).unwrap();
+            expected.extend_from_slice(&data);
+        }
+        assert_eq!(stream.writer(), &expected);
+        let mut boxed = RustWriteStream::new(Vec::new()).into_box();
+        for len in SIZES {
+            boxed.as_mut().write(&pattern(len)).unwrap();
+        }
+        assert_eq!(WriteStream::close(boxed), Ok(()));
+    }
+
+    #[test]
+    fn every_owner_drops_the_writer_exactly_once() {
+        let (writer, log) = logged();
+        drop(RustWriteStream::new(writer));
+        assert_eq!(*log.borrow(), [Call::Drop]);
+
+        let (writer, log) = logged();
+        drop(RustWriteStream::new(writer).into_box());
+        assert_eq!(*log.borrow(), [Call::Drop]);
+
+        let (writer, log) = logged();
+        let mut stream = RustWriteStream::new(writer).into_box();
+        stream.as_mut().write(b"x").unwrap();
+        assert_eq!(WriteStream::close(stream), Ok(()));
+        assert_eq!(
+            *log.borrow(),
+            [Call::Write(b"x".to_vec()), Call::Close, Call::Drop]
+        );
+
+        let (writer, log) = logged();
+        let writer = RustWriteStream::new(writer).into_inner();
+        assert!(log.borrow().is_empty());
+        drop(writer);
+        assert_eq!(*log.borrow(), [Call::Drop]);
+    }
+
+    /// Handles and direct writer access alternate through reborrows of the owner: every
+    /// write through the header sees the writer's latest state.
+    #[test]
+    fn handles_and_writer_access_alternate() {
+        let mut stream = RustWriteStream::new(Vec::new());
+        for round in 0..64u8 {
+            let mut handle = stream.as_mut();
+            handle.write(&[round]).unwrap();
+            handle.as_mut().write(&[round, round]).unwrap();
+            let writer = stream.writer_mut();
+            assert_eq!(writer.len(), 3);
+            writer.clear();
+            let shared = stream.as_ref();
+            let _ = (shared, stream.writer());
+        }
+        assert!(stream.writer().is_empty());
+    }
+
+    /// A borrowed writer outlives the stream; the stream's members reach it only while
+    /// the stream lives.
+    #[test]
+    fn borrowed_writer_outlives_the_stream() {
+        let mut out = Vec::new();
+        let mut stream = RustWriteStream::new(&mut out);
+        stream.as_mut().write(b"borrowed").unwrap();
+        drop(stream);
+        out.push(b'!');
+        assert_eq!(out, b"borrowed!");
+    }
+
+    /// A writer's error comes back with its code, class and message; the error is the
+    /// thread's last libgit2 error too.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writer_errors_come_back_whole() {
+        let (mut writer, _log) = logged();
+        writer.fail_write = Some(
+            StreamError::new(ErrorClass::Callback, c"refused %s %n").with_code(ErrorCode::User),
+        );
+        writer.fail_close = Some(StreamError::new(ErrorClass::Os, c"x"));
+        let mut stream = RustWriteStream::new(writer).into_box();
+        let error = stream.as_mut().write(b"data").unwrap_err();
+        assert_eq!(
+            (error.code(), error.class(), error.message()),
+            (
+                Some(ErrorCode::User),
+                Some(ErrorClass::Callback),
+                c"refused %s %n"
+            )
+        );
+        assert_eq!(last().message(), c"refused %s %n");
+        let error = WriteStream::close(stream).unwrap_err();
+        assert_eq!(
+            (error.class(), error.message()),
+            (Some(ErrorClass::Os), c"x")
+        );
+    }
+
+    /// The first contact with libgit2 in a process can be a writer's error, raised from
+    /// the trampoline: it pins the runtime rather than reach uninitialised thread state.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writer_error_before_init_pins_the_runtime() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::writer_error_before_init_pins_the_runtime"
+            ),
+            || {
+                let (mut writer, _log) = logged();
+                writer.fail_write = Some(StreamError::new(ErrorClass::Filter, c"first"));
+                let mut stream = RustWriteStream::new(writer);
+                let error = stream.as_mut().write(b"x").unwrap_err();
+                assert_eq!(
+                    (error.class(), error.message()),
+                    (Some(ErrorClass::Filter), c"first")
+                );
+            },
+        );
+    }
+
+    // --- C streams, Rust callers -------------------------------------------------------
+
+    /// A blob stream written past its 2 MiB buffer, so it spills to its temporary file,
+    /// then committed.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_stream_is_written_and_committed() {
+        let repo = TempRepo::new("committed");
+        let mut stream = blob_stream(&repo, Some(c"file.txt"));
+        let chunk = vec![0x5a; 65_537];
+        let mut total = 0;
+        while total <= 2 * 1024 * 1024 {
+            stream.as_mut().write(&chunk).unwrap();
+            total += chunk.len();
+        }
+        stream.as_mut().write(&[]).unwrap();
+        assert_eq!(repo.stream_files(), 1);
+        let id = commit_blob(stream).unwrap();
+        assert_eq!(id.len(), 20);
+        assert_eq!(repo.stream_files(), 0);
+    }
+
+    /// Dropping a blob stream frees it, written or not, through its own `free` member:
+    /// LSan flags a leak, ASan a double free.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_stream_drops_unwritten_and_written() {
+        let repo = TempRepo::new("dropped");
+        drop(blob_stream(&repo, None));
+        let mut stream = blob_stream(&repo, Some(c"hint"));
+        for len in SIZES {
+            stream.as_mut().write(&pattern(len)).unwrap();
+        }
+        assert_eq!(repo.stream_files(), 1);
+        drop(stream);
+        assert_eq!(repo.stream_files(), 0);
+    }
+
+    /// Closing consumes the owner: the closed stream is freed at once, so it can never be
+    /// written (which would call the NULL write function of its zeroed file buffer).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_stream_close_consumes_it() {
+        let repo = TempRepo::new("closed");
+        let mut stream = blob_stream(&repo, None);
+        stream.as_mut().write(b"discarded").unwrap();
+        assert_eq!(WriteStream::close(stream), Ok(()));
+        assert_eq!(repo.stream_files(), 0);
+        assert_eq!(WriteStream::close(blob_stream(&repo, None)), Ok(()));
+    }
+
+    // --- Rust streams, C callers -------------------------------------------------------
+
+    /// libgit2 writes into the target and closes it, never frees it; the owner frees it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_target_is_written_and_closed_by_c() {
+        let (writer, log) = logged();
+        let mut target = RustWriteStream::new(writer).into_box();
+        for len in SIZES {
+            let data = pattern(len);
+            assert_eq!(stream_buffer(Filters::None, &data, &mut target), 0);
+            assert_eq!(
+                log.borrow_mut().drain(..).collect::<Vec<_>>(),
+                [Call::Write(data), Call::Close]
+            );
+        }
+        drop(target);
+        assert_eq!(*log.borrow(), [Call::Drop]);
+    }
+
+    /// Behind libgit2's buffered `ident` stream, the target gets the filtered data once
+    /// the chain closes; a failing write skips its close.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_target_behind_a_c_filter_stream() {
+        let (writer, log) = logged();
+        let mut target = RustWriteStream::new(writer).into_box();
+        let rc = stream_buffer(Filters::IdentClean, b"a $Id: 1234 $ b", &mut target);
+        assert_eq!(rc, 0);
+        assert_eq!(
+            log.borrow_mut().drain(..).collect::<Vec<_>>(),
+            [Call::Write(b"a $Id$ b".to_vec()), Call::Close]
+        );
+        // No empty data: `ident` then computes `NULL + 0` in `git_str_is_binary` (UBSan),
+        // a libgit2 defect. Its NULL buffer would reach the target as empty data
+        // (`unit_tests::null_buffer_is_empty_only_when_len_is_zero`).
+        drop(target);
+
+        let (mut writer, log) = logged();
+        writer.fail_write = Some(StreamError::new(ErrorClass::Filter, c"full"));
+        let mut target = RustWriteStream::new(writer).into_box();
+        let rc = stream_buffer(Filters::IdentClean, b"plain", &mut target);
+        assert_eq!(rc, ErrorCode::Generic.raw());
+        assert_eq!(last().message(), c"full");
+        assert_eq!(
+            log.borrow_mut().drain(..).collect::<Vec<_>>(),
+            [Call::Write(b"plain".to_vec())]
+        );
+    }
+
+    /// A Rust stream handed to libgit2 by a filter's `stream` callback: libgit2 writes
+    /// into it, closes it and frees it, through its members.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_filter_stream_is_freed_by_c() {
+        let (writer, log) = logged();
+        let mut target = RustWriteStream::new(writer).into_box();
+        let (made, dropped) = upper_streams();
+        for (i, len) in SIZES.into_iter().enumerate() {
+            let data = pattern(len);
+            assert_eq!(stream_buffer(Filters::Upper, &data, &mut target), 0);
+            assert_eq!(
+                log.borrow_mut().drain(..).collect::<Vec<_>>(),
+                [Call::Write(data.to_ascii_uppercase()), Call::Close]
+            );
+            // One stream per chain, freed by libgit2 before the call returns.
+            assert_eq!(upper_streams(), (made + i + 1, dropped + i + 1));
+        }
+
+        // The target's failure travels back up through the Rust filter stream.
+        let (mut writer, log) = logged();
+        writer.fail_close = Some(StreamError::new(ErrorClass::Os, c"disk gone"));
+        let mut target = RustWriteStream::new(writer).into_box();
+        let rc = stream_buffer(Filters::Upper, b"abc", &mut target);
+        assert_eq!(rc, ErrorCode::Generic.raw());
+        assert_eq!(last().message(), c"disk gone");
+        assert_eq!(
+            log.borrow_mut().drain(..).collect::<Vec<_>>(),
+            [Call::Write(b"ABC".to_vec()), Call::Close]
+        );
+    }
+
+    /// A filter that cannot start its stream makes libgit2 close the target unwritten.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_target_closed_when_a_filter_fails_to_start() {
+        let (writer, log) = logged();
+        let mut target = RustWriteStream::new(writer).into_box();
+        let rc = stream_buffer(Filters::Refused, b"never written", &mut target);
+        assert_eq!(rc, ErrorCode::User.raw());
+        assert_eq!(last().message(), c"refused");
+        assert_eq!(
+            log.borrow_mut().drain(..).collect::<Vec<_>>(),
+            [Call::Close]
+        );
+        drop(target);
+        assert_eq!(*log.borrow(), [Call::Drop]);
+    }
+
+    /// libgit2 keeps the target's pointer only during the call: afterwards the owner
+    /// reborrows it freely, and writes again (a Rust stream accepts writes after close).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_keeps_no_pointer_past_the_call() {
+        let (writer, log) = logged();
+        let mut target = RustWriteStream::new(writer).into_box();
+        assert_eq!(stream_buffer(Filters::Upper, b"x", &mut target), 0);
+        target.as_mut().write(b"after").unwrap();
+        assert_eq!(stream_buffer(Filters::None, b"y", &mut target), 0);
+        assert_eq!(
+            *log.borrow(),
+            [
+                Call::Write(b"X".to_vec()),
+                Call::Close,
+                Call::Write(b"after".to_vec()),
+                Call::Write(b"y".to_vec()),
+                Call::Close,
+            ]
+        );
+    }
+
+    // --- Threads -------------------------------------------------------------------------
+
+    /// `RustWriteStream<W>` is `Send` for a `Send` writer: written on one thread, then
+    /// another, then read back on the first.
+    #[test]
+    fn rust_stream_moves_between_threads() {
+        let mut stream = RustWriteStream::new(Vec::new());
+        stream.as_mut().write(b"main ").unwrap();
+        let stream = thread::spawn(move || {
+            stream.as_mut().write(b"worker").unwrap();
+            stream
+        })
+        .join()
+        .unwrap();
+        assert_eq!(stream.into_inner(), b"main worker");
+    }
+
+    /// `RustWriteStream<W>` is `Sync` for a `Sync` writer: shared readers race nothing.
+    #[test]
+    fn rust_stream_is_shared_read_only() {
+        let mut stream = RustWriteStream::new(pattern(4097));
+        stream.as_mut().write(b"tail").unwrap();
+        let stream = &stream;
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(move || {
+                    assert_eq!(stream.writer().len(), 4101);
+                    let _ = stream.as_ref();
+                });
+            }
+        });
+    }
+
+    /// A shared writer behind an `Arc`, written through streams on several threads at once.
+    #[test]
+    fn streams_on_many_threads_share_a_writer() {
+        struct Counting(Arc<AtomicUsize>);
+        impl StreamWriter for Counting {
+            fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+                self.0.fetch_add(data.len(), SeqCst);
+                Ok(())
+            }
+        }
+        let total = Arc::new(AtomicUsize::new(0));
+        thread::scope(|s| {
+            for _ in 0..4 {
+                let mut stream = RustWriteStream::new(Counting(total.clone()));
+                s.spawn(move || {
+                    for len in SIZES {
+                        stream.as_mut().write(&pattern(len)).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(total.load(SeqCst), 4 * SIZES.iter().sum::<usize>());
+    }
+
+    /// libgit2 streams on several threads at once, each on its own repository, and Rust
+    /// streams lent to libgit2 on each.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_streams_on_many_threads() {
+        init();
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let repo = TempRepo::new(&format!("thread-{t}"));
+                    let mut stream = blob_stream(&repo, None);
+                    stream.as_mut().write(&pattern(4097 + t)).unwrap();
+                    commit_blob(stream).unwrap();
+                    let (writer, log) = logged();
+                    let mut target = RustWriteStream::new(writer).into_box();
+                    assert_eq!(stream_buffer(Filters::Upper, b"t", &mut target), 0);
+                    assert_eq!(log.borrow().len(), 2);
+                });
+            }
+        });
+    }
 }

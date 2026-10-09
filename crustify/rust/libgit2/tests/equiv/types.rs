@@ -74,6 +74,9 @@
 //!   exactly when the header does, and `git_tree_entry_filemode` normalises it to a
 //!   mode `from_raw` names and the builder accepts; a mode past 16 bits fails the
 //!   parse.
+//!
+//! Then `git_writestream`, in `write_streams`: C blob streams written through the
+//! wrappers, and Rust streams driven by libgit2, against their C counterparts.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -1475,4 +1478,691 @@ fn parsed_trees_keep_any_16_bit_mode() {
             c"failed to parse tree: can't parse filemode".to_owned()
         ))
     );
+}
+
+mod write_streams {
+    //! Equivalence of `git2/types.h`'s `git_writestream` wrappers with the C streams and
+    //! C callers they stand in for.
+    //!
+    //! - C streams: a blob stream (`git_blob_create_from_stream`) written by raw member
+    //!   calls, and one adopted into a `WriteStreamBox` and written through
+    //!   `WriteStreamMut::write`, each on its own repository; the two are compared after
+    //!   every step (the return, the thread's error after a failure, the stream's temporary
+    //!   file), then on how they end: committed (the blob id), freed (`free` / drop), or
+    //!   closed (`close` + `free` / `WriteStream::close`).
+    //! - Rust streams: libgit2 drives a hand-written C-layout stream and a
+    //!   `RustWriteStream` over the same recorder through `git_filter_list_stream_buffer`,
+    //!   bare, behind libgit2's buffered `ident` stream, and behind a filter whose own
+    //!   stream libgit2 frees; each side runs on a thread of its own, and the recorded
+    //!   calls, returns and errors are compared after every call, failures injected.
+    //!
+    //! Each side runs on a fresh thread, so the error each reports is its own.
+
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString, c_char, c_int, c_void};
+    use std::path::PathBuf;
+    use std::ptr;
+    use std::rc::Rc;
+    use std::sync::OnceLock;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::{
+        RustWriteStream, StreamError, StreamWriter, WriteStream, WriteStreamBox,
+    };
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+
+    fn init() {
+        // SAFETY: no arguments; the reference is kept for the rest of the process.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// `len` bytes varying with `seed`; past a page, one repeated byte, since BSan is slow
+    /// on per-element loops.
+    fn pattern(len: usize, seed: usize) -> Vec<u8> {
+        if len > 4097 {
+            return vec![(seed * 7 + 3) as u8; len];
+        }
+        (0..len).map(|i| (i * 31 + seed * 7 + 3) as u8).collect()
+    }
+
+    /// The thread's last error, as `git_error_last` reports it.
+    fn c_last() -> (c_int, CString) {
+        // SAFETY: the runtime is initialised; the error is copied before any other call.
+        unsafe {
+            let e = ffi::git_error_last();
+            ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+        }
+    }
+
+    /// What one call reported: its return (0 for success on the Rust side, the code
+    /// otherwise) and, after a failure, the thread's last error.
+    type Reported = (c_int, Option<(c_int, CString)>);
+
+    fn c_reported(rc: c_int) -> Reported {
+        (rc, (rc < 0).then(c_last))
+    }
+
+    fn rust_reported(result: Result<(), StreamError>) -> Reported {
+        match result {
+            Ok(()) => (0, None),
+            Err(e) => {
+                let last = last();
+                // The error the wrapper copied is the thread's.
+                assert_eq!(
+                    (e.raw_class(), e.message()),
+                    (last.raw_class(), last.message())
+                );
+                (e.raw_code(), Some((e.raw_class(), e.message().to_owned())))
+            }
+        }
+    }
+
+    // --- blob streams --------------------------------------------------------------------
+
+    struct TempRepo {
+        path: PathBuf,
+        repo: *mut ffi::git_repository,
+    }
+
+    impl TempRepo {
+        fn new(tag: &str) -> Self {
+            init();
+            let path = std::env::temp_dir().join(format!(
+                "crustify-writestream-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot, a NUL-terminated path and live options, read for the call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+            assert_eq!(rc, 0);
+            Self { path, repo }
+        }
+
+        /// The blob stream's temporary files under `objects/`.
+        fn stream_files(&self) -> usize {
+            std::fs::read_dir(self.path.join("objects"))
+                .unwrap()
+                .filter(|e| {
+                    let name = e.as_ref().unwrap().file_name();
+                    name.to_string_lossy().starts_with("streamed")
+                })
+                .count()
+        }
+
+        fn open(&self, hint: Option<&CStr>) -> *mut ffi::git_writestream {
+            let mut out = ptr::null_mut();
+            // SAFETY: a live slot, the live repository and a NULL or live hint path.
+            let rc = unsafe {
+                ffi::git_blob_create_from_stream(
+                    &mut out,
+                    self.repo,
+                    hint.map_or(ptr::null(), CStr::as_ptr),
+                )
+            };
+            assert_eq!(rc, 0);
+            out
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository opened above, freed once after its streams.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// `git_blob_create_from_stream_commit`, consuming the stream: the blob id, or the
+    /// failure.
+    fn commit(stream: *mut ffi::git_writestream) -> Result<Vec<u8>, Reported> {
+        let mut oid = ffi::git_oid::default();
+        // SAFETY: an open, never-closed blob stream, given up to the call.
+        let rc = unsafe { ffi::git_blob_create_from_stream_commit(&mut oid, stream) };
+        if rc < 0 {
+            return Err(c_reported(rc));
+        }
+        Ok(oid.id[..20].to_vec())
+    }
+
+    /// A raw `write` member call on a C stream.
+    fn c_write(stream: *mut ffi::git_writestream, data: &[u8]) -> Reported {
+        // SAFETY: an open stream and its own member; `data` is live for the call.
+        c_reported(unsafe { (*stream).write.unwrap()(stream, data.as_ptr().cast(), data.len()) })
+    }
+
+    /// Chunk sizes written in order: empty, small, page-crossing, and enough to spill the
+    /// blob stream's 2 MiB buffer into its temporary file twice.
+    const CHUNKS: [usize; 8] = [0, 1, 7, 4097, 1 << 20, 1 << 20, 65_537, 0];
+
+    /// One side's steps: the report and the temporary-file count after each write.
+    type Trace = Vec<(Reported, usize)>;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_stream_writes_and_commit_match_c() {
+        for (tag, hint) in [("none", None), ("hint", Some(c"dir/file.txt"))] {
+            let c = thread::spawn(move || {
+                let repo = TempRepo::new(&format!("c-commit-{tag}"));
+                let stream = repo.open(hint);
+                let mut trace = Trace::new();
+                for (i, len) in CHUNKS.into_iter().enumerate() {
+                    trace.push((c_write(stream, &pattern(len, i)), repo.stream_files()));
+                }
+                let id = commit(stream);
+                (trace, id, repo.stream_files())
+            })
+            .join()
+            .unwrap();
+            let rust = thread::spawn(move || {
+                let repo = TempRepo::new(&format!("rust-commit-{tag}"));
+                // SAFETY: a fresh, open blob stream, owned here and released by its own
+                // `free` member (stands in for the blob wrapper).
+                let mut stream = unsafe { WriteStreamBox::from_c(repo.open(hint)) }.unwrap();
+                let mut trace = Trace::new();
+                for (i, len) in CHUNKS.into_iter().enumerate() {
+                    let reported = rust_reported(stream.as_mut().write(&pattern(len, i)));
+                    trace.push((reported, repo.stream_files()));
+                }
+                let id = commit(stream.into_c());
+                (trace, id, repo.stream_files())
+            })
+            .join()
+            .unwrap();
+            assert_eq!(rust, c, "hint {hint:?}");
+            assert!(c.1.is_ok());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_stream_free_and_close_match_c() {
+        let c = thread::spawn(|| {
+            let repo = TempRepo::new("c-end");
+            let mut states = Vec::new();
+            // Freed unwritten, freed written, closed written.
+            let s = repo.open(None);
+            states.push(repo.stream_files());
+            // SAFETY: an open stream, its own member, never used again.
+            unsafe { (*s).free.unwrap()(s) };
+            states.push(repo.stream_files());
+            let s = repo.open(Some(c"x"));
+            c_write(s, b"discarded");
+            // SAFETY: as above.
+            unsafe { (*s).free.unwrap()(s) };
+            states.push(repo.stream_files());
+            let s = repo.open(None);
+            c_write(s, b"closed");
+            // SAFETY: an open stream and its own member; afterwards it is only freed.
+            let closed = c_reported(unsafe { (*s).close.unwrap()(s) });
+            states.push(repo.stream_files());
+            // SAFETY: the closed stream, freed once.
+            unsafe { (*s).free.unwrap()(s) };
+            states.push(repo.stream_files());
+            (states, closed)
+        })
+        .join()
+        .unwrap();
+        let rust = thread::spawn(|| {
+            let repo = TempRepo::new("rust-end");
+            // SAFETY: fresh, open blob streams, owned here (stands in for the blob wrapper).
+            let open =
+                |hint: Option<&CStr>| unsafe { WriteStreamBox::from_c(repo.open(hint)) }.unwrap();
+            let mut states = Vec::new();
+            let s = open(None);
+            states.push(repo.stream_files());
+            drop(s);
+            states.push(repo.stream_files());
+            let mut s = open(Some(c"x"));
+            s.as_mut().write(b"discarded").unwrap();
+            drop(s);
+            states.push(repo.stream_files());
+            let mut s = open(None);
+            s.as_mut().write(b"closed").unwrap();
+            let closed = rust_reported(WriteStream::close(s));
+            // Close and free are one step on the Rust side.
+            states.push(repo.stream_files());
+            states.push(repo.stream_files());
+            (states, closed)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(rust, c);
+        assert_eq!(c.0, [1, 0, 0, 0, 0]);
+    }
+
+    // --- Rust streams, driven by libgit2 ---------------------------------------------------
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum Call {
+        Write(Vec<u8>),
+        Close,
+        Free,
+    }
+
+    /// The bytes a C caller passed. libgit2's buffered streams pass NULL for empty data
+    /// (their input buffer is `git__calloc`ed and never grown).
+    ///
+    /// # Safety
+    ///
+    /// `buf` is NULL with `len` 0, or valid for reads of `len` bytes.
+    unsafe fn bytes<'a>(buf: *const c_char, len: usize) -> &'a [u8] {
+        if len == 0 {
+            return &[];
+        }
+        // SAFETY: per this function's contract.
+        unsafe { std::slice::from_raw_parts(buf.cast::<u8>(), len) }
+    }
+
+    /// A failure to inject: the code returned, and the class and message set.
+    #[derive(Clone, Copy, Debug)]
+    struct Fail(c_int, ErrorClass, &'static CStr);
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct Plan {
+        write: Option<Fail>,
+        close: Option<Fail>,
+    }
+
+    /// The recorder both sides share: the calls made, and the failures to report.
+    struct Recorder {
+        log: Rc<RefCell<Vec<Call>>>,
+        plan: Plan,
+    }
+
+    // The C side: a hand-written C-layout stream, as a C caller would define one.
+
+    #[repr(C)]
+    struct RawStream {
+        parent: ffi::git_writestream,
+        rec: Recorder,
+    }
+
+    fn raw_fail(fail: Option<Fail>) -> c_int {
+        match fail {
+            None => 0,
+            Some(Fail(code, class, message)) => {
+                // SAFETY: a live message, which libgit2 copies; the runtime is initialised.
+                unsafe { ffi::git_error_set_str(class.raw(), message.as_ptr()) };
+                code
+            }
+        }
+    }
+
+    unsafe extern "C" fn raw_write(
+        s: *mut ffi::git_writestream,
+        buf: *const c_char,
+        len: usize,
+    ) -> c_int {
+        // SAFETY: `s` heads a live `RawStream`; `buf` holds `len` bytes, or is empty.
+        let (rec, data) = unsafe { (&(*s.cast::<RawStream>()).rec, bytes(buf, len).to_vec()) };
+        rec.log.borrow_mut().push(Call::Write(data));
+        raw_fail(rec.plan.write)
+    }
+
+    unsafe extern "C" fn raw_close(s: *mut ffi::git_writestream) -> c_int {
+        // SAFETY: `s` heads a live `RawStream`.
+        let rec = unsafe { &(*s.cast::<RawStream>()).rec };
+        rec.log.borrow_mut().push(Call::Close);
+        raw_fail(rec.plan.close)
+    }
+
+    unsafe extern "C" fn raw_free(s: *mut ffi::git_writestream) {
+        // SAFETY: `s` heads a `RawStream` box, given up by its owner.
+        let raw = unsafe { Box::from_raw(s.cast::<RawStream>()) };
+        raw.rec.log.borrow_mut().push(Call::Free);
+    }
+
+    fn raw_stream(rec: Recorder) -> *mut ffi::git_writestream {
+        let raw = Box::new(RawStream {
+            parent: ffi::git_writestream {
+                write: Some(raw_write),
+                close: Some(raw_close),
+                free: Some(raw_free),
+            },
+            rec,
+        });
+        Box::into_raw(raw).cast()
+    }
+
+    // The Rust side: the same recorder as a `StreamWriter`.
+
+    fn rust_fail(fail: Option<Fail>) -> Result<(), StreamError> {
+        match fail {
+            None => Ok(()),
+            Some(Fail(code, class, message)) => {
+                let code = ErrorCode::from_raw(code).unwrap();
+                Err(StreamError::new(class, message).with_code(code))
+            }
+        }
+    }
+
+    impl StreamWriter for Recorder {
+        fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+            self.log.borrow_mut().push(Call::Write(data.to_vec()));
+            rust_fail(self.plan.write)
+        }
+
+        fn close(&mut self) -> Result<(), StreamError> {
+            self.log.borrow_mut().push(Call::Close);
+            rust_fail(self.plan.close)
+        }
+    }
+
+    impl Drop for Recorder {
+        fn drop(&mut self) {
+            // The C side logs its free from `raw_free`; a raw stream's recorder drops there
+            // too, so only the Rust side's drop is the free.
+        }
+    }
+
+    /// A filter chain in front of the target.
+    #[derive(Clone, Copy, Debug)]
+    enum Filters {
+        None,
+        IdentClean,
+        Upper,
+        Refused,
+    }
+
+    /// `git_filter_list_stream_buffer(filters, data, target)`.
+    fn stream_buffer(filters: Filters, data: &[u8], target: *mut ffi::git_writestream) -> Reported {
+        let mut list = ptr::null_mut();
+        let filter = match filters {
+            Filters::None => None,
+            // SAFETY: a NUL-terminated name; the registry outlives the call.
+            Filters::IdentClean => Some(unsafe { ffi::git_filter_lookup(c"ident".as_ptr()) }),
+            Filters::Upper => Some(upper_filter()),
+            Filters::Refused => Some(refused_filter()),
+        };
+        if let Some(filter) = filter {
+            // SAFETY: a live slot; these filters need no repository.
+            let rc = unsafe {
+                ffi::git_filter_list_new(&mut list, ptr::null_mut(), ffi::GIT_FILTER_TO_ODB, 0)
+            };
+            assert_eq!(rc, 0);
+            // SAFETY: a fresh list and a registered filter.
+            let rc = unsafe { ffi::git_filter_list_push(list, filter, ptr::null_mut()) };
+            assert_eq!(rc, 0);
+        }
+        // SAFETY: `list` is NULL or live; `data` is live; `target` is an open stream the
+        // caller owns, which the call writes and closes.
+        let rc = unsafe {
+            ffi::git_filter_list_stream_buffer(list, data.as_ptr().cast(), data.len(), target)
+        };
+        let reported = c_reported(rc);
+        // SAFETY: the list above, or NULL.
+        unsafe { ffi::git_filter_list_free(list) };
+        reported
+    }
+
+    /// A C-written filter whose stream upper-cases into the next one: libgit2 makes it
+    /// with the `stream` callback and frees it after the chain closes.
+    #[repr(C)]
+    struct UpperStream {
+        parent: ffi::git_writestream,
+        next: *mut ffi::git_writestream,
+    }
+
+    unsafe extern "C" fn upper_write(
+        s: *mut ffi::git_writestream,
+        buf: *const c_char,
+        len: usize,
+    ) -> c_int {
+        // SAFETY: `s` heads a live `UpperStream`, whose `next` libgit2 keeps open.
+        unsafe {
+            let next = (*s.cast::<UpperStream>()).next;
+            let data = bytes(buf, len).to_ascii_uppercase();
+            (*next).write.unwrap()(next, data.as_ptr().cast(), data.len())
+        }
+    }
+
+    unsafe extern "C" fn upper_close(s: *mut ffi::git_writestream) -> c_int {
+        // SAFETY: as above.
+        unsafe {
+            let next = (*s.cast::<UpperStream>()).next;
+            (*next).close.unwrap()(next)
+        }
+    }
+
+    unsafe extern "C" fn upper_free(s: *mut ffi::git_writestream) {
+        // SAFETY: `s` heads an `UpperStream` box libgit2 gives up.
+        drop(unsafe { Box::from_raw(s.cast::<UpperStream>()) });
+    }
+
+    unsafe extern "C" fn upper_stream(
+        out: *mut *mut ffi::git_writestream,
+        _filter: *mut ffi::git_filter,
+        _payload: *mut *mut c_void,
+        _source: *const ffi::git_filter_source,
+        next: *mut ffi::git_writestream,
+    ) -> c_int {
+        let stream = Box::new(UpperStream {
+            parent: ffi::git_writestream {
+                write: Some(upper_write),
+                close: Some(upper_close),
+                free: Some(upper_free),
+            },
+            next,
+        });
+        // SAFETY: libgit2's live out-slot, which takes the stream over.
+        unsafe { out.write(Box::into_raw(stream).cast()) };
+        0
+    }
+
+    /// `git_filter.stream` of a filter that cannot start: libgit2 then closes the chain's
+    /// last stream, the target, unwritten.
+    unsafe extern "C" fn refused_stream(
+        _out: *mut *mut ffi::git_writestream,
+        _filter: *mut ffi::git_filter,
+        _payload: *mut *mut c_void,
+        _source: *const ffi::git_filter_source,
+        _next: *mut ffi::git_writestream,
+    ) -> c_int {
+        // SAFETY: a live message, which libgit2 copies; the runtime is initialised.
+        unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_FILTER as c_int, c"refused".as_ptr()) };
+        ffi::GIT_EUSER
+    }
+
+    /// A filter registered once under `name` with `stream` as its callback.
+    fn registered(
+        slot: &'static OnceLock<Registered>,
+        name: &CStr,
+        stream: ffi::git_filter_stream_fn,
+    ) -> *mut ffi::git_filter {
+        slot.get_or_init(|| {
+            let filter = Box::leak(Box::new(ffi::git_filter::default()));
+            // SAFETY: a live filter struct.
+            let rc = unsafe { ffi::git_filter_init(filter, ffi::GIT_FILTER_VERSION) };
+            assert_eq!(rc, 0);
+            filter.stream = stream;
+            // Loaded only for paths that set `crustify-test`, which none do, so blobs with a
+            // hint path stay unfiltered.
+            filter.attributes = c"+crustify-test".as_ptr();
+            // SAFETY: a NUL-terminated name and a filter that lives for the process.
+            let rc = unsafe { ffi::git_filter_register(name.as_ptr(), filter, 0) };
+            assert_eq!(rc, 0);
+            Registered(filter)
+        })
+        .0
+    }
+
+    struct Registered(*mut ffi::git_filter);
+    // SAFETY: leaked, immutable after registration.
+    unsafe impl Send for Registered {}
+    // SAFETY: as above.
+    unsafe impl Sync for Registered {}
+
+    fn upper_filter() -> *mut ffi::git_filter {
+        static FILTER: OnceLock<Registered> = OnceLock::new();
+        registered(&FILTER, c"crustify-upper-equiv", Some(upper_stream))
+    }
+
+    fn refused_filter() -> *mut ffi::git_filter {
+        static FILTER: OnceLock<Registered> = OnceLock::new();
+        registered(&FILTER, c"crustify-refused-equiv", Some(refused_stream))
+    }
+
+    /// Every call of a sequence: what libgit2 returned and what the target recorded.
+    type Run = Vec<(Reported, Vec<Call>)>;
+
+    const INPUTS: [&[u8]; 4] = [
+        b"",
+        b"plain text",
+        b"a $Id: 0123abc $ b\n",
+        b"\0binary $Id: 1 $",
+    ];
+
+    /// The inputs for a chain, each twice. `ident` gets no empty input: it then computes
+    /// `NULL + 0` in `git_str_is_binary` (UBSan), a libgit2 defect outside these wrappers.
+    fn inputs(filters: Filters) -> impl Iterator<Item = &'static [u8]> {
+        let skip_empty = matches!(filters, Filters::IdentClean);
+        INPUTS
+            .into_iter()
+            .filter(move |i| !(skip_empty && i.is_empty()))
+            .flat_map(|i| [i, i])
+    }
+
+    /// Each input twice through one target (closed by the first call, written again by the
+    /// second), then the target freed.
+    fn run_c(filters: Filters, plan: Plan) -> Run {
+        init();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let target = raw_stream(Recorder {
+            log: log.clone(),
+            plan,
+        });
+        let mut run = Run::new();
+        for input in inputs(filters) {
+            let reported = stream_buffer(filters, input, target);
+            run.push((reported, log.borrow_mut().drain(..).collect()));
+        }
+        // SAFETY: the target made above, freed once, through its own member.
+        unsafe { (*target).free.unwrap()(target) };
+        run.push(((0, None), log.borrow_mut().drain(..).collect()));
+        run
+    }
+
+    fn run_rust(filters: Filters, plan: Plan) -> Run {
+        init();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let target = RustWriteStream::new(Recorder {
+            log: log.clone(),
+            plan,
+        })
+        .into_box();
+        let mut run = Run::new();
+        for input in inputs(filters) {
+            let reported = stream_buffer(filters, input, target.as_c_ptr());
+            run.push((reported, log.borrow_mut().drain(..).collect()));
+        }
+        drop(target);
+        log.borrow_mut().push(Call::Free);
+        run.push(((0, None), log.borrow_mut().drain(..).collect()));
+        run
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_targets_match_c_targets_under_libgit2() {
+        let fail_user = Some(Fail(ffi::GIT_EUSER, ErrorClass::Callback, c"user stop"));
+        let fail_os = Some(Fail(ffi::GIT_ERROR, ErrorClass::Os, c"disk full"));
+        let plans = [
+            Plan::default(),
+            Plan {
+                write: fail_user,
+                close: None,
+            },
+            Plan {
+                write: None,
+                close: fail_os,
+            },
+            Plan {
+                write: fail_os,
+                close: fail_user,
+            },
+        ];
+        let chains = [
+            Filters::None,
+            Filters::IdentClean,
+            Filters::Upper,
+            Filters::Refused,
+        ];
+        for filters in chains {
+            for plan in plans {
+                let c = thread::spawn(move || run_c(filters, plan)).join().unwrap();
+                let rust = thread::spawn(move || run_rust(filters, plan))
+                    .join()
+                    .unwrap();
+                assert_eq!(rust, c, "{filters:?} {plan:?}");
+            }
+        }
+    }
+
+    /// Rust-side calls through a handle match the same calls made on the raw stream's
+    /// members, success and failure alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn handle_calls_match_member_calls() {
+        let plans = [
+            Plan::default(),
+            Plan {
+                write: Some(Fail(ffi::GIT_EUSER, ErrorClass::Filter, c"no")),
+                close: Some(Fail(ffi::GIT_PASSTHROUGH, ErrorClass::None, c"pass")),
+            },
+        ];
+        for plan in plans {
+            let c = thread::spawn(move || {
+                init();
+                let log = Rc::new(RefCell::new(Vec::new()));
+                let s = raw_stream(Recorder {
+                    log: log.clone(),
+                    plan,
+                });
+                let mut steps = Vec::new();
+                for (i, len) in [0, 1, 4097].into_iter().enumerate() {
+                    steps.push(c_write(s, &pattern(len, i)));
+                }
+                // SAFETY: the stream's own members; closed, then freed once.
+                unsafe {
+                    steps.push(c_reported((*s).close.unwrap()(s)));
+                    (*s).free.unwrap()(s);
+                }
+                (steps, log.take())
+            })
+            .join()
+            .unwrap();
+            let rust = thread::spawn(move || {
+                init();
+                let log = Rc::new(RefCell::new(Vec::new()));
+                let mut s = RustWriteStream::new(Recorder {
+                    log: log.clone(),
+                    plan,
+                })
+                .into_box();
+                let mut steps = Vec::new();
+                for (i, len) in [0, 1, 4097].into_iter().enumerate() {
+                    steps.push(rust_reported(s.as_mut().write(&pattern(len, i))));
+                }
+                steps.push(rust_reported(WriteStream::close(s)));
+                log.borrow_mut().push(Call::Free);
+                (steps, log.take())
+            })
+            .join()
+            .unwrap();
+            assert_eq!(rust, c, "{plan:?}");
+        }
+    }
 }

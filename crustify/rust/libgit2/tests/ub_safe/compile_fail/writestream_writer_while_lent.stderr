@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `stream` as immutable because it is also borrowed as mutable
+ --> tests/ub_safe/compile_fail/writestream_writer_while_lent.rs:8:18
+  |
+7 |     let mut handle = stream.as_mut();
+  |                      ------ mutable borrow occurs here
+8 |     let writer = stream.writer();
+  |                  ^^^^^^ immutable borrow occurs here
+9 |     handle.write(b"aliased").unwrap();
+  |     ------ mutable borrow later used here

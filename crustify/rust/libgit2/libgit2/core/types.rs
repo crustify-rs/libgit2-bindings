@@ -48,16 +48,44 @@
 //! A [`FileMode`] is a tree entry's `git_filemode_t`. A parsed tree keeps whatever
 //! 16-bit mode its object spells, so a raw mode is converted fallibly
 //! ([`FileMode::from_raw`]) and never transmuted.
+//!
+//! # Write streams
+//!
+//! A `git_writestream` is a vtable header: libgit2 embeds it as the first member of a
+//! concrete stream (a blob writer, a filter's buffered stream, the checkout writer), and
+//! each of its three members takes the header back and casts it to that container. A
+//! header is therefore only valid where its producer put it: it is never held by value,
+//! and every handle designates one in place.
+//!
+//! A stream is written any number of times, then closed once, then freed:
+//!
+//! - [`WriteStreamMut::write`] calls the `write` member;
+//! - closing ends the stream: libgit2's own streams accept nothing but `free` afterwards
+//!   (a blob stream's next write or commit calls a NULL function, since closing zeroes
+//!   its file buffer; the checkout writer writes to a closed file descriptor), so
+//!   [`WriteStream::close`] consumes the owner;
+//! - the `free` member releases the whole container. [`WriteStreamFree`] calls it, so
+//!   one owner, [`WriteStreamBox`], holds any stream, C's or Rust's.
+//!
+//! [`RustWriteStream`] implements a stream in Rust, over a [`StreamWriter`]: its members
+//! are `extern "C"` trampolines into the writer. It lends a [`WriteStreamMut`] to code
+//! that writes into it (libgit2's `git_filter_list_stream_*` take one as their target,
+//! write into it and close it, but never free it), or becomes a [`WriteStreamBox`] to
+//! hand over to libgit2 (a filter's `stream` callback returns one, which libgit2 frees).
 
-use core::ffi::c_char;
+use core::ffi::{CStr, c_char, c_int};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
-use core::ptr::{addr_of, addr_of_mut};
+use core::mem::ManuallyDrop;
+use core::ptr::{NonNull, addr_of, addr_of_mut};
+use std::ffi::CString;
 
-use ffibox::{CZeroable, define_ctype};
+use ffibox::{CBox, CZeroable, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::runtime_pinned;
 
 /// The type of a Git object: what its content is, which fixes how libgit2 parses it.
 ///
@@ -703,6 +731,548 @@ const _: () = assert!(
         && align_of::<Time>() == align_of::<ffi::git_time>()
 );
 
+define_ctype!(
+    /// A stream that data is written into piece by piece, then closed
+    /// (`git_writestream`): the sink of libgit2's filters, and the writer
+    /// `git_blob_create_from_stream` opens.
+    ///
+    /// Only ever behind a pointer, in the container its producer embedded it in (see
+    /// the [module docs](self#write-streams)): owned as a [`WriteStreamBox`] or a
+    /// [`RustWriteStream`], borrowed as a [`WriteStreamRef`] / [`WriteStreamMut`].
+    /// There is no public constructor of a bare header, and no setter: replacing a
+    /// member would detach it from the container its functions cast the header to.
+    ///
+    /// Besides `from_ptr`'s requirements, building a handle requires the pointer to be
+    /// a header in place in its container, its three members set to that container's
+    /// functions, and the stream to accept writes for the handle's lifetime: not
+    /// closed, unless it is a [`RustWriteStream`]'s, whose members accept any order of
+    /// calls. Lending a handle to C code that closes the stream (as
+    /// `git_filter_list_stream_*` do with their target) is sound only for such a
+    /// stream, or when the handle is not written through again.
+    ///
+    /// The handles are neither `Send` nor `Sync`: a C stream may hold a repository or
+    /// a filter session that belongs to its thread.
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::core::types::WriteStreamBox;
+    ///
+    /// fn send<T: Send>(_: T) {}
+    /// fn forward(stream: WriteStreamBox) {
+    ///     send(stream);
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_writestream
+    WriteStream, WriteStreamRef, WriteStreamMut, ffi::git_writestream
+);
+
+impl WriteStream {
+    /// Closes the stream, then frees it: its `close` member, then its `free` member.
+    ///
+    /// Closing ends a stream, so the owner is consumed and freed whether or not
+    /// closing fails. A negative return is an error, which comes back with the thread's
+    /// last libgit2 error; any other return is success, as libgit2's callers read it.
+    ///
+    /// Not every stream is meant to be closed by its owner: the stream
+    /// `git_blob_create_from_stream` opens is committed instead, and closing it
+    /// discards what was written (dropping it does the same).
+    ///
+    /// Field: git_writestream.close
+    pub fn close(mut stream: WriteStreamBox) -> Result<(), StreamError> {
+        // SAFETY: `stream` is dropped right below, so the stream is freed and never
+        // written or closed again.
+        let closed = unsafe { stream.as_mut().close() };
+        drop(stream);
+        closed
+    }
+}
+
+impl WriteStreamMut<'_> {
+    /// Writes `data` into the stream: its `write` member, given the slice's pointer
+    /// and length. The stream reads the bytes during the call only.
+    ///
+    /// A negative return is an error, which comes back with the thread's last libgit2
+    /// error; any other return is success, as libgit2's callers read it.
+    ///
+    /// # Panics
+    ///
+    /// If the stream has no `write` member, which no producer leaves unset and the
+    /// handle's invariant excludes.
+    ///
+    /// Field: git_writestream.write
+    pub fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        let stream = self.as_mut_ptr();
+        // SAFETY: a read through the exclusive handle's pointer to a live header.
+        let write = unsafe { addr_of!((*stream).write).read() };
+        let write = write.expect("a git_writestream always has a write member");
+        // SAFETY: per the handle's invariant, `write` is the member the stream's
+        // producer set for this header, in place in its container, and the stream
+        // accepts writes; it reads `data.len()` bytes at `data` during the call only.
+        // The handle is exclusive, so no other call on the stream runs meanwhile.
+        let rc = unsafe { write(stream, data.as_ptr().cast(), data.len()) };
+        check(rc)
+    }
+
+    /// Closes the stream: its `close` member. Results read as [`write`](Self::write)'s.
+    ///
+    /// # Panics
+    ///
+    /// If the stream has no `close` member, which the handle's invariant excludes.
+    ///
+    /// # Safety
+    ///
+    /// Closing ends the stream: afterwards it must not be written or closed again
+    /// through any handle, only freed, unless it is a [`RustWriteStream`]'s.
+    ///
+    /// Field: git_writestream.close
+    pub(crate) unsafe fn close(&mut self) -> Result<(), StreamError> {
+        let stream = self.as_mut_ptr();
+        // SAFETY: a read through the exclusive handle's pointer to a live header.
+        let close = unsafe { addr_of!((*stream).close).read() };
+        let close = close.expect("a git_writestream always has a close member");
+        // SAFETY: as in `write`, for the `close` member; the caller ends the stream.
+        let rc = unsafe { close(stream) };
+        check(rc)
+    }
+}
+
+/// A stream member's return as a result: negative is an error, described by the
+/// thread's last libgit2 error, which is copied before any other libgit2 call.
+fn check(rc: c_int) -> Result<(), StreamError> {
+    if rc < 0 {
+        Err(StreamError::from_libgit2(rc))
+    } else {
+        Ok(())
+    }
+}
+
+/// `git_writestream.free` in `impl_cdrop!`'s shape: the stream's own destructor.
+///
+/// A stream without one is left alone: no producer leaves the member unset.
+///
+/// # Safety
+///
+/// `stream` is a live header in its container, with its members set, which the caller
+/// owns and does not use again.
+unsafe fn stream_free(stream: *mut ffi::git_writestream) {
+    // SAFETY: a read of the header the caller owns.
+    let free = unsafe { addr_of!((*stream).free).read() };
+    if let Some(free) = free {
+        // SAFETY: `free` is the member the stream's producer set for this header; it
+        // releases the container, which the caller gives up.
+        unsafe { free(stream) }
+    }
+}
+
+/// Releases a stream through its own `free` member, which frees the container the
+/// header is embedded in: a blob writer's file buffer, hint path and allocation; a
+/// [`RustWriteStream`]'s box. Stateless: the routine is recovered from the object.
+///
+/// Field: git_writestream.free
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WriteStreamFree;
+
+impl_cdrop!(WriteStreamFree, WriteStream, stream_free);
+
+/// The sole owner of a stream, C's or Rust's, released through its `free` member.
+///
+/// [`RustWriteStream::into_box`] builds one safely; a stream libgit2 opens is adopted
+/// by the wrapper of the routine that opens it.
+pub type WriteStreamBox = CBox<WriteStream, WriteStreamFree>;
+
+/// What a stream implemented in Rust does when its `write` and `close` members are
+/// called, by libgit2 or through a handle; [`RustWriteStream`] adapts it.
+///
+/// libgit2 writes any number of times and then closes once, but a stream lent to other
+/// code may see any order, so an implementation must not rely on one. An error is
+/// returned to the caller as its code and becomes the thread's last libgit2 error. A
+/// panic aborts the process, since it cannot unwind into C.
+///
+/// Handwritten
+pub trait StreamWriter {
+    /// Takes the next piece of the stream's data.
+    fn write(&mut self, data: &[u8]) -> Result<(), StreamError>;
+
+    /// Ends the stream's data. The default accepts.
+    fn close(&mut self) -> Result<(), StreamError> {
+        Ok(())
+    }
+}
+
+/// Collects the data written.
+impl StreamWriter for Vec<u8> {
+    fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        self.extend_from_slice(data);
+        Ok(())
+    }
+}
+
+/// Forwards to the borrowed writer, which the caller keeps.
+impl<T: StreamWriter + ?Sized> StreamWriter for &mut T {
+    fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        (**self).write(data)
+    }
+
+    fn close(&mut self) -> Result<(), StreamError> {
+        (**self).close()
+    }
+}
+
+/// A stream's header and the writer its members run, boxed together: the header first,
+/// so a pointer to it is a pointer to the box.
+#[repr(C)]
+struct Repr<W> {
+    stream: ffi::git_writestream,
+    writer: W,
+}
+
+/// A stream implemented in Rust: a `git_writestream` whose members run a
+/// [`StreamWriter`], owned by Rust.
+///
+/// It lends [`WriteStreamRef`] / [`WriteStreamMut`] handles, as any owner does, and the
+/// writer itself, through [`writer`](Self::writer) / [`writer_mut`](Self::writer_mut)
+/// or [`into_inner`](Self::into_inner) once the stream is done. Its members accept any
+/// order of calls, so it may be lent to C code that closes it and written again
+/// afterwards. [`into_box`](Self::into_box) erases the writer's type into a
+/// [`WriteStreamBox`], for code that takes any stream (a filter's `stream` callback
+/// hands one to libgit2, which frees it); dropping either drops the writer.
+///
+/// ```
+/// use libgit2::libgit2::core::types::RustWriteStream;
+///
+/// let mut stream = RustWriteStream::new(Vec::new());
+/// stream.as_mut().write(b"hello, ").unwrap();
+/// stream.as_mut().write(b"world").unwrap();
+/// assert_eq!(stream.into_inner(), b"hello, world");
+/// ```
+///
+/// A handle borrows the stream, and an erased one cannot borrow anything:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::core::types::RustWriteStream;
+///
+/// let mut out = Vec::new();
+/// let stream = RustWriteStream::new(&mut out);
+/// let _boxed = stream.into_box();
+/// ```
+///
+/// It crosses threads only with a writer that does:
+///
+/// ```compile_fail,E0277
+/// use std::rc::Rc;
+///
+/// use libgit2::libgit2::core::types::{RustWriteStream, StreamError, StreamWriter};
+///
+/// struct Shared(Rc<()>);
+///
+/// impl StreamWriter for Shared {
+///     fn write(&mut self, _: &[u8]) -> Result<(), StreamError> {
+///         Ok(())
+///     }
+/// }
+///
+/// let stream = RustWriteStream::new(Shared(Rc::new(())));
+/// std::thread::spawn(move || drop(stream));
+/// ```
+///
+/// Wraps: git_writestream
+/// Handwritten
+pub struct RustWriteStream<W: StreamWriter> {
+    raw: NonNull<Repr<W>>,
+    _owns: PhantomData<Box<Repr<W>>>,
+}
+
+// SAFETY: a `RustWriteStream` uniquely owns its box, as `Box<Repr<W>>` does: the header
+// holds three function pointers fixed at construction, nothing else points into the
+// box while the owner holds it, and no member call outlives the borrow that made it.
+// Moving the owner to another thread moves `W` and three code addresses.
+unsafe impl<W: StreamWriter + Send> Send for RustWriteStream<W> {}
+// SAFETY: `&RustWriteStream` reaches `&W` ([`RustWriteStream::writer`]) and a shared
+// handle, which neither calls a member nor writes the header; every call and write
+// needs `&mut`.
+unsafe impl<W: StreamWriter + Sync> Sync for RustWriteStream<W> {}
+
+impl<W: StreamWriter> RustWriteStream<W> {
+    /// A stream whose members run `writer`.
+    pub fn new(writer: W) -> Self {
+        let repr = Box::new(Repr {
+            stream: ffi::git_writestream {
+                write: Some(write_with::<W>),
+                close: Some(close_with::<W>),
+                free: Some(free_with::<W>),
+            },
+            writer,
+        });
+        Self {
+            raw: NonNull::from(Box::leak(repr)),
+            _owns: PhantomData,
+        }
+    }
+
+    /// The stream's header.
+    fn header(&self) -> *mut ffi::git_writestream {
+        // The header is `Repr`'s first field, at offset 0 (`#[repr(C)]`).
+        self.raw.as_ptr().cast()
+    }
+
+    /// Shared handle to the stream.
+    pub fn as_ref(&self) -> WriteStreamRef<'_> {
+        // SAFETY: the header of the live box this owner holds, in place in its `Repr`
+        // with every member set to `Repr<W>`'s trampolines; shared for `&self`.
+        unsafe { WriteStreamRef::from_ptr(self.header()) }.expect("a box is never NULL")
+    }
+
+    /// Exclusive handle to the stream, to write into it or lend it to code that does.
+    pub fn as_mut(&mut self) -> WriteStreamMut<'_> {
+        // SAFETY: as in `as_ref`, exclusive for `&mut self`; the trampolines accept any
+        // order of calls.
+        unsafe { WriteStreamMut::from_ptr(self.header()) }.expect("a box is never NULL")
+    }
+
+    /// The writer.
+    pub fn writer(&self) -> &W {
+        // SAFETY: the writer of the live box this owner holds; no member call runs
+        // while `&self` lives, since each needs a handle borrowed from `&mut self`.
+        unsafe { &*addr_of!((*self.raw.as_ptr()).writer) }
+    }
+
+    /// The writer, exclusively.
+    pub fn writer_mut(&mut self) -> &mut W {
+        // SAFETY: as in `writer`, exclusive for `&mut self`.
+        unsafe { &mut *addr_of_mut!((*self.raw.as_ptr()).writer) }
+    }
+
+    /// The writer, the stream's header released.
+    pub fn into_inner(self) -> W {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: the box this owner held, from `Box::leak` in `new`; `this` is never
+        // dropped, so the box is reclaimed once.
+        let repr = unsafe { Box::from_raw(this.raw.as_ptr()) };
+        repr.writer
+    }
+
+    /// The stream as an owner of any stream: it is freed through its `free` member,
+    /// which drops the writer and the box.
+    ///
+    /// `WriteStreamBox` carries no lifetime, so the writer must borrow nothing.
+    pub fn into_box(self) -> WriteStreamBox
+    where
+        W: 'static,
+    {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: the header of the live box this owner held, which it gives up (`this`
+        // is never dropped); its `free` member, `free_with::<W>`, reclaims exactly that
+        // box, and `W: 'static` outlives any owner.
+        unsafe { WriteStreamBox::from_c(this.header()) }.expect("a box is never NULL")
+    }
+}
+
+impl<W: StreamWriter> Drop for RustWriteStream<W> {
+    fn drop(&mut self) {
+        // SAFETY: the box this owner holds, from `Box::leak` in `new`, reclaimed once.
+        drop(unsafe { Box::from_raw(self.raw.as_ptr()) });
+    }
+}
+
+impl<W: StreamWriter + fmt::Debug> fmt::Debug for RustWriteStream<W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RustWriteStream")
+            .field("writer", self.writer())
+            .finish()
+    }
+}
+
+/// The writer of the box `stream` heads.
+///
+/// # Safety
+///
+/// `stream` is the header of a live `Repr<W>`, which no other reference reaches for
+/// `'a`.
+unsafe fn writer_of<'a, W>(stream: *mut ffi::git_writestream) -> &'a mut W {
+    // SAFETY: per this function's contract; the header is at offset 0 of its `Repr`.
+    unsafe { &mut *addr_of_mut!((*stream.cast::<Repr<W>>()).writer) }
+}
+
+/// A writer's result as the member's return: 0, or the error's code once it is the
+/// thread's last libgit2 error.
+fn returned(result: Result<(), StreamError>) -> c_int {
+    match result {
+        Ok(()) => 0,
+        Err(error) => error.raise(),
+    }
+}
+
+/// `git_writestream.write` over [`StreamWriter::write`].
+///
+/// A NULL `buffer` is empty data when `len` is 0, and refused otherwise.
+///
+/// # Safety
+///
+/// `stream` is the header of a live `Repr<W>`, which nothing else reaches during the
+/// call; `buffer` is NULL or valid for reads of `len` bytes, unchanged during the call.
+unsafe extern "C" fn write_with<W: StreamWriter>(
+    stream: *mut ffi::git_writestream,
+    buffer: *const c_char,
+    len: usize,
+) -> c_int {
+    let data: &[u8] = match (buffer.is_null(), len) {
+        (_, 0) => &[],
+        (true, _) => {
+            let error = StreamError::new(ErrorClass::Invalid, c"NULL buffer written to stream");
+            return error.raise();
+        }
+        // SAFETY: per this function's contract, `buffer` is valid for `len` bytes.
+        (false, _) => unsafe { core::slice::from_raw_parts(buffer.cast(), len) },
+    };
+    // SAFETY: per this function's contract.
+    let writer = unsafe { writer_of::<W>(stream) };
+    returned(writer.write(data))
+}
+
+/// `git_writestream.close` over [`StreamWriter::close`].
+///
+/// # Safety
+///
+/// `stream` is the header of a live `Repr<W>`, which nothing else reaches during the
+/// call.
+unsafe extern "C" fn close_with<W: StreamWriter>(stream: *mut ffi::git_writestream) -> c_int {
+    // SAFETY: per this function's contract.
+    let writer = unsafe { writer_of::<W>(stream) };
+    returned(writer.close())
+}
+
+/// `git_writestream.free`: drops the `Repr<W>` box, writer and all.
+///
+/// # Safety
+///
+/// `stream` is the header of a live `Repr<W>` box, which the caller owns and does not
+/// use again.
+unsafe extern "C" fn free_with<W: StreamWriter>(stream: *mut ffi::git_writestream) {
+    // SAFETY: per this function's contract, the box from `RustWriteStream::new`, given
+    // up by its owner.
+    drop(unsafe { Box::from_raw(stream.cast::<Repr<W>>()) });
+}
+
+/// A stream's failure: the code its member returned, and the error it left as the
+/// thread's last libgit2 error, copied out; or the failure a [`StreamWriter`] reports.
+///
+/// A writer's error reaches its caller the way C's do: its member returns the code,
+/// and the class and message become the thread's last error.
+///
+/// Handwritten
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct StreamError {
+    code: c_int,
+    class: c_int,
+    message: CString,
+}
+
+impl StreamError {
+    /// A failure in `class` described by `message`, returned as `GIT_ERROR`.
+    pub fn new(class: ErrorClass, message: &CStr) -> Self {
+        Self {
+            code: ErrorCode::Generic.raw(),
+            class: class.raw(),
+            message: message.to_owned(),
+        }
+    }
+
+    /// The same failure, returned as `code` (`GIT_EUSER`, say). [`ErrorCode::Ok`]
+    /// would read as success, so the code then stays `GIT_ERROR`.
+    pub fn with_code(mut self, code: ErrorCode) -> Self {
+        if code != ErrorCode::Ok {
+            self.code = code.raw();
+        }
+        self
+    }
+
+    /// The returned code; `None` for one the header does not name, which a stream may
+    /// return ([`raw_code`](Self::raw_code) has it).
+    pub fn code(&self) -> Option<ErrorCode> {
+        ErrorCode::from_raw(self.code)
+    }
+
+    /// The returned code, always negative.
+    pub fn raw_code(&self) -> c_int {
+        self.code
+    }
+
+    /// The error's class; `None` for a class the header does not name
+    /// ([`raw_class`](Self::raw_class) has it).
+    pub fn class(&self) -> Option<ErrorClass> {
+        ErrorClass::from_raw(self.class)
+    }
+
+    /// The error's class as libgit2 stores it.
+    pub fn raw_class(&self) -> c_int {
+        self.class
+    }
+
+    /// The error message.
+    pub fn message(&self) -> &CStr {
+        &self.message
+    }
+
+    /// The failure a member reported by returning `code`, with the thread's last error.
+    fn from_libgit2(code: c_int) -> Self {
+        let error = last();
+        Self {
+            code,
+            class: error.raw_class(),
+            message: error.message().to_owned(),
+        }
+    }
+
+    /// Makes this the thread's last libgit2 error (`git_error_set_str`), for a member to
+    /// return its code. When libgit2 cannot be initialised the error is not stored, and
+    /// when the thread's error buffer is out of memory libgit2 keeps the previous one;
+    /// the code is returned either way.
+    fn raise(&self) -> c_int {
+        if runtime_pinned() {
+            // SAFETY: `message` is a live C string, which libgit2 copies; any class is
+            // accepted. The runtime is pinned, so the thread state is looked up under
+            // libgit2's live TLS key.
+            let _ = unsafe { ffi::git_error_set_str(self.class, self.message.as_ptr()) };
+        }
+        self.code
+    }
+}
+
+/// A failure reported by another libgit2 wrapper, returned as `GIT_ERROR`.
+impl From<ErrorBuf> for StreamError {
+    fn from(error: ErrorBuf) -> Self {
+        Self {
+            code: ErrorCode::Generic.raw(),
+            class: error.raw_class(),
+            message: error.message().to_owned(),
+        }
+    }
+}
+
+impl fmt::Debug for StreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("StreamError");
+        match self.code() {
+            Some(code) => s.field("code", &code),
+            None => s.field("code", &self.code),
+        };
+        match self.class() {
+            Some(class) => s.field("class", &class),
+            None => s.field("class", &self.class),
+        };
+        s.field("message", &self.message).finish()
+    }
+}
+
+impl fmt::Display for StreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message.to_string_lossy())
+    }
+}
+
+impl std::error::Error for StreamError {}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -1092,5 +1662,379 @@ mod unit_tests {
         let set: HashSet<FileMode> = MODES.iter().map(|&(_, m)| m).collect();
         assert_eq!(set.len(), MODES.len());
         assert_eq!(format!("{:?}", FileMode::BlobExecutable), "BlobExecutable");
+    }
+
+    /// `git_writestream`: `WriteStream`, `RustWriteStream` and their policies.
+    mod write_streams {
+        use super::super::*;
+        use core::ptr;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        /// What a writer saw, in order.
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        enum Call {
+            Write(Vec<u8>),
+            Close,
+            Drop,
+        }
+
+        /// A writer logging its calls into a log the test keeps, failing on request.
+        #[derive(Debug)]
+        struct Logged {
+            log: Rc<RefCell<Vec<Call>>>,
+            fail_write: Option<StreamError>,
+            fail_close: Option<StreamError>,
+        }
+
+        impl Logged {
+            fn new() -> (Self, Rc<RefCell<Vec<Call>>>) {
+                let log = Rc::new(RefCell::new(Vec::new()));
+                let writer = Self {
+                    log: log.clone(),
+                    fail_write: None,
+                    fail_close: None,
+                };
+                (writer, log)
+            }
+        }
+
+        impl StreamWriter for Logged {
+            fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+                self.log.borrow_mut().push(Call::Write(data.to_vec()));
+                self.fail_write.clone().map_or(Ok(()), Err)
+            }
+
+            fn close(&mut self) -> Result<(), StreamError> {
+                self.log.borrow_mut().push(Call::Close);
+                self.fail_close.clone().map_or(Ok(()), Err)
+            }
+        }
+
+        impl Drop for Logged {
+            fn drop(&mut self) {
+                self.log.borrow_mut().push(Call::Drop);
+            }
+        }
+
+        fn init() {
+            assert!(runtime_pinned());
+        }
+
+        #[test]
+        fn vec_writer_collects_writes_through_the_header() {
+            let mut stream = RustWriteStream::new(Vec::new());
+            stream.as_mut().write(b"one ").unwrap();
+            stream.as_mut().write(b"").unwrap();
+            stream.as_mut().write(b"two").unwrap();
+            assert_eq!(stream.writer(), b"one two");
+            stream.writer_mut().clear();
+            stream.as_mut().write(b"three").unwrap();
+            assert_eq!(
+                format!("{stream:?}"),
+                "RustWriteStream { writer: [116, 104, 114, 101, 101] }"
+            );
+            assert_eq!(stream.into_inner(), b"three");
+        }
+
+        #[test]
+        fn borrowed_writer_is_kept_by_the_caller() {
+            let mut out = Vec::new();
+            {
+                let mut stream = RustWriteStream::new(&mut out);
+                stream.as_mut().write(b"kept").unwrap();
+                // The default `close` accepts, and the stream accepts writes afterwards.
+                assert_eq!(stream.writer_mut().close(), Ok(()));
+                stream.as_mut().write(b"!").unwrap();
+            }
+            assert_eq!(out, b"kept!");
+        }
+
+        #[test]
+        fn owner_drops_the_writer_once() {
+            let (writer, log) = Logged::new();
+            let mut stream = RustWriteStream::new(writer);
+            stream.as_mut().write(b"x").unwrap();
+            drop(stream);
+            assert_eq!(*log.borrow(), [Call::Write(b"x".to_vec()), Call::Drop]);
+
+            let (writer, log) = Logged::new();
+            let writer = RustWriteStream::new(writer).into_inner();
+            assert!(log.borrow().is_empty());
+            drop(writer);
+            assert_eq!(*log.borrow(), [Call::Drop]);
+        }
+
+        #[test]
+        fn box_frees_through_the_member() {
+            let (writer, log) = Logged::new();
+            let mut stream = RustWriteStream::new(writer).into_box();
+            stream.as_mut().write(b"abc").unwrap();
+            drop(stream);
+            assert_eq!(*log.borrow(), [Call::Write(b"abc".to_vec()), Call::Drop]);
+        }
+
+        #[test]
+        fn close_runs_close_then_free() {
+            let (writer, log) = Logged::new();
+            let mut stream = RustWriteStream::new(writer).into_box();
+            stream.as_mut().write(b"abc").unwrap();
+            assert_eq!(WriteStream::close(stream), Ok(()));
+            assert_eq!(
+                *log.borrow(),
+                [Call::Write(b"abc".to_vec()), Call::Close, Call::Drop]
+            );
+        }
+
+        #[test]
+        fn missing_free_member_is_left_alone() {
+            let mut header = ffi::git_writestream::default();
+            // SAFETY: a live header the test owns, with no `free` member to call.
+            unsafe { stream_free(&raw mut header) };
+        }
+
+        #[test]
+        fn handles_designate_the_header() {
+            let mut stream = RustWriteStream::new(Vec::new());
+            let header = stream.header();
+            assert_eq!(stream.as_ref().as_ptr(), header.cast_const());
+            assert_eq!(stream.as_mut().as_mut_ptr(), header);
+            assert_eq!(header.cast::<Repr<Vec<u8>>>(), stream.raw.as_ptr());
+            let boxed = stream.into_box();
+            assert_eq!(boxed.as_c_ptr(), header);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn writer_errors_cross_the_member_as_c_errors() {
+            init();
+            let (mut writer, log) = Logged::new();
+            writer.fail_write = Some(
+                StreamError::new(ErrorClass::Filter, c"write refused").with_code(ErrorCode::User),
+            );
+            writer.fail_close = Some(StreamError::new(ErrorClass::Os, c"close refused"));
+            let mut stream = RustWriteStream::new(writer);
+
+            let error = stream.as_mut().write(b"x").unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::User));
+            assert_eq!(error.raw_code(), ffi::GIT_EUSER);
+            assert_eq!(error.class(), Some(ErrorClass::Filter));
+            assert_eq!(error.message(), c"write refused");
+            // The member left the thread's error, as a C stream does.
+            let last = last();
+            assert_eq!(
+                (last.class(), last.message()),
+                (Some(ErrorClass::Filter), c"write refused")
+            );
+
+            let mut stream = stream.into_box();
+            stream.as_mut().write(b"y").unwrap_err();
+            let error = WriteStream::close(stream).unwrap_err();
+            assert_eq!(
+                (error.code(), error.class(), error.message()),
+                (
+                    Some(ErrorCode::Generic),
+                    Some(ErrorClass::Os),
+                    c"close refused"
+                )
+            );
+            assert_eq!(
+                *log.borrow(),
+                [
+                    Call::Write(b"x".to_vec()),
+                    Call::Write(b"y".to_vec()),
+                    Call::Close,
+                    Call::Drop,
+                ]
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn null_buffer_is_empty_only_when_len_is_zero() {
+            init();
+            let (writer, log) = Logged::new();
+            let mut stream = RustWriteStream::new(writer);
+            let header = stream.as_mut().as_mut_ptr();
+            // SAFETY: the header of the live stream, reached by no other pointer; a NULL
+            // buffer, which the member accepts.
+            let rc = unsafe { write_with::<Logged>(header, ptr::null(), 0) };
+            assert_eq!(rc, 0);
+            // SAFETY: as above.
+            let rc = unsafe { write_with::<Logged>(header, ptr::null(), 5) };
+            assert_eq!(rc, ffi::GIT_ERROR);
+            let last = last();
+            assert_eq!(
+                (last.class(), last.message()),
+                (Some(ErrorClass::Invalid), c"NULL buffer written to stream")
+            );
+            assert_eq!(*log.borrow(), [Call::Write(Vec::new())]);
+        }
+
+        /// The typed stream lent to C as a filter target: libgit2 writes and closes it,
+        /// never frees it, and the writer stays usable afterwards.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn typed_stream_lent_to_c_as_a_target() {
+            init();
+            let (writer, log) = Logged::new();
+            let mut stream = RustWriteStream::new(writer);
+            let data = b"lent to C";
+            // SAFETY: no filters; `data` is live for the call; the target is the header of
+            // a live stream, whose members accept the write and close libgit2 makes.
+            let rc = unsafe {
+                ffi::git_filter_list_stream_buffer(
+                    ptr::null_mut(),
+                    data.as_ptr().cast(),
+                    data.len(),
+                    stream.as_mut().as_mut_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+            assert_eq!(*log.borrow(), [Call::Write(data.to_vec()), Call::Close]);
+            // Closed by C, and written again: a Rust stream accepts any order.
+            stream.as_mut().write(b"again").unwrap();
+            drop(stream);
+            assert_eq!(log.borrow().last(), Some(&Call::Drop));
+        }
+
+        #[test]
+        fn stream_error_builds_and_formats() {
+            let error = StreamError::new(ErrorClass::Odb, c"bad object");
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+            assert_eq!(error.raw_code(), -1);
+            assert_eq!(
+                (error.class(), error.raw_class()),
+                (Some(ErrorClass::Odb), 9)
+            );
+            assert_eq!(error.to_string(), "bad object");
+            assert_eq!(
+                format!("{error:?}"),
+                r#"StreamError { code: Generic, class: Odb, message: "bad object" }"#
+            );
+            // `Ok` would read as success in C.
+            assert_eq!(error.clone().with_code(ErrorCode::Ok), error);
+            let passthrough = error.clone().with_code(ErrorCode::Passthrough);
+            assert_eq!(passthrough.raw_code(), ffi::GIT_PASSTHROUGH);
+            assert_ne!(passthrough, error);
+            let dyn_err: &dyn std::error::Error = &error;
+            assert!(dyn_err.source().is_none());
+
+            let unnamed = StreamError {
+                code: -1000,
+                class: 1000,
+                message: c"path \xff".to_owned(),
+            };
+            assert_eq!((unnamed.code(), unnamed.class()), (None, None));
+            assert_eq!(unnamed.to_string(), "path \u{fffd}");
+            assert_eq!(
+                format!("{unnamed:?}"),
+                r#"StreamError { code: -1000, class: 1000, message: "path \xff" }"#
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn stream_error_from_another_wrapper() {
+            init();
+            crate::libgit2::util::sys::errors::set(ErrorClass::Index, c"from elsewhere");
+            let error = StreamError::from(last());
+            assert_eq!(
+                (error.code(), error.class(), error.message()),
+                (
+                    Some(ErrorCode::Generic),
+                    Some(ErrorClass::Index),
+                    c"from elsewhere"
+                )
+            );
+        }
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// An allocator refusing every request, so `git_libgit2_init` fails.
+        struct Refusing;
+
+        // SAFETY: every request fails, which `Alloc` allows; nothing is ever allocated, so
+        // nothing is resized or released.
+        unsafe impl crate::libgit2::util::sys::alloc::Alloc for Refusing {
+            fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn realloc(
+                _: Option<NonNull<u8>>,
+                _: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn free(_: NonNull<u8>) {}
+        }
+
+        /// When libgit2 cannot be initialised, a writer's error is not stored (nothing
+        /// reaches `errors.c`), but its code still comes back.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn writer_error_without_a_runtime_keeps_its_code() {
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::writer_error_without_a_runtime_keeps_its_code"
+                ),
+                || {
+                    let allocator = crate::libgit2::util::sys::alloc::Allocator::new::<Refusing>();
+                    // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
+                    // every member set; libgit2 copies it before anything is allocated.
+                    let rc = unsafe {
+                        ffi::git_libgit2_opts(
+                            ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                            allocator.as_ref().as_ptr(),
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    let (mut writer, _log) = Logged::new();
+                    writer.fail_close =
+                        Some(StreamError::new(ErrorClass::Filter, c"x").with_code(ErrorCode::User));
+                    let mut stream = RustWriteStream::new(writer).into_box();
+                    stream.as_mut().write(b"fine").unwrap();
+                    let error = WriteStream::close(stream).unwrap_err();
+                    assert!(!runtime_pinned());
+                    assert_eq!(error.code(), Some(ErrorCode::User));
+                    // `last` synthesises C's static error rather than call libgit2.
+                    assert_eq!(error.message(), c"library has not been initialized");
+                },
+            );
+        }
+
+        #[test]
+        fn auto_traits_follow_the_writer() {
+            fn send<T: Send>() {}
+            fn sync<T: Sync>() {}
+            send::<RustWriteStream<Vec<u8>>>();
+            sync::<RustWriteStream<Vec<u8>>>();
+            send::<StreamError>();
+            sync::<StreamError>();
+            send::<WriteStreamFree>();
+        }
     }
 }
