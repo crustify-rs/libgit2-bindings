@@ -1,0 +1,8 @@
+{
+ "names": [
+  "git_filemode_t",
+  "git_libgit2_opt_t"
+ ],
+ "exit": 1,
+ "stderr": "unsafe: no sites matched --name git_filemode_t git_libgit2_opt_t"
+}

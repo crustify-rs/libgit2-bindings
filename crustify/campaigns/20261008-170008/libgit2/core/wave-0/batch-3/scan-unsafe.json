@@ -1,0 +1,8 @@
+{
+ "names": [
+  "git_object_t",
+  "git_reference_t"
+ ],
+ "exit": 1,
+ "stderr": "unsafe: no sites matched --name git_object_t git_reference_t"
+}
