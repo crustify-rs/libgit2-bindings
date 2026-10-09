@@ -1,0 +1,3 @@
+stage             model                                 $      tokens     wall
+review-type       anthropic/claude-fable-5.1        18.99  21,307,731    0h39m
+  /target/crustify/campaigns/20261008-170008/libgit2/core/review-wave-1/batch-0/translator.usage.json
