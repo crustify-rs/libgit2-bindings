@@ -426,9 +426,9 @@ mod config {
 
     /// Marks the thread's error state, so a step that touches it shows.
     fn mark_error() {
+        let class = ffi::GIT_ERROR_CALLBACK as c_int;
         // SAFETY: a class and a C string, which libgit2 copies; libgit2 is initialised.
-        let rc =
-            unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_CALLBACK as c_int, c"mark".as_ptr()) };
+        let rc = unsafe { ffi::git_error_set_str(class, c"mark".as_ptr()) };
         assert_eq!(rc, 0);
     }
 

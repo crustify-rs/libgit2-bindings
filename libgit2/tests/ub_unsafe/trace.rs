@@ -472,6 +472,53 @@ mod config {
         );
     }
 
+    /// A thread that has been inside libgit2 (and traced) stays alive but outside it
+    /// while this thread reconfigures: what the contract excludes is being inside
+    /// libgit2, not having been. Each hand-off goes through a channel, which orders
+    /// the write before the next traced read.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn set_and_clear_while_a_traced_thread_waits_outside_libgit2() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::set_and_clear_while_a_traced_thread_waits_outside_libgit2"
+            ),
+            || {
+                use std::sync::mpsc;
+
+                init();
+                let url = serve_404();
+                assert!(connect(&url) < 0);
+                let (go, wait) = mpsc::channel::<()>();
+                let (done, out) = mpsc::channel::<()>();
+                let worker = thread::spawn(move || {
+                    while wait.recv().is_ok() {
+                        assert!(connect(&url) < 0, "the server answers 404");
+                        done.send(()).unwrap();
+                    }
+                });
+                let rounds = if cfg!(bsan) { 2 } else { 4 };
+                for round in 0..rounds {
+                    // SAFETY: the worker is parked outside libgit2 (it has reported
+                    // `done` for every connection it was sent), and it enters again
+                    // only on `go`, after this write.
+                    unsafe { trace::set(TraceLevel::Debug, TraceCallback::new::<First>()) };
+                    go.send(()).unwrap();
+                    out.recv().unwrap();
+                    assert_eq!(connecting(&take(&FIRST)), 1, "round {round}");
+                    // SAFETY: as above.
+                    unsafe { trace::clear() };
+                    go.send(()).unwrap();
+                    out.recv().unwrap();
+                    assert_eq!(take(&FIRST), [], "round {round}");
+                }
+                drop(go);
+                worker.join().unwrap();
+            },
+        );
+    }
+
     static CALLS: AtomicUsize = AtomicUsize::new(0);
 
     /// Counts its call and clears the configuration it was called under, from the
