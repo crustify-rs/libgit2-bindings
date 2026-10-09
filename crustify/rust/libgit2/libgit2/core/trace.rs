@@ -165,8 +165,8 @@ pub trait Tracer {
 ///
 /// Built over a [`Tracer`] with [`new`](Self::new), whose `extern "C"` trampoline
 /// adapts libgit2's call to it, or over a C function with
-/// [`from_fn`](Self::from_fn), which vouches that the function is safe to call
-/// whenever the callback is. Either way [`call`](Self::call) is safe: it passes a
+/// [`from_fn`](Self::from_fn), which vouches that the function is safe to call for
+/// the rest of the process. Either way [`call`](Self::call) is safe: it passes a
 /// named level and a borrowed message, as libgit2 does. A function pointer and
 /// nothing else: `Copy`, owning nothing, never released, and callable from any thread.
 ///
@@ -216,10 +216,14 @@ impl TraceCallback {
     ///
     /// # Safety
     ///
-    /// For as long as this value or a copy of it exists, `f` must be callable with any
-    /// [`TraceLevel`] and any NUL-terminated string live for the call, from any thread,
-    /// concurrently and reentrantly, with no obligation beyond [`TraceFn`]'s, and must
-    /// not unwind. Those are the calls [`call`](Self::call) and libgit2 make.
+    /// For the rest of the process, `f` must be callable with any [`TraceLevel`] and
+    /// any NUL-terminated string live for the call, from any thread, concurrently and
+    /// reentrantly, with no obligation beyond [`TraceFn`]'s, and must not unwind. Those
+    /// are the calls [`call`](Self::call) and libgit2 make, and the obligation cannot
+    /// end with this value: it is `Copy`, [`as_fn`](Self::as_fn) hands the function
+    /// out again, and [`raw`](Self::raw) feeds `git_trace_set`, after which libgit2
+    /// calls `f` from any thread for as long as it stays installed, with no
+    /// `TraceCallback` left to tie that to.
     pub const unsafe fn from_fn(f: TraceFn) -> Self {
         Self(f)
     }

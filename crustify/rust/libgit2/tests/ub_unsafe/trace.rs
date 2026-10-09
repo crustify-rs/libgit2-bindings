@@ -3,10 +3,10 @@
 //!
 //! Its contract is that the adopted C function may be called with any named level
 //! and any C string live for the call, from any thread, concurrently and reentrantly,
-//! for as long as the callback exists. The functions adopted here meet it, so calls
-//! through the callback must race nothing (TSan), read the message only while it
-//! lives (ASan), and reach the function exactly as a direct call does; libgit2's own
-//! calls, once it is installed, too.
+//! for the rest of the process. The functions adopted here meet it, so calls through
+//! the callback must race nothing (TSan), read the message only while it lives
+//! (ASan), and reach the function exactly as a direct call does; libgit2's own calls,
+//! once it is installed, too, even after every `TraceCallback` is gone.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::process::Command;
@@ -257,6 +257,51 @@ fn from_fn_installed_in_libgit2() {
             assert_eq!(rc, 0);
             let connecting = take_mine(b"Connecting to remote 127.0.0.1");
             assert_eq!(connecting.len(), threads);
+            assert!(
+                connecting
+                    .iter()
+                    .all(|(level, _)| *level == ffi::GIT_TRACE_DEBUG)
+            );
+        },
+    );
+}
+
+/// Once installed, libgit2 calls the function with no `TraceCallback` left anywhere:
+/// `from_fn`'s obligation binds the function for the process, not for the value that
+/// adopted it, so a function that honours it keeps receiving messages after that
+/// value is gone.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn from_fn_installed_function_outlives_every_callback_value() {
+    isolated(
+        concat!(
+            module_path!(),
+            "::from_fn_installed_function_outlives_every_callback_value"
+        ),
+        || {
+            // SAFETY: no arguments; the reference dies with the child.
+            assert!(unsafe { ffi::git_libgit2_init() } > 0);
+            let url = serve_404();
+            assert!(connect(&url) < 0);
+            let raw = {
+                // SAFETY: `c_logging` meets the contract (see its doc): its state is
+                // static, so it stays callable for the process.
+                let cb = unsafe { TraceCallback::from_fn(c_logging) };
+                cb.raw()
+            };
+            // SAFETY: a named level with a function libgit2 may call from any thread
+            // for the life of the process; this thread is alone with the trace state.
+            let rc = unsafe { ffi::git_trace_set(TraceLevel::Debug.raw(), raw) };
+            assert_eq!(rc, 0);
+            // Every `TraceCallback` is gone; libgit2 still calls the function.
+            for _ in 0..3 {
+                assert!(connect(&url) < 0, "the server answers 404");
+            }
+            // SAFETY: `None` without a callback; nothing else touches the trace state.
+            let rc = unsafe { ffi::git_trace_set(TraceLevel::None.raw(), None) };
+            assert_eq!(rc, 0);
+            let connecting = take_mine(b"Connecting to remote 127.0.0.1");
+            assert_eq!(connecting.len(), 3);
             assert!(
                 connecting
                     .iter()
