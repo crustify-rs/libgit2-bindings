@@ -7,6 +7,9 @@ git_error_last
 git_error_set
 git_error_set_oom
 git_error_set_str
+git_libgit2_buildinfo
+git_libgit2_feature_backend
+git_libgit2_features
 git_libgit2_init
 git_libgit2_opts
 git_merge_bases

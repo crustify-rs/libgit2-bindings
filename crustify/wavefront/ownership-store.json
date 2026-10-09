@@ -60,6 +60,12 @@
    ]
   },
   {
+   "name": "git_buildinfo_t",
+   "defined_in": "include/git2/common.h",
+   "_comment_agent": "Fieldless enum, passed by value only; no pointer, no lifecycle (core wave 0 batch 1, 2026-10-09). Sole consumer git_libgit2_buildinfo (settings.c:478) switches on it: GIT_BUILDINFO_CPU (1) returns the static string GIT_BUILD_CPU, GIT_BUILDINFO_COMMIT (2) the static GIT_BUILD_COMMIT, each only when cmake defined it (CPU always, COMMIT when `git rev-parse HEAD` succeeded at configure time); every other value, 0 included, returns NULL without setting an error. The returned strings are static, never freed. Rust: `BuildInfo` (#[repr(u32)], fallible from_raw) in core/common.rs.",
+   "fields": []
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
@@ -91,6 +97,12 @@
    "name": "git_error_t",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Plain C enum of error classes (bindgen: c_uint constants 0..=36, contiguous). No storage, no pointer, no lifecycle. Consumers carry it as int: git_error.klass (int, @type git_error_t) and git_error_set/git_error_set_str(int error_class, ...), which accept any int from user code, so git_error_last()->klass may hold a value outside the enum. Wrapped as a Rust enum with discriminants from the bindgen constants, converted from int fallibly (from_raw -> Option).",
+   "fields": []
+  },
+  {
+   "name": "git_feature_t",
+   "defined_in": "include/git2/common.h",
+   "_comment_agent": "Fieldless bit-flag enum (1<<0 .. 1<<12), by value only; no pointer, no lifecycle (core wave 0 batch 1, 2026-10-09). Two consumers with different cardinality: git_libgit2_features (libgit2.c:83) returns an `int` OR-ing the compiled-in features (scalar set; HTTP_PARSER, REGEX, COMPRESSION, SHA1, SHA256 always), and git_libgit2_feature_backend (libgit2.c:118) takes ONE value and switches on it, returning a static backend string or NULL (unnamed values, combinations, HTTP always, and features compiled out). Its GIT_ASSERT_WITH_RETVAL branches (feature compiled in with an unknown backend) are unreachable in configured builds but would set an error (pre-init TLS hazard) or abort in Debug. Rust: `Feature` (#[repr(u32)] single value) and `Features` (c_int set, unnamed bits retained) in core/common.rs.",
    "fields": []
   },
   {
