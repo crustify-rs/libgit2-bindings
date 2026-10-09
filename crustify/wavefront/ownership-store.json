@@ -126,6 +126,28 @@
    "defined_in": "include/git2/oid.h",
    "_comment_agent": "Fieldless C enum (GIT_OID_SHA1 = 1, GIT_OID_SHA256 = 2, both unconditional in include/git2/oid.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. Unnamed values flow through it: 0 means 'unset, use GIT_OID_DEFAULT (SHA1)' in every *_options.oid_type (repository.c:356/364, odb.c:307, index.c:447, commit_graph.c:431, midx.c:537, indexer.c:178, object.c:633, diff_generate.c:502) and is git_oid_type_fromstr's 'unknown' result; git_oid_size/hexsize/type_is_valid reject anything but 1 and 2 (oid.h:27-54), so git_oid_from_* return -1 'unknown type'. git_oid.type stores it narrowed to unsigned char. Rust side: never transmute; convert fallibly (OidType::from_raw / TryFrom<git_oid_t>), option-field accessors should map 0 to None.",
    "fields": []
+  },
+  {
+   "name": "git_oidarray",
+   "defined_in": "include/git2/oidarray.h",
+   "_comment_agent": "By-value C struct {ids, count}, never allocated by libgit2 itself (header: 'the library will never allocate that object directly'): callers own it inline and dispose its ids with git_oidarray_dispose. All-zero is the empty array and dispose accepts it (git__free(NULL)); before git_libgit2_init git__free is failalloc's no-op, so disposing an empty array pre-init is harmless. count must not exceed the buffer's length; ids must be non-NULL when count > 0 (git_repository__shallow_roots_write indexes it unconditionally). Not address-sensitive. No refcount, no lock. Deprecated alias git_oidarray_free is compiled hidden under DEPRECATE_HARD. Wrapped as OidArray / OidArrayVal = CVal<OidArray, OidArrayDispose> with ids moved in/out as OdbDataVec<Oid> (git_odb_backend_data_alloc/free = git__malloc/git__free).",
+   "fields": [
+    {
+     "name": "ids",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "A buffer of `count` git_oid values in libgit2's allocator (git__allocator), owned by the struct and released by git_oidarray_dispose -> git__free (which does not reset the fields). Producers: git_merge_bases / git_merge_bases_many hand over a git_array_oid_t's ptr (git_oidarray__from_array; grown by git__reallocarray, so asize may exceed count), git_smart__shallow_roots git__malloc's a copy (NULL for 0). NULL whenever count == 0 on every libgit2 path (git_array_init leaves ptr NULL until the first alloc; smart sets NULL); fetch.c/compute_base start from {0}. Elements are written in place (git_oidarray__reverse), read by index (git_repository__shallow_roots_write, oidarray_contains, compute_base). A transport's shallow_roots callback (git2/sys/transport.h) fills `out` with an allocation libgit2 later frees with git_oidarray_dispose, so a user-filled array must be git__malloc storage (git_odb_backend_data_alloc is the exported route). git_oidarray__to_array lends the buffer to a git_array without transferring ownership."
+     }
+    }
+   ]
   }
  ],
  "symbols": [
@@ -1009,6 +1031,36 @@
      "note": "Fresh git__calloc'd shortener with a 16-node zeroed trie, node_count 1; released by git_oid_shorten_free. NULL on allocation failure, or when min_length does not round-trip through int (GIT_ASSERT_ARG_WITH_RETVAL: error set in release builds, assert(3) abort in _DEBUG builds)."
     }
    }
+  },
+  {
+   "name": "git_oidarray_dispose",
+   "defined_in": "src/libgit2/oidarray.c",
+   "lifetime": {
+    "for": "arr",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "arr",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "The caller's git_oidarray, borrowed for the call: its ids buffer is released with git__free, the struct itself is not (the caller holds it inline). Dereferenced unconditionally, so NULL crashes. The fields are left as they were: ids dangles afterwards, so the struct must not be read or disposed again without reinitialising it. Accepts {NULL, 0} and any ids from libgit2's allocator."
+     }
+    }
+   ]
   },
   {
    "name": "git_stdalloc_init_allocator",

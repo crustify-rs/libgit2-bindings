@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `m` as immutable because it is also borrowed as mutable
+ --> tests/ub_safe/compile_fail/oidarray_ids_mut_aliased.rs:8:18
+  |
+7 |     let mut run = m.ids_mut();
+  |                   - mutable borrow occurs here
+8 |     let shared = m.as_ref();
+  |                  ^ immutable borrow occurs here
+9 |     let _ = run.get_mut(0);
+  |             --- mutable borrow later used here

@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `array` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/oidarray_set_ids_while_borrowed.rs:8:5
+  |
+7 |     let ids = array.as_ref().ids();
+  |               ----- immutable borrow occurs here
+8 |     array.as_mut().set_ids(OdbDataVec::empty());
+  |     ^^^^^^^^^^^^^^ mutable borrow occurs here
+9 |     let _ = ids.get(0);
+  |             --- immutable borrow later used here
