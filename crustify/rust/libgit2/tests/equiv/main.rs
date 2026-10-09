@@ -9,4 +9,5 @@ mod oidarray;
 mod sys_alloc;
 mod sys_errors;
 mod sys_odb_backend;
+mod trace;
 mod types;

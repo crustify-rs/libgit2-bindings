@@ -17,16 +17,31 @@
 //! Recorded C behaviour, outside the types: a setting libgit2 cannot read fails the
 //! lookup (`GIT_EINVALID`), and `git_submodule_set_fetch_recurse_submodules` writes
 //! `No` by deleting the setting, failing with `GIT_ENOTFOUND` when there is none.
+//!
+//! Then [`Time`], against the `git_time` values libgit2 builds, parses and copies.
+//!
+//! libgit2 has no routine of its own over a bare `git_time`: it builds one inside a
+//! signature. [`Time::new`] must build what `git_signature_new` stores in `when` for
+//! the same seconds and offset; the getters must read back exactly what
+//! `git_signature_from_buffer` parses into `when`, sign bytes it copies from a
+//! malformed zone included; and the setters must write what C code writing the same
+//! fields writes, as `git_signature_dup` copies it. Each sequence of writes runs on a
+//! Rust `Time` and on a C-allocated `git_signature` independently, and the two are
+//! compared after every step.
+//!
+//! Documented divergences: none. A `Time` is a plain value, so the comparisons are
+//! field by field (`git_signature__equal`'s rule) and never cover padding.
 
-use std::ffi::{CStr, CString, c_int};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::ptr;
 
+use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    SubmoduleRecurse, SubmoduleUpdate, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
+    SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
 };
 
 /// Every `git_submodule_recurse_t` constant, beside the variant that must carry it.
@@ -460,4 +475,189 @@ fn init_copies_the_update_setting_by_name() {
         assert_eq!(sp.init_submodule(), Ok(()), "{v:?}");
         assert_eq!(sp.config_setting("update").as_deref(), written, "{v:?}");
     }
+}
+
+// --- `git_time` ------------------------------------------------------------
+
+/// A C-allocated signature, freed by `git_signature_free` on drop.
+struct Signature(*mut ffi::git_signature);
+
+impl Signature {
+    /// `git_signature_new(out, "n", "e@x", seconds, offset)`.
+    fn new(seconds: i64, offset: i32) -> Signature {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; the name and email are NUL-terminated,
+        // without angle brackets, and not retained (libgit2 copies them).
+        let rc = unsafe {
+            ffi::git_signature_new(&mut out, c"n".as_ptr(), c"e@x".as_ptr(), seconds, offset)
+        };
+        assert_eq!(rc, 0);
+        assert!(!out.is_null());
+        Signature(out)
+    }
+
+    /// `git_signature_from_buffer(out, buf)`.
+    fn parse(buf: &CStr) -> Signature {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `buf` NUL-terminated; neither is
+        // retained.
+        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        assert_eq!(rc, 0, "{buf:?}");
+        assert!(!out.is_null());
+        Signature(out)
+    }
+
+    /// `git_signature_dup(out, self)`.
+    fn dup(&self) -> Signature {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `self.0` a live signature, only read.
+        let rc = unsafe { ffi::git_signature_dup(&mut out, self.0) };
+        assert_eq!(rc, 0);
+        assert!(!out.is_null());
+        Signature(out)
+    }
+
+    /// A copy of `when`.
+    fn when(&self) -> ffi::git_time {
+        // SAFETY: `self.0` is a live signature, read by value.
+        unsafe { (*self.0).when }
+    }
+
+    /// Writes `when`, as C code holding the signature does.
+    fn when_mut(&mut self) -> &mut ffi::git_time {
+        // SAFETY: `self.0` is a live signature this value owns alone; the borrow ends
+        // before any other access to it.
+        unsafe { &mut (*self.0).when }
+    }
+}
+
+impl Drop for Signature {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` came from a `git_signature_*` constructor and is freed once.
+        unsafe { ffi::git_signature_free(self.0) }
+    }
+}
+
+/// `time`'s fields, as the getters read them.
+fn fields(time: &Time) -> (i64, i32, u8) {
+    let r = time.as_ref();
+    (r.seconds(), r.offset_minutes(), r.sign())
+}
+
+/// `raw`'s fields, as C reads them.
+fn c_fields(raw: &ffi::git_time) -> (i64, i32, u8) {
+    (raw.time, raw.offset, raw.sign as u8)
+}
+
+const SECONDS: [i64; 7] = [i64::MIN, -86_400, -1, 0, 1, 1_700_000_000, i64::MAX];
+const OFFSETS: [i32; 11] = [i32::MIN, -899, -840, -60, -1, 0, 1, 60, 840, 899, i32::MAX];
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn new_matches_git_signature_new() {
+    init();
+    for seconds in SECONDS {
+        for offset in OFFSETS {
+            let c = Signature::new(seconds, offset).when();
+            let rust = Time::new(seconds, offset);
+            assert_eq!(fields(&rust), c_fields(&c), "{seconds} {offset}");
+            assert_eq!(Time::from(c), rust, "{seconds} {offset}");
+        }
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn getters_read_what_git_signature_from_buffer_parses() {
+    init();
+    // The zone after the timestamp, and the fields libgit2 is expected to leave.
+    let cases: [(&CStr, i64, i32, u8); 11] = [
+        (c"A <a@b> 1234 +0130", 1234, 90, b'+'),
+        (c"A <a@b> 1234 -0130", 1234, -90, b'-'),
+        (c"A <a@b> 1234 +0000", 1234, 0, b'+'),
+        // git's questionable `-0000`: offset 0, sign `-`.
+        (c"A <a@b> 1234 -0000", 1234, 0, b'-'),
+        (c"A <a@b> -5 +1459", -5, 899, b'+'),
+        // Out of range: neither offset nor sign is stored.
+        (c"A <a@b> 1234 +1500", 1234, 0, 0),
+        (c"A <a@b> 1234 +0160", 1234, 0, 0),
+        // Malformed: offset 0, the first character kept as the sign.
+        (c"A <a@b> 1234 x0130", 1234, 0, b'x'),
+        (c"A <a@b> 1234 \xff0130", 1234, 0, 0xff),
+        // A signed number after the sign: the offset and sign disagree.
+        (c"A <a@b> 1234 +-130", 1234, -90, b'+'),
+        // No zone at all.
+        (c"A <a@b> 1234", 1234, 0, 0),
+    ];
+    for (buf, seconds, offset, sign) in cases {
+        let c = Signature::parse(buf).when();
+        let time = Time::from(c);
+        assert_eq!(fields(&time), c_fields(&c), "{buf:?}");
+        assert_eq!(fields(&time), (seconds, offset, sign), "{buf:?}");
+        assert_eq!(fields(&time.as_ref().to_time()), c_fields(&c), "{buf:?}");
+    }
+}
+
+/// One write, applied to both sides.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    Seconds(i64),
+    Offset(i32),
+    Sign(u8),
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn setters_write_what_git_signature_dup_copies() {
+    init();
+    let steps = [
+        Step::Seconds(-1),
+        Step::Offset(-60),
+        Step::Sign(b'-'),
+        Step::Offset(0),
+        Step::Sign(b'x'),
+        Step::Sign(0),
+        Step::Sign(0xff),
+        Step::Seconds(i64::MAX),
+        Step::Offset(i32::MIN),
+        Step::Sign(b'+'),
+        Step::Seconds(i64::MIN),
+        Step::Offset(i32::MAX),
+    ];
+    let mut c = Signature::new(1_700_000_000, 120);
+    let mut rust = Time::new(1_700_000_000, 120);
+    assert_eq!(fields(&rust), c_fields(&c.dup().when()));
+    for step in steps {
+        let when = c.when_mut();
+        let mut handle = rust.as_mut();
+        match step {
+            Step::Seconds(v) => {
+                when.time = v;
+                handle.set_seconds(v);
+            }
+            Step::Offset(v) => {
+                when.offset = v;
+                handle.set_offset_minutes(v);
+            }
+            Step::Sign(v) => {
+                when.sign = v as c_char;
+                handle.set_sign(v);
+            }
+        }
+        // What C copies of its own writes, and of the Rust value placed in a
+        // signature of its own, are the Rust value.
+        let copied = c.dup().when();
+        assert_eq!(fields(&rust), c_fields(&copied), "{step:?}");
+        let mut placed = Signature::new(0, 0);
+        *placed.when_mut() = rust.into();
+        assert_eq!(Time::from(placed.dup().when()), rust, "{step:?}");
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn zeroed_is_what_a_zoneless_parse_leaves() {
+    init();
+    let c = Signature::parse(c"A <a@b>").when();
+    assert_eq!(Time::from(c), Time::zeroed());
 }

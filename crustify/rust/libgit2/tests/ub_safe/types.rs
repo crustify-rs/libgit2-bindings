@@ -6,12 +6,29 @@
 //! an invalid discriminant (which Miri and UBSan would flag on the next read); an `as`
 //! cast to either does not compile (`compile_fail/`). None of them calls libgit2, so
 //! they also run under Miri.
+//!
+//! Then the `Time` value (`git_time`) and its handles.
+//!
+//! A `Time` is a plain 16-byte value with 3 bytes of padding. Its handles project each
+//! field out of a pointer, so these tests exercise every getter and setter on every
+//! holder Rust has for one (a local, a heap slot, an element of a run that moves when
+//! it grows, a copy), through reborrows, and across threads under the `Send` / `Sync`
+//! the crate asserts (TSan). Reading padding through a getter, a misaligned
+//! projection or a write through the shared handle would be flagged by Miri and
+//! ASan/UBSan. Handles that outlive their value, aliased exclusive handles and setters
+//! on the shared handle do not compile (`compile_fail/`). None of them calls libgit2,
+//! so all run under Miri; no C routine keeps a pointer to a bare `git_time`, so
+//! there is no foreign write or retained pointer to race (BSan).
 
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::hint::black_box;
+use std::sync::Mutex;
 use std::thread;
 
-use libgit2::libgit2::core::types::{SubmoduleRecurse, SubmoduleUpdate};
+use ffibox::CZeroable;
+use libgit2::ffi;
+use libgit2::libgit2::core::types::{SubmoduleRecurse, SubmoduleUpdate, Time, TimeMut, TimeRef};
 
 /// Every value around the declared ones, then a coarse stride across the whole
 /// type; BorrowSanitizer instruments each comparison, so the probe set stays small.
@@ -107,4 +124,165 @@ fn values_cross_threads() {
             assert_eq!(h.join().unwrap(), v.raw());
         }
     });
+}
+
+// --- `git_time` ------------------------------------------------------------
+
+const SIGNS: [u8; 6] = [0, b'+', b'-', b'x', 0x80, 0xff];
+
+fn read(r: TimeRef<'_>) -> (i64, i32, u8) {
+    (r.seconds(), r.offset_minutes(), r.sign())
+}
+
+fn write(mut m: TimeMut<'_>, seconds: i64, offset: i32, sign: u8) {
+    m.set_seconds(seconds);
+    m.set_offset_minutes(offset);
+    m.set_sign(sign);
+}
+
+#[test]
+fn every_field_round_trips_on_every_holder() {
+    let mut local = Time::zeroed();
+    let mut boxed = Box::new(Time::zeroed());
+    let mut run = vec![Time::zeroed()];
+    for (i, sign) in SIGNS.into_iter().enumerate() {
+        let seconds = [i64::MIN, -1, 0, 1, i64::MAX][i % 5];
+        let offset = [i32::MIN, -1, 0, 1, i32::MAX][i % 5];
+        write(local.as_mut(), seconds, offset, sign);
+        write(Time::as_mut(&mut boxed), seconds, offset, sign);
+        // Growing the run moves its elements: every handle is taken afresh.
+        run.push(Time::zeroed());
+        let last = run.len() - 1;
+        write(run[last].as_mut(), seconds, offset, sign);
+        for time in [&local, &*boxed, &run[last]] {
+            assert_eq!(read(time.as_ref()), (seconds, offset, sign));
+            assert_eq!(
+                read(time.as_ref().to_time().as_ref()),
+                (seconds, offset, sign)
+            );
+        }
+    }
+}
+
+#[test]
+fn reborrows_keep_one_writer() {
+    let mut time = Time::new(5, -30);
+    let mut m = time.as_mut();
+    {
+        let mut inner = m.as_mut();
+        inner.set_sign(b'x');
+        assert_eq!(inner.as_ref().sign(), b'x');
+    }
+    let shared = m.as_ref();
+    let copy = shared;
+    assert_eq!(read(copy), (5, -30, b'x'));
+    m.set_offset_minutes(0);
+    assert_eq!(read(time.as_ref()), (5, 0, b'x'));
+}
+
+#[test]
+fn copies_are_independent() {
+    let c = {
+        let a = Time::new(1, 60);
+        let mut b = a;
+        b.as_mut().set_seconds(2);
+        assert_eq!(read(a.as_ref()), (1, 60, b'+'));
+        assert_eq!(read(b.as_ref()), (2, 60, b'+'));
+        let c = a.as_ref().to_time();
+        assert_eq!(c, a);
+        c
+    };
+    // The copy outlives the value it was read from.
+    assert_eq!(read(c.as_ref()), (1, 60, b'+'));
+}
+
+#[test]
+fn raw_values_convert_both_ways() {
+    for sign in SIGNS {
+        let raw = ffi::git_time {
+            time: -7,
+            offset: 330,
+            sign: sign as _,
+        };
+        let time = Time::from(raw);
+        assert_eq!(read(time.as_ref()), (-7, 330, sign));
+        let back = ffi::git_time::from(time);
+        assert_eq!((back.time, back.offset, back.sign as u8), (-7, 330, sign));
+    }
+}
+
+#[test]
+fn equality_and_hash_never_read_padding() {
+    // `ffi::git_time` built by value leaves its padding unspecified; equal fields must
+    // compare and hash equal anyway, and Miri checks no padding byte is read.
+    let a = Time::from(ffi::git_time {
+        time: 9,
+        offset: -9,
+        sign: b'-' as _,
+    });
+    let b = Time::new(9, -9);
+    assert_eq!(a, b);
+    let hash = |t: &Time| {
+        let mut h = DefaultHasher::new();
+        t.hash(&mut h);
+        h.finish()
+    };
+    assert_eq!(hash(&a), hash(&b));
+    assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    assert_eq!(format!("{:?}", a.as_ref()), format!("{b:?}"));
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "slow: many interleavings")]
+fn shared_handles_read_across_threads() {
+    let time = Time::new(1_700_000_000, 120);
+    let r = time.as_ref();
+    thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(move || {
+                for _ in 0..1000 {
+                    assert_eq!(read(r), (1_700_000_000, 120, b'+'));
+                }
+            });
+        }
+    });
+}
+
+#[test]
+fn values_and_exclusive_handles_move_across_threads() {
+    let mut time = Time::zeroed();
+    thread::scope(|s| {
+        let m = time.as_mut();
+        s.spawn(move || write(m, 3, -3, b'-')).join().unwrap();
+    });
+    assert_eq!(read(time.as_ref()), (3, -3, b'-'));
+    let moved = thread::spawn(move || {
+        let mut time = time;
+        time.as_mut().set_sign(b'x');
+        time
+    })
+    .join()
+    .unwrap();
+    assert_eq!(read(moved.as_ref()), (3, -3, b'x'));
+}
+
+#[test]
+fn a_locked_time_has_one_writer_at_a_time() {
+    let time = Mutex::new(Time::zeroed());
+    let rounds = if cfg!(miri) { 10 } else { 500 };
+    thread::scope(|s| {
+        for t in 0..4 {
+            let time = &time;
+            s.spawn(move || {
+                for _ in 0..rounds {
+                    let mut guard = time.lock().unwrap();
+                    let n = guard.as_ref().seconds();
+                    let mut m = guard.as_mut();
+                    m.set_seconds(n + 1);
+                    m.set_offset_minutes(t);
+                }
+            });
+        }
+    });
+    assert_eq!(time.lock().unwrap().as_ref().seconds(), 4 * rounds as i64);
 }
