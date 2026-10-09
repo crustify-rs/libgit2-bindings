@@ -15,8 +15,9 @@
 //! dispatches on; it refuses any other key, so a raw key is converted fallibly too
 //! ([`LibraryOption::from_raw`], [`LibraryOption::from_key`]).
 //!
-//! [`version`], [`prerelease`] and [`features`] answer from constants compiled into
-//! the loaded libgit2.so, so they need no initialisation.
+//! [`version`], [`prerelease`], [`features`], [`feature_backend`] and [`build_info`]
+//! answer from constants compiled into the loaded libgit2.so, so they need no
+//! initialisation.
 //!
 //! # Global options
 //!
@@ -800,6 +801,44 @@ pub fn prerelease() -> Option<&'static CStr> {
 pub fn features() -> Features {
     // SAFETY: no arguments; the routine ORs compile-time constants.
     Features::from_bits_retain(unsafe { ffi::git_libgit2_features() })
+}
+
+/// The backend that provides `feature` in the libgit2 library in use: `"openssl"`
+/// for [`Feature::Https`] over OpenSSL, `"pcre2"` for [`Feature::Regex`], and so on.
+/// `None` when the feature is not compiled in, or has no backend to choose:
+/// [`Feature::Http`] never has one, its presence is all [`features`] reports.
+///
+/// libgit2 returns a string literal of its own, as [`prerelease`] does, chosen by the
+/// build's defines. Needs no initialisation: the routine's only other path, an
+/// assertion for a compiled-in feature whose backend no define names, cannot be
+/// reached by a build that CMake configured, which always names one.
+///
+/// Wraps: git_libgit2_feature_backend
+pub fn feature_backend(feature: Feature) -> Option<&'static CStr> {
+    // SAFETY: a named `git_feature_t`, by value; the routine reads no state.
+    let s = unsafe { ffi::git_libgit2_feature_backend(feature.raw()) };
+    // SAFETY: a non-NULL result is one of the routine's NUL-terminated literals, in
+    // libgit2.so's read-only data, never written or freed while the library is loaded,
+    // which it is for the rest of the process.
+    (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
+}
+
+/// A detail of how the libgit2 library in use was built: the CPU it targets
+/// ([`BuildInfo::Cpu`], `"x86_64"`, say) or the commit it was built from
+/// ([`BuildInfo::Commit`], as hex). `None` when the build did not record it: the
+/// commit is only known when the sources were a git checkout at configure time.
+///
+/// libgit2 returns a string literal of its own, as [`prerelease`] does. Needs no
+/// initialisation.
+///
+/// Wraps: git_libgit2_buildinfo
+pub fn build_info(item: BuildInfo) -> Option<&'static CStr> {
+    // SAFETY: a named `git_buildinfo_t`, by value; the routine reads no state.
+    let s = unsafe { ffi::git_libgit2_buildinfo(item.raw()) };
+    // SAFETY: a non-NULL result is `GIT_BUILD_CPU` or `GIT_BUILD_COMMIT`, a
+    // NUL-terminated literal in libgit2.so's read-only data, never written or freed
+    // while the library is loaded, which it is for the rest of the process.
+    (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
 }
 
 // --- Options -------------------------------------------------------------------------

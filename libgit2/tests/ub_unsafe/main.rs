@@ -8,3 +8,4 @@ mod buffer;
 mod common;
 mod sys_alloc;
 mod sys_odb_backend;
+mod trace;

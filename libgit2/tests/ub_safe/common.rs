@@ -27,6 +27,8 @@
 //! threads may read them at once (TSan); the string getters allocate and copy out
 //! (ASan, LSan); and the plain getters need no initialised libgit2, while the string
 //! ones pin it first, so they run in a child process where nothing has initialised it.
+//! `feature_backend` and `build_info` return `'static` literals of libgit2.so's: the
+//! results outlive the threads that asked, and asking initialises nothing.
 
 use std::collections::HashSet;
 use std::ffi::c_int;
@@ -224,7 +226,8 @@ mod options {
     use std::ffi::CStr;
     use std::thread;
 
-    use libgit2::libgit2::core::common::{self, Feature, SearchPathLevel};
+    use libgit2::libgit2::core::common::{self, BuildInfo, Feature, SearchPathLevel};
+    use libgit2::libgit2::core::global;
 
     use crate::fixture::isolated;
 
@@ -234,6 +237,11 @@ mod options {
         assert!(v.major >= 1, "{v}");
         let _ = common::prerelease();
         assert!(common::features().contains(Feature::Sha1));
+        for feature in Feature::ALL {
+            let _ = common::feature_backend(feature).map(CStr::to_bytes);
+        }
+        assert!(common::build_info(BuildInfo::Cpu).is_some());
+        let _ = common::build_info(BuildInfo::Commit);
         assert!(common::mwindow_size() > 0);
         assert!(common::mwindow_mapped_limit() > 0);
         let _ = common::mwindow_file_limit();
@@ -305,6 +313,55 @@ mod options {
                 let extensions = common::extensions().unwrap();
                 drop(extensions);
                 read_all();
+            },
+        );
+    }
+
+    /// The backend and build queries initialise nothing, run on many threads at once
+    /// before anything has, and their `'static` results outlive those threads.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn backend_and_build_info_need_no_initialisation() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::backend_and_build_info_need_no_initialisation"
+            ),
+            || {
+                let answers = thread::scope(|s| {
+                    let threads: Vec<_> = (0..4)
+                        .map(|_| {
+                            s.spawn(|| {
+                                let backends = Feature::ALL.map(common::feature_backend);
+                                let infos =
+                                    [BuildInfo::Cpu, BuildInfo::Commit].map(common::build_info);
+                                (backends, infos)
+                            })
+                        })
+                        .collect();
+                    threads
+                        .into_iter()
+                        .map(|t| t.join().unwrap())
+                        .collect::<Vec<_>>()
+                });
+                // The threads are gone; their answers are libgit2.so's literals.
+                for (backends, infos) in &answers {
+                    assert_eq!((backends, infos), (&answers[0].0, &answers[0].1));
+                    for backend in backends.iter().flatten() {
+                        assert!(!backend.to_bytes().is_empty());
+                    }
+                    assert_eq!(infos[0], Some(c"x86_64"));
+                }
+                // Nothing took a reference: this one sets libgit2 up.
+                let runtime = global::init().unwrap();
+                assert_eq!(runtime.count().get(), 1);
+                assert_eq!(answers[0].0, Feature::ALL.map(common::feature_backend));
+                assert_eq!(runtime.shutdown().unwrap(), 0);
+                // Nor after the last shutdown.
+                assert_eq!(
+                    answers[0].1,
+                    [BuildInfo::Cpu, BuildInfo::Commit].map(common::build_info)
+                );
             },
         );
     }

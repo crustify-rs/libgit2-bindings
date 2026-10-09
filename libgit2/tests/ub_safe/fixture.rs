@@ -458,7 +458,6 @@ pub fn refused_filter() -> *mut ffi::git_filter {
 
 // --- `git2/strarray.h` -------------------------------------------------------------
 
-
 /// Sets libgit2's user extensions, which `!name` entries disable, through the unsafe
 /// [`common::set_extensions`](libgit2::libgit2::core::common::set_extensions).
 /// Process-global: call it in an isolated child, single-threaded.
@@ -500,4 +499,75 @@ pub fn fill_from_option(option: u32, buf: &mut BufVal) {
     // SAFETY: `raw` is as libgit2 left it: owning a NUL-terminated allocation of its
     // allocator, or nothing.
     buf.as_mut().set(unsafe { Buf::from_raw(raw) });
+}
+
+// --- `git2/trace.h` ----------------------------------------------------------------
+
+use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel};
+
+/// Installs `callback` as libgit2's tracer at `level` (`None`: no tracer); stands in
+/// for the `git_trace_set` wrapper (`core`), which replaces it.
+///
+/// libgit2 keeps the trace state in globals written without a lock: callers run in an
+/// isolated child, single-threaded around the call.
+pub fn set_trace(level: TraceLevel, callback: Option<TraceCallback>) {
+    let callback = callback.and_then(TraceCallback::raw);
+    // SAFETY: a named level with a callback, or `None` without one, which libgit2
+    // accepts; a callback is a `TraceCallback`, safe to call from any thread for the
+    // life of the process; no other thread reads or writes the state meanwhile, per
+    // this function's contract.
+    assert_eq!(unsafe { ffi::git_trace_set(level.raw(), callback) }, 0);
+}
+
+/// An HTTP server on loopback answering every request `404`, for the life of the
+/// process; its URL. libgit2 traces only from its HTTP client.
+pub fn serve_404() -> CString {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => request.extend_from_slice(&chunk[..n]),
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    CString::new(format!("http://127.0.0.1:{port}/repo.git")).unwrap()
+}
+
+/// Connects a detached remote to `url` for a fetch and frees it; the status. Stands in
+/// for the `git_remote` wrapper (`remote`), which replaces it.
+///
+/// libgit2's HTTP client fills its parser settings lazily, in a static, without a lock
+/// (`http_client_parser_settings`, `src/libgit2/transports/httpclient.c`): concurrent
+/// first connections race there (TSan). Connect once on one thread before connecting
+/// from several.
+pub fn connect(url: &CStr) -> c_int {
+    init();
+    let mut remote = core::ptr::null_mut();
+    // SAFETY: a live out-parameter and a C string, which libgit2 copies.
+    let rc = unsafe { ffi::git_remote_create_detached(&raw mut remote, url.as_ptr()) };
+    assert_eq!(rc, 0);
+    // SAFETY: a live remote; NULL callbacks, proxy and headers take the defaults.
+    let rc = unsafe {
+        ffi::git_remote_connect(
+            remote,
+            ffi::GIT_DIRECTION_FETCH,
+            core::ptr::null(),
+            core::ptr::null(),
+            core::ptr::null(),
+        )
+    };
+    // SAFETY: the remote created above, freed once.
+    unsafe { ffi::git_remote_free(remote) };
+    rc
 }

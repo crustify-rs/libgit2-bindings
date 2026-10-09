@@ -1041,6 +1041,42 @@
    ]
   },
   {
+   "name": "git_libgit2_buildinfo",
+   "defined_in": "src/libgit2/settings.c",
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "static"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Returns the GIT_BUILD_CPU / GIT_BUILD_COMMIT string literal (cmake-configured in git2_features.h) or NULL for any other key or an unrecorded item; never freed, valid while libgit2.so is loaded. Touches no runtime state, so needs no git_libgit2_init."
+    }
+   }
+  },
+  {
+   "name": "git_libgit2_feature_backend",
+   "defined_in": "src/libgit2/libgit2.c",
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "static"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Returns a string literal naming the compiled-in backend of the feature, or NULL for an unnamed value, a feature not compiled in, or GIT_FEATURE_HTTP (no backend selection). The GIT_ASSERT_WITH_RETVAL paths (a compiled-in feature whose backend define CMake did not set) are unreachable for any CMake-configured build; in release they would git_error_set (pre-init TLS hazard), in Debug they abort. Never freed; needs no git_libgit2_init."
+    }
+   }
+  },
+  {
    "name": "git_libgit2_features",
    "defined_in": "src/libgit2/libgit2.c"
   },
@@ -2088,6 +2124,27 @@
       "nullable": true,
       "mutable": true,
       "note": "The caller's struct, borrowed for the call (libgit2 never allocates a git_strarray). NULL returns. Frees strings[0..count) and then `strings` with git__free, then memsets the struct to zero, leaving it reusable. Requires the struct to own its array and strings (the OUTPUT contract of git_strarray.strings); a NULL `strings` with count > 0 derefs NULL. With NULL `strings` and count 0 it still calls git__free(NULL), which reads git__allocator unsynchronised against a concurrent first git_libgit2_init, so the Rust policy skips C for that empty state."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_trace_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Sole invoker git_trace__write_fmt (src/libgit2/trace.h, via git_trace from httpclient.c only) passes git_str_cstr of a local git_str it formats the message into and disposes right after the call: borrowed for the call only, never NULL (an allocated string, or the static git_str__initstr / git_str__oom sentinel after a failed vprintf), NUL-terminated, arbitrary bytes (server responses are traced verbatim, so not necessarily UTF-8). The level argument is always a named GIT_TRACE_* constant at every call site (FATAL..TRACE, never NONE). Called on whichever thread runs the traced libgit2 call, concurrently from several threads; the callback reads no payload (none exists), and git_trace__data is read without a lock."
      }
     }
    ]
