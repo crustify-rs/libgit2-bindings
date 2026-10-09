@@ -1,5 +1,27 @@
 //! Safe wrappers over `include/git2/types.h`.
 //!
+//! The header's enums travel by value, and through out-parameters libgit2 or a user
+//! callback fills, so a value read back from C may be one the header does not name
+//! for the purpose at hand: a lookup filter or an error answer where an object's type
+//! is expected, `-1` from `git_reference_type(NULL)`, or a setting libgit2 refuses to
+//! write. A raw value is therefore converted fallibly (each enum's `from_raw` and
+//! `TryFrom`) and never transmuted.
+//!
+//! [`ObjectType`] names the four types an object can have, the values
+//! `git_object_type_is_valid` accepts. `GIT_OBJECT_ANY` is not one: it is the filter
+//! that lookups and peels take to mean "whatever type the object has", spelled `None`
+//! by [`ObjectType::raw_or_any`]. `GIT_OBJECT_INVALID` is what routines answer when
+//! they have no type (`git_object_string2type` for an unknown name,
+//! `git_object_type(NULL)`). libgit2 rejects every other value as an "invalid object
+//! type", except `0`: `git_odb_write` reads it as a blob for the object's id, but its
+//! loose backend stores the object under an empty type name, so the object cannot be
+//! read back; a typed argument cannot carry it.
+//!
+//! [`ReferenceType`] names the two kinds of reference `git_reference_type` answers
+//! for every reference libgit2 builds. `GIT_REFERENCE_INVALID` (a reference without
+//! a target, inside a transaction) and `GIT_REFERENCE_ALL` (the union of both kinds,
+//! a listing filter no current routine takes) are not kinds a reference has.
+//!
 //! The submodule settings ([`SubmoduleRecurse`], [`SubmoduleUpdate`]) are fieldless
 //! enums over their C values, converted fallibly from a raw one.
 //!
@@ -32,6 +54,167 @@ use core::ptr::{addr_of, addr_of_mut};
 use ffibox::{CZeroable, define_ctype};
 
 use crate::ffi;
+
+/// The type of a Git object: what its content is, which fixes how libgit2 parses it.
+///
+/// libgit2 answers `GIT_OBJECT_INVALID` where it has no type, and its lookups take
+/// `GIT_OBJECT_ANY` to accept any type ([`raw_or_any`](Self::raw_or_any));
+/// [`from_raw`](Self::from_raw) gives `None` for both, and for every value
+/// `git_object_type_is_valid` refuses.
+///
+/// Wraps: git_object_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum ObjectType {
+    /// A commit object.
+    Commit = ffi::GIT_OBJECT_COMMIT,
+    /// A tree (directory listing) object.
+    Tree = ffi::GIT_OBJECT_TREE,
+    /// A file revision object.
+    Blob = ffi::GIT_OBJECT_BLOB,
+    /// An annotated tag object.
+    Tag = ffi::GIT_OBJECT_TAG,
+}
+
+impl ObjectType {
+    /// The variant whose C value is `raw`; `None` for `GIT_OBJECT_ANY`,
+    /// `GIT_OBJECT_INVALID` and every value the header does not name.
+    pub const fn from_raw(raw: ffi::git_object_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_OBJECT_COMMIT => Some(Self::Commit),
+            ffi::GIT_OBJECT_TREE => Some(Self::Tree),
+            ffi::GIT_OBJECT_BLOB => Some(Self::Blob),
+            ffi::GIT_OBJECT_TAG => Some(Self::Tag),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2's functions take and return it.
+    pub const fn raw(self) -> ffi::git_object_t {
+        self as ffi::git_object_t
+    }
+
+    /// The C value of a type filter, as lookups and peels take it: `kind`'s value, or
+    /// `GIT_OBJECT_ANY` for `None`, which accepts an object of any type.
+    pub const fn raw_or_any(kind: Option<Self>) -> ffi::git_object_t {
+        match kind {
+            Some(kind) => kind.raw(),
+            None => ffi::GIT_OBJECT_ANY,
+        }
+    }
+}
+
+impl TryFrom<ffi::git_object_t> for ObjectType {
+    type Error = NotAnObjectType;
+
+    fn try_from(raw: ffi::git_object_t) -> Result<Self, NotAnObjectType> {
+        Self::from_raw(raw).ok_or(NotAnObjectType(raw))
+    }
+}
+
+impl From<ObjectType> for ffi::git_object_t {
+    fn from(value: ObjectType) -> ffi::git_object_t {
+        value.raw()
+    }
+}
+
+/// A `git_object_t` value that is no object's type: `GIT_OBJECT_ANY`,
+/// `GIT_OBJECT_INVALID`, or a value the header does not name. [`raw`](Self::raw) has
+/// it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NotAnObjectType(ffi::git_object_t);
+
+impl NotAnObjectType {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_object_t {
+        self.0
+    }
+}
+
+impl fmt::Display for NotAnObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "libgit2 value {} is not an object type", self.0)
+    }
+}
+
+impl std::error::Error for NotAnObjectType {}
+
+/// The kind of a Git reference: whether it points at an object id or at another
+/// reference.
+///
+/// [`from_raw`](Self::from_raw) gives `None` for `GIT_REFERENCE_INVALID`,
+/// `GIT_REFERENCE_ALL` and every value the header does not name, such as the `-1`
+/// that `git_reference_type(NULL)` returns in a release build.
+///
+/// Wraps: git_reference_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum ReferenceType {
+    /// A reference that points at an object id.
+    Direct = ffi::GIT_REFERENCE_DIRECT,
+    /// A reference that points at another reference.
+    Symbolic = ffi::GIT_REFERENCE_SYMBOLIC,
+}
+
+impl ReferenceType {
+    /// The variant whose C value is `raw`; `None` for `GIT_REFERENCE_INVALID`,
+    /// `GIT_REFERENCE_ALL` and every value the header does not name.
+    pub const fn from_raw(raw: ffi::git_reference_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_REFERENCE_DIRECT => Some(Self::Direct),
+            ffi::GIT_REFERENCE_SYMBOLIC => Some(Self::Symbolic),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2's functions return it.
+    pub const fn raw(self) -> ffi::git_reference_t {
+        self as ffi::git_reference_t
+    }
+}
+
+impl TryFrom<ffi::git_reference_t> for ReferenceType {
+    type Error = NotAReferenceType;
+
+    fn try_from(raw: ffi::git_reference_t) -> Result<Self, NotAReferenceType> {
+        Self::from_raw(raw).ok_or(NotAReferenceType(raw))
+    }
+}
+
+impl From<ReferenceType> for ffi::git_reference_t {
+    fn from(value: ReferenceType) -> ffi::git_reference_t {
+        value.raw()
+    }
+}
+
+/// A `git_reference_t` value that is no reference's kind: `GIT_REFERENCE_INVALID`,
+/// `GIT_REFERENCE_ALL`, or a value the header does not name. [`raw`](Self::raw) has
+/// it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NotAReferenceType(ffi::git_reference_t);
+
+impl NotAReferenceType {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_reference_t {
+        self.0
+    }
+}
+
+impl fmt::Display for NotAReferenceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "libgit2 value {} is not a reference type", self.0)
+    }
+}
+
+impl std::error::Error for NotAReferenceType {}
 
 /// Whether `git fetch` recurses into a submodule: the value of its
 /// `submodule.<name>.fetchRecurseSubmodules` setting.
@@ -425,8 +608,150 @@ const _: () = assert!(
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use std::collections::HashSet;
     use std::collections::hash_map::DefaultHasher;
     use std::error::Error;
+
+    const OBJECT_TYPES: [(ffi::git_object_t, ObjectType); 4] = [
+        (ffi::GIT_OBJECT_COMMIT, ObjectType::Commit),
+        (ffi::GIT_OBJECT_TREE, ObjectType::Tree),
+        (ffi::GIT_OBJECT_BLOB, ObjectType::Blob),
+        (ffi::GIT_OBJECT_TAG, ObjectType::Tag),
+    ];
+
+    const REFERENCE_TYPES: [(ffi::git_reference_t, ReferenceType); 2] = [
+        (ffi::GIT_REFERENCE_DIRECT, ReferenceType::Direct),
+        (ffi::GIT_REFERENCE_SYMBOLIC, ReferenceType::Symbolic),
+    ];
+
+    /// Every value around the declared ones, and the extremes.
+    fn object_probes() -> impl Iterator<Item = ffi::git_object_t> {
+        (-300..=300).chain([
+            ffi::git_object_t::MIN,
+            ffi::git_object_t::MIN + 1,
+            ffi::git_object_t::MAX - 1,
+            ffi::git_object_t::MAX,
+        ])
+    }
+
+    /// Every value around the declared ones, and the extremes; `u32::MAX` is the `-1`
+    /// of `git_reference_type(NULL)`.
+    fn reference_probes() -> impl Iterator<Item = ffi::git_reference_t> {
+        (0..=300).chain([ffi::git_reference_t::MAX - 1, ffi::git_reference_t::MAX])
+    }
+
+    #[test]
+    fn object_variants_carry_their_c_values() {
+        for (raw, kind) in OBJECT_TYPES {
+            assert_eq!(kind.raw(), raw);
+            assert_eq!(ffi::git_object_t::from(kind), raw);
+            assert_eq!(ObjectType::from_raw(raw), Some(kind));
+            assert_eq!(ObjectType::try_from(raw), Ok(kind));
+            assert_eq!(ObjectType::raw_or_any(Some(kind)), raw);
+        }
+        let distinct: HashSet<_> = OBJECT_TYPES.iter().map(|(_, k)| *k).collect();
+        assert_eq!(distinct.len(), OBJECT_TYPES.len());
+    }
+
+    #[test]
+    fn object_from_raw_refuses_every_other_value() {
+        for raw in object_probes() {
+            let named = OBJECT_TYPES
+                .iter()
+                .find(|(r, _)| *r == raw)
+                .map(|(_, k)| *k);
+            assert_eq!(ObjectType::from_raw(raw), named, "{raw}");
+            match ObjectType::try_from(raw) {
+                Ok(kind) => assert_eq!(Some(kind), named),
+                Err(e) => {
+                    assert_eq!(named, None);
+                    assert_eq!(e.raw(), raw);
+                }
+            }
+        }
+        // The named non-types in particular.
+        for raw in [ffi::GIT_OBJECT_ANY, ffi::GIT_OBJECT_INVALID, 0] {
+            assert_eq!(ObjectType::from_raw(raw), None);
+        }
+    }
+
+    #[test]
+    fn object_filter_spells_any_as_none() {
+        assert_eq!(ObjectType::raw_or_any(None), ffi::GIT_OBJECT_ANY);
+        assert_eq!(ObjectType::from_raw(ObjectType::raw_or_any(None)), None);
+    }
+
+    #[test]
+    fn not_an_object_type_reports_the_value() {
+        let e = ObjectType::try_from(ffi::GIT_OBJECT_ANY).unwrap_err();
+        assert_eq!(e.raw(), -2);
+        assert_eq!(e.to_string(), "libgit2 value -2 is not an object type");
+        assert!(e.source().is_none());
+        let boxed: Box<dyn Error> = Box::new(e);
+        assert_eq!(boxed.to_string(), e.to_string());
+        assert_eq!(
+            ObjectType::try_from(ffi::git_object_t::MIN)
+                .unwrap_err()
+                .to_string(),
+            format!("libgit2 value {} is not an object type", i32::MIN)
+        );
+    }
+
+    #[test]
+    fn reference_variants_carry_their_c_values() {
+        for (raw, kind) in REFERENCE_TYPES {
+            assert_eq!(kind.raw(), raw);
+            assert_eq!(ffi::git_reference_t::from(kind), raw);
+            assert_eq!(ReferenceType::from_raw(raw), Some(kind));
+            assert_eq!(ReferenceType::try_from(raw), Ok(kind));
+        }
+        assert_ne!(ReferenceType::Direct, ReferenceType::Symbolic);
+    }
+
+    #[test]
+    fn reference_from_raw_refuses_every_other_value() {
+        for raw in reference_probes() {
+            let named = REFERENCE_TYPES
+                .iter()
+                .find(|(r, _)| *r == raw)
+                .map(|(_, k)| *k);
+            assert_eq!(ReferenceType::from_raw(raw), named, "{raw}");
+            match ReferenceType::try_from(raw) {
+                Ok(kind) => assert_eq!(Some(kind), named),
+                Err(e) => {
+                    assert_eq!(named, None);
+                    assert_eq!(e.raw(), raw);
+                }
+            }
+        }
+        for raw in [ffi::GIT_REFERENCE_INVALID, ffi::GIT_REFERENCE_ALL] {
+            assert_eq!(ReferenceType::from_raw(raw), None);
+        }
+    }
+
+    #[test]
+    fn not_a_reference_type_reports_the_value() {
+        let e = ReferenceType::try_from(ffi::GIT_REFERENCE_ALL).unwrap_err();
+        assert_eq!(e.raw(), 3);
+        assert_eq!(e.to_string(), "libgit2 value 3 is not a reference type");
+        assert!(e.source().is_none());
+        let boxed: Box<dyn Error> = Box::new(e);
+        assert_eq!(boxed.to_string(), e.to_string());
+    }
+
+    #[test]
+    fn debug_names_the_variant() {
+        assert_eq!(format!("{:?}", ObjectType::Commit), "Commit");
+        assert_eq!(format!("{:?}", ReferenceType::Symbolic), "Symbolic");
+        assert_eq!(
+            format!("{:?}", ObjectType::try_from(5).unwrap_err()),
+            "NotAnObjectType(5)"
+        );
+        assert_eq!(
+            format!("{:?}", ReferenceType::try_from(0).unwrap_err()),
+            "NotAReferenceType(0)"
+        );
+    }
 
     #[test]
     fn conversions_round_trip() {
