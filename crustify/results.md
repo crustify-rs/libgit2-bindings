@@ -460,3 +460,15 @@ where `asan-ubsan` and `tsan` build and pass `ub_safe` 50/50 from clean target d
 rejected and its runner change reverted (`util/rejected-pocs.md`); it is a tooling report,
 so the `+rejected PoCs` column, which counts `ub_safe`, `ub_unsafe` and `equiv` PoCs, does not
 include it.
+
+### `git_allocator` exposes raw callback pointers
+
+`util/sys/alloc.rs` wraps `git_allocator` through an `unsafe trait Alloc` with private
+`extern "C"` trampolines (`Allocator::new::<A>()`), but also publishes the raw form: the
+`MallocFn` / `ReallocFn` / `FreeFn` aliases, `Allocator::from_fns`, and accessors that take
+or return those pointers. The raw form is unnecessary once every `Allocator` is built from an
+`Alloc` implementation, and the review's confirmed zero-byte `realloc` double free came from
+its contract. The `util` review judged the aliases necessary ("C function pointers and must
+stay so"), and `scan-unsafe` does not count function-pointer types, so neither flagged it.
+Left in place by decision; the same pattern can recur for the backend, filter, merge-driver,
+transport and stream vtables.
