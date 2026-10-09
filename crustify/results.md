@@ -29,10 +29,10 @@ Thin batches with `"objective": "review"`, LLM-as-a-Judge over each landed wave.
 - **agent backend** — `claude`
 - **model** — `openrouter/anthropic/claude-fable-5.1`
 - **`--billing`** — `api`
-- **`--max-types`** — `2`
-- **`--max-syms`** — `25`
-- **`--max-loc`** — `500`
-- **`--min-fields`** — `20`
+- **`--max-types`** — `2` through `libgit2/oid`; from `libgit2/core`, uncapped: a review batch holds its route's whole wave
+- **`--max-syms`** — `25` through `libgit2/oid`; from `libgit2/core`, uncapped: a review batch holds its route's whole wave
+- **`--max-loc`** — `500` through `libgit2/oid`; from `libgit2/core`, uncapped: a review batch holds its route's whole wave
+- **`--min-fields`** — `20` through `libgit2/oid`; from `libgit2/core`, uncapped: a review batch holds its route's whole wave
 - **orchestrator parallelism** — `10` concurrent batch processes
 - **branch** — `<branch>`, tip `<sha>`
 - **agents** — `<n>`, over `<n>` wave(s)
@@ -591,4 +591,23 @@ against 380 s serialized), so the stall is slow collection under thread churn, n
 deadlock. `cargo-variant.sh bsan` keeps tests parallel and sets
 `BSAN_OPTIONS=gc_hang_threshold_ms=120000`; the full workspace gate then passes in 431 s
 (244 passed) against 641 s serialized.
+
+### Review and BorrowSanitizer policy from `libgit2/core`
+
+Through `libgit2/oid`, review ran after each sub-campaign's translation as a mirror of its
+batches (one review batch per translation batch, same caps), and translators validated under
+every instrument, BorrowSanitizer included. From `libgit2/core` on, by the operator's decision:
+
+- every translated wave is reviewed before the next translation wave starts, by at most two
+  review batches, one with all the wave's types and one with all its symbols and callbacks,
+  so review caps scale with the wave;
+- translators write BSan tests but do not run the BSan variant; the orchestrator gates every
+  translated wave and every reviewed wave under BSan (plain and ASan+UBSan alongside), and a
+  failing translated-wave gate hands its log to the review wave as `bsan-gate.log`;
+- reviewers keep BSan.
+
+The translator prompt for these rules is crustify `e9ff79a`
+(`policy/wave-reviews-orchestrator-bsan`). Review rows before and after the change are
+therefore not like-for-like: earlier review rows are per translation batch, later ones per
+wave and route.
 
