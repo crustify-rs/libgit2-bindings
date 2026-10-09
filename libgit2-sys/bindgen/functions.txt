@@ -9,6 +9,7 @@ git_error_set_oom
 git_error_set_str
 git_libgit2_init
 git_libgit2_opts
+git_merge_bases
 git_odb_backend_data_alloc
 git_odb_backend_data_free
 git_oid_cpy
@@ -17,6 +18,8 @@ git_oid_from_raw
 git_oid_from_string
 git_oid_shorten_free
 git_oid_shorten_new
+git_oidarray_dispose
 git_reference_normalize_name
+git_repository_free
 git_repository_open_ext
 git_strarray_dispose

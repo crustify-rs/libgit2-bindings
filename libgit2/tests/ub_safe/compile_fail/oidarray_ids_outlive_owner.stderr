@@ -1,0 +1,11 @@
+error[E0597]: `array` does not live long enough
+ --> tests/ub_safe/compile_fail/oidarray_ids_outlive_owner.rs:7:9
+  |
+5 |     let ids = {
+  |         --- borrow later stored here
+6 |         let array = OidArray::new();
+  |             ----- binding `array` declared here
+7 |         array.as_ref().ids()
+  |         ^^^^^ borrowed value does not live long enough
+8 |     };
+  |     - `array` dropped here while still borrowed
