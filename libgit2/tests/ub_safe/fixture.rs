@@ -459,3 +459,46 @@ pub fn refused_filter() -> *mut ffi::git_filter {
         .get_or_init(|| Registered::new(c"crustify-refused", Some(refused_stream)))
         .0
 }
+
+// --- `git2/strarray.h` -------------------------------------------------------------
+
+use libgit2::libgit2::core::strarray::{StrArray, StrArrayVal};
+use libgit2::libgit2::raw::OdbDataStrVec;
+
+/// libgit2's extension list (`GIT_OPT_GET_EXTENSIONS`), adopted as libgit2 hands it
+/// out: a detached `git_vector` of `git__strdup` copies, with spare capacity. Stands in
+/// for the `git_libgit2_opts` wrapper (`core`), which replaces it.
+pub fn libgit2_extensions() -> StrArrayVal {
+    let mut out = ffi::git_strarray {
+        strings: core::ptr::null_mut(),
+        count: 0,
+    };
+    // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills; `out`
+    // held nothing.
+    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+    assert_eq!(rc, 0);
+    // SAFETY: on success `out` owns an array of libgit2's allocator holding `count`
+    // non-NULL strings from the same allocator, handed over whole.
+    let strings = unsafe { OdbDataStrVec::from_raw_parts(out.strings, out.count) }.unwrap();
+    StrArray::from_strings(strings)
+}
+
+/// Sets libgit2's user extensions (`GIT_OPT_SET_EXTENSIONS`), which `!name` entries
+/// disable, after initialising libgit2 (pre-init its allocations fail through a path
+/// that corrupts foreign TLS); stands in for the `git_libgit2_opts` and
+/// `git_libgit2_init` wrappers (`core`). Process-global: call it in an isolated child.
+pub fn set_extensions(names: &[&CStr]) {
+    let ptrs: Vec<*const core::ffi::c_char> = names.iter().map(|s| s.as_ptr()).collect();
+    // SAFETY: no arguments; the reference is never released, so the copies below are
+    // made by an initialised library.
+    assert!(unsafe { ffi::git_libgit2_init() } > 0);
+    // SAFETY: `GIT_OPT_SET_EXTENSIONS` takes an array of `len` strings, which it copies.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ptrs.as_ptr(),
+            ptrs.len(),
+        )
+    };
+    assert_eq!(rc, 0);
+}

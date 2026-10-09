@@ -1,0 +1,11 @@
+error[E0597]: `view` does not live long enough
+ --> tests/ub_safe/compile_fail/strarray_iter_outlives_view.rs:8:9
+  |
+6 |     let it = {
+  |         -- borrow later stored here
+7 |         let view = StrArrayView::new(&names);
+  |             ---- binding `view` declared here
+8 |         view.as_ref().iter()
+  |         ^^^^ borrowed value does not live long enough
+9 |     };
+  |     - `view` dropped here while still borrowed

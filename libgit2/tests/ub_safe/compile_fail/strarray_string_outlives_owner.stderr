@@ -1,0 +1,11 @@
+error[E0597]: `array` does not live long enough
+ --> tests/ub_safe/compile_fail/strarray_string_outlives_owner.rs:7:9
+  |
+5 |     let s = {
+  |         - borrow later stored here
+6 |         let array = StrArray::new();
+  |             ----- binding `array` declared here
+7 |         array.as_ref().get(0)
+  |         ^^^^^ borrowed value does not live long enough
+8 |     };
+  |     - `array` dropped here while still borrowed

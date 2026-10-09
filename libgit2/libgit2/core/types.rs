@@ -22,8 +22,9 @@
 //! a target, inside a transaction) and `GIT_REFERENCE_ALL` (the union of both kinds,
 //! a listing filter no current routine takes) are not kinds a reference has.
 //!
-//! The submodule settings ([`SubmoduleRecurse`], [`SubmoduleUpdate`]) are fieldless
-//! enums over their C values, converted fallibly from a raw one.
+//! The submodule settings ([`SubmoduleIgnore`], [`SubmoduleRecurse`],
+//! [`SubmoduleUpdate`]) are fieldless enums over their C values, converted fallibly
+//! from a raw one.
 //!
 //! A [`Time`] is a `git_time`: the moment a signature records, as seconds since the
 //! epoch, the timezone's offset from UTC in minutes, and the sign character the
@@ -438,6 +439,109 @@ impl fmt::Display for UnnamedSubmoduleUpdate {
 }
 
 impl std::error::Error for UnnamedSubmoduleUpdate {}
+
+/// How deeply submodule status looks into a submodule's working directory: the
+/// `submodule.<name>.ignore` setting, as `git_submodule_status`, `git_submodule_ignore`
+/// and the `ignore_submodules` of diff options read it.
+///
+/// [`Unspecified`](Self::Unspecified) is a request, not a setting: "whatever the
+/// submodule (or, for a diff, `diff.ignoreSubmodules`) is configured with". It is the
+/// value libgit2's option initialisers select, hence [`Default`], and the one
+/// `git_submodule_set_ignore` refuses ("invalid value for ignore"), as it refuses every
+/// value outside `None..=All`. libgit2 reads the rest by equality, so a value without a
+/// variant behaves as [`Untracked`](Self::Untracked) in a status, and a diff's `0` (a
+/// zeroed options struct) as `Unspecified`; [`from_raw`](Self::from_raw) gives `None`
+/// for all of them. libgit2's own routines return only named values.
+///
+/// Wraps: git_submodule_ignore_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum SubmoduleIgnore {
+    /// Use the submodule's configuration (`GIT_SUBMODULE_IGNORE_UNSPECIFIED`).
+    #[default]
+    Unspecified = ffi::GIT_SUBMODULE_IGNORE_UNSPECIFIED,
+    /// Any change, untracked files included, makes the submodule dirty; ignored files
+    /// are still ignored (`GIT_SUBMODULE_IGNORE_NONE`, config `none`).
+    None = ffi::GIT_SUBMODULE_IGNORE_NONE,
+    /// Only changes to tracked files, the index or the HEAD commit count
+    /// (`GIT_SUBMODULE_IGNORE_UNTRACKED`, config `untracked`).
+    Untracked = ffi::GIT_SUBMODULE_IGNORE_UNTRACKED,
+    /// The working directory is not scanned: only a moved HEAD counts
+    /// (`GIT_SUBMODULE_IGNORE_DIRTY`, config `dirty`).
+    Dirty = ffi::GIT_SUBMODULE_IGNORE_DIRTY,
+    /// Never dirty: only the submodule's location is reported
+    /// (`GIT_SUBMODULE_IGNORE_ALL`, config `all`).
+    All = ffi::GIT_SUBMODULE_IGNORE_ALL,
+}
+
+impl SubmoduleIgnore {
+    /// The variant whose C value is `raw`; `None` for a value this version of
+    /// libgit2's header does not name.
+    pub const fn from_raw(raw: ffi::git_submodule_ignore_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_SUBMODULE_IGNORE_UNSPECIFIED => Some(Self::Unspecified),
+            ffi::GIT_SUBMODULE_IGNORE_NONE => Some(Self::None),
+            ffi::GIT_SUBMODULE_IGNORE_UNTRACKED => Some(Self::Untracked),
+            ffi::GIT_SUBMODULE_IGNORE_DIRTY => Some(Self::Dirty),
+            ffi::GIT_SUBMODULE_IGNORE_ALL => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2's functions take and return it.
+    pub const fn raw(self) -> ffi::git_submodule_ignore_t {
+        self as ffi::git_submodule_ignore_t
+    }
+}
+
+impl TryFrom<ffi::git_submodule_ignore_t> for SubmoduleIgnore {
+    type Error = UnnamedSubmoduleIgnore;
+
+    fn try_from(raw: ffi::git_submodule_ignore_t) -> Result<Self, UnnamedSubmoduleIgnore> {
+        Self::from_raw(raw).ok_or(UnnamedSubmoduleIgnore(raw))
+    }
+}
+
+impl From<SubmoduleIgnore> for ffi::git_submodule_ignore_t {
+    fn from(value: SubmoduleIgnore) -> ffi::git_submodule_ignore_t {
+        value.raw()
+    }
+}
+
+/// A submodule ignore value that this version of libgit2's header does not name: `0`,
+/// which a zeroed diff options struct holds, or anything outside `-1` and `1..=4`.
+/// [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedSubmoduleIgnore(ffi::git_submodule_ignore_t);
+
+impl UnnamedSubmoduleIgnore {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_submodule_ignore_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedSubmoduleIgnore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 submodule ignore value {} is not named by git2/types.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedSubmoduleIgnore {}
+
+// A `SubmoduleIgnore` passes where C takes a `git_submodule_ignore_t`.
+const _: () = assert!(
+    size_of::<SubmoduleIgnore>() == size_of::<ffi::git_submodule_ignore_t>()
+        && align_of::<SubmoduleIgnore>() == align_of::<ffi::git_submodule_ignore_t>()
+);
 
 /// The mode of a tree entry: the kind of object it names, and for a blob whether it
 /// is an executable or a symbolic link (`git_filemode_t`, UNIX modes in octal).
@@ -2036,5 +2140,59 @@ mod unit_tests {
             sync::<StreamError>();
             send::<WriteStreamFree>();
         }
+    }
+
+    const SUBMODULE_IGNORES: [(SubmoduleIgnore, ffi::git_submodule_ignore_t); 5] = [
+        (SubmoduleIgnore::Unspecified, -1),
+        (SubmoduleIgnore::None, 1),
+        (SubmoduleIgnore::Untracked, 2),
+        (SubmoduleIgnore::Dirty, 3),
+        (SubmoduleIgnore::All, 4),
+    ];
+
+    /// Every variant converts to the value `git2/types.h` gives it, and back.
+    #[test]
+    fn submodule_ignore_named_values_round_trip() {
+        for (variant, raw) in SUBMODULE_IGNORES {
+            assert_eq!(variant.raw(), raw);
+            assert_eq!(ffi::git_submodule_ignore_t::from(variant), raw);
+            assert_eq!(SubmoduleIgnore::from_raw(raw), Some(variant));
+            assert_eq!(SubmoduleIgnore::try_from(raw), Ok(variant));
+        }
+        assert_eq!(SubmoduleIgnore::default(), SubmoduleIgnore::Unspecified);
+    }
+
+    /// Every other value is rejected before it can become a variant, without panicking,
+    /// and the error keeps it; an exhaustive sweep around the named range, plus the
+    /// extremes.
+    #[test]
+    fn submodule_ignore_unnamed_values_are_rejected() {
+        let named = |raw| SUBMODULE_IGNORES.iter().any(|&(_, r)| r == raw);
+        for raw in (-300..300).chain([i32::MIN, i32::MIN + 1, i32::MAX - 1, i32::MAX]) {
+            if named(raw) {
+                continue;
+            }
+            assert_eq!(SubmoduleIgnore::from_raw(raw), None, "{raw}");
+            let err = SubmoduleIgnore::try_from(raw).unwrap_err();
+            assert_eq!(err.raw(), raw);
+            assert_eq!(
+                err.to_string(),
+                format!("libgit2 submodule ignore value {raw} is not named by git2/types.h")
+            );
+        }
+        let zero: Box<dyn std::error::Error> = Box::new(UnnamedSubmoduleIgnore(0));
+        assert!(zero.source().is_none());
+    }
+
+    #[test]
+    fn submodule_ignore_layout_matches_c() {
+        assert_eq!(
+            size_of::<SubmoduleIgnore>(),
+            size_of::<ffi::git_submodule_ignore_t>()
+        );
+        assert_eq!(
+            size_of::<Option<SubmoduleIgnore>>(),
+            size_of::<ffi::git_submodule_ignore_t>()
+        );
     }
 }

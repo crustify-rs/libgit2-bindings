@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `array` as mutable more than once at a time
+ --> tests/ub_safe/compile_fail/strarray_mut_aliased.rs:7:13
+  |
+6 |     let mut a = array.as_mut();
+  |                 ----- first mutable borrow occurs here
+7 |     let b = array.as_mut();
+  |             ^^^^^ second mutable borrow occurs here
+8 |     a.truncate(0);
+  |     - first borrow later used here
