@@ -1,0 +1,11 @@
+[package]
+name = "format-cstr-empty-buffer-told-by-address"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libgit2 = { path = "../../../../../../../../rust/libgit2" }
+libgit2-sys = { path = "../../../../../../../../rust/libgit2-sys" }
