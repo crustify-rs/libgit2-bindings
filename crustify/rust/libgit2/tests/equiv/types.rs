@@ -52,8 +52,16 @@
 //! Rust `Time` and on a C-allocated `git_signature` independently, and the two are
 //! compared after every step.
 //!
-//! Documented divergences: none. A `Time` is a plain value, so the comparisons are
-//! field by field (`git_signature__equal`'s rule) and never cover padding.
+//! libgit2's one writer of a time, `git_signature__writebuf`, is observed through
+//! `git_commit_create_buffer`: the `author` line it writes for a signature holding
+//! each probed `Time` must be the one predicted from the Rust handle by the rule the
+//! [`Time`] docs state (a negative zone for a negative offset or a `'-'` sign byte,
+//! hours and minutes from the offset's magnitude, the seconds truncated to 32 bits).
+//!
+//! Documented divergences: `i32::MIN` minutes is not probed, since negating it in the
+//! C writer is undefined behaviour (an abort under UBSan); the [`Time`] docs record it.
+//! A `Time` is a plain value, so the comparisons are field by field
+//! (`git_signature__equal`'s rule) and never cover padding.
 //!
 //! Then [`FileMode`], against the `git_filemode_t` values libgit2 declares, accepts
 //! and returns.
@@ -103,7 +111,12 @@
 //! ignoring bits beyond `GIT_BRANCH_ALL`; [`BranchType`] names only the three values every
 //! branch routine accepts (`git_branch_lookup` asserts on the rest), so
 //! [`BranchType::from_raw`] rejects those selections, which the test checks list nothing
-//! new: a documented divergence.
+//! new: a documented divergence. `git_branch_lookup` reads the same value the other way:
+//! for every branch of the fixture and every selection, the C lookup must find the
+//! reference the Rust prediction names from the listing with [`BranchType::contains`]
+//! (the local one first under [`BranchType::All`]), fail with `GIT_ENOTFOUND` where it
+//! names none, and refuse every selection without a variant through its internal
+//! assertion (skipped under the debug `coverage` build, where that assertion aborts).
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -113,6 +126,7 @@ use std::ptr;
 
 use ffibox::CZeroable;
 use libgit2::ffi;
+use libgit2::libgit2::core::buffer::Buf;
 use libgit2::libgit2::core::types::{
     BranchType, FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType,
     SubmoduleIgnore, SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedFileMode,
@@ -737,6 +751,112 @@ fn zeroed_is_what_a_zoneless_parse_leaves() {
     assert_eq!(Time::from(c), Time::zeroed());
 }
 
+/// The `author` line `git_commit_create_buffer` writes for a signature whose `when`
+/// is `time`: libgit2's one writer of a `git_time` (`git_signature__writebuf`, shared
+/// with tags and reflogs).
+fn c_author_line(repo: &TreeRepo, time: &Time) -> String {
+    let mut sig = Signature::new(0, 0);
+    *sig.when_mut() = ffi::git_time::from(*time);
+    let mut tree = ptr::null_mut();
+    // SAFETY: `tree` is a live slot, `repo.repo` a live repository and `empty_tree`
+    // the id of a tree it holds.
+    let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.repo, &repo.empty_tree) };
+    assert_eq!(rc, 0);
+    let mut raw = ffi::git_buf {
+        ptr: ptr::null_mut(),
+        reserved: 0,
+        size: 0,
+    };
+    // SAFETY: `raw` is `GIT_BUF_INIT`, filled by the call; the signature, tree and
+    // message are live and only read; no parents.
+    let rc = unsafe {
+        ffi::git_commit_create_buffer(
+            &mut raw,
+            repo.repo,
+            sig.0,
+            sig.0,
+            ptr::null(),
+            c"m\n".as_ptr(),
+            tree,
+            0,
+            ptr::null_mut(),
+        )
+    };
+    // SAFETY: `tree` is the live tree looked up above, released once.
+    unsafe { ffi::git_tree_free(tree) };
+    assert_eq!(rc, 0, "{:?}", last_error());
+    // SAFETY: `raw` is as libgit2 left it.
+    let buf = unsafe { Buf::from_raw(raw) };
+    let text = buf.as_ref().to_str().unwrap().to_owned();
+    text.lines()
+        .find_map(|l| l.strip_prefix("author "))
+        .expect("an author line")
+        .to_owned()
+}
+
+/// The zone and timestamp a signature's `git_time` is written with, read from the
+/// Rust value as the [`Time`] docs describe libgit2's rule: the zone is negative when
+/// the offset is negative or the sign byte is `b'-'`, hours and minutes are the
+/// offset's magnitude, and the seconds are truncated to 32 bits.
+fn predicted_author_line(time: &Time) -> String {
+    let t = time.as_ref();
+    let sign = if t.offset_minutes() < 0 || t.sign() == b'-' {
+        '-'
+    } else {
+        '+'
+    };
+    let magnitude = t.offset_minutes().unsigned_abs();
+    format!(
+        "n <e@x> {} {sign}{:02}{:02}",
+        t.seconds() as u32,
+        magnitude / 60,
+        magnitude % 60
+    )
+}
+
+/// Every offset and sign a `Time` can hold is written as the docs say, the
+/// questionable `-0000`, a `'+'` over a negative offset and a foreign sign byte
+/// included; the seconds are written through a 32-bit cast, so negative and far
+/// future times wrap. `i32::MIN` is left out: negating it in `git_signature__writebuf`
+/// overflows, which the UBSan build aborts on.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn signature_zones_are_written_from_offset_and_sign() {
+    let repo = TreeRepo::new("zones");
+    let offsets = [0, 1, -1, 59, 60, -90, 90, 840, -899, 899, 100_000, i32::MAX];
+    let signs = [b'+', b'-', b'x', 0, 0xff];
+    let seconds = [
+        0,
+        1,
+        1_700_000_000,
+        -1,
+        i64::from(u32::MAX) + 5,
+        i64::MIN,
+        i64::MAX,
+    ];
+    for (i, &offset) in offsets.iter().enumerate() {
+        for &sign in &signs {
+            let mut time = Time::new(seconds[i % seconds.len()], offset);
+            time.as_mut().set_sign(sign);
+            assert_eq!(
+                c_author_line(&repo, &time),
+                predicted_author_line(&time),
+                "{time:?}"
+            );
+        }
+    }
+    // The sign `Time::new` derives is written back as itself.
+    for &offset in &offsets {
+        let time = Time::new(1_700_000_000, offset);
+        let line = c_author_line(&repo, &time);
+        assert_eq!(line, predicted_author_line(&time));
+        assert!(
+            line.contains(if offset < 0 { " -" } else { " +" }),
+            "{line}"
+        );
+    }
+}
+
 /// Every `git_object_t` constant that names an object's type, beside its variant.
 const OBJECT_TYPES: [(ffi::git_object_t, ObjectType); 4] = [
     (ffi::GIT_OBJECT_COMMIT, ObjectType::Commit),
@@ -1248,8 +1368,15 @@ fn modes_carry_their_c_values() {
 
 #[test]
 fn from_raw_names_exactly_the_c_modes() {
-    // Every mode a tree entry can hold, and the extremes past it.
-    for raw in (0..=0o177777).chain([0o200000, u32::MAX - 1, u32::MAX]) {
+    // Every mode a tree entry can hold, and the extremes past it. BorrowSanitizer
+    // instruments each step and stalls on tens of thousands of them, so it takes a
+    // stride; the named modes always.
+    let stride = if cfg!(bsan) { 97 } else { 1 };
+    let modes = (0..=0o177777)
+        .step_by(stride)
+        .chain(MODES.iter().map(|&(raw, _)| raw))
+        .chain([0o200000, u32::MAX - 1, u32::MAX]);
+    for raw in modes {
         let c = MODES.iter().find(|(r, _)| *r == raw).map(|&(_, m)| m);
         assert_eq!(FileMode::from_raw(raw), c, "{raw:#o}");
         assert_eq!(
@@ -2465,6 +2592,119 @@ fn branch_iterators_filter_and_report_as_branch_type_says() {
         let named = raw & ffi::GIT_BRANCH_ALL;
         let expected = BranchType::from_raw(named).map_or(Vec::new(), |k| c_list(repo, k.raw()));
         assert_eq!(c_list(repo, raw), expected, "raw {raw:#x}");
+    }
+
+    // SAFETY: `repo` is open, released once.
+    unsafe { ffi::git_repository_free(repo) };
+}
+
+/// `git_branch_lookup(repo, name, selection)`: the found reference's full name, or
+/// the return and error of a failed lookup.
+fn c_lookup(
+    repo: *mut ffi::git_repository,
+    name: &CStr,
+    selection: ffi::git_branch_t,
+) -> Result<String, (c_int, c_int, String)> {
+    let mut reference = ptr::null_mut();
+    // SAFETY: `reference` receives the reference; `repo` is open and `name`
+    // NUL-terminated, read for the call only.
+    let rc = unsafe { ffi::git_branch_lookup(&mut reference, repo, name.as_ptr(), selection) };
+    if rc != 0 {
+        let (class, message) = c_last();
+        return Err((rc, class, message));
+    }
+    // SAFETY: `reference` is live until freed; its name is copied out first, and it
+    // is released once.
+    unsafe {
+        let name = CStr::from_ptr(ffi::git_reference_name(reference))
+            .to_string_lossy()
+            .into_owned();
+        ffi::git_reference_free(reference);
+        Ok(name)
+    }
+}
+
+/// `git_branch_lookup` reads a selection as [`BranchType`] says: each kind finds the
+/// branch of its own namespace, [`BranchType::All`] the local one first and the
+/// remote-tracking one otherwise, each predicted from the iterator's listing with
+/// [`BranchType::contains`]; a selection without a variant fails libgit2's internal
+/// assertion (an error in release builds, an abort in the debug `coverage` build,
+/// where it is skipped).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn branch_lookup_takes_exactly_the_named_selections() {
+    let repo = open_fixture();
+    let all = c_list(repo, ffi::GIT_BRANCH_ALL);
+    let namespace = |kind: BranchType| match kind {
+        BranchType::Local => "refs/heads/",
+        BranchType::Remote => "refs/remotes/",
+        BranchType::All => unreachable!("no branch is reported as All"),
+    };
+    let listed = |kind: BranchType, short: &str| {
+        let full = format!("{}{short}", namespace(kind));
+        all.iter().any(|(name, _)| *name == full)
+    };
+    let mut shorts: Vec<String> = all
+        .iter()
+        .map(|(name, kind)| {
+            let kind = BranchType::from_raw(*kind).unwrap();
+            name.strip_prefix(namespace(kind)).unwrap().to_owned()
+        })
+        .collect();
+    shorts.push("no-such-branch".to_owned());
+    shorts.sort();
+    shorts.dedup();
+    assert!(shorts.iter().any(|s| listed(BranchType::Local, s)));
+    assert!(shorts.iter().any(|s| listed(BranchType::Remote, s)));
+
+    for short in &shorts {
+        let name = CString::new(short.as_str()).unwrap();
+        for selection in [BranchType::Local, BranchType::Remote, BranchType::All] {
+            // The first kind the selection contains that has a branch of that name.
+            let predicted = [BranchType::Local, BranchType::Remote]
+                .into_iter()
+                .filter(|kind| selection.contains(*kind))
+                .find(|kind| listed(*kind, short))
+                .map(|kind| format!("{}{short}", namespace(kind)));
+            let found = c_lookup(repo, &name, selection.raw());
+            match predicted {
+                Some(full) => assert_eq!(found, Ok(full), "{short} as {selection:?}"),
+                None => {
+                    let (rc, class, _) = found.expect_err("not found");
+                    assert_eq!(
+                        (rc, class),
+                        (ffi::GIT_ENOTFOUND, ffi::GIT_ERROR_REFERENCE as c_int),
+                        "{short} as {selection:?}"
+                    );
+                }
+            }
+        }
+        // `Local | Remote` is `All`.
+        assert_eq!(
+            c_lookup(repo, &name, (BranchType::Local | BranchType::Remote).raw()),
+            c_lookup(repo, &name, BranchType::All.raw())
+        );
+    }
+
+    // Selections without a variant: the iterator reads their bits, the lookup refuses
+    // them whatever branches exist.
+    if std::env::var("CRUSTIFY_BUILD_VARIANT").as_deref() != Ok("coverage") {
+        for raw in [0, 4, 5, 7, 0x8000_0003] {
+            assert!(BranchType::from_raw(raw).is_none());
+            for short in &shorts {
+                let name = CString::new(short.as_str()).unwrap();
+                assert_eq!(
+                    c_lookup(repo, &name, raw),
+                    Err((
+                        -1,
+                        ffi::GIT_ERROR_INTERNAL as c_int,
+                        // `GIT_ASSERT(false)`, with `false` expanded before it is spelled.
+                        "unrecoverable internal error: '0'".to_owned()
+                    )),
+                    "{short} as {raw:#x}"
+                );
+            }
+        }
     }
 
     // SAFETY: `repo` is open, released once.

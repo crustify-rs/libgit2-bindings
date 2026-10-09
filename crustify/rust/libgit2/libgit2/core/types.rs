@@ -47,6 +47,14 @@
 //! questionable `-0000` survives a round trip. So the accessors take and return any
 //! byte, and the offset and sign are independent.
 //!
+//! libgit2 accepts any value in a signature, but its one writer of a time
+//! (`git_signature__writebuf`, behind commit, tag and reflog creation) is narrower than
+//! the type: it prints the seconds through a 32-bit unsigned cast, so a time before
+//! the epoch or past 2106 is written wrapped, and it negates a negative offset as an
+//! `int`, which overflows for `i32::MIN` (undefined behaviour in C, an abort under
+//! UBSan). The wrappers of those routines must refuse such a time or document the
+//! wrap; the type itself carries what libgit2 stores.
+//!
 //! Times compare as libgit2 compares signatures' times: equal when all three fields
 //! are, whatever the struct's padding holds.
 //!
@@ -780,7 +788,9 @@ unsafe impl Sync for TimeMut<'_> {}
 impl Time {
     /// The time `seconds` after the epoch in the zone `offset_minutes` east of UTC,
     /// signed as `git_signature_new` signs it: `'-'` for a negative offset, `'+'`
-    /// otherwise. Any value is accepted, as libgit2 accepts it.
+    /// otherwise. Any value is accepted, as libgit2 accepts it; see the [module
+    /// docs](self) for what libgit2 then writes of a time outside `u32` seconds or at
+    /// `i32::MIN` minutes.
     ///
     /// Handwritten
     pub fn new(seconds: i64, offset_minutes: i32) -> Time {
@@ -860,6 +870,8 @@ impl TimeMut<'_> {
     }
 
     /// Replaces the offset from UTC in minutes. The sign character is left as it is.
+    /// Any value is accepted; `i32::MIN` is one libgit2 cannot write (see the [module
+    /// docs](self)).
     ///
     /// Field: git_time.offset
     pub fn set_offset_minutes(&mut self, offset_minutes: i32) {
