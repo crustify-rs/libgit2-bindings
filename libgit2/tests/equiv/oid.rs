@@ -50,6 +50,10 @@
 //!   corrupts foreign thread-local state; every comparison here runs initialised.
 
 use std::ffi::{CStr, CString, c_char, c_int};
+use std::fs;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
+use std::ptr;
 use std::thread;
 
 use ffibox::CZeroable;
@@ -266,6 +270,174 @@ fn parses_into_one_oid_follow_the_rust_type() {
         }
         assert!(same(&out, &expected), "step {step}: {out:?}");
     }
+}
+
+/// A bare repository of its own under the temp dir, removed when dropped.
+struct TempRepo {
+    path: PathBuf,
+    c_path: CString,
+}
+
+impl TempRepo {
+    fn new(tag: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("crustify-oid-equiv-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        Self { path, c_path }
+    }
+
+    /// The repository's config file, which `extensions.objectformat` lives in.
+    fn config(&self) -> PathBuf {
+        self.path.join("config")
+    }
+}
+
+impl Drop for TempRepo {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+/// What one repository call reported: its return, the type `git_repository_oid_type`
+/// gives for the repository it produced (0 without one), and the thread's last error.
+type Reported = (c_int, ffi::git_oid_t, (c_int, CString));
+
+/// `git_repository_init_ext(path)`, bare, with `oid_type` as the option.
+fn init_repo(repo: &TempRepo, oid_type: ffi::git_oid_t) -> Reported {
+    let mut opts = ffi::git_repository_init_options::default();
+    // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+    let rc = unsafe {
+        ffi::git_repository_init_options_init(&mut opts, ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION)
+    };
+    assert_eq!(rc, 0);
+    opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+    opts.oid_type = oid_type;
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a live slot, `path` NUL-terminated and `opts` a live options
+    // struct, all read for the call only; the result is NULL or a fresh repository.
+    let rc = unsafe { ffi::git_repository_init_ext(&mut out, repo.c_path.as_ptr(), &mut opts) };
+    oid_type_of(rc, out)
+}
+
+/// `git_repository_open_ext(path)`, bare, no search.
+fn open_repo(repo: &TempRepo) -> Reported {
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a live slot and `path` NUL-terminated, read for the call only;
+    // no ceiling directories. The result is NULL or a fresh repository.
+    let rc = unsafe {
+        ffi::git_repository_open_ext(
+            &mut out,
+            repo.c_path.as_ptr(),
+            ffi::GIT_REPOSITORY_OPEN_NO_SEARCH | ffi::GIT_REPOSITORY_OPEN_BARE,
+            ptr::null(),
+        )
+    };
+    oid_type_of(rc, out)
+}
+
+/// The type of `repo`, which `rc` produced, read before it is freed; 0 for NULL,
+/// which `git_repository_oid_type` itself answers.
+fn oid_type_of(rc: c_int, repo: *mut ffi::git_repository) -> Reported {
+    let last = c_last();
+    // SAFETY: `repo` is NULL, which `git_repository_oid_type` accepts, or the live
+    // repository the call produced, released here exactly once.
+    let oid_type = unsafe {
+        let oid_type = ffi::git_repository_oid_type(repo);
+        ffi::git_repository_free(repo);
+        oid_type
+    };
+    (rc, oid_type, last)
+}
+
+/// The config's `objectformat` line, if any.
+fn objectformat(repo: &TempRepo) -> Option<String> {
+    fs::read_to_string(repo.config())
+        .unwrap()
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("objectformat"))
+        .map(str::to_owned)
+}
+
+/// `git_repository_oid_type` is the public routine that returns a `git_oid_t`, read
+/// back from the repository's `extensions.objectformat` on open; its values must be
+/// what the Rust type predicts from the `oid_type` the repository was created with:
+/// the default for 0, a value `from_raw` refuses for no repository or an object
+/// format libgit2 does not name.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn repository_oid_types_follow_the_rust_type() {
+    init();
+    // A successful open leaves whatever error libgit2 set and recovered from on the
+    // thread (a missing `shallow` file), so only a failure's error is compared.
+    let produced = |(rc, oid_type, _): Reported| (rc, oid_type);
+
+    // Each option value, through init, then through a fresh open of the result.
+    for (step, raw) in [0, ffi::GIT_OID_SHA1, ffi::GIT_OID_SHA256]
+        .into_iter()
+        .enumerate()
+    {
+        let kind = OidType::from_raw(raw).unwrap_or_default();
+        let repo = TempRepo::new(&format!("init-{step}"));
+        assert_eq!(
+            produced(init_repo(&repo, raw)),
+            (0, kind.raw()),
+            "init {raw}"
+        );
+        // Only a non-default type is recorded, by name.
+        let recorded = (kind != OidType::default()).then(|| match kind {
+            OidType::Sha256 => "objectformat = sha256".to_owned(),
+            other => unreachable!("{other:?} is the default"),
+        });
+        assert_eq!(objectformat(&repo), recorded, "config {raw}");
+        assert_eq!(produced(open_repo(&repo)), (0, kind.raw()), "open {raw}");
+
+        // An object format libgit2 does not name is refused on open, as `from_raw`
+        // refuses the 0 `git_oid_type_fromstr` reads it as; the default's name, which
+        // libgit2 never writes itself, reads back as the default.
+        if let Some(line) = objectformat(&repo) {
+            let config = fs::read_to_string(repo.config()).unwrap();
+            let rewrite = |name: &str| {
+                fs::write(
+                    repo.config(),
+                    config.replace(&line, &format!("objectformat = {name}")),
+                )
+                .unwrap();
+            };
+            rewrite("sha512");
+            let (rc, oid_type, (class, message)) = open_repo(&repo);
+            assert_eq!(rc, ffi::GIT_EINVALID);
+            assert_eq!(OidType::from_raw(oid_type), None);
+            assert_eq!(class, ffi::GIT_ERROR_REPOSITORY as c_int);
+            assert_eq!(message, c"unknown object format 'sha512'".to_owned());
+            rewrite("sha1");
+            assert_eq!(produced(open_repo(&repo)), (0, OidType::default().raw()));
+        }
+    }
+
+    // No repository: a value without a variant, which `from_raw` refuses.
+    let (_, oid_type, _) = oid_type_of(0, ptr::null_mut());
+    assert_eq!(oid_type, 0);
+    assert_eq!(OidType::from_raw(oid_type), None);
+    assert_eq!(
+        OidType::try_from(oid_type).map_err(UnnamedOidType::raw),
+        Err(0)
+    );
+
+    // C alone: `git_repository_init_ext` validates no `oid_type`, so a value without a
+    // variant is written as the format name "unknown", and the repository it just
+    // created fails to open; `OidType` cannot express it (`compile_fail/`).
+    let repo = TempRepo::new("init-unnamed");
+    let (rc, oid_type, (class, message)) = init_repo(&repo, 3);
+    assert_eq!(rc, ffi::GIT_EINVALID);
+    assert_eq!(OidType::from_raw(oid_type), None);
+    assert_eq!(class, ffi::GIT_ERROR_REPOSITORY as c_int);
+    assert_eq!(message, c"unknown object format 'unknown'".to_owned());
+    assert_eq!(
+        objectformat(&repo).as_deref(),
+        Some("objectformat = unknown")
+    );
 }
 
 const SHA1_HEX: &str = "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3";

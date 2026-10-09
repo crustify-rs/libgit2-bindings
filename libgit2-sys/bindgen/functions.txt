@@ -33,5 +33,8 @@ git_oid_tostr_s
 git_oidarray_dispose
 git_reference_normalize_name
 git_repository_free
+git_repository_init_ext
+git_repository_init_options_init
+git_repository_oid_type
 git_repository_open_ext
 git_strarray_dispose
