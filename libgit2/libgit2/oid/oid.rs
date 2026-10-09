@@ -506,7 +506,8 @@ impl OidRef<'_> {
     /// Formats the id into `out` as a NUL-terminated string, truncated to
     /// `out.len() - 1` digits when `out` is shorter than its
     /// [`hex_size`](OidType::hex_size) plus the NUL, and returns it. An empty `out`
-    /// gives the empty string, writing nothing.
+    /// gives the empty string, writing nothing and reporting nothing, whatever the
+    /// type.
     ///
     /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, having
     /// written only a NUL at the start of `out`: C returns that empty string and leaves
@@ -517,14 +518,17 @@ impl OidRef<'_> {
         if !runtime_pinned() {
             return Err(last());
         }
-        // SAFETY: `out` is valid for writes of `out.len()` bytes, the count passed, and
-        // libgit2 writes no further (nothing when it is 0, when it returns its static
-        // empty string instead); the oid is a live `git_oid` read for the call. Neither
-        // is retained. The runtime is pinned.
-        let rc = unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), self.as_ptr()) };
-        if rc.cast_const() != out.as_ptr().cast() {
+        // C answers a length of 0 with its static "" and touches neither `out` nor the
+        // thread's error; an empty slice's address says nothing about it, so the length
+        // decides here.
+        if out.is_empty() {
             return Ok(c"");
         }
+        // SAFETY: `out` is valid for writes of `out.len()` bytes, the count passed, and
+        // libgit2 writes no further; the oid is a live `git_oid` read for the call.
+        // Neither is retained. The runtime is pinned.
+        let rc = unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), self.as_ptr()) };
+        debug_assert_eq!(rc.cast_const(), out.as_ptr().cast());
         if self.kind().is_none() {
             return Err(last());
         }
@@ -1445,6 +1449,36 @@ mod unit_tests {
         })
         .join()
         .unwrap();
+    }
+
+    /// `git_oid_tostr` answers an empty buffer with its static "" rather than `out`,
+    /// which the wrapper tells by the length alone: an empty slice may sit at any
+    /// address, that static string's included, and must still give the empty string
+    /// (and no error, for an unknown type either), never a panic.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn format_cstr_tells_an_empty_buffer_by_its_length() {
+        assert!(runtime_pinned());
+        let sha1 = Oid::zero(OidType::Sha1);
+        let mut scratch = [b'#'; 1];
+        // SAFETY: a length of 0 writes nothing through `scratch`; the oid is live.
+        let empty =
+            unsafe { ffi::git_oid_tostr(scratch.as_mut_ptr().cast(), 0, sha1.as_ref().as_ptr()) };
+        assert_ne!(empty.cast_const(), scratch.as_ptr().cast());
+        set(ErrorClass::Invalid, c"primed");
+        for raw in [1, 2, 0, 7] {
+            let mut oid = Oid::zeroed();
+            oid.as_mut().set_raw_kind(raw);
+            // SAFETY: a zero-length slice needs a non-null, aligned pointer and no
+            // bytes behind it: nothing is read or written through it, so the static
+            // string it addresses stays untouched.
+            let at_static = unsafe { core::slice::from_raw_parts_mut(empty.cast::<u8>(), 0) };
+            assert_eq!(oid.as_ref().format_cstr(at_static), Ok(c""));
+            assert_eq!(oid.as_ref().format_cstr(&mut []), Ok(c""));
+            assert_eq!(oid.as_ref().format_cstr(&mut scratch[1..]), Ok(c""));
+            assert_eq!(last().message(), c"primed");
+        }
+        assert_eq!(scratch, [b'#']);
     }
 
     /// libgit2 cannot allocate a thread's string: its error, and the next call on the

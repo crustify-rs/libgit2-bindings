@@ -1121,11 +1121,21 @@ fn rust_format(&(bytes, fmt): &(Bytes, Fmt)) -> Formatted {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn formatters_match_c() {
+    // Every buffer length up to past the longest form, odd ones included: a NUL
+    // placed at every position, and every odd digit count's trailing nibble.
+    // BorrowSanitizer instruments every call, so there every third length and the
+    // boundaries stand in.
+    let lengths: Vec<usize> = if cfg!(bsan) {
+        (0..=70)
+            .step_by(3)
+            .chain([1, 2, 39, 40, 41, 63, 64, 65])
+            .collect()
+    } else {
+        (0..=70).collect()
+    };
     let mut fmts = vec![Fmt::ThreadStr, Fmt::Full, Fmt::Path];
-    for n in [0, 1, 2, 3, 39, 40, 41, 63, 64, 65, 70] {
+    for n in lengths {
         fmts.push(Fmt::Prefix(n));
-    }
-    for n in [0, 1, 2, 40, 41, 42, 64, 65, 66] {
         fmts.push(Fmt::CStr(n));
     }
     // The first step formats a SHA1 id, so the thread's string is written before an
@@ -1263,4 +1273,131 @@ fn shortener_fills_up_like_c() {
         c"unable to shorten OID - OID set full".to_owned(),
     );
     assert!(added[first..].iter().all(|a| a.as_ref() == Err(&full)));
+}
+
+/// A xorshift generator, so the sweep below is the same every run.
+struct Seeded(u64);
+
+impl Seeded {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        usize::try_from(self.next() % n as u64).unwrap()
+    }
+
+    fn byte(&mut self) -> u8 {
+        u8::try_from(self.next() & 0xff).unwrap()
+    }
+}
+
+/// Oid bytes drawn at random: a named type most of the time, the typeless zero or any
+/// byte otherwise; an id that is zero, SHA1-length or full.
+fn seeded_oid(rng: &mut Seeded) -> Bytes {
+    let kind = match rng.below(6) {
+        0 => 0,
+        1 | 2 => 1,
+        3 | 4 => 2,
+        _ => rng.byte(),
+    };
+    let mut id = [0; 32];
+    let filled = match rng.below(4) {
+        0 => 0,
+        1 => 20,
+        _ => 32,
+    };
+    for b in &mut id[..filled] {
+        *b = rng.byte();
+    }
+    (kind, id)
+}
+
+/// Hex text drawn at random: lengths around both hex sizes, short and long, digits of
+/// either case, now and then a non-hex ASCII byte or one past ASCII (never NUL).
+fn seeded_hex(rng: &mut Seeded) -> Vec<u8> {
+    let len = match rng.below(5) {
+        0 => rng.below(3),
+        1 => 38 + rng.below(6),
+        2 => 62 + rng.below(6),
+        _ => rng.below(70),
+    };
+    (0..len)
+        .map(|_| match rng.below(40) {
+            0 => b'g' + rng.byte() % 20,
+            1 => 0x80 | rng.byte(),
+            _ => b"0123456789abcdefABCDEF"[rng.below(22)],
+        })
+        .collect()
+}
+
+/// The structured inputs above pick the boundaries; this sweep draws oids, hex strings,
+/// prefix lengths and buffer sizes at random from one seed, and runs every comparison,
+/// formatter and parser over them on both sides.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn seeded_random_inputs_match_c() {
+    let mut rng = Seeded(0x2545_f491_4f6c_dd1d);
+    // Fewer rounds under BorrowSanitizer, which instruments every call.
+    let rounds = if cfg!(bsan) { 100 } else { 400 };
+    let mut fmt_steps: Vec<(Bytes, Fmt)> = vec![((1, [0; 32]), Fmt::ThreadStr)];
+    let mut parse_steps: Vec<(Vec<u8>, OidType)> = Vec::new();
+    init();
+    for round in 0..rounds {
+        let (a, b) = (seeded_oid(&mut rng), seeded_oid(&mut rng));
+        let hexes: Vec<CString> = (0..3)
+            .map(|_| CString::new(seeded_hex(&mut rng)).unwrap())
+            .collect();
+        let (c_a, c_b) = (c_oid(a), c_oid(b));
+        let (r_a, r_b) = (rust_oid(a), rust_oid(b));
+        assert_eq!(
+            c_compare(&c_a, &c_b, &hexes),
+            rust_compare(r_a.as_ref(), r_b.as_ref(), &hexes),
+            "round {round}: {a:?} vs {b:?}, {hexes:?}"
+        );
+        let len = match rng.below(3) {
+            0 => rng.below(70),
+            1 => usize::MAX - rng.below(3),
+            _ => rng.below(3),
+        };
+        // SAFETY: two live `git_oid`s, read for the call; libgit2 caps `len`.
+        let c_ncmp = unsafe { ffi::git_oid_ncmp(&c_a, &c_b, len) == 0 };
+        assert_eq!(
+            c_ncmp,
+            r_a.as_ref().eq_prefix(r_b.as_ref(), len),
+            "round {round}"
+        );
+
+        fmt_steps.push((a, Fmt::Prefix(rng.below(72))));
+        fmt_steps.push((a, Fmt::CStr(rng.below(72))));
+        fmt_steps.push((a, [Fmt::Full, Fmt::Path, Fmt::ThreadStr][rng.below(3)]));
+        for hex in &hexes {
+            parse_steps.push((hex.to_bytes().to_vec(), KINDS[rng.below(2)]));
+        }
+    }
+
+    let c = run(fmt_steps.clone(), c_format);
+    let rust = run(fmt_steps, rust_format);
+    assert_same(c, rust, "seeded formatters");
+
+    let c = run(parse_steps.clone(), |(s, kind)| {
+        let mut out = ffi::git_oid::default();
+        // SAFETY: `out` is a live `git_oid`; `s` is valid for `s.len()` bytes.
+        let rc =
+            unsafe { ffi::git_oid_from_prefix(&mut out, s.as_ptr().cast(), s.len(), kind.raw()) };
+        let prefix = c_outcome(rc, &out);
+        let s = CString::new(s.clone()).unwrap();
+        // SAFETY: `out` is a live `git_oid`; `s` a C string read for the call.
+        let rc = unsafe { ffi::git_oid_from_string(&mut out, s.as_ptr(), kind.raw()) };
+        (prefix, c_outcome(rc, &out))
+    });
+    let rust = run(parse_steps, |(s, kind)| {
+        let prefix = rust_outcome(Oid::from_prefix(s, *kind));
+        let s = CString::new(s.clone()).unwrap();
+        (prefix, rust_outcome(Oid::from_string(&s, *kind)))
+    });
+    assert_same(c, rust, "seeded parsers");
 }
