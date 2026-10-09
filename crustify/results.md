@@ -135,9 +135,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 |---|---:|---:|---|---:|---:|---:|---:|---:|
 | `raw-lifetime-void` | `0` | `2` | `1h54m19s` | `$8.28` | `$7.89` | `$16.17` | — | `$8.09` |
 | `raw-lifetime-string` | `0` | `2` | `52m30s` | `$5.49` | `$10.89` | `$16.38` | — | `$8.19` |
-| `<link-unit>/<subsystem>` | `<n>` | `<n>` | `<n>h<n>m<n>s` | `$<n>` | `$<n>` | `$<n>` | `$<n>` | `$<n>` |
+| `libgit2/util` | `4` | `5` | `2h24m28s` | `$19.86` | `$46.50` | `$66.36` | `$16.59` | `$13.27` |
 | orchestrator | `<n>` | `<n>` | — | — | — | `$<n>`+ | — | — |
-| **Σ recorded agents** | **`<n>`** | **`<n>`** | **`<n>h<n>m`** | **`$<n>`** | **`$<n>`** | **`$<n>`** | **`$<n>`** | **`$<n>`** |
+| **Σ recorded agents** | **`4`** | **`9`** | **`5h11m`** | **`$33.63`** | **`$65.28`** | **`$98.91`** | **`$24.73`** | **`$10.99`** |
 
 ## Raw lifetime discovery
 
@@ -167,8 +167,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | types | fields | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/type | $/field |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`<n>`|`<n>`| `<n>` | `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `$<n>` | `<n>m<n>s` | `$<n>` | `$<n>` |
-| **Σ** |  | **`<n>`** | **`<n>`** | **`+<n>/-<n>`** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`±<n>`** | **`±<n>`** | **`$<n>`** | — | **`$<n>`** | **`$<n>`** |
+|`util/0`|`0`| `2` | `5` |`+1934/-2`|`+4` (`—`/`—` pp)|`+7` (`—`/`—` pp)|`+2` (`—`/`—` pp)|`+14` (`—`/`—` pp)| `—` | `—` | `$7.55` | `33m43s` | `$3.77` | `$1.51` |
+|`util/0`|`1`| `2` | `0` |`+849/-26`|`+4` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+6` (`—`/`—` pp)|`+10` (`—`/`—` pp)| `—` | `—` | `$5.25` | `38m51s` | `$2.62` | — |
+| **Σ** |  | **`4`** | **`5`** | **`+2783/-28`** | **`+8` (`—`/`—` pp)** | **`+7` (`—`/`—` pp)** | **`+8` (`—`/`—` pp)** | **`+24` (`—`/`—` pp)** | **`—`** | **`—`** | **`$12.80`** | — | **`$3.20`** | **`$2.56`** |
 
 ### Batches — port
 
@@ -185,8 +186,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | types | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/type |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`<n>`|`<n>`| `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `+<n>/-<n>` | `$<n>` | `<n>m<n>s` | `$<n>` |
-| **Σ** |  | **`<n>`** | **`+<n>/-<n>`** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`±<n>`** | **`±<n>`** | **`+<n>/-<n>`** | **`$<n>`** | — | **`$<n>`** |
+|`util/0`|`0`| `2` |`+172/-15`|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+2` (`—`/`—` pp)| `—` | `—` | `+172/-15` | `$20.66` | `48m16s` | `$10.33` |
+|`util/0`|`1`| `2` |`+149/-12`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)|`+1` (`—`/`—` pp)| `—` | `—` | `+149/-12` | `$7.58` | `18m18s` | `$3.79` |
+| **Σ** |  | **`4`** | **`+321/-27`** | **`+0` (`—`/`—` pp)** | **`+1` (`—`/`—` pp)** | **`+1` (`—`/`—` pp)** | **`+3` (`—`/`—` pp)** | **`—`** | **`—`** | **`+321/-27`** | **`$28.24`** | — | **`$7.06`** |
 
 ### Batches — review: PoC + reports
 
@@ -194,8 +196,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | +lifecycle | +unsafe | +UB safe | +UB unsafe | +equiv | +internal | +conventions | +misc | total | +rejected PoCs |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `<n>` | `<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `<n>` | `<n>` |
-| **Σ** |  | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`<n>`** | **`<n>`** |
+| `util/0` | `0` | `+0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `2` | `0` |
+| `util/0` | `1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` | `0` |
+| **Σ** |  | **`+0`** | **`+1`** | **`+0`** | **`+0`** | **`+0`** | **`+0`** | **`+0`** | **`+3`** | **`4`** | **`0`** |
 
 ## Symbols
 
@@ -205,9 +208,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | objective | symbols | loc | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | $ | wall | $/symbol | $/loc |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`<n>`|`<n>`| wrap | `<n>` | `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `$<n>` | `<n>m<n>s` | `$<n>` | `$<n>` |
-|`<n>`|`<n>`| port | `<n>` | `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `$<n>` | `<n>m<n>s` | `$<n>` | `$<n>` |
-| **Σ** |  |  | **`<n>`** | **`<n>`** | **`+<n>/-<n>`** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`±<n>`** | **`±<n>`** | **`$<n>`** | — | **`$<n>`** | **`$<n>`** |
+|`util/0`|`2`| wrap | `4` | `51` |`+1008/-26`|`+11` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+4` (`—`/`—` pp)|`+4` (`—`/`—` pp)| `—` | `—` | `$4.00` | `21m23s` | `$1.00` | `$0.08` |
+|`util/1`|`0`| wrap | `1` | `15` |`+756/-71`|`+6` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+5` (`—`/`—` pp)|`+3` (`—`/`—` pp)| `—` | `—` | `$3.06` | `15m41s` | `$3.06` | `$0.20` |
+| **Σ** |  |  | **`5`** | **`66`** | **`+1764/-97`** | **`+17` (`—`/`—` pp)** | **`+0` (`—`/`—` pp)** | **`+9` (`—`/`—` pp)** | **`+7` (`—`/`—` pp)** | **`—`** | **`—`** | **`$7.06`** | — | **`$1.41`** | **`$0.11`** |
 
 ### Batches — review
 
@@ -215,8 +218,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | symbols | +LoC | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) | +unsafe fn smell | +raw-ptr smell | rv loc | rv $ | rv wall | rv $/symbol |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|`<n>`|`<n>`| `<n>` |`+<n>/-<n>`|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)|`+<n>` (`+<n>`/`+<n>` pp)| `±<n>` | `±<n>` | `+<n>/-<n>` | `$<n>` | `<n>m<n>s` | `$<n>` |
-| **Σ** |  | **`<n>`** | **`+<n>/-<n>`** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`+<n>` (`+<n>`/`+<n>` pp)** | **`±<n>`** | **`±<n>`** | **`+<n>/-<n>`** | **`$<n>`** | — | **`$<n>`** |
+|`util/0`|`2`| `4` |`+281/-117`|`+1` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+1` (`—`/`—` pp)| `—` | `—` | `+281/-117` | `$12.00` | `28m49s` | `$3.00` |
+|`util/1`|`0`| `1` |`+0/-0`|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)|`+0` (`—`/`—` pp)| `—` | `—` | `+0/-0` | `$6.26` | `23m51s` | `$6.26` |
+| **Σ** |  | **`5`** | **`+281/-117`** | **`+1` (`—`/`—` pp)** | **`+0` (`—`/`—` pp)** | **`+0` (`—`/`—` pp)** | **`+1` (`—`/`—` pp)** | **`—`** | **`—`** | **`+281/-117`** | **`$18.26`** | — | **`$3.65`** |
 
 ### Batches — review: PoC + reports
 
@@ -224,8 +228,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`; review
 
 | wave | batch | +lifecycle | +unsafe | +UB safe | +UB unsafe | +equiv | +internal | +conventions | +misc | total | +rejected PoCs |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `<n>` | `<n>` | — | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `+<n>` | `<n>` | `<n>` |
-| **Σ** |  | — | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`+<n>`** | **`<n>`** | **`<n>`** |
+| `util/0` | `2` | — | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `2` | `0` |
+| `util/1` | `0` | — | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `1` | `0` |
+| **Σ** |  | — | **`+1`** | **`+0`** | **`+0`** | **`+0`** | **`+0`** | **`+0`** | **`+2`** | **`3`** | **`0`** |
 
 ## Safety audit
 
@@ -427,3 +432,31 @@ libgit2's static `git_str__initstr`, because a `git_buf` owns its `ptr` only whi
 rule and adds a checked `take_buf` seam. `wavefront/string-cloners-unrecorded` submitted
 the hidden `git__strdup` family as the tier's cloners. No PoC was rejected.
 
+
+### Reading the batch tables
+
+Batch rows from every sub-campaign share one table per kind, so the `wave` cell names the
+sub-campaign as `<subsystem>/<wave index>`; the Overview row of that subsystem joins them.
+Two column groups are not measured per batch and read `—` throughout: the per-batch C/Rust
+coverage deltas (pp) beside each test count, and the `+unsafe fn smell` / `+raw-ptr smell`
+deltas. The unseeded scan of every wave and sub-campaign, and the seeded scan of every
+batch, are kept beside its artifacts as `scan-unsafe.json`. Test counts are `#[test]`
+functions the landing commits add, by directory; trybuild `compile_fail` cases are not
+counted. `+LoC` and `rv loc` count `.rs` lines under `crustify/rust/`, so review
+reproducer crates under `crustify/reviews/` are excluded. A wrap campaign has no port
+batches, so `Types — Batches — port` stays unfilled. A `wavefront` report category, for
+ownership findings the review resubmitted, is counted under `+misc`.
+
+### `libgit2/util`
+
+Wave 0 wrapped `git_allocator`, `git_error`, `git_error_code`, `git_error_t` and the
+`git2/sys/errors.h` setters; wave 1 wrapped `git_error_last`. The review's two reproducers
+held on rerun: an ASan double free when a caller follows the documented `realloc` contract
+to the letter for a zero-byte resize on glibc (`unsafe/alloc-realloc-contract-zero-size-resize`),
+and an equivalence-test flake where a fresh thread can start with `errno == EAGAIN`
+(`misc/equiv-runners-read-errno-of-fresh-thread`, also filed twice more as no-PoC reports).
+`misc/asan-tsan-runner-sanitizes-host-proc-macros` did not reproduce at its base commit,
+where `asan-ubsan` and `tsan` build and pass `ub_safe` 50/50 from clean target dirs. It was
+rejected and its runner change reverted (`util/rejected-pocs.md`); it is a tooling report,
+so the `+rejected PoCs` column, which counts `ub_safe`, `ub_unsafe` and `equiv` PoCs, does not
+include it.
