@@ -17,7 +17,7 @@ use std::thread;
 
 use libgit2::libgit2::core::common::{self, SearchPathLevel};
 use libgit2::libgit2::core::types::ObjectType;
-use libgit2::libgit2::util::errors::ErrorClass;
+use libgit2::libgit2::util::errors::{ErrorBuf, ErrorClass};
 use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
 
 const CHILD: &str = "CRUSTIFY_UB_UNSAFE_CHILD";
@@ -658,6 +658,85 @@ allocation_failures_report_errors, {
     // SAFETY: as above.
     unsafe { common::set_user_agent(Some(c"after")).unwrap() };
     assert_eq!(common::user_agent().unwrap(), c"after".to_owned());
+});
+
+/// A copy into a system directory that fails for want of memory leaves the directory
+/// empty and readable, and a later copy fills it again. Without the wrappers' repair
+/// (`sysdir_status`), libgit2 would leave it pointing at its one-byte out-of-memory
+/// sentinel with the old value's `size`, so the next read would run past the
+/// sentinel's end (ASan), and would refuse every later copy.
+fn failed_copy_empties(
+    set: impl Fn(Option<&CStr>) -> Result<(), ErrorBuf>,
+    get: impl Fn() -> Result<CString, ErrorBuf>,
+) {
+    let oom = |r: Result<(), ErrorBuf>| {
+        let e = r.unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::NoMemory), "{e:?}");
+    };
+    let short = CString::new("/".repeat(64)).unwrap();
+    let long = CString::new("/".repeat(4096)).unwrap();
+    // The same, expanding the old value: the scratch copy fails instead.
+    let long_expanding = CString::new(format!("{}$PATH", "/".repeat(4096))).unwrap();
+    // First over the default libgit2 guessed at initialisation, then over values set.
+    REFUSE.store(true, SeqCst);
+    oom(set(Some(&long)));
+    REFUSE.store(false, SeqCst);
+    assert_eq!(get().unwrap(), CString::default());
+    for failing in [&long, &long_expanding] {
+        set(Some(&short)).unwrap();
+        assert_eq!(get().unwrap(), short);
+        REFUSE.store(true, SeqCst);
+        oom(set(Some(failing)));
+        assert_eq!(get().unwrap(), CString::default(), "readable while short");
+        oom(set(Some(&short)));
+        assert_eq!(get().unwrap(), CString::default());
+        REFUSE.store(false, SeqCst);
+        assert_eq!(
+            get().unwrap(),
+            CString::default(),
+            "empty once memory is back"
+        );
+        set(Some(&short)).unwrap();
+        assert_eq!(get().unwrap(), short, "filled again");
+        set(Some(c"/more:$PATH")).unwrap();
+        assert_eq!(
+            get().unwrap().to_bytes(),
+            [b"/more:", short.to_bytes()].concat(),
+            "expanded again"
+        );
+    }
+    set(None).unwrap();
+}
+
+isolated_test!(
+/// Every system directory setter, after a copy that failed for want of memory.
+failed_sysdir_copies_leave_empty_readable_directories, {
+    // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
+    unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
+    // Allocates the thread's error state, so failures below read as out of memory.
+    // SAFETY: as above.
+    assert!(unsafe { common::set_server_timeout(-1) }.is_err());
+    for level in [
+        SearchPathLevel::System,
+        SearchPathLevel::Xdg,
+        SearchPathLevel::Global,
+    ] {
+        failed_copy_empties(
+            // SAFETY: this child runs no other thread while setting.
+            |path| unsafe { common::set_search_path(level, path) },
+            || common::search_path(level),
+        );
+    }
+    failed_copy_empties(
+        // SAFETY: as above.
+        |path| unsafe { common::set_template_path(path) },
+        common::template_path,
+    );
+    failed_copy_empties(
+        // SAFETY: as above.
+        |path| unsafe { common::set_homedir(path) },
+        common::homedir,
+    );
 });
 
 isolated_test!(

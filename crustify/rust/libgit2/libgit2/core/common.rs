@@ -867,6 +867,51 @@ fn status(rc: c_int) -> Result<(), ErrorBuf> {
     if rc < 0 { Err(last()) } else { Ok(()) }
 }
 
+/// A status `git_sysdir_set` returned through `key`, with the system directory it
+/// failed to fill emptied: `Ok` for 0, the thread's libgit2 error for a negative one.
+/// Only for keys that run with the runtime pinned.
+///
+/// `git_sysdir_set` copies the new path over the old one in place; when the copy
+/// cannot grow the directory's buffer, `git_str_try_grow` (`src/util/str.c`) has
+/// already freed the old string, points the buffer at libgit2's one-byte out-of-memory
+/// sentinel and leaves its `size` as it was. Left alone, the next `GIT_OPT_GET_*` of
+/// the directory copies that `size` from the sentinel (a read past its end), and
+/// every later plain copy into it is refused. Two allocation-free sets repair it: the
+/// empty path zeroes the `size` (`git_str_clear`), and `"$PATH"` alone then swaps in a
+/// fresh empty buffer (`git_sysdir_set` joins nothing around an empty old value and
+/// swaps its scratch buffer in, which releases the sentinel without freeing it).
+///
+/// # Safety
+///
+/// `key` must be a `GIT_OPT_SET_*` key that `git_sysdir_set` serves, reading
+/// `level`'s `int` first when it is `Some`, and `rc` the status it just returned; the
+/// caller excludes concurrent access to the directory.
+unsafe fn sysdir_status(
+    rc: c_int,
+    key: LibraryOption,
+    level: Option<SearchPathLevel>,
+) -> Result<(), ErrorBuf> {
+    if rc >= 0 {
+        return Ok(());
+    }
+    let error = last();
+    let mut repaired = -1;
+    for path in [c"", c"$PATH"] {
+        // SAFETY: per this function's contract, `key` reads `level` (a named one) when
+        // given and a `const char *`, NUL-terminated here, which `git_sysdir_set`
+        // copies without allocating for these two values; the caller excludes
+        // concurrent access to the directory.
+        repaired = unsafe {
+            match level {
+                Some(level) => ffi::git_libgit2_opts(key.key(), level.raw(), path.as_ptr()),
+                None => ffi::git_libgit2_opts(key.key(), path.as_ptr()),
+            }
+        };
+    }
+    debug_assert_eq!(repaired, 0, "{key:?} could not be emptied");
+    Err(error)
+}
+
 /// Runs `fill` on a fresh, zeroed `git_buf` and returns what it left there, copied
 /// out, disposing the buffer either way; `fill`'s failure is the thread's libgit2
 /// error. Pins the runtime first.
@@ -1032,7 +1077,9 @@ pub fn search_path(level: SearchPathLevel) -> Result<CString, ErrorBuf> {
 /// `path` lists directories separated by `:` (`GIT_PATH_LIST_SEPARATOR`); a `$PATH` in
 /// it stands for the previous value, so `"/opt/git:$PATH"` prepends. libgit2 copies
 /// it. Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// allocated; the level is then empty, libgit2 having freed its previous value before
+/// the copy failed (and, left to itself, it would make the level unreadable: see
+/// `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1049,7 +1096,12 @@ pub unsafe fn set_search_path(level: SearchPathLevel, path: Option<&CStr>) -> Re
     // SAFETY: `GIT_OPT_SET_SEARCH_PATH` reads an `int` level, a named one, and a
     // `const char *`, NULL or NUL-terminated, which it copies and does not retain. The
     // runtime is pinned; the caller excludes concurrent access to the search paths.
-    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetSearchPath.key(), level.raw(), path) })
+    let rc =
+        unsafe { ffi::git_libgit2_opts(LibraryOption::SetSearchPath.key(), level.raw(), path) };
+    // SAFETY: `GIT_OPT_SET_SEARCH_PATH` is served by `git_sysdir_set`, reading the
+    // level first, and `rc` is what it just returned; the caller excludes concurrent
+    // access to the search paths.
+    unsafe { sysdir_status(rc, LibraryOption::SetSearchPath, Some(level)) }
 }
 
 /// Sets the largest object of type `kind` that libgit2 caches in memory, in bytes; 0
@@ -1154,7 +1206,9 @@ pub fn template_path() -> Result<CString, ErrorBuf> {
 /// default.
 ///
 /// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when
-/// the copy cannot be allocated.
+/// the copy cannot be allocated; the path is then empty, libgit2 having freed its
+/// previous value before the copy failed (and, left to itself, it would make the path
+/// unreadable: see `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1171,7 +1225,11 @@ pub unsafe fn set_template_path(path: Option<&CStr>) -> Result<(), ErrorBuf> {
     // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` reads one `const char *`, NULL or
     // NUL-terminated, which it copies and does not retain. The runtime is pinned; the
     // caller excludes concurrent access to the path.
-    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetTemplatePath.key(), path) })
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetTemplatePath.key(), path) };
+    // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` is served by `git_sysdir_set` with no level,
+    // and `rc` is what it just returned; the caller excludes concurrent access to the
+    // path.
+    unsafe { sysdir_status(rc, LibraryOption::SetTemplatePath, None) }
 }
 
 /// Sets where libgit2's TLS backend looks for certificate authorities: `file`, one
@@ -1621,7 +1679,9 @@ pub unsafe fn set_odb_loose_priority(priority: c_int) {
 /// with it.
 ///
 /// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// allocated; a copy that fails part-way leaks the names copied until then, which
+/// libgit2 drops without releasing (`git_repository__extensions`) and nothing here
+/// can reach.
 ///
 /// Wraps: git_libgit2_opts
 pub fn extensions() -> Result<StrArrayVal, ErrorBuf> {
@@ -1724,7 +1784,9 @@ pub fn homedir() -> Result<CString, ErrorBuf> {
 /// with `None` resets it to the default libgit2 derives from the environment.
 ///
 /// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when the
-/// copy cannot be allocated.
+/// copy cannot be allocated; the directory is then empty, libgit2 having freed its
+/// previous value before the copy failed (and, left to itself, it would make the
+/// directory unreadable: see `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1739,7 +1801,9 @@ pub unsafe fn set_homedir(path: Option<&CStr>) -> Result<(), ErrorBuf> {
     }
     let path = path.map_or(ptr::null(), CStr::as_ptr);
     // SAFETY: as in `set_template_path`, for `GIT_OPT_SET_HOMEDIR`.
-    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetHomeDir.key(), path) })
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetHomeDir.key(), path) };
+    // SAFETY: as in `set_template_path`, for `GIT_OPT_SET_HOMEDIR`.
+    unsafe { sysdir_status(rc, LibraryOption::SetHomeDir, None) }
 }
 
 /// The timeout for connecting to a remote server, in milliseconds; 0 is the system's.
@@ -1837,7 +1901,75 @@ pub unsafe fn set_pack_max_object_size(size: usize) {
 mod unit_tests {
     use super::*;
     use crate::libgit2::util::errors::ErrorClass;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::set_str;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+    const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+    /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    static REFUSING: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut c_void;
+        fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+        fn free(p: *mut c_void);
+    }
+
+    /// libc's allocator, refusing every request while `REFUSING` is set: a family
+    /// sharing storage with the system allocator.
+    struct Refusable;
+
+    // SAFETY: forwards to libc's `malloc` family unchanged, or fails, which `Alloc`
+    // allows.
+    unsafe impl Alloc for Refusable {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            // SAFETY: plain libc allocation.
+            NonNull::new(unsafe { malloc(len) }.cast())
+        }
+        unsafe fn realloc(
+            p: Option<NonNull<u8>>,
+            len: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+            // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+            NonNull::new(unsafe { realloc(p, len) }.cast())
+        }
+        unsafe fn free(p: NonNull<u8>) {
+            // SAFETY: `p` is a live libc block the caller gives up.
+            unsafe { free(p.as_ptr().cast()) }
+        }
+    }
+
+    static REFUSABLE: Allocator = Allocator::new::<Refusable>();
 
     #[test]
     fn feature_bits_are_distinct_single_bits() {
@@ -2087,6 +2219,47 @@ mod unit_tests {
         })
         .unwrap();
         assert!(agent.to_bytes().starts_with(b"libgit2 "));
+    }
+
+    /// Corrects C: a system directory whose copy failed for want of memory is empty
+    /// and readable, and takes the next copy, where libgit2 leaves it pointing at its
+    /// one-byte out-of-memory sentinel with the old `size` (read past the sentinel's
+    /// end on the next get) and refuses every later copy.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failed_sysdir_copies_are_repaired() {
+        isolated(
+            concat!(module_path!(), "::failed_sysdir_copies_are_repaired"),
+            || {
+                // SAFETY: nothing has initialised libgit2 or allocated through it in
+                // this child, and no other thread runs.
+                unsafe { set_allocator(Some(REFUSABLE.as_ref())) };
+                let short = CString::new("/".repeat(64)).unwrap();
+                let long = CString::new("/".repeat(4096)).unwrap();
+                // SAFETY: this child runs no other thread.
+                unsafe { set_template_path(Some(&short)) }.unwrap();
+                assert_eq!(template_path().unwrap(), short);
+                // Allocates the thread's error state, so the failure reads as out of
+                // memory rather than as missing thread state.
+                // SAFETY: as above.
+                assert!(unsafe { set_server_timeout(-1) }.is_err());
+                REFUSING.store(true, SeqCst);
+                // SAFETY: as above.
+                let failed = unsafe { set_template_path(Some(&long)) }.unwrap_err();
+                REFUSING.store(false, SeqCst);
+                assert_eq!(failed.class(), Some(ErrorClass::NoMemory), "{failed:?}");
+                assert_eq!(template_path().unwrap(), CString::default());
+                // SAFETY: as above.
+                unsafe { set_template_path(Some(&long)) }.unwrap();
+                assert_eq!(template_path().unwrap(), long);
+                // A status of 0 is passed through without touching the directory.
+                // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` is served by `git_sysdir_set`
+                // with no level, and 0 is a status it returns; no other thread runs.
+                let ok = unsafe { sysdir_status(0, LibraryOption::SetTemplatePath, None) };
+                assert_eq!(ok, Ok(()));
+                assert_eq!(template_path().unwrap(), long);
+            },
+        );
     }
 
     #[test]
