@@ -3,8 +3,11 @@
 //! libgit2 passes an object id's type (`git_oid_t`) by value: it names the hash
 //! function behind the id, which fixes the id's size. Values the header does not name
 //! travel through it too: a zeroed `oid_type` field of an options struct means "the
-//! default type" ([`OidType::default`]), and `git_oid.type` stores whatever byte it was
-//! given. So a raw value is converted fallibly ([`OidType::from_raw`]) and never
+//! default type" ([`OidType::default`]), or the repository's type where the call has a
+//! repository (`git_diff_options`); the routines that return a type answer `0` when
+//! they have none (`git_repository_oid_type` without a repository,
+//! `git_remote_oid_type` when it fails); and `git_oid.type` stores whatever byte it
+//! was given. So a raw value is converted fallibly ([`OidType::from_raw`]) and never
 //! transmuted.
 //!
 //! An [`Oid`] is a `git_oid`: a one-byte object-id type (an [`OidType`] value, or 0
@@ -51,9 +54,10 @@ use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 /// many bytes of a `git_oid` hold the id ([`size`](Self::size)) and how many hex
 /// digits format it ([`hex_size`](Self::hex_size)).
 ///
-/// libgit2's parsers reject any value without a variant as an "unknown type", and its
-/// options structs read `0` as [`OidType::default`];
-/// [`from_raw`](Self::from_raw) gives `None` for all of them.
+/// libgit2's parsers reject any value without a variant as an "unknown type"; its
+/// options structs read `0` as [`OidType::default`] (or, with a repository at hand, as
+/// the repository's type), and its routines that return a type answer `0` when they
+/// have none. [`from_raw`](Self::from_raw) gives `None` for all of them.
 ///
 /// Wraps: git_oid_t
 /// Handwritten
@@ -102,7 +106,8 @@ impl OidType {
     }
 }
 
-/// libgit2's default type, `GIT_OID_DEFAULT`: the one a zeroed `oid_type` selects.
+/// libgit2's default type, `GIT_OID_DEFAULT`: the one a zeroed `oid_type` selects
+/// where no repository supplies its own.
 impl Default for OidType {
     fn default() -> Self {
         Self::Sha1
@@ -124,8 +129,8 @@ impl From<OidType> for ffi::git_oid_t {
 }
 
 /// An object id type that this version of libgit2's header does not name: `0`, which
-/// an options struct reads as the default, or a value libgit2 rejects.
-/// [`raw`](Self::raw) has it.
+/// an options struct reads as the default and a routine returns for no repository, or
+/// a value libgit2 rejects. [`raw`](Self::raw) has it.
 ///
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
