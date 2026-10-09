@@ -23,10 +23,19 @@
 //! not say: the shortener carries the lifetime `'s` of those strings, and must not
 //! outlive any of them.
 //!
-//! The `Oid` and `OidShortener` constructors can fail and set the calling thread's
-//! libgit2 error, so they pin libgit2's runtime first (`runtime_pinned`) and return
-//! the error, copied out, as an [`ErrorBuf`].
+//! Oids compare as libgit2 compares them: `Eq` and `Ord` over all 33 bytes, type first
+//! (`memcmp`), and [`OidRef::eq_prefix`], [`OidRef::cmp_hex`] and [`OidRef::eq_hex`]
+//! against a prefix of another oid or a hex string. They format as lowercase hex into
+//! a caller's buffer, whose type or length bounds what libgit2 writes. libgit2's own
+//! string, `git_oid_tostr_s`, is a per-thread buffer that the next call on the thread
+//! overwrites, so [`OidRef::to_hex_string`] copies it out. An oid whose type libgit2
+//! does not know has no hex form: formatting one fails.
+//!
+//! The constructors, the formatters and [`OidShortenerMut::add`] can fail and set the
+//! calling thread's libgit2 error, so they pin libgit2's runtime first
+//! (`runtime_pinned`) and return the error, copied out, as an [`ErrorBuf`].
 
+use core::cmp::Ordering;
 use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::marker::PhantomData;
@@ -143,6 +152,9 @@ impl std::error::Error for UnnamedOidType {}
 
 /// The length of `git_oid.id`, `GIT_OID_MAX_SIZE`.
 const MAX_SIZE: usize = ffi::GIT_OID_MAX_SIZE as usize;
+
+/// The length of the longest hex form of an id, `GIT_OID_MAX_HEXSIZE`.
+const MAX_HEX_SIZE: usize = ffi::GIT_OID_MAX_HEXSIZE as usize;
 
 define_ctype!(
     /// The id of a git object: a commit, tree, blob or tag (`git_oid`).
@@ -349,6 +361,255 @@ impl fmt::Debug for OidRef<'_> {
     }
 }
 
+impl OidRef<'_> {
+    /// Whether `other` has the same type and the same first `len` hex digits; an odd
+    /// `len` compares the high nibble of the last byte. A `len` beyond
+    /// `GIT_OID_MAX_HEXSIZE` compares all 32 id bytes, and 0 only the types.
+    ///
+    /// Wraps: git_oid_ncmp
+    pub fn eq_prefix(&self, other: OidRef<'_>, len: usize) -> bool {
+        // SAFETY: two shared handles to live `git_oid`s, possibly the same one, read for
+        // the call only; libgit2 caps `len` at `GIT_OID_MAX_HEXSIZE` digits, so it reads
+        // at most the 32 id bytes of each.
+        unsafe { ffi::git_oid_ncmp(self.as_ptr(), other.as_ptr(), len) == 0 }
+    }
+
+    /// Whether all 32 id bytes are zero, whatever the type byte holds.
+    ///
+    /// Wraps: git_oid_is_zero
+    pub fn is_zero(&self) -> bool {
+        // SAFETY: a shared handle to a live `git_oid`, of which libgit2 reads the 32 id
+        // bytes for the call only.
+        unsafe { ffi::git_oid_is_zero(self.as_ptr()) != 0 }
+    }
+
+    /// How this id sorts against the hex digits of `hex`, compared byte by byte.
+    ///
+    /// libgit2 compares only as many digits as both have: `hex` may be a prefix (the
+    /// empty string is `Equal` to every id), digits past the id's
+    /// [`hex_size`](OidType::hex_size) are ignored, an odd last digit is compared as a
+    /// byte whose low nibble is zero, and an oid of a type libgit2 does not know is
+    /// `Equal` to everything. A non-hex digit it reaches reads as `Less`: C reports it as
+    /// -1, which a byte difference of -1 also is. Check the string first, with
+    /// [`Oid::from_prefix`], where that matters.
+    ///
+    /// Wraps: git_oid_strcmp
+    pub fn cmp_hex(&self, hex: &CStr) -> Ordering {
+        // SAFETY: a shared handle to a live `git_oid`, of which libgit2 reads at most the
+        // id's size in bytes; `hex` is NUL-terminated, and libgit2 checks for the NUL
+        // before each digit it reads. Neither is retained.
+        let rc = unsafe { ffi::git_oid_strcmp(self.as_ptr(), hex.as_ptr()) };
+        rc.cmp(&0)
+    }
+
+    /// Whether [`cmp_hex`](Self::cmp_hex) finds `hex` equal to this id: `hex` is a hex
+    /// prefix of it (or longer, its extra digits ignored).
+    ///
+    /// Wraps: git_oid_streq
+    pub fn eq_hex(&self, hex: &CStr) -> bool {
+        // SAFETY: as in `cmp_hex`: libgit2 reads at most the id's bytes, and `hex` up to
+        // its NUL; neither is retained.
+        unsafe { ffi::git_oid_streq(self.as_ptr(), hex.as_ptr()) == 0 }
+    }
+
+    /// Formats the id as its [`hex_size`](OidType::hex_size) lowercase hex digits at the
+    /// start of `out`, and returns them; the rest of `out` is left as it was.
+    ///
+    /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
+    /// nothing.
+    ///
+    /// Wraps: git_oid_fmt
+    pub fn format<'b>(&self, out: &'b mut [u8; MAX_HEX_SIZE]) -> Result<&'b str, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        // SAFETY: `out` is valid for writes of `GIT_OID_MAX_HEXSIZE` bytes, the most any
+        // type's hex form takes, and libgit2 writes that form only (none for an unknown
+        // type); the oid is a live `git_oid` read for the call. Neither is retained. The
+        // runtime is pinned, so an unknown type is reported on live thread-local state.
+        let rc = unsafe { ffi::git_oid_fmt(out.as_mut_ptr().cast(), self.as_ptr()) };
+        if rc != 0 {
+            return Err(last());
+        }
+        Ok(hex_str(&out[..self.hex_len()]))
+    }
+
+    /// Formats the first `out.len()` hex digits of the id into `out`, and returns them;
+    /// past the id's [`hex_size`](OidType::hex_size), `out` is zero-filled instead, and
+    /// the digits returned are all of them. Nothing is NUL-terminated otherwise.
+    ///
+    /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
+    /// nothing.
+    ///
+    /// Wraps: git_oid_nfmt
+    pub fn format_prefix<'b>(&self, out: &'b mut [u8]) -> Result<&'b str, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        // SAFETY: `out` is valid for writes of `out.len()` bytes, the count passed, and
+        // libgit2 writes no further (none for an unknown type); the oid is a live
+        // `git_oid` read for the call. Neither is retained. The runtime is pinned.
+        let rc = unsafe { ffi::git_oid_nfmt(out.as_mut_ptr().cast(), out.len(), self.as_ptr()) };
+        if rc != 0 {
+            return Err(last());
+        }
+        let digits = out.len().min(self.hex_len());
+        Ok(hex_str(&out[..digits]))
+    }
+
+    /// Formats the id as a loose-object path, `aa/bbbb…`, at the start of `out`: its
+    /// first two hex digits, a `/`, then the rest, one byte longer than its
+    /// [`hex_size`](OidType::hex_size). Returns it; the rest of `out` is left as it was.
+    ///
+    /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
+    /// nothing.
+    ///
+    /// Wraps: git_oid_pathfmt
+    pub fn format_path<'b>(
+        &self,
+        out: &'b mut [u8; MAX_HEX_SIZE + 1],
+    ) -> Result<&'b str, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        // SAFETY: `out` is valid for writes of `GIT_OID_MAX_HEXSIZE + 1` bytes, the
+        // longest path form, and libgit2 writes that form only (none for an unknown
+        // type); the oid is a live `git_oid` read for the call. Neither is retained. The
+        // runtime is pinned.
+        let rc = unsafe { ffi::git_oid_pathfmt(out.as_mut_ptr().cast(), self.as_ptr()) };
+        if rc != 0 {
+            return Err(last());
+        }
+        Ok(hex_str(&out[..self.hex_len() + 1]))
+    }
+
+    /// Formats the id into `out` as a NUL-terminated string, truncated to
+    /// `out.len() - 1` digits when `out` is shorter than its
+    /// [`hex_size`](OidType::hex_size) plus the NUL, and returns it. An empty `out`
+    /// gives the empty string, writing nothing.
+    ///
+    /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, having
+    /// written only a NUL at the start of `out`: C returns that empty string and leaves
+    /// the error on the thread.
+    ///
+    /// Wraps: git_oid_tostr
+    pub fn format_cstr<'b>(&self, out: &'b mut [u8]) -> Result<&'b CStr, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        // SAFETY: `out` is valid for writes of `out.len()` bytes, the count passed, and
+        // libgit2 writes no further (nothing when it is 0, when it returns its static
+        // empty string instead); the oid is a live `git_oid` read for the call. Neither
+        // is retained. The runtime is pinned.
+        let rc = unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), self.as_ptr()) };
+        if rc.cast_const() != out.as_ptr().cast() {
+            return Ok(c"");
+        }
+        if self.kind().is_none() {
+            return Err(last());
+        }
+        Ok(
+            CStr::from_bytes_until_nul(out)
+                .expect("git_oid_tostr NUL-terminates within its buffer"),
+        )
+    }
+
+    /// The id's hex form, formatted by libgit2 into its per-thread string and copied out
+    /// before that is overwritten.
+    ///
+    /// Fails, with libgit2's error, when libgit2 cannot allocate the string, and for an
+    /// oid of a type libgit2 does not know: C formats nothing then, and returns the
+    /// thread's string as the last call left it, unwritten and unterminated on the
+    /// thread's first call. It is refused here before the call instead, with the
+    /// `GIT_ERROR_INVALID` "unable to parse OID - unknown type" error C sets.
+    ///
+    /// Wraps: git_oid_tostr_s
+    pub fn to_hex_string(&self) -> Result<String, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        if self.kind().is_none() {
+            set(ErrorClass::Invalid, c"unable to parse OID - unknown type");
+            return Err(last());
+        }
+        // SAFETY: the oid is a live `git_oid` of a known type, read for the call, which
+        // libgit2 formats with its NUL into the thread's string of
+        // `GIT_OID_MAX_HEXSIZE + 1` bytes. The runtime is pinned, so that string's TLS
+        // key is live and no shutdown frees it.
+        let s = unsafe { ffi::git_oid_tostr_s(self.as_ptr()) };
+        if s.is_null() {
+            return Err(last());
+        }
+        // SAFETY: `s` is this thread's NUL-terminated string, which only a libgit2 call
+        // on this thread, or its exit, changes or frees; it is copied out before either.
+        let hex = unsafe { CStr::from_ptr(s) };
+        Ok(hex_str(hex.to_bytes()).to_owned())
+    }
+
+    /// The number of hex digits libgit2 formats the id with: its type's
+    /// [`hex_size`](OidType::hex_size), 0 for a type libgit2 does not know.
+    fn hex_len(&self) -> usize {
+        self.kind().map_or(0, OidType::hex_size)
+    }
+}
+
+/// The hex digits libgit2 formatted, as text.
+fn hex_str(digits: &[u8]) -> &str {
+    core::str::from_utf8(digits).expect("libgit2 formats ids as ASCII hex digits")
+}
+
+impl<'b> PartialEq<OidRef<'b>> for OidRef<'_> {
+    /// Whether the two oids are byte for byte the same, type included.
+    ///
+    /// Wraps: git_oid_equal
+    fn eq(&self, other: &OidRef<'b>) -> bool {
+        // SAFETY: two shared handles to live `git_oid`s, possibly the same one, compared
+        // with `memcmp` for the call only.
+        unsafe { ffi::git_oid_equal(self.as_ptr(), other.as_ptr()) != 0 }
+    }
+}
+
+impl Eq for OidRef<'_> {}
+
+impl PartialOrd for OidRef<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OidRef<'_> {
+    /// Orders the two oids as libgit2 does: `memcmp` over all 33 bytes, so by type
+    /// first, then by raw id.
+    ///
+    /// Wraps: git_oid_cmp
+    fn cmp(&self, other: &Self) -> Ordering {
+        // SAFETY: two shared handles to live `git_oid`s, possibly the same one, compared
+        // with `memcmp` for the call only.
+        let rc = unsafe { ffi::git_oid_cmp(self.as_ptr(), other.as_ptr()) };
+        rc.cmp(&0)
+    }
+}
+
+impl PartialEq for Oid {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for Oid {}
+
+impl PartialOrd for Oid {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Oid {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.as_ref().cmp(&other.as_ref())
+    }
+}
+
 impl OidMut<'_> {
     /// Replaces the type.
     ///
@@ -497,7 +758,6 @@ impl<'a, 's> OidShortenerRef<'a, 's> {
 
 impl<'a, 's> OidShortenerMut<'a, 's> {
     /// Writable pointer to the C object, for `git_oid_shorten_add`.
-    #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_oid_shorten {
         self.0.0.as_non_null().as_ptr().cast()
     }
@@ -511,6 +771,75 @@ impl<'a, 's> OidShortenerMut<'a, 's> {
     pub fn as_mut(&mut self) -> OidShortenerMut<'_, 's> {
         OidShortenerMut(self.0, PhantomData)
     }
+
+    /// Adds the hex id `id` to the set, and returns the shortest prefix length, in hex
+    /// digits, that tells apart every id added so far; never below the shortener's
+    /// minimum length, and 41 once an id is added twice.
+    ///
+    /// libgit2 reads the first 40 digits of `id` (a SHA1 id's length) and no further: a
+    /// longer id, such as a SHA256 one, is shortened on those. It keeps pointers into
+    /// them for later additions to read, so `id` is borrowed for the shortener's `'s`.
+    ///
+    /// Fails, with libgit2's error:
+    ///
+    /// - when `id` does not start with 40 hex digits. C validates only the digits it
+    ///   walks before finding a free slot, and keeps the rest for a later addition to
+    ///   index its trie with, writing outside a node for a non-hex one; such an `id` is
+    ///   refused here before the call instead, with the `GIT_ERROR_INVALID` "unable to
+    ///   shorten OID - invalid hex value" error C sets for a non-hex digit it walks;
+    /// - once the trie is full (`SHRT_MAX` nodes, some 20,000 to 30,000 ids), with
+    ///   "unable to shorten OID - OID set full"; every later addition fails the same way.
+    ///
+    /// # Aborts
+    ///
+    /// When libgit2 cannot grow the trie, C keeps NULL in its place, which the next
+    /// addition dereferences; only freeing the shortener stays safe, which a borrowed
+    /// handle cannot enforce. The process is aborted instead, as Rust aborts on an
+    /// allocation failure.
+    ///
+    /// Wraps: git_oid_shorten_add
+    pub fn add(&mut self, id: &'s str) -> Result<usize, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        if !shortenable(id) {
+            set(
+                ErrorClass::Invalid,
+                c"unable to shorten OID - invalid hex value",
+            );
+            return Err(last());
+        }
+        // SAFETY: the exclusive handle's pointer to a live shortener, which nothing else
+        // reaches during the call. libgit2 reads `id[..40]`, all hex digits (checked
+        // above), and keeps pointers into `id[1..=40]` (the last one past the end, never
+        // read), which outlive the shortener: `id` is borrowed for `'s`, which this
+        // handle is invariant in. The runtime is pinned.
+        let rc = unsafe { ffi::git_oid_shorten_add(self.as_mut_ptr(), id.as_ptr().cast()) };
+        if let Ok(len) = usize::try_from(rc) {
+            return Ok(len);
+        }
+        let error = last();
+        // Only a full trie stays usable; any other failure is the lost trie, recorded as
+        // libgit2's out-of-memory error or not at all.
+        if error.class() == Some(ErrorClass::Invalid)
+            && error.message() == c"unable to shorten OID - OID set full"
+        {
+            return Err(error);
+        }
+        eprintln!("git_oid_shorten_add lost its trie to an allocation failure; aborting");
+        std::process::abort()
+    }
+}
+
+/// The digits of an id that `git_oid_shorten_add` reads: a SHA1 id's.
+const SHORTEN_DIGITS: usize = ffi::GIT_OID_SHA1_HEXSIZE as usize;
+
+/// Whether `id` starts with the [`SHORTEN_DIGITS`] hex digits `git_oid_shorten_add`
+/// reads, the alphabet of libgit2's `git__fromhex`.
+fn shortenable(id: &str) -> bool {
+    id.as_bytes()
+        .get(..SHORTEN_DIGITS)
+        .is_some_and(|digits| digits.iter().all(u8::is_ascii_hexdigit))
 }
 
 impl fmt::Debug for OidShortenerRef<'_, '_> {
@@ -908,6 +1237,40 @@ mod unit_tests {
         );
     }
 
+    /// When libgit2 cannot be initialised, every formatter reports C's static "not
+    /// initialized" error without calling into it, whatever the oid's type.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn formatters_without_runtime_fail_cleanly() {
+        isolated(
+            concat!(module_path!(), "::formatters_without_runtime_fail_cleanly"),
+            || {
+                install_refusing();
+                REFUSING.store(true, SeqCst);
+                let mut oid = Oid::zeroed();
+                oid.as_mut().set_kind(OidType::Sha1);
+                let r = oid.as_ref();
+                let mut buf = [b'#'; MAX_HEX_SIZE + 1];
+                let errors = [
+                    r.format((&mut buf[..MAX_HEX_SIZE]).try_into().unwrap())
+                        .map(drop)
+                        .unwrap_err(),
+                    r.format_prefix(&mut buf).map(drop).unwrap_err(),
+                    r.format_path(&mut buf).map(drop).unwrap_err(),
+                    r.format_cstr(&mut buf).map(drop).unwrap_err(),
+                    r.to_hex_string().map(drop).unwrap_err(),
+                ];
+                REFUSING.store(false, SeqCst);
+                assert!(!runtime_pinned(), "libgit2 could not initialise");
+                assert_eq!(buf, [b'#'; MAX_HEX_SIZE + 1]);
+                for e in errors {
+                    assert_eq!(e.class(), Some(ErrorClass::Invalid));
+                    assert_eq!(e.message(), c"library has not been initialized");
+                }
+            },
+        );
+    }
+
     /// An allocation failure in `git_oid_shorten_new` (the struct, or its trie) is
     /// reported as libgit2's out-of-memory error, and nothing is adopted.
     #[test]
@@ -935,6 +1298,194 @@ mod unit_tests {
                 REFUSING_REALLOC.store(false, SeqCst);
                 assert_eq!(err.class(), Some(ErrorClass::NoMemory));
                 drop(OidShortener::new(0).unwrap());
+            },
+        );
+    }
+
+    /// Like [`isolated`], for a body that must end the child with `abort()`.
+    fn isolated_aborts(test: &str, body: fn()) {
+        use std::os::unix::process::ExitStatusExt;
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.signal(),
+            Some(libc::SIGABRT),
+            "child `{name}` did not abort: {:?}\n{}\n{stderr}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(stderr.contains("lost its trie"), "{stderr}");
+    }
+
+    /// The 40-digit check `add` makes before the call, without libgit2.
+    #[test]
+    fn shortenable_ids_start_with_forty_hex_digits() {
+        let hex = SHA1_HEX.to_str().unwrap();
+        assert!(shortenable(hex));
+        assert!(shortenable(&hex.to_uppercase()));
+        assert!(shortenable(&format!("{hex}{hex}")));
+        assert!(shortenable(&format!("{hex}not hex")));
+        assert!(!shortenable(""));
+        assert!(!shortenable(&hex[..39]));
+        for i in 0..SHORTEN_DIGITS {
+            for bad in ['g', 'G', ' ', '\0', '/', ':', '@', '`', 'é'] {
+                let mut id: Vec<char> = hex.chars().collect();
+                id[i] = bad;
+                let id: String = id.into_iter().collect();
+                assert!(!shortenable(&id), "{id:?}");
+            }
+        }
+        assert_eq!(hex_str(b"09af"), "09af");
+    }
+
+    /// `Oid` orders and compares through its shared handle, so sorting values sorts
+    /// as libgit2 does: type first, then the raw id.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn oid_values_order_like_their_handles() {
+        let mut oids: Vec<Oid> = [(2, 0x00), (1, 0xff), (1, 0x10), (0, 0x99), (1, 0x10)]
+            .into_iter()
+            .map(|(kind, first)| {
+                let mut oid = Oid::zeroed();
+                oid.as_mut().set_raw_kind(kind);
+                assert!(oid.as_mut().id_mut().set_elem(0, first));
+                oid
+            })
+            .collect();
+        assert_eq!(oids[2], oids[4]);
+        assert_ne!(oids[1], oids[2]);
+        assert_eq!(oids[2].partial_cmp(&oids[1]), Some(Ordering::Less));
+        assert_eq!(
+            oids[0].as_ref().partial_cmp(&oids[1].as_ref()),
+            Some(Ordering::Greater)
+        );
+        oids.sort();
+        let order: Vec<(u8, u8)> = oids
+            .iter()
+            .map(|o| (o.as_ref().raw_kind(), o.as_ref().id()[0]))
+            .collect();
+        assert_eq!(
+            order,
+            [(0, 0x99), (1, 0x10), (1, 0x10), (1, 0xff), (2, 0x00)]
+        );
+        // Handles of different lifetimes compare.
+        let long = oids[1];
+        let r = long.as_ref();
+        {
+            let short = oids[2];
+            assert!(r == short.as_ref());
+        }
+    }
+
+    /// C's `git_oid_tostr_s` returns its per-thread string unwritten for an unknown
+    /// type, uninitialised and unterminated on the thread's first call; the wrapper
+    /// refuses the type first, with the error C sets.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn to_hex_string_refuses_unknown_types_before_ffi() {
+        std::thread::spawn(|| {
+            for raw in [0, 3, u8::MAX] {
+                let mut oid = Oid::zeroed();
+                oid.as_mut().set_raw_kind(raw);
+                let err = oid.as_ref().to_hex_string().unwrap_err();
+                assert_eq!(err.class(), Some(ErrorClass::Invalid));
+                assert_eq!(err.message(), c"unable to parse OID - unknown type");
+            }
+            let oid = Oid::from_string(SHA1_HEX, OidType::Sha1).unwrap();
+            assert_eq!(
+                oid.as_ref().to_hex_string().unwrap(),
+                SHA1_HEX.to_str().unwrap()
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// libgit2 cannot allocate a thread's string: its error, and the next call on the
+    /// thread allocates it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn to_hex_string_out_of_memory_is_an_error() {
+        isolated(
+            concat!(module_path!(), "::to_hex_string_out_of_memory_is_an_error"),
+            || {
+                install_refusing();
+                assert!(runtime_pinned());
+                std::thread::spawn(|| {
+                    // Allocate the thread's error state before allocations start failing.
+                    set(ErrorClass::Invalid, c"primed");
+                    let oid = Oid::from_string(SHA1_HEX, OidType::Sha1).unwrap();
+                    REFUSING.store(true, SeqCst);
+                    let err = oid.as_ref().to_hex_string().unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert_eq!(err.class(), Some(ErrorClass::NoMemory));
+                    assert_eq!(
+                        oid.as_ref().to_hex_string().unwrap(),
+                        SHA1_HEX.to_str().unwrap()
+                    );
+                })
+                .join()
+                .unwrap();
+            },
+        );
+    }
+
+    /// `add` refuses ids C would store and later index its trie out of bounds with,
+    /// and the shortener stays as it was.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn add_refuses_malformed_ids_before_ffi() {
+        let hex = SHA1_HEX.to_str().unwrap();
+        let mut bad_tail = hex.to_owned();
+        bad_tail.replace_range(39.., "g");
+        let malformed = ["", "a", "ab", &hex[..39], &bad_tail, "zz"];
+        let mut b = OidShortener::new(0).unwrap();
+        for id in malformed {
+            let err = b.as_mut().add(id).unwrap_err();
+            assert_eq!(err.class(), Some(ErrorClass::Invalid));
+            assert_eq!(err.message(), c"unable to shorten OID - invalid hex value");
+        }
+        assert_eq!(b.as_mut().add(hex), Ok(1));
+        assert_eq!(
+            b.as_mut().add("a94b000000000000000000000000000000000000"),
+            Ok(4)
+        );
+        assert_eq!(b.as_mut().add(hex), Ok(41));
+    }
+
+    /// A trie libgit2 could not grow is NULL in C, and the next addition would
+    /// dereference it: `add` aborts instead of returning.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn add_aborts_when_the_trie_cannot_grow() {
+        isolated_aborts(
+            concat!(module_path!(), "::add_aborts_when_the_trie_cannot_grow"),
+            || {
+                install_refusing();
+                assert!(runtime_pinned());
+                set(ErrorClass::Invalid, c"primed");
+                let ids: Vec<String> = "0123456789abcdef"
+                    .chars()
+                    .map(|c| format!("{c}{}", &SHA1_HEX.to_str().unwrap()[1..]))
+                    .collect();
+                let mut b = OidShortener::new(0).unwrap();
+                REFUSING_REALLOC.store(true, SeqCst);
+                // The trie starts with 16 nodes, the root among them: the 16th leaf
+                // needs it grown.
+                for id in &ids[..15] {
+                    assert_eq!(b.as_mut().add(id), Ok(1));
+                }
+                let _ = b.as_mut().add(&ids[15]);
+                unreachable!("add returned with the trie lost");
             },
         );
     }

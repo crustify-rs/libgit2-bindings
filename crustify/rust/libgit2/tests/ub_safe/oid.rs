@@ -11,17 +11,24 @@
 //! `git_oid_from_raw` and its copy over `git_oid_cpy`, and the `OidShortener` owner
 //! over `git_oid_shorten_new` / `git_oid_shorten_free`.
 //!
-//! Inputs sit in exact-length heap buffers, so ASan flags any read libgit2 makes past
-//! them.
+//! Then the symbols: comparisons (`git_oid_cmp`, `_equal`, `_ncmp`, `_is_zero`,
+//! `_strcmp`, `_streq`), formatters (`git_oid_fmt`, `_nfmt`, `_pathfmt`, `_tostr`,
+//! `_tostr_s`) and `OidShortenerMut::add` (`git_oid_shorten_add`), whose shortener keeps
+//! pointers into the ids it is given.
+//!
+//! Inputs and outputs sit in exact-length heap buffers, so ASan flags any access
+//! libgit2 makes past them.
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::hint::black_box;
 use std::thread;
 
+use std::cmp::Ordering;
+
 use ffibox::CZeroable;
 use libgit2::ffi;
-use libgit2::libgit2::oid::oid::{Oid, OidShortener, OidShortenerBox, OidType};
+use libgit2::libgit2::oid::oid::{Oid, OidShortener, OidShortenerBox, OidShortenerMut, OidType};
 use libgit2::libgit2::util::errors::ErrorClass;
 
 use crate::fixture::isolated;
@@ -342,4 +349,286 @@ fn shortener_lifetime_follows_its_strings() {
     let shortener: OidShortenerBox<'_> = OidShortener::new(borrowed.to_bytes().len()).unwrap();
     drop(shortener);
     drop(text);
+}
+
+/// Oids of every kind a wrapper must accept: both types, unknown type bytes, the
+/// zero id, each in a heap allocation of exactly its 33 bytes.
+// Boxed on purpose: ASan then sees each oid's own bounds.
+#[allow(clippy::vec_box)]
+fn sample_oids() -> Vec<Box<Oid>> {
+    let mut v = Vec::new();
+    for (kind, hex) in [(OidType::Sha1, SHA1_HEX), (OidType::Sha256, SHA256_HEX)] {
+        v.push(Box::new(Oid::from_prefix(hex.as_bytes(), kind).unwrap()));
+        v.push(Box::new(Oid::from_prefix(b"0", kind).unwrap()));
+    }
+    for raw in [0, 3, u8::MAX] {
+        let mut oid = Oid::zeroed();
+        oid.as_mut().set_raw_kind(raw);
+        oid.as_mut().set_id([0xc5; 32]);
+        v.push(Box::new(oid));
+    }
+    v.push(Box::new(Oid::zeroed()));
+    v
+}
+
+/// Hex strings of every length up to past the longest id, odd ones included, and with
+/// a bad digit at either end, each in an exact `len + 1` heap buffer.
+fn sample_hex() -> Vec<CString> {
+    let mut v: Vec<CString> = (0..=SHA256_HEX.len() + 2)
+        .map(|n| CString::new(SHA256_HEX.repeat(2)[..n].to_owned()).unwrap())
+        .collect();
+    v.push(CString::new(SHA1_HEX).unwrap());
+    v.push(CString::new(SHA1_HEX.to_uppercase()).unwrap());
+    v.push(CString::new(format!("z{}", &SHA1_HEX[1..])).unwrap());
+    v.push(CString::new(format!("{}z", &SHA1_HEX[..39])).unwrap());
+    v
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn comparisons_read_within_their_operands() {
+    let oids = sample_oids();
+    let hexes = sample_hex();
+    for a in &oids {
+        let a = a.as_ref().as_ref();
+        let _ = black_box(a.is_zero());
+        for b in &oids {
+            let b = b.as_ref().as_ref();
+            assert_eq!(a == b, a.cmp(&b) == Ordering::Equal);
+            assert_eq!(a.cmp(&b), b.cmp(&a).reverse());
+            for len in [0, 1, 2, 39, 40, 41, 63, 64, 65, 1000, usize::MAX] {
+                let _ = black_box(a.eq_prefix(b, len));
+            }
+        }
+        // An oid aliasing itself.
+        assert!(a == a && a.eq_prefix(a, usize::MAX));
+        for hex in &hexes {
+            assert_eq!(a.eq_hex(hex), a.cmp_hex(hex) == Ordering::Equal);
+        }
+    }
+}
+
+/// Every formatter, for every kind of oid, into exact-length heap buffers of every
+/// size around the hex forms: nothing is written past them, and what comes back is
+/// within them.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn formatters_write_within_exact_buffers() {
+    for oid in sample_oids() {
+        let r = oid.as_ref().as_ref();
+        let hex_size = r.kind().map(OidType::hex_size);
+
+        let mut full = Box::new([b'#'; 64]);
+        match r.format(&mut full) {
+            Ok(hex) => assert_eq!(Some(hex.len()), hex_size),
+            Err(_) => assert_eq!(hex_size, None),
+        }
+        let mut path = Box::new([b'#'; 65]);
+        match r.format_path(&mut path) {
+            Ok(p) => assert_eq!(Some(p.len() - 1), hex_size),
+            Err(_) => assert_eq!(hex_size, None),
+        }
+        for n in 0..=70 {
+            let mut out = vec![b'#'; n].into_boxed_slice();
+            match r.format_prefix(&mut out) {
+                Ok(hex) => {
+                    let hex_size = hex_size.unwrap();
+                    assert_eq!(hex.len(), n.min(hex_size));
+                    assert!(out[n.min(hex_size)..].iter().all(|&b| b == 0));
+                }
+                Err(_) => {
+                    assert_eq!(hex_size, None);
+                    assert!(out.iter().all(|&b| b == b'#'));
+                }
+            }
+            let mut out = vec![b'#'; n].into_boxed_slice();
+            match r.format_cstr(&mut out) {
+                Ok(s) => assert_eq!(
+                    s.to_bytes().len(),
+                    n.saturating_sub(1).min(hex_size.unwrap_or(0))
+                ),
+                Err(_) => {
+                    assert_eq!(hex_size, None);
+                    assert_eq!(out[0], 0);
+                }
+            }
+        }
+    }
+}
+
+/// `git_oid_tostr_s`'s per-thread string is uninitialised on a thread's first call,
+/// which an unknown type returns unwritten; each thread's copy is its own.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn thread_strings_are_copied_out_on_every_thread() {
+    let oids = sample_oids();
+    let refs: Vec<_> = oids.iter().map(|o| o.as_ref().as_ref()).collect();
+    thread::scope(|s| {
+        for t in 0..6 {
+            let refs = &refs;
+            s.spawn(move || {
+                // Unknown types first, on a fresh thread string.
+                for r in refs
+                    .iter()
+                    .rev()
+                    .chain(refs.iter())
+                    .cycle()
+                    .skip(t)
+                    .take(40)
+                {
+                    match r.to_hex_string() {
+                        Ok(hex) => assert_eq!(Some(hex.len()), r.kind().map(OidType::hex_size)),
+                        Err(e) => {
+                            assert!(r.kind().is_none());
+                            assert_eq!(e.message(), c"unable to parse OID - unknown type");
+                        }
+                    }
+                    // Other libgit2 calls on the thread in between.
+                    let mut buf = [0; 64];
+                    let _ = r.format(&mut buf);
+                }
+            });
+        }
+    });
+}
+
+/// The formatters as the first libgit2 call in the process: failures are reported on
+/// initialised thread state.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn formatters_before_init_pin_the_runtime() {
+    isolated(
+        concat!(module_path!(), "::formatters_before_init_pin_the_runtime"),
+        || {
+            let unknown = Oid::zeroed();
+            let mut buf = [0; 64];
+            let err = unknown.as_ref().format(&mut buf).unwrap_err();
+            assert_eq!(err.class(), Some(ErrorClass::Invalid));
+            assert!(unknown.as_ref().format_prefix(&mut buf).is_err());
+            assert!(unknown.as_ref().format_cstr(&mut buf).is_err());
+            assert!(unknown.as_ref().format_path(&mut [0; 65]).is_err());
+            assert!(unknown.as_ref().to_hex_string().is_err());
+        },
+    );
+}
+
+/// Deterministic, distinct-looking 40-digit hex ids.
+fn random_ids(n: usize, mut seed: u64) -> Vec<Box<str>> {
+    (0..n)
+        .map(|_| {
+            let mut id = String::with_capacity(40);
+            while id.len() < 40 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                id.push_str(&format!("{:016x}", seed));
+            }
+            id.truncate(40);
+            id.into_boxed_str()
+        })
+        .collect()
+}
+
+/// Ids in exact 40-byte heap buffers, no NUL after them: libgit2 reads, and keeps
+/// pointers into, no more than that (ASan), and the result never shrinks.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn add_reads_forty_digits_of_ids_it_keeps() {
+    let mut ids = random_ids(600, 0x9e37_79b9_7f4a_7c15);
+    // Shared prefixes of every length, duplicates, and longer ids.
+    for k in [1, 4, 20, 38, 39] {
+        let mut id = ids[0].to_string();
+        let flip = if &id[k..=k] == "0" { "1" } else { "0" };
+        id.replace_range(k..=k, flip);
+        ids.push(id.into_boxed_str());
+    }
+    ids.push(ids[1].clone());
+    ids.push(SHA256_HEX.into());
+    ids.push(SHA1_HEX.to_uppercase().into_boxed_str());
+    let mut b = OidShortener::new(4).unwrap();
+    let mut last = 0;
+    for id in &ids {
+        let len = b.as_mut().add(id).unwrap();
+        assert!((last..=41).contains(&len), "{len} after {last}");
+        last = len;
+    }
+    assert_eq!(last, 41);
+    drop(b);
+    drop(ids);
+}
+
+/// No id the wrapper refuses reaches C: a shortener that saw them answers as one that
+/// did not.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn malformed_ids_leave_the_shortener_untouched() {
+    let good = random_ids(64, 7);
+    let mut malformed: Vec<String> = Vec::new();
+    for i in 0..40 {
+        let mut id = good[0].to_string();
+        id.replace_range(i..=i, "x");
+        malformed.push(id);
+        malformed.push(good[1][..i].to_owned());
+    }
+    let mut clean = OidShortener::new(0).unwrap();
+    let mut probed = OidShortener::new(0).unwrap();
+    for id in &good {
+        for bad in &malformed {
+            assert!(probed.as_mut().add(bad).is_err());
+        }
+        assert_eq!(probed.as_mut().add(id), clean.as_mut().add(id));
+    }
+}
+
+/// Filling the trie to libgit2's limit: the last additions fail, the shortener stays
+/// usable for further (failing) additions and is freed once.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+#[cfg_attr(
+    bsan,
+    ignore = "tens of thousands of additions stall BorrowSanitizer; the other variants run it"
+)]
+fn a_full_shortener_keeps_failing_safely() {
+    let ids = random_ids(40_000, 0x2545_f491_4f6c_dd1d);
+    let mut b = OidShortener::new(0).unwrap();
+    let mut added = 0;
+    let err = loop {
+        match b.as_mut().add(&ids[added]) {
+            Ok(_) => added += 1,
+            Err(e) => break e,
+        }
+    };
+    assert!(added > 10_000, "{added}");
+    assert_eq!(err.class(), Some(ErrorClass::Invalid));
+    assert_eq!(err.message(), c"unable to shorten OID - OID set full");
+    for id in &ids[added..added + 8] {
+        assert_eq!(b.as_mut().add(id).unwrap_err(), err);
+    }
+    assert!(b.as_mut().add("zz").is_err());
+}
+
+/// The shortener only reads the ids it keeps: Rust reads them between additions
+/// (BorrowSanitizer checks the retained pointers against these reborrows), and an
+/// owner moved to another thread keeps adding (TSan checks the `Send` claim).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn kept_ids_are_shared_with_rust_readers() {
+    let ids = random_ids(64, 99);
+    let mut b = OidShortener::new(0).unwrap();
+    for (i, id) in ids.iter().enumerate().take(32) {
+        b.as_mut().add(id).unwrap();
+        let total: usize = ids[..=i].iter().map(|s| s.as_bytes()[39] as usize).sum();
+        assert!(total > 0);
+    }
+    let ids = &ids;
+    thread::scope(|s| {
+        s.spawn(move || {
+            let mut m: OidShortenerMut<'_, '_> = b.as_mut();
+            for id in &ids[32..] {
+                assert!(m.add(id).unwrap() >= 1);
+            }
+            drop(b);
+        });
+        s.spawn(move || ids.iter().map(|id| id.len()).sum::<usize>());
+    });
 }

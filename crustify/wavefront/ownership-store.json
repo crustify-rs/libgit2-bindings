@@ -741,6 +741,46 @@
    ]
   },
   {
+   "name": "git_oid_cmp",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "a",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "memcmp over the whole sizeof(git_oid) (type byte first, then all 32 id bytes); read for the call only. Any byte pattern is accepted; may alias b."
+     }
+    },
+    {
+     "name": "b",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As a; may alias a."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_oid_cpy",
    "defined_in": "src/libgit2/oid.c",
    "lifetime": {
@@ -786,6 +826,86 @@
       "nullable": false,
       "mutable": false,
       "note": "memcpy source, read for the call only; must not overlap out (memcpy)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_equal",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "a",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "memcmp over the whole git_oid, == 0; read for the call only; may alias b."
+     }
+    },
+    {
+     "name": "b",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As a."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_fmt",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Type selects the hex size; unknown type -> GIT_ERROR_INVALID 'unable to parse OID - unknown type', -1, nothing written (sets the thread error, so the runtime must be initialised)."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller buffer of at least git_oid_hexsize(type) bytes (40/64); exactly that many hex digits written, no NUL. Untouched when the type is unknown."
      }
     }
    ]
@@ -939,6 +1059,149 @@
    ]
   },
   {
+   "name": "git_oid_is_zero",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads the 32 id bytes only (memcmp against a zero array); the type byte is ignored."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_ncmp",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid_a",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Types compared first (returns their difference); then the first len hex digits of id, len capped at GIT_OID_MAX_HEXSIZE so at most 32 bytes are read. Returns 0 on match, 1 or the type difference otherwise (not an ordering)."
+     }
+    },
+    {
+     "name": "oid_b",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As oid_a."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_nfmt",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL is accepted (zero-fills str). Unknown type -> -1 with GIT_ERROR_INVALID 'unable to parse OID - unknown type'."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Counted buffer of n bytes: the first min(n, hexsize) are hex digits, the rest (when n > hexsize) zeroed; no NUL added otherwise. With oid NULL all n bytes are zeroed. Untouched when the type is unknown."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_pathfmt",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Unknown type -> -1 with GIT_ERROR_INVALID 'unable to parse OID - unknown type'."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller buffer of at least hexsize + 1 bytes (41/65): two digits, '/', the remaining hexsize - 2 digits; no NUL. Untouched when the type is unknown."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_oid_shorten_add",
    "defined_in": "src/libgit2/oid.c",
    "ptr_args": [
@@ -956,7 +1219,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Mutated in place (trie grown via resize_trie/push_leaf, min_length raised, `full` set at SHRT_MAX nodes). Dereferenced unconditionally. After a failed resize nodes is NULL and a further add crashes."
+      "note": "Mutated in place (trie grown via resize_trie/push_leaf, min_length raised, `full` set at SHRT_MAX nodes). Dereferenced unconditionally. After a failed resize nodes is NULL and a further add crashes. The failed resize (OOM, GIT_ERROR_NOMEMORY) is the only way into the NULL-nodes state; 'OID set full' leaves the trie intact and every later add fails early."
      }
     },
     {
@@ -971,7 +1234,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "RETAINED: push_leaf stores &text_oid[i+1] as a leaf tail that later adds read, so the string must outlive the shortener (despite the header's 'owned by the user'). NULL returns min_length without reading. Only the characters walked are validated: a short or non-hex id is stored as a tail whose first char later gives git__fromhex == -1, and push_leaf then writes node->children[-1], corrupting the preceding trie node without any sanitizer report. Callers must pass full 40-char hex ids."
+      "note": "RETAINED: push_leaf stores &text_oid[i+1] as a leaf tail that later adds read, so the string must outlive the shortener (despite the header's 'owned by the user'). NULL returns min_length without reading. Only the characters walked are validated: a short or non-hex id is stored as a tail whose first char later gives git__fromhex == -1, and push_leaf then writes node->children[-1], corrupting the preceding trie node without any sanitizer report. Callers must pass full 40-char hex ids. Only text_oid[0..40) is ever read (the walk stops at i < GIT_OID_SHA1_HEXSIZE and a leaf at depth d holds &text[d], converted only at d <= 39), so no NUL is needed once 40 hex bytes are present; a stored tail may be the one-past pointer &text[40], never dereferenced."
      }
     }
    ]
@@ -1029,6 +1292,173 @@
      "nullable": true,
      "mutable": true,
      "note": "Fresh git__calloc'd shortener with a 16-node zeroed trie, node_count 1; released by git_oid_shorten_free. NULL on allocation failure, or when min_length does not round-trip through int (GIT_ASSERT_ARG_WITH_RETVAL: error set in release builds, assert(3) abort in _DEBUG builds)."
+    }
+   }
+  },
+  {
+   "name": "git_oid_strcmp",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid_a",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads up to git_oid_size(type) id bytes; an unknown type has size 0, so every string compares equal."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated hex, read two digits per id byte until its NUL or the oid's size; an odd last digit is compared as the high nibble with a zero low nibble. Returns -1 at a non-hex digit it reads, which is indistinguishable from a byte difference of -1; characters past the id's size are never read."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_streq",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid_a",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As git_oid_strcmp."
+     }
+    },
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As git_oid_strcmp: 0 when strcmp is 0 (so a prefix, or the empty string, matches), -1 otherwise."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_oid_tostr",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL formats as \"\" (out[0] = NUL). Unknown type: empty string plus the 'unknown type' thread error."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Counted buffer of n bytes: min(n - 1, hexsize) digits then a NUL. NULL or n == 0 returns a static \"\" without writing. An unknown type writes only out[0] = NUL (nfmt's error is set and ignored)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:out"
+     },
+     "nullable": false,
+     "mutable": true,
+     "note": "Returns out itself, NUL-terminated within n, or the static string literal \"\" (must not be written) when out is NULL or n is 0."
+    }
+   }
+  },
+  {
+   "name": "git_oid_tostr_s",
+   "defined_in": "src/libgit2/oid.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Formatted with nfmt into the thread buffer; an unknown type makes nfmt fail WITHOUT writing, and the stale buffer (uninitialised and unterminated on the thread's first call: ASan heap-buffer-overflow in strlen) is returned anyway, with the 'unknown type' error set."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "global"
+     },
+     "nullable": true,
+     "mutable": true,
+     "note": "Per-thread buffer of GIT_OID_MAX_HEXSIZE + 1 bytes under thread_str_key, git__malloc'd on the thread's first call (NULL + OOM error on failure). Owned by libgit2: overwritten by the next git_oid_tostr_s on the same thread (also called internally by checkout/refs/odb code), freed at thread exit or by the shutdown hook. Copy it out before any other libgit2 call."
     }
    }
   },

@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `id` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/oid_shortener_add_then_mutate_id.rs:9:5
+   |
+ 8 |     shortener.as_mut().add(&id).unwrap();
+   |                            --- immutable borrow occurs here
+ 9 |     id.replace_range(..1, "b");
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     shortener.as_mut().add("a94a8fe5ccb19ba61c4c0873d391e987982fbbd4").unwrap();
+   |     --------- immutable borrow later used here
