@@ -5,6 +5,7 @@
 mod buffer;
 mod common;
 mod errors;
+mod global;
 mod oid;
 mod oidarray;
 mod strarray;

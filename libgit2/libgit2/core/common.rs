@@ -14,12 +14,45 @@
 //! A [`LibraryOption`] is a `git_libgit2_opt_t`, the key `git_libgit2_opts`
 //! dispatches on; it refuses any other key, so a raw key is converted fallibly too
 //! ([`LibraryOption::from_raw`], [`LibraryOption::from_key`]).
+//!
+//! [`version`], [`prerelease`] and [`features`] answer from constants compiled into
+//! the loaded libgit2.so, so they need no initialisation.
+//!
+//! # Global options
+//!
+//! `git_libgit2_opts(key, ...)` sets or queries one of libgit2's global settings per
+//! key, a variadic call whose arguments the key decides; each key has a wrapper here.
+//! The settings are plain globals that libgit2's other routines read without
+//! synchronisation (pack windows, object caches, timeouts, search paths, the
+//! `User-Agent`), and the string settings free the string they replace while an HTTP
+//! transport may be reading it. So every setter is `unsafe`: no other thread may call
+//! into libgit2 while it runs. Nothing but those setters writes the settings, so the
+//! getters are safe — except [`cached_memory`], whose read of the cache size races
+//! the caches updating it.
+//!
+//! The keys that allocate or report an error (the strings, the search paths, the
+//! extensions, the TLS settings, the timeouts) pin libgit2's runtime first
+//! (`runtime_pinned`), which initialises libgit2: before initialisation its allocator
+//! fails every request, and its error state has no TLS key. Being pinned for good, the
+//! runtime is also never shut down under a string they set — libgit2 frees those
+//! strings at its last shutdown without forgetting them, so a later initialisation
+//! would read and free them again. The plain numbers and switches need no runtime, and
+//! [`set_allocator`] must not initialise one: it is meant to run first. Failures
+//! return libgit2's error, copied out, as an [`ErrorBuf`].
 
-use core::ffi::c_int;
+use core::ffi::{CStr, c_char, c_int, c_ulong, c_void};
 use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
+use core::ptr::{self, NonNull};
+use core::slice;
+use std::ffi::CString;
 
 use crate::ffi;
+use crate::libgit2::core::strarray::{StrArray, StrArrayVal};
+use crate::libgit2::core::types::ObjectType;
+use crate::libgit2::util::errors::{ErrorBuf, last};
+use crate::libgit2::util::sys::alloc::AllocatorRef;
+use crate::libgit2::util::sys::errors::runtime_pinned;
 
 /// One configurable feature of libgit2: an optional setting (threading, say), or a
 /// capability that one of several backend providers supplies (HTTPS, through
@@ -696,9 +729,1115 @@ impl fmt::Display for UnnamedLibraryOption {
 
 impl std::error::Error for UnnamedLibraryOption {}
 
+// --- Version -------------------------------------------------------------------------
+
+/// The version of the libgit2 library in use: `major.minor.revision`, as
+/// `git_libgit2_version` reports it.
+///
+/// It is the version of the loaded libgit2.so, which may differ from the headers this
+/// crate was generated from (`ffi::LIBGIT2_VERSION_*`). It displays as
+/// `major.minor.revision`; [`prerelease`] has the rest of the version.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Version {
+    /// The major version number.
+    pub major: c_int,
+    /// The minor version number.
+    pub minor: c_int,
+    /// The revision (patch) number.
+    pub revision: c_int,
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.revision)
+    }
+}
+
+/// The version of the libgit2 library in use.
+///
+/// libgit2 answers from constants compiled into it, so this needs no initialisation
+/// and cannot fail.
+///
+/// Wraps: git_libgit2_version
+pub fn version() -> Version {
+    let (mut major, mut minor, mut revision) = (0, 0, 0);
+    // SAFETY: three out-parameters, each a live `int` local, written once and not
+    // retained; the routine reads no other state and always returns 0.
+    unsafe { ffi::git_libgit2_version(&raw mut major, &raw mut minor, &raw mut revision) };
+    Version {
+        major,
+        minor,
+        revision,
+    }
+}
+
+/// The prerelease state of the libgit2 library in use: `"alpha"` for nightly builds,
+/// `"beta"` or a release candidate (`"rc1"`, ...) for prereleases, and `None` for a
+/// final release.
+///
+/// libgit2 returns a string literal of its own, which lives as long as libgit2.so
+/// stays loaded: this crate links it for the life of the process. Needs no
+/// initialisation.
+///
+/// Wraps: git_libgit2_prerelease
+pub fn prerelease() -> Option<&'static CStr> {
+    // SAFETY: no arguments, no state read.
+    let s = unsafe { ffi::git_libgit2_prerelease() };
+    // SAFETY: a non-NULL result is `LIBGIT2_VERSION_PRERELEASE`, a NUL-terminated
+    // literal in libgit2.so's read-only data, never written or freed while the library
+    // is loaded, which it is for the rest of the process.
+    (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
+}
+
+/// The features compiled into the libgit2 library in use.
+///
+/// The set keeps any bit a later libgit2 adds that this crate's [`Feature`] does not
+/// name. Needs no initialisation.
+///
+/// Wraps: git_libgit2_features
+pub fn features() -> Features {
+    // SAFETY: no arguments; the routine ORs compile-time constants.
+    Features::from_bits_retain(unsafe { ffi::git_libgit2_features() })
+}
+
+// --- Options -------------------------------------------------------------------------
+//
+// `git_libgit2_opts(key, ...)` is one variadic entry point per setting; each wrapper
+// below is one key, with the argument types that key reads.
+
+/// `git_libgit2_opts` with a key whose only argument is a `size_t *` it writes.
+///
+/// # Safety
+///
+/// `key` must read exactly one `size_t *` and write a `size_t` through it.
+unsafe fn get_size(key: LibraryOption) -> usize {
+    let mut value = 0usize;
+    // SAFETY: per this function's contract, `key` reads one `size_t *`, a live local
+    // here, writes through it and keeps no pointer to it.
+    let rc = unsafe { ffi::git_libgit2_opts(key.key(), &raw mut value) };
+    debug_assert_eq!(rc, 0, "{key:?} cannot fail");
+    value
+}
+
+/// `git_libgit2_opts` with a key whose only argument is an `int *` it writes.
+///
+/// # Safety
+///
+/// `key` must read exactly one `int *` and write an `int` through it.
+unsafe fn get_int(key: LibraryOption) -> c_int {
+    let mut value: c_int = 0;
+    // SAFETY: per this function's contract, `key` reads one `int *`, a live local
+    // here, writes through it and keeps no pointer to it.
+    let rc = unsafe { ffi::git_libgit2_opts(key.key(), &raw mut value) };
+    debug_assert_eq!(rc, 0, "{key:?} cannot fail");
+    value
+}
+
+/// `git_libgit2_opts` with a key whose only argument is a `size_t` it stores.
+///
+/// # Safety
+///
+/// `key` must read exactly one `size_t` and store it in a global that no other thread
+/// accesses while this runs.
+unsafe fn set_size(key: LibraryOption, value: usize) {
+    // SAFETY: per this function's contract, `key` reads one `size_t` and the global
+    // it writes is not accessed concurrently.
+    let rc = unsafe { ffi::git_libgit2_opts(key.key(), value) };
+    debug_assert_eq!(rc, 0, "{key:?} cannot fail");
+}
+
+/// `git_libgit2_opts` with a key whose only argument is an `int` it stores.
+///
+/// # Safety
+///
+/// `key` must read exactly one `int` and store it (or whether it is non-zero) in a
+/// global that no other thread accesses while this runs, without failing.
+unsafe fn set_int(key: LibraryOption, value: c_int) {
+    // SAFETY: per this function's contract, `key` reads one `int` and the global it
+    // writes is not accessed concurrently.
+    let rc = unsafe { ffi::git_libgit2_opts(key.key(), value) };
+    debug_assert_eq!(rc, 0, "{key:?} cannot fail");
+}
+
+/// A status `git_libgit2_opts` returned: `Ok` for 0, the thread's libgit2 error for a
+/// negative one. Only for keys that run with the runtime pinned.
+fn status(rc: c_int) -> Result<(), ErrorBuf> {
+    if rc < 0 { Err(last()) } else { Ok(()) }
+}
+
+/// Runs `fill` on a fresh, zeroed `git_buf` and returns what it left there, copied
+/// out, disposing the buffer either way; `fill`'s failure is the thread's libgit2
+/// error. Pins the runtime first.
+///
+/// `fill` hands the buffer to a `git_libgit2_opts` key that writes a `git_buf *`.
+fn buf_string(fill: impl FnOnce(*mut ffi::git_buf) -> c_int) -> Result<CString, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut buf = ffi::git_buf {
+        ptr: ptr::null_mut(),
+        reserved: 0,
+        size: 0,
+    };
+    let rc = fill(&raw mut buf);
+    let out = if rc < 0 {
+        Err(last())
+    } else if buf.ptr.is_null() {
+        Ok(CString::default())
+    } else {
+        // SAFETY: libgit2 filled the buffer (`git_buf_fromstr`): `ptr` addresses `size`
+        // bytes followed by a NUL, in its allocator or in its static empty string, and
+        // stays valid until the dispose below.
+        let bytes = unsafe { slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size + 1) };
+        Ok(CStr::from_bytes_until_nul(bytes).map_or_else(|_| CString::default(), CStr::to_owned))
+    };
+    // SAFETY: `buf` is zeroed or as libgit2 left it, so it owns `ptr` exactly when
+    // `reserved > 0`, which is what `git_buf_dispose` frees; the runtime is pinned,
+    // so `git__free` reads an initialised allocator. Nothing reads `buf` afterwards.
+    unsafe { ffi::git_buf_dispose(&raw mut buf) };
+    out
+}
+
+/// A configuration level whose search path libgit2 keeps ([`search_path`],
+/// [`set_search_path`]): the three of `git_config_level_t` that name a file outside
+/// any repository.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum SearchPathLevel {
+    /// The system-wide configuration, typically `/etc/gitconfig`
+    /// (`GIT_CONFIG_LEVEL_SYSTEM`).
+    System = ffi::GIT_CONFIG_LEVEL_SYSTEM,
+    /// The XDG configuration, typically `~/.config/git/config`
+    /// (`GIT_CONFIG_LEVEL_XDG`).
+    Xdg = ffi::GIT_CONFIG_LEVEL_XDG,
+    /// The user's global configuration, typically `~/.gitconfig`
+    /// (`GIT_CONFIG_LEVEL_GLOBAL`).
+    Global = ffi::GIT_CONFIG_LEVEL_GLOBAL,
+}
+
+impl SearchPathLevel {
+    /// The `git_config_level_t` value, as `git_libgit2_opts` reads it.
+    pub const fn raw(self) -> ffi::git_config_level_t {
+        self as ffi::git_config_level_t
+    }
+}
+
+/// The current and the allowed number of bytes in libgit2's object caches, across
+/// every repository ([`cached_memory`]).
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CachedMemory {
+    /// Bytes held in the caches now.
+    pub current: isize,
+    /// Bytes the caches may hold before libgit2 starts evicting
+    /// ([`set_cache_max_size`]).
+    pub allowed: isize,
+}
+
+/// The maximum size of an mmap window into a pack file, in bytes.
+///
+/// Wraps: git_libgit2_opts
+pub fn mwindow_size() -> usize {
+    // SAFETY: `GIT_OPT_GET_MWINDOW_SIZE` writes one `size_t` through one `size_t *`.
+    // Its global is written only by `set_mwindow_size`, whose caller excludes this.
+    unsafe { get_size(LibraryOption::GetMwindowSize) }
+}
+
+/// Sets the maximum size of an mmap window into a pack file, in bytes.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_mwindow_size(size: usize) {
+    // SAFETY: `GIT_OPT_SET_MWINDOW_SIZE` reads one `size_t`; the caller excludes
+    // concurrent access to its global.
+    unsafe { set_size(LibraryOption::SetMwindowSize, size) }
+}
+
+/// The maximum number of bytes libgit2 maps from pack files at any time, in total.
+///
+/// Wraps: git_libgit2_opts
+pub fn mwindow_mapped_limit() -> usize {
+    // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_MWINDOW_MAPPED_LIMIT`.
+    unsafe { get_size(LibraryOption::GetMwindowMappedLimit) }
+}
+
+/// Sets the maximum number of bytes libgit2 maps from pack files at any time.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_mwindow_mapped_limit(limit: usize) {
+    // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_MWINDOW_MAPPED_LIMIT`.
+    unsafe { set_size(LibraryOption::SetMwindowMappedLimit, limit) }
+}
+
+/// The maximum number of pack files libgit2 maps at any time; 0 is unlimited.
+///
+/// Wraps: git_libgit2_opts
+pub fn mwindow_file_limit() -> usize {
+    // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_MWINDOW_FILE_LIMIT`.
+    unsafe { get_size(LibraryOption::GetMwindowFileLimit) }
+}
+
+/// Sets the maximum number of pack files libgit2 maps at any time; 0 (the default) is
+/// unlimited.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_mwindow_file_limit(limit: usize) {
+    // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_MWINDOW_FILE_LIMIT`.
+    unsafe { set_size(LibraryOption::SetMwindowFileLimit, limit) }
+}
+
+/// The search path of configuration `level`: directories separated by `:`
+/// (`GIT_PATH_LIST_SEPARATOR`), where libgit2 looks for that level's configuration,
+/// attributes and ignore files.
+///
+/// Pins the runtime first: libgit2 computes the defaults from the environment when it
+/// initialises. Fails, with libgit2's error, when the copy cannot be allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn search_path(level: SearchPathLevel) -> Result<CString, ErrorBuf> {
+    buf_string(|buf| {
+        // SAFETY: `GIT_OPT_GET_SEARCH_PATH` reads an `int` level, a named one, and a
+        // `git_buf *`, the zeroed local `buf_string` passes, which it fills and does
+        // not retain. The runtime is pinned, so the search paths exist; they are
+        // written only by `set_search_path`, whose caller excludes this.
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetSearchPath.key(), level.raw(), buf) }
+    })
+}
+
+/// Sets the search path of configuration `level`, or with `None` resets it to the
+/// default libgit2 derives from the environment.
+///
+/// `path` lists directories separated by `:` (`GIT_PATH_LIST_SEPARATOR`); a `$PATH` in
+/// it stands for the previous value, so `"/opt/git:$PATH"` prepends. libgit2 copies
+/// it. Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_search_path(level: SearchPathLevel, path: Option<&CStr>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let path = path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `GIT_OPT_SET_SEARCH_PATH` reads an `int` level, a named one, and a
+    // `const char *`, NULL or NUL-terminated, which it copies and does not retain. The
+    // runtime is pinned; the caller excludes concurrent access to the search paths.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetSearchPath.key(), level.raw(), path) })
+}
+
+/// Sets the largest object of type `kind` that libgit2 caches in memory, in bytes; 0
+/// caches none. The defaults are 0 for blobs (never cached) and 4 KiB for commits,
+/// trees and tags.
+///
+/// libgit2 refuses a type outside its cache's table, which no [`ObjectType`] is.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_cache_object_limit(kind: ObjectType, size: usize) {
+    // SAFETY: `GIT_OPT_SET_CACHE_OBJECT_LIMIT` reads an `int` object type, a named one
+    // that indexes its table in bounds, so it neither fails nor sets an error, and a
+    // `size_t`. The caller excludes concurrent access to the limits.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(LibraryOption::SetCacheObjectLimit.key(), kind.raw(), size)
+    };
+    debug_assert_eq!(rc, 0);
+}
+
+/// Sets how many bytes libgit2's object caches may hold, across every repository,
+/// before libgit2 starts evicting: a soft limit, 256 MiB by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_cache_max_size(max_storage_bytes: isize) {
+    // SAFETY: `GIT_OPT_SET_CACHE_MAX_SIZE` reads one `ssize_t`; the caller excludes
+    // concurrent access to its global.
+    let rc =
+        unsafe { ffi::git_libgit2_opts(LibraryOption::SetCacheMaxSize.key(), max_storage_bytes) };
+    debug_assert_eq!(rc, 0);
+}
+
+/// Enables or disables libgit2's object caches. Caches belong to repositories, so
+/// disabling empties each one only the next time it would be updated.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_caching(enabled: bool) {
+    // SAFETY: `GIT_OPT_ENABLE_CACHING` reads one `int`; the caller excludes concurrent
+    // access to its global.
+    unsafe { set_int(LibraryOption::EnableCaching, c_int::from(enabled)) }
+}
+
+/// How many bytes libgit2's object caches hold now, and may hold.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 reads the current size with a plain load, while every
+/// repository's cache updates it atomically as it adds and evicts objects.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn cached_memory() -> CachedMemory {
+    let mut memory = CachedMemory::default();
+    // SAFETY: `GIT_OPT_GET_CACHED_MEMORY` writes one `ssize_t` through each of two
+    // `ssize_t *`, fields of a live local, and keeps neither; the caller excludes the
+    // concurrent cache updates its plain read would race.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            LibraryOption::GetCachedMemory.key(),
+            &raw mut memory.current,
+            &raw mut memory.allowed,
+        )
+    };
+    debug_assert_eq!(rc, 0);
+    memory
+}
+
+/// The default template directory, which repository initialisation copies from.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn template_path() -> Result<CString, ErrorBuf> {
+    buf_string(|buf| {
+        // SAFETY: `GIT_OPT_GET_TEMPLATE_PATH` reads a `git_buf *`, the zeroed local
+        // `buf_string` passes, which it fills and does not retain. The runtime is
+        // pinned; the path is written only by `set_template_path`, whose caller
+        // excludes this.
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetTemplatePath.key(), buf) }
+    })
+}
+
+/// Sets the default template directory, or with `None` resets it to libgit2's
+/// default.
+///
+/// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when
+/// the copy cannot be allocated.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_template_path(path: Option<&CStr>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let path = path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `GIT_OPT_SET_TEMPLATE_PATH` reads one `const char *`, NULL or
+    // NUL-terminated, which it copies and does not retain. The runtime is pinned; the
+    // caller excludes concurrent access to the path.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetTemplatePath.key(), path) })
+}
+
+/// Sets where libgit2's TLS backend looks for certificate authorities: `file`, one
+/// file of concatenated certificates, and `path`, a directory of certificates one per
+/// file.
+///
+/// Either may be `None`; with both, OpenSSL loads nothing and the call fails. Pins the
+/// runtime first. Fails, with libgit2's error (`GIT_ERROR_SSL`), when OpenSSL cannot
+/// load them.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 loads them into the one OpenSSL context every HTTPS connection
+/// is created from, which OpenSSL does not synchronise.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_ssl_cert_locations(
+    file: Option<&CStr>,
+    path: Option<&CStr>,
+) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let file = file.map_or(ptr::null(), CStr::as_ptr);
+    let path = path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `GIT_OPT_SET_SSL_CERT_LOCATIONS` reads two `const char *`, each NULL or
+    // NUL-terminated, which OpenSSL reads during the call. The runtime is pinned, so
+    // the OpenSSL context exists; the caller excludes concurrent use of it.
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetSslCertLocations.key(), file, path) };
+    status(rc)
+}
+
+/// Adds the OpenSSL certificate `cert` to the certificate store of libgit2's TLS
+/// backend, for the rest of the process.
+///
+/// libgit2 takes a reference of its own (`X509_STORE_add_cert` up-refs it), so the
+/// caller keeps its own. Pins the runtime first. Fails, with libgit2's error
+/// (`GIT_ERROR_SSL`), when OpenSSL cannot add it.
+///
+/// Raw seam: libgit2 publishes no type for the certificate, OpenSSL's `X509`, and
+/// this crate binds no OpenSSL.
+///
+/// # Safety
+///
+/// `cert` must point to a live `X509` of the libcrypto libgit2 is linked against,
+/// valid for the call.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn add_ssl_x509_cert(cert: NonNull<c_void>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    // SAFETY: `GIT_OPT_ADD_SSL_X509_CERT` reads one `X509 *`, a live certificate per
+    // this function's contract, which OpenSSL up-refs into the store under the
+    // store's own lock. The runtime is pinned, so the OpenSSL context exists.
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::AddSslX509Cert.key(), cert.as_ptr()) };
+    status(rc)
+}
+
+/// The comment part of the `User-Agent` header libgit2 sends: `"libgit2 1.9.0"` (the
+/// version) by default.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn user_agent() -> Result<CString, ErrorBuf> {
+    buf_string(|buf| {
+        // SAFETY: `GIT_OPT_GET_USER_AGENT` reads a `git_buf *`, the zeroed local
+        // `buf_string` passes, which it fills and does not retain. The runtime is
+        // pinned; the string is replaced only by `set_user_agent`, whose caller
+        // excludes this.
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetUserAgent.key(), buf) }
+    })
+}
+
+/// Sets the comment part of the `User-Agent` header, appended to its product part
+/// ([`set_user_agent_product`]); `Some(c"")` sends no comment, and `None` restores the
+/// default.
+///
+/// libgit2 copies `user_agent`. Pins the runtime first. Fails, with libgit2's error,
+/// when the copy cannot be allocated; the default is then in effect.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 frees the previous string, which its HTTP transport reads
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_user_agent(user_agent: Option<&CStr>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let user_agent = user_agent.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `GIT_OPT_SET_USER_AGENT` reads one `const char *`, NULL or
+    // NUL-terminated, which it copies and does not retain. The runtime is pinned, for
+    // good, so the copy is never freed by a shutdown it would outlive; the caller
+    // excludes concurrent readers of the string it frees.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetUserAgent.key(), user_agent) })
+}
+
+/// The product part of the `User-Agent` header libgit2 sends: `"git/2.0"` by default.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn user_agent_product() -> Result<CString, ErrorBuf> {
+    buf_string(|buf| {
+        // SAFETY: as in `user_agent`, for `GIT_OPT_GET_USER_AGENT_PRODUCT`, whose string
+        // is replaced only by `set_user_agent_product`.
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetUserAgentProduct.key(), buf) }
+    })
+}
+
+/// Sets the product part of the `User-Agent` header; `Some(c"")` sends no
+/// `User-Agent` at all, and `None` restores `"git/2.0"`. Servers detect clients by it,
+/// so keep it `git/<version>`.
+///
+/// libgit2 copies `product`. Pins the runtime first. Fails, with libgit2's error, when
+/// the copy cannot be allocated; the default is then in effect.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 frees the previous string, which its HTTP transport reads
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_user_agent_product(product: Option<&CStr>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let product = product.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: as in `set_user_agent`, for `GIT_OPT_SET_USER_AGENT_PRODUCT`.
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetUserAgentProduct.key(), product) };
+    status(rc)
+}
+
+/// Enables or disables validating the inputs of new objects (that a new commit's tree
+/// and parents exist, say). Enabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_strict_object_creation(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`.
+    unsafe {
+        set_int(
+            LibraryOption::EnableStrictObjectCreation,
+            c_int::from(enabled),
+        )
+    }
+}
+
+/// Enables or disables validating the target of a new symbolic reference, so that
+/// `foobar`, not a valid reference name, is refused where `refs/heads/foobar` is
+/// accepted. Enabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_strict_symbolic_ref_creation(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_SYMBOLIC_REF_CREATION`.
+    unsafe {
+        set_int(
+            LibraryOption::EnableStrictSymbolicRefCreation,
+            c_int::from(enabled),
+        )
+    }
+}
+
+/// Sets the cipher list libgit2's TLS backend offers on HTTPS connections, in
+/// OpenSSL's syntax.
+///
+/// libgit2 copies `ciphers`, and applies it when it sets OpenSSL up: when it
+/// initialises, before this can run with OpenSSL linked in, or on first use with
+/// OpenSSL loaded dynamically. Pins the runtime first. Fails, with libgit2's error,
+/// when the copy cannot be allocated.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 frees the previous string, which it reads without
+/// synchronisation when it sets OpenSSL up.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_ssl_ciphers(ciphers: &CStr) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    // SAFETY: `GIT_OPT_SET_SSL_CIPHERS` reads one `const char *`, NUL-terminated and
+    // never NULL here (libgit2 would `strlen` it), which it copies and does not
+    // retain. The runtime is pinned, for good, so the copy is never freed by a
+    // shutdown it would outlive; the caller excludes concurrent readers.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetSslCiphers.key(), ciphers.as_ptr()) })
+}
+
+/// Enables or disables offset deltas when creating pack files and negotiating with a
+/// server: a shorter encoding of a delta's base. Pack files holding them can be read
+/// either way. Enabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_ofs_delta(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_OFS_DELTA`.
+    unsafe { set_int(LibraryOption::EnableOfsDelta, c_int::from(enabled)) }
+}
+
+/// Enables or disables `fsync` of the files libgit2 writes in a repository's git
+/// directory, so new objects reach permanent storage. Disabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_fsync_gitdir(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_FSYNC_GITDIR`.
+    unsafe { set_int(LibraryOption::EnableFsyncGitDir, c_int::from(enabled)) }
+}
+
+/// The share mode libgit2 opens files with on Windows (see `CreateFile`); `None`
+/// elsewhere, where libgit2 keeps none and writes nothing.
+///
+/// Wraps: git_libgit2_opts
+pub fn windows_sharemode() -> Option<c_ulong> {
+    let mut mode: c_ulong = 0;
+    // SAFETY: `GIT_OPT_GET_WINDOWS_SHAREMODE` reads one `unsigned long *`, a live
+    // local, and on Windows writes through it; elsewhere it reads no argument at all.
+    // The global is written only by `set_windows_sharemode`, whose caller excludes
+    // this.
+    let rc =
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetWindowsShareMode.key(), &raw mut mode) };
+    debug_assert_eq!(rc, 0);
+    cfg!(windows).then_some(mode)
+}
+
+/// Sets the share mode libgit2 opens files with on Windows; the default is
+/// `FILE_SHARE_READ | FILE_SHARE_WRITE`. Ignored elsewhere.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: on Windows, libgit2 keeps the setting in a global that its other
+/// routines read without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_windows_sharemode(mode: c_ulong) {
+    // SAFETY: `GIT_OPT_SET_WINDOWS_SHAREMODE` reads one `unsigned long` on Windows and
+    // nothing elsewhere; the caller excludes concurrent access to its global.
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetWindowsShareMode.key(), mode) };
+    debug_assert_eq!(rc, 0);
+}
+
+/// Enables or disables verifying the hash of every object read from disk, at the cost
+/// of hashing it again. Enabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_strict_hash_verification(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_HASH_VERIFICATION`.
+    unsafe {
+        set_int(
+            LibraryOption::EnableStrictHashVerification,
+            c_int::from(enabled),
+        )
+    }
+}
+
+/// Makes `allocator` libgit2's memory allocator for every later allocation, or with
+/// `None` restores the system allocator (`malloc` and friends).
+///
+/// libgit2 copies the three members into a global (`git__allocator`), so `allocator`
+/// is borrowed for the call only. Does not initialise libgit2: initialisation keeps an
+/// allocator installed before it, and itself allocates.
+///
+/// # Safety
+///
+/// - `allocator`'s members must form one allocator family meeting [`Alloc`]'s
+///   contract, as an [`Allocator::new`] value does; an [`Allocator::from_fns`] value
+///   does only if its functions do.
+///
+/// [`Alloc`]: crate::libgit2::util::sys::alloc::Alloc
+/// [`Allocator::new`]: crate::libgit2::util::sys::alloc::Allocator::new
+/// [`Allocator::from_fns`]: crate::libgit2::util::sys::alloc::Allocator::from_fns
+/// - Every allocation libgit2 holds when this runs must be one the new family can
+///   resize and release, since libgit2 releases it through whichever allocator is
+///   current then: install before libgit2 is initialised (before any call into this
+///   crate that reaches libgit2 — libgit2's global state holds allocations from its
+///   initialisation on), or install a family that shares storage with the one it
+///   replaces (two over libc's `malloc`, say). The same holds for every allocation a
+///   live owner of this crate holds (an `OdbDataBox`, say).
+/// - No other thread may call into libgit2 — through this crate or otherwise — while
+///   this runs: every allocation reads the global without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_allocator(allocator: Option<AllocatorRef<'_>>) {
+    let allocator = allocator.map_or(ptr::null(), |a| a.as_ptr());
+    // SAFETY: `GIT_OPT_SET_ALLOCATOR` reads one `git_allocator *`, NULL or a live
+    // value it `memcpy`s and does not retain. The family is coherent and every live
+    // allocation is the new family's, and nothing else reads the global, per this
+    // function's contract.
+    let rc = unsafe { ffi::git_libgit2_opts(LibraryOption::SetAllocator.key(), allocator) };
+    debug_assert_eq!(rc, 0);
+}
+
+/// Enables or disables refusing to reload the index from disk (as checkout does)
+/// over unsaved changes in it; a forced checkout still overwrites them. Enabled by
+/// default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_unsaved_index_safety(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_UNSAVED_INDEX_SAFETY`.
+    unsafe {
+        set_int(
+            LibraryOption::EnableUnsavedIndexSafety,
+            c_int::from(enabled),
+        )
+    }
+}
+
+/// The most objects libgit2 accepts in a pack file downloaded from a remote.
+///
+/// Wraps: git_libgit2_opts
+pub fn pack_max_objects() -> usize {
+    // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_PACK_MAX_OBJECTS`.
+    unsafe { get_size(LibraryOption::GetPackMaxObjects) }
+}
+
+/// Sets the most objects libgit2 accepts in a pack file downloaded from a remote, to
+/// bound the memory an untrusted remote can make it use.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_pack_max_objects(objects: usize) {
+    // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_PACK_MAX_OBJECTS`.
+    unsafe { set_size(LibraryOption::SetPackMaxObjects, objects) }
+}
+
+/// Enables or disables skipping the check for a `.keep` file next to each pack file,
+/// which can speed up remote filesystems. Disabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn disable_pack_keep_file_checks(disabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_DISABLE_PACK_KEEP_FILE_CHECKS`.
+    unsafe {
+        set_int(
+            LibraryOption::DisablePackKeepFileChecks,
+            c_int::from(disabled),
+        )
+    }
+}
+
+/// Enables or disables `Expect: 100-continue` when POSTing to a server that
+/// authenticates with NTLM or Negotiate. Not available on Windows.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn enable_http_expect_continue(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_HTTP_EXPECT_CONTINUE`.
+    unsafe {
+        set_int(
+            LibraryOption::EnableHttpExpectContinue,
+            c_int::from(enabled),
+        )
+    }
+}
+
+/// Sets the priority of the packed object-database backend libgit2 adds to a
+/// repository with its default backends.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_odb_packed_priority(priority: c_int) {
+    // SAFETY: `GIT_OPT_SET_ODB_PACKED_PRIORITY` reads one `int`; the caller excludes
+    // concurrent access to its global.
+    unsafe { set_int(LibraryOption::SetOdbPackedPriority, priority) }
+}
+
+/// Sets the priority of the loose object-database backend libgit2 adds to a
+/// repository with its default backends.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_odb_loose_priority(priority: c_int) {
+    // SAFETY: as in `set_odb_packed_priority`, for `GIT_OPT_SET_ODB_LOOSE_PRIORITY`.
+    unsafe { set_int(LibraryOption::SetOdbLoosePriority, priority) }
+}
+
+/// The repository extensions libgit2 supports, sorted: its built-in ones (`noop`,
+/// `objectformat`, ...) less those negated with [`set_extensions`], and those added
+/// with it.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn extensions() -> Result<StrArrayVal, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut out = StrArray::new();
+    // SAFETY: `GIT_OPT_GET_EXTENSIONS` reads one `git_strarray *`, an empty array of
+    // this function's own, and overwrites `strings` / `count` with a fresh array of
+    // strings in libgit2's allocator, which `git_strarray_dispose` releases; it keeps
+    // no pointer to `out`. The previous contents are empty, so nothing leaks. The
+    // runtime is pinned; the extension list is written only by `set_extensions`,
+    // whose caller excludes this.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            LibraryOption::GetExtensions.key(),
+            out.as_mut().as_mut_ptr(),
+        )
+    };
+    status(rc).map(|()| out)
+}
+
+/// Sets the repository extensions the caller supports, beyond libgit2's built-in
+/// ones; a built-in one prefixed with `!` (`"!noop"`) is negated instead, so that
+/// libgit2 refuses repositories needing it.
+///
+/// Replaces every extension set before. libgit2 copies each string, keeping one copy
+/// of duplicates and none of the built-in names. Pins the runtime first. Fails, with
+/// libgit2's error, when a copy cannot be allocated; the extensions copied until then
+/// are set.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_extensions<S: AsRef<CStr>>(extensions: &[S]) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let ptrs: Vec<*const c_char> = extensions.iter().map(|s| s.as_ref().as_ptr()).collect();
+    // SAFETY: `GIT_OPT_SET_EXTENSIONS` reads a `const char **` and a `size_t`: `ptrs`
+    // holds that many NUL-terminated strings, borrowed from `extensions` for the
+    // call, which libgit2 copies and does not retain (an empty `ptrs` is read not at
+    // all). The runtime is pinned; the caller excludes concurrent access to the list.
+    let rc = unsafe {
+        ffi::git_libgit2_opts(
+            LibraryOption::SetExtensions.key(),
+            ptrs.as_ptr(),
+            ptrs.len(),
+        )
+    };
+    status(rc)
+}
+
+/// Whether libgit2 refuses to open a repository whose directory the current user does
+/// not own.
+///
+/// Wraps: git_libgit2_opts
+pub fn owner_validation() -> bool {
+    // SAFETY: `GIT_OPT_GET_OWNER_VALIDATION` writes one `int` through one `int *`. Its
+    // global is written only by `set_owner_validation`, whose caller excludes this.
+    unsafe { get_int(LibraryOption::GetOwnerValidation) != 0 }
+}
+
+/// Sets whether libgit2 refuses to open a repository whose directory the current user
+/// does not own. Enabled by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_owner_validation(enabled: bool) {
+    // SAFETY: as in `enable_caching`, for `GIT_OPT_SET_OWNER_VALIDATION`.
+    unsafe { set_int(LibraryOption::SetOwnerValidation, c_int::from(enabled)) }
+}
+
+/// The directory libgit2 takes as the current user's home for file lookups.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
+/// allocated.
+///
+/// Wraps: git_libgit2_opts
+pub fn homedir() -> Result<CString, ErrorBuf> {
+    buf_string(|buf| {
+        // SAFETY: `GIT_OPT_GET_HOMEDIR` reads a `git_buf *`, the zeroed local
+        // `buf_string` passes, which it fills and does not retain. The runtime is
+        // pinned; the path is written only by `set_homedir`, whose caller excludes
+        // this.
+        unsafe { ffi::git_libgit2_opts(LibraryOption::GetHomeDir.key(), buf) }
+    })
+}
+
+/// Sets the directory libgit2 takes as the current user's home for file lookups, or
+/// with `None` resets it to the default libgit2 derives from the environment.
+///
+/// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when the
+/// copy cannot be allocated.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_homedir(path: Option<&CStr>) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let path = path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: as in `set_template_path`, for `GIT_OPT_SET_HOMEDIR`.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetHomeDir.key(), path) })
+}
+
+/// The timeout for connecting to a remote server, in milliseconds; 0 is the system's.
+///
+/// Wraps: git_libgit2_opts
+pub fn server_connect_timeout() -> c_int {
+    // SAFETY: `GIT_OPT_GET_SERVER_CONNECT_TIMEOUT` writes one `int` through one
+    // `int *`. Its global is written only by `set_server_connect_timeout`, whose
+    // caller excludes this.
+    unsafe { get_int(LibraryOption::GetServerConnectTimeout) }
+}
+
+/// Sets the timeout for connecting to a remote server, in milliseconds; 0 (the
+/// default) is the system's, typically 75 seconds, which a longer timeout may not
+/// exceed.
+///
+/// Pins the runtime first. Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid
+/// connect timeout"), for a negative timeout, leaving the setting alone.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_server_connect_timeout(timeout_ms: c_int) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    // SAFETY: `GIT_OPT_SET_SERVER_CONNECT_TIMEOUT` reads one `int`, which it
+    // range-checks. The runtime is pinned, so a rejection is reported on live thread
+    // state; the caller excludes concurrent access to the global.
+    status(unsafe {
+        ffi::git_libgit2_opts(LibraryOption::SetServerConnectTimeout.key(), timeout_ms)
+    })
+}
+
+/// The timeout for reading from and writing to a remote server, in milliseconds; 0 is
+/// the system's.
+///
+/// Wraps: git_libgit2_opts
+pub fn server_timeout() -> c_int {
+    // SAFETY: as in `server_connect_timeout`, for `GIT_OPT_GET_SERVER_TIMEOUT`, written
+    // only by `set_server_timeout`.
+    unsafe { get_int(LibraryOption::GetServerTimeout) }
+}
+
+/// Sets the timeout for reading from and writing to a remote server, in milliseconds;
+/// 0 (the default) is the system's.
+///
+/// Pins the runtime first. Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid
+/// timeout"), for a negative timeout, leaving the setting alone.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_server_timeout(timeout_ms: c_int) -> Result<(), ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    // SAFETY: as in `set_server_connect_timeout`, for `GIT_OPT_SET_SERVER_TIMEOUT`.
+    status(unsafe { ffi::git_libgit2_opts(LibraryOption::SetServerTimeout.key(), timeout_ms) })
+}
+
+/// The largest object, in bytes, libgit2 accepts in a pack file downloaded from a
+/// remote.
+///
+/// Wraps: git_libgit2_opts
+pub fn pack_max_object_size() -> usize {
+    // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_PACK_MAX_OBJECT_SIZE`.
+    unsafe { get_size(LibraryOption::GetPackMaxObjectSize) }
+}
+
+/// Sets the largest object, in bytes, libgit2 accepts in a pack file downloaded from a
+/// remote; 2 GiB by default.
+///
+/// # Safety
+///
+/// No other thread may call into libgit2 — through this crate or otherwise — while
+/// this runs: libgit2 keeps the setting in a global that its other routines read
+/// without synchronisation.
+///
+/// Wraps: git_libgit2_opts
+pub unsafe fn set_pack_max_object_size(size: usize) {
+    // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_PACK_MAX_OBJECT_SIZE`.
+    unsafe { set_size(LibraryOption::SetPackMaxObjectSize, size) }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::libgit2::util::errors::ErrorClass;
+    use crate::libgit2::util::sys::errors::set_str;
 
     #[test]
     fn feature_bits_are_distinct_single_bits() {
@@ -885,5 +2024,80 @@ mod unit_tests {
         let set: HashSet<LibraryOption> = (0..END).filter_map(LibraryOption::from_raw).collect();
         assert_eq!(set.len(), END as usize);
         assert_eq!(format!("{:?}", LibraryOption::SetAllocator), "SetAllocator");
+    }
+
+    #[test]
+    fn version_displays_dotted() {
+        let v = Version {
+            major: 1,
+            minor: 9,
+            revision: 0,
+        };
+        assert_eq!(v.to_string(), "1.9.0");
+        assert!(
+            v < Version {
+                major: 1,
+                minor: 10,
+                revision: 0
+            }
+        );
+        assert!(
+            v > Version {
+                major: 0,
+                minor: 99,
+                revision: 99
+            }
+        );
+    }
+
+    #[test]
+    fn search_path_levels_are_the_config_levels() {
+        assert_eq!(SearchPathLevel::System.raw(), ffi::GIT_CONFIG_LEVEL_SYSTEM);
+        assert_eq!(SearchPathLevel::Xdg.raw(), ffi::GIT_CONFIG_LEVEL_XDG);
+        assert_eq!(SearchPathLevel::Global.raw(), ffi::GIT_CONFIG_LEVEL_GLOBAL);
+    }
+
+    #[test]
+    fn cached_memory_defaults_to_zero() {
+        assert_eq!(
+            CachedMemory::default(),
+            CachedMemory {
+                current: 0,
+                allowed: 0
+            }
+        );
+    }
+
+    /// A key that fails leaves its error; a key that leaves the buffer untouched (NULL)
+    /// reads as empty; a filled buffer is copied and disposed (LSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn buf_string_covers_every_outcome() {
+        let failed = buf_string(|_| {
+            set_str(ErrorClass::Invalid, c"refused by the test").unwrap();
+            -1
+        })
+        .unwrap_err();
+        assert_eq!(failed.class(), Some(ErrorClass::Invalid));
+        assert_eq!(failed.message(), c"refused by the test");
+        assert_eq!(buf_string(|_| 0).unwrap(), CString::default());
+        let agent = buf_string(|buf| {
+            // SAFETY: `GIT_OPT_GET_USER_AGENT` fills the zeroed `git_buf *` it is given.
+            unsafe { ffi::git_libgit2_opts(LibraryOption::GetUserAgent.key(), buf) }
+        })
+        .unwrap();
+        assert!(agent.to_bytes().starts_with(b"libgit2 "));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn status_reads_the_thread_error() {
+        assert!(runtime_pinned());
+        assert_eq!(status(0), Ok(()));
+        assert_eq!(status(1), Ok(()));
+        set_str(ErrorClass::Os, c"from the test").unwrap();
+        let e = status(-1).unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Os));
+        assert_eq!(e.message(), c"from the test");
     }
 }

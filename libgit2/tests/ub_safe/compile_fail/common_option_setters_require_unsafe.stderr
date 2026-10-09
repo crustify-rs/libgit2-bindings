@@ -1,0 +1,31 @@
+error[E0133]: call to unsafe function `set_mwindow_size` is unsafe and requires unsafe block
+ --> tests/ub_safe/compile_fail/common_option_setters_require_unsafe.rs:6:5
+  |
+6 |     common::set_mwindow_size(1 << 20);
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `set_user_agent` is unsafe and requires unsafe block
+ --> tests/ub_safe/compile_fail/common_option_setters_require_unsafe.rs:7:13
+  |
+7 |     let _ = common::set_user_agent(Some(c"agent"));
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `set_allocator` is unsafe and requires unsafe block
+ --> tests/ub_safe/compile_fail/common_option_setters_require_unsafe.rs:8:5
+  |
+8 |     common::set_allocator(None);
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior
+
+error[E0133]: call to unsafe function `cached_memory` is unsafe and requires unsafe block
+ --> tests/ub_safe/compile_fail/common_option_setters_require_unsafe.rs:9:13
+  |
+9 |     let _ = common::cached_memory();
+  |             ^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+  |
+  = note: consult the function's documentation for information on how to avoid undefined behavior

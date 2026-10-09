@@ -21,6 +21,12 @@
 //! (which Miri and UBSan would flag on the next read); an `as` cast to it does not
 //! compile (`compile_fail/`). None of these calls libgit2, so they also run under
 //! Miri.
+//!
+//! The version queries and the safe option getters do call libgit2. The getters read
+//! globals only the `unsafe` setters write (`ub_unsafe/common.rs`), so any number of
+//! threads may read them at once (TSan); the string getters allocate and copy out
+//! (ASan, LSan); and the plain getters need no initialised libgit2, while the string
+//! ones pin it first, so they run in a child process where nothing has initialised it.
 
 use std::collections::HashSet;
 use std::ffi::c_int;
@@ -210,4 +216,128 @@ fn options_cross_threads() {
             assert_eq!(h.join().unwrap(), Some(*opt));
         }
     });
+}
+
+// --- Version and global options ----------------------------------------------------
+
+mod options {
+    use std::ffi::CStr;
+    use std::thread;
+
+    use libgit2::libgit2::core::common::{self, Feature, SearchPathLevel};
+
+    use crate::fixture::isolated;
+
+    /// Every safe getter, once; panics on none of them.
+    fn read_all() {
+        let v = common::version();
+        assert!(v.major >= 1, "{v}");
+        let _ = common::prerelease();
+        assert!(common::features().contains(Feature::Sha1));
+        assert!(common::mwindow_size() > 0);
+        assert!(common::mwindow_mapped_limit() > 0);
+        let _ = common::mwindow_file_limit();
+        assert!(common::pack_max_objects() > 0);
+        assert!(common::pack_max_object_size() > 0);
+        let _ = common::owner_validation();
+        assert!(common::server_connect_timeout() >= 0);
+        assert!(common::server_timeout() >= 0);
+        assert_eq!(common::windows_sharemode(), None);
+        for level in [
+            SearchPathLevel::System,
+            SearchPathLevel::Xdg,
+            SearchPathLevel::Global,
+        ] {
+            let _: &CStr = &common::search_path(level).unwrap();
+        }
+        let _ = common::template_path().unwrap();
+        assert!(!common::user_agent().unwrap().is_empty());
+        assert!(!common::user_agent_product().unwrap().is_empty());
+        let _ = common::homedir().unwrap();
+        let extensions = common::extensions().unwrap();
+        assert!(extensions.as_ref().len() >= 3);
+        for e in extensions.as_ref().iter() {
+            assert!(!e.is_empty());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_read_defaults() {
+        isolated(concat!(module_path!(), "::getters_read_defaults"), || {
+            assert_eq!(common::user_agent().unwrap().to_bytes(), b"libgit2 1.9.0");
+            assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
+            assert!(common::owner_validation());
+            assert_eq!(common::server_connect_timeout(), 0);
+            assert_eq!(common::server_timeout(), 0);
+            assert_eq!(common::mwindow_file_limit(), 0);
+            let extensions = common::extensions().unwrap();
+            let names: Vec<&CStr> = extensions.as_ref().iter().collect();
+            assert_eq!(
+                names,
+                [
+                    c"noop",
+                    c"objectformat",
+                    c"preciousobjects",
+                    c"refstorage",
+                    c"relativeworktrees",
+                    c"worktreeconfig"
+                ]
+            );
+            read_all();
+        });
+    }
+
+    /// The plain getters and the version queries need no initialised libgit2; the
+    /// string getters initialise it themselves.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_before_initialisation() {
+        isolated(
+            concat!(module_path!(), "::getters_before_initialisation"),
+            || {
+                let _ = common::version();
+                let _ = common::features();
+                let _ = common::mwindow_size();
+                let _ = common::owner_validation();
+                let _ = common::windows_sharemode();
+                assert!(!common::user_agent().unwrap().is_empty());
+                let extensions = common::extensions().unwrap();
+                drop(extensions);
+                read_all();
+            },
+        );
+    }
+
+    /// Readers on many threads at once race nothing: only the `unsafe` setters write.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_race_nothing() {
+        thread::scope(|s| {
+            for _ in 0..6 {
+                s.spawn(|| {
+                    for _ in 0..10 {
+                        read_all();
+                    }
+                });
+            }
+        });
+    }
+
+    /// Owned results outlive further calls and cross threads.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn results_outlive_later_calls() {
+        let extensions = common::extensions().unwrap();
+        let agent = common::user_agent().unwrap();
+        read_all();
+        let prerelease = common::prerelease();
+        thread::spawn(move || {
+            assert!(extensions.as_ref().iter().any(|e| e == c"objectformat"));
+            assert!(agent.to_bytes().starts_with(b"libgit2"));
+            let _ = prerelease.map(CStr::to_bytes);
+        })
+        .join()
+        .unwrap();
+    }
 }

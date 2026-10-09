@@ -13,6 +13,7 @@ mod buffer;
 mod common;
 mod errors;
 mod fixture;
+mod global;
 mod oid;
 mod oidarray;
 mod strarray;

@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `Runtime` in the current scope
+ --> tests/ub_safe/compile_fail/global_runtime_not_clone.rs:7:20
+  |
+7 |     let _again = r.clone();
+  |                    ^^^^^ method not found in `Runtime`

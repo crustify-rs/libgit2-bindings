@@ -4,6 +4,7 @@ git_allocator
 git_branch_t
 git_buf
 git_buildinfo_t
+git_config_level_t
 git_error
 git_error_code
 git_error_t

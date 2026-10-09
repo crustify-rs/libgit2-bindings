@@ -31,6 +31,7 @@ use std::io;
 use std::sync::OnceLock;
 
 use crate::ffi;
+use crate::libgit2::core::global::{Runtime, init};
 use crate::libgit2::util::errors::ErrorClass;
 
 /// Holds one `git_libgit2_init` reference for the rest of the process; `false` when
@@ -39,27 +40,20 @@ use crate::libgit2::util::errors::ErrorClass;
 /// Until the first initialisation, and after the last shutdown, libgit2's error state
 /// is looked up under a TLS key that does not exist: `errors.c` then writes into
 /// whatever block key 0 holds. Its allocator also fails every request, and
-/// `git__malloc` reports that through the same state. A reference that is never
-/// released keeps the key live across balanced `git_libgit2_init` /
-/// `git_libgit2_shutdown` pairs.
+/// `git__malloc` reports that through the same state. The reference is a [`Runtime`]
+/// that is never dropped, so it keeps the key live across balanced [`init`] /
+/// shutdown pairs; a refused one is final, as [`init`] refuses every initialisation
+/// after a failed one.
 ///
 /// The calling thread's `errno` survives the first call, which initialises libgit2,
 /// so a `GIT_ERROR_OS` error set right after still describes the caller's failure.
-///
-/// Raw seam: replace with the safe `git_libgit2_init` wrapper (`core/global.rs`).
 pub(crate) fn runtime_pinned() -> bool {
-    static PINNED: OnceLock<bool> = OnceLock::new();
-    if let Some(&pinned) = PINNED.get() {
-        return pinned;
+    static PINNED: OnceLock<Option<Runtime>> = OnceLock::new();
+    if let Some(pinned) = PINNED.get() {
+        return pinned.is_some();
     }
     let errno = io::Error::last_os_error().raw_os_error().unwrap_or(0);
-    let pinned = *PINNED.get_or_init(|| {
-        // SAFETY: no arguments; libgit2 counts initialisations under its own lock, so
-        // concurrent callers are serialised. A negative result is a failed
-        // initialisation, after which nothing reaches libgit2's thread state.
-        let count = unsafe { ffi::git_libgit2_init() };
-        count >= 0
-    });
+    let pinned = PINNED.get_or_init(|| init().ok()).is_some();
     // SAFETY: `__errno_location` returns the calling thread's `errno`, valid for writes
     // for the thread's lifetime.
     unsafe { libc::__errno_location().write(errno) };
