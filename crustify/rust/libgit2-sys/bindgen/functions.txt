@@ -64,3 +64,14 @@ git_submodule_set_fetch_recurse_submodules
 git_submodule_set_update
 git_submodule_update_strategy
 git_trace_set
+git_tree_entry_byindex
+git_tree_entry_filemode
+git_tree_entry_filemode_raw
+git_tree_entrycount
+git_tree_free
+git_tree_lookup
+git_treebuilder_free
+git_treebuilder_get
+git_treebuilder_insert
+git_treebuilder_new
+git_treebuilder_write

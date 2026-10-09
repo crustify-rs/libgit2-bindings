@@ -22,6 +22,14 @@
 //! on the shared handle do not compile (`compile_fail/`). None of them calls libgit2,
 //! so all run under Miri; no C routine keeps a pointer to a bare `git_time`, so
 //! there is no foreign write or retained pointer to race (BSan).
+//!
+//! Then the enum `FileMode`.
+//!
+//! `FileMode` is a fieldless enum over C's `git_filemode_t`. The only safe way in
+//! from a raw value is `from_raw` / `try_from`, which must reject every value
+//! without a variant rather than produce an invalid discriminant (which Miri and
+//! UBSan would flag on the next read); an `as` cast to it does not compile
+//! (`compile_fail/`). None of these calls libgit2, so they also run under Miri.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -32,7 +40,7 @@ use std::thread;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
+    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
     SubmoduleUpdate, Time, TimeMut, TimeRef,
 };
 
@@ -419,4 +427,77 @@ fn a_locked_time_has_one_writer_at_a_time() {
         }
     });
     assert_eq!(time.lock().unwrap().as_ref().seconds(), 4 * rounds as i64);
+}
+
+/// Every type nibble with the permission bits git trees spell, the values around
+/// the declared ones, a coarse stride across the whole type and its extremes;
+/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+fn mode_probes() -> impl Iterator<Item = ffi::git_filemode_t> {
+    let kinds = (0..16)
+        .flat_map(|t| [0, 0o644, 0o755, 0o664, 0o777, 0o001, 0o100].map(move |p| (t << 12) | p));
+    let named = [0o000000, 0o040000, 0o100644, 0o100755, 0o120000, 0o160000];
+    let around = named
+        .into_iter()
+        .flat_map(|m: u32| [m.wrapping_sub(1), m, m + 1]);
+    kinds
+        .chain(around)
+        .chain((0..=ffi::git_filemode_t::MAX).step_by(1 << 26))
+        .chain([
+            0o177777,
+            0o200000,
+            ffi::git_filemode_t::MAX - 1,
+            ffi::git_filemode_t::MAX,
+        ])
+}
+
+#[test]
+fn from_raw_yields_only_valid_modes() {
+    let mut seen = HashSet::new();
+    for raw in mode_probes() {
+        // `black_box` keeps the conversion from being folded at compile time.
+        if let Some(mode) = FileMode::from_raw(black_box(raw)) {
+            // Reading the discriminant back validates it.
+            assert_eq!(mode.raw(), raw);
+            assert!(!format!("{mode:?}").is_empty());
+            seen.insert(mode);
+        } else {
+            assert_eq!(FileMode::try_from(raw).map_err(|e| e.raw()), Err(raw));
+        }
+    }
+    assert_eq!(seen.len(), 6);
+}
+
+#[test]
+fn mode_option_niche_holds_for_every_value() {
+    // `Option<FileMode>` stores `None` in a value no variant uses: a rejected value
+    // must never alias a variant, nor a variant read as `None`.
+    for raw in mode_probes() {
+        let mode = black_box(FileMode::from_raw(raw));
+        assert_eq!(mode.map(FileMode::raw).unwrap_or(raw), raw);
+        // The unreadable mode is 0, the value a zeroed discriminant would hold.
+        assert_eq!(mode == Some(FileMode::Unreadable), raw == 0);
+    }
+}
+
+#[test]
+fn modes_cross_threads() {
+    // A plain value: `Send` and `Sync` without an assertion, so sharing one races
+    // nothing for TSan to report.
+    let modes = [
+        FileMode::Unreadable,
+        FileMode::Tree,
+        FileMode::Blob,
+        FileMode::BlobExecutable,
+        FileMode::Link,
+        FileMode::Commit,
+    ];
+    thread::scope(|s| {
+        let handles: Vec<_> = modes
+            .iter()
+            .map(|mode| s.spawn(move || FileMode::from_raw(mode.raw())))
+            .collect();
+        for (mode, h) in modes.iter().zip(handles) {
+            assert_eq!(h.join().unwrap(), Some(*mode));
+        }
+    });
 }

@@ -44,6 +44,10 @@
 //!
 //! Times compare as libgit2 compares signatures' times: equal when all three fields
 //! are, whatever the struct's padding holds.
+//!
+//! A [`FileMode`] is a tree entry's `git_filemode_t`. A parsed tree keeps whatever
+//! 16-bit mode its object spells, so a raw mode is converted fallibly
+//! ([`FileMode::from_raw`]) and never transmuted.
 
 use core::ffi::c_char;
 use core::fmt;
@@ -406,6 +410,100 @@ impl fmt::Display for UnnamedSubmoduleUpdate {
 }
 
 impl std::error::Error for UnnamedSubmoduleUpdate {}
+
+/// The mode of a tree entry: the kind of object it names, and for a blob whether it
+/// is an executable or a symbolic link (`git_filemode_t`, UNIX modes in octal).
+///
+/// `git_treebuilder_insert` accepts every variant but [`Unreadable`](Self::Unreadable)
+/// and refuses every other value with `GIT_ERROR_TREE` ("failed to insert entry:
+/// invalid filemode for file"). A parsed tree, though, stores whatever 16-bit mode
+/// its object spells: `git_tree_entry_filemode` normalises it to one of the five
+/// insertable variants, while `git_tree_entry_filemode_raw` returns it as is, such as
+/// old git's group-writable `0100664`, or `0`, which reads as `Unreadable`.
+/// [`from_raw`](Self::from_raw) gives `None` for a value without a variant.
+///
+/// Wraps: git_filemode_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum FileMode {
+    /// `0000000`: no object. libgit2 gives it to a working-directory file it could
+    /// not read; no tree entry can be inserted with it.
+    Unreadable = ffi::GIT_FILEMODE_UNREADABLE,
+    /// `0040000`: a subtree.
+    Tree = ffi::GIT_FILEMODE_TREE,
+    /// `0100644`: a regular file's blob.
+    Blob = ffi::GIT_FILEMODE_BLOB,
+    /// `0100755`: an executable file's blob.
+    BlobExecutable = ffi::GIT_FILEMODE_BLOB_EXECUTABLE,
+    /// `0120000`: a blob holding a symbolic link's target.
+    Link = ffi::GIT_FILEMODE_LINK,
+    /// `0160000`: a submodule's commit, which the repository need not contain.
+    Commit = ffi::GIT_FILEMODE_COMMIT,
+}
+
+impl FileMode {
+    /// The variant whose C value is `raw`; `None` for a mode this version of
+    /// libgit2's header does not name.
+    pub const fn from_raw(raw: ffi::git_filemode_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_FILEMODE_UNREADABLE => Some(Self::Unreadable),
+            ffi::GIT_FILEMODE_TREE => Some(Self::Tree),
+            ffi::GIT_FILEMODE_BLOB => Some(Self::Blob),
+            ffi::GIT_FILEMODE_BLOB_EXECUTABLE => Some(Self::BlobExecutable),
+            ffi::GIT_FILEMODE_LINK => Some(Self::Link),
+            ffi::GIT_FILEMODE_COMMIT => Some(Self::Commit),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2's functions take and return it.
+    pub const fn raw(self) -> ffi::git_filemode_t {
+        self as ffi::git_filemode_t
+    }
+}
+
+impl TryFrom<ffi::git_filemode_t> for FileMode {
+    type Error = UnnamedFileMode;
+
+    fn try_from(raw: ffi::git_filemode_t) -> Result<Self, UnnamedFileMode> {
+        Self::from_raw(raw).ok_or(UnnamedFileMode(raw))
+    }
+}
+
+impl From<FileMode> for ffi::git_filemode_t {
+    fn from(value: FileMode) -> ffi::git_filemode_t {
+        value.raw()
+    }
+}
+
+/// A file mode that this version of libgit2's header does not name, as
+/// `git_tree_entry_filemode_raw` returns for a tree that spells one;
+/// [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedFileMode(ffi::git_filemode_t);
+
+impl UnnamedFileMode {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_filemode_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedFileMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 file mode {:#o} is not named by git2/types.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedFileMode {}
 
 define_ctype!(
     /// A point in time as a git signature records it (`git_time`): seconds since the
@@ -938,5 +1036,61 @@ mod unit_tests {
             format!("{:?}", Time::new(1, -60)),
             "Time { seconds: 1, offset_minutes: -60, sign: '-' }"
         );
+    }
+
+    const MODES: [(ffi::git_filemode_t, FileMode); 6] = [
+        (0o000000, FileMode::Unreadable),
+        (0o040000, FileMode::Tree),
+        (0o100644, FileMode::Blob),
+        (0o100755, FileMode::BlobExecutable),
+        (0o120000, FileMode::Link),
+        (0o160000, FileMode::Commit),
+    ];
+
+    #[test]
+    fn variants_carry_the_octal_modes() {
+        for (raw, mode) in MODES {
+            assert_eq!(mode.raw(), raw);
+            assert_eq!(ffi::git_filemode_t::from(mode), raw);
+            assert_eq!(FileMode::from_raw(raw), Some(mode));
+            assert_eq!(FileMode::try_from(raw), Ok(mode));
+        }
+    }
+
+    #[test]
+    fn unnamed_modes_keep_their_value() {
+        for raw in [
+            0o100664,
+            0o100600,
+            0o040755,
+            0o160755,
+            1,
+            0o177777,
+            u32::MAX,
+        ] {
+            assert_eq!(FileMode::from_raw(raw), None);
+            let err = FileMode::try_from(raw).unwrap_err();
+            assert_eq!(err.raw(), raw);
+            assert_eq!(err, UnnamedFileMode(raw));
+        }
+    }
+
+    #[test]
+    fn unnamed_mode_displays_in_octal() {
+        let err = FileMode::try_from(0o100664).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "libgit2 file mode 0o100664 is not named by git2/types.h"
+        );
+        let boxed: Box<dyn std::error::Error> = Box::new(err);
+        assert!(boxed.source().is_none());
+    }
+
+    #[test]
+    fn modes_hash_and_compare_by_variant() {
+        use std::collections::HashSet;
+        let set: HashSet<FileMode> = MODES.iter().map(|&(_, m)| m).collect();
+        assert_eq!(set.len(), MODES.len());
+        assert_eq!(format!("{:?}", FileMode::BlobExecutable), "BlobExecutable");
     }
 }
