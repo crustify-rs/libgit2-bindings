@@ -259,6 +259,33 @@ fn views_stay_in_bounds() {
     assert_eq!(r.id()[30..], [0xaa, 0xbb]);
 }
 
+/// Hashing reads the 33 bytes in place, on values and handles alike, so a hashed
+/// collection can key on either; the typed null ids are distinct keys (Miri checks the
+/// reads, and the equality here needs no libgit2 call: the keys are byte-distinct).
+#[test]
+fn hashes_read_within_the_oid() {
+    use std::hash::{BuildHasher, RandomState};
+    let state = RandomState::new();
+    let mut oids: Vec<Box<Oid>> = Vec::new();
+    for kind in [OidType::Sha1, OidType::Sha256] {
+        oids.push(Box::new(Oid::zero(kind)));
+    }
+    for raw in [0, 3, u8::MAX] {
+        let mut oid = Oid::zeroed();
+        oid.as_mut().set_raw_kind(raw);
+        oid.as_mut().set_id(std::array::from_fn(|i| i as u8 ^ raw));
+        oids.push(Box::new(oid));
+    }
+    let hashes: Vec<u64> = oids.iter().map(|o| state.hash_one(**o)).collect();
+    for (o, h) in oids.iter().zip(&hashes) {
+        assert_eq!(state.hash_one(o.as_ref().as_ref()), *h);
+        let copy: Oid = **o;
+        assert_eq!(state.hash_one(copy), *h);
+    }
+    let distinct: HashSet<u64> = hashes.iter().copied().collect();
+    assert_eq!(distinct.len(), oids.len());
+}
+
 /// `Oid` and its handles are `Send` / `Sync`: readers on many threads, a writer on
 /// one at a time (TSan checks the claims, and Miri the Rust-side accesses).
 #[test]
@@ -351,8 +378,9 @@ fn shortener_lifetime_follows_its_strings() {
     drop(text);
 }
 
-/// Oids of every kind a wrapper must accept: both types, unknown type bytes, the
-/// zero id, each in a heap allocation of exactly its 33 bytes.
+/// Oids of every kind a wrapper must accept: both types, their null ids, unknown
+/// type bytes, the typeless zero id, each in a heap allocation of exactly its 33
+/// bytes.
 // Boxed on purpose: ASan then sees each oid's own bounds.
 #[allow(clippy::vec_box)]
 fn sample_oids() -> Vec<Box<Oid>> {
@@ -360,6 +388,7 @@ fn sample_oids() -> Vec<Box<Oid>> {
     for (kind, hex) in [(OidType::Sha1, SHA1_HEX), (OidType::Sha256, SHA256_HEX)] {
         v.push(Box::new(Oid::from_prefix(hex.as_bytes(), kind).unwrap()));
         v.push(Box::new(Oid::from_prefix(b"0", kind).unwrap()));
+        v.push(Box::new(Oid::zero(kind)));
     }
     for raw in [0, 3, u8::MAX] {
         let mut oid = Oid::zeroed();
@@ -381,6 +410,8 @@ fn sample_hex() -> Vec<CString> {
     v.push(CString::new(SHA1_HEX.to_uppercase()).unwrap());
     v.push(CString::new(format!("z{}", &SHA1_HEX[1..])).unwrap());
     v.push(CString::new(format!("{}z", &SHA1_HEX[..39])).unwrap());
+    v.push(CString::new(format!("\u{e9}{}", &SHA1_HEX[1..])).unwrap());
+    v.push(CString::new([&SHA1_HEX.as_bytes()[..39], &[0xff][..]].concat()).unwrap());
     v
 }
 

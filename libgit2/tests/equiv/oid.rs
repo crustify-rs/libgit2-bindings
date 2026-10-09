@@ -812,6 +812,9 @@ fn hex_strings() -> Vec<String> {
     v.push(format!("{}d4", &SHA1_HEX[..38]));
     v.push(format!("z{}", &SHA1_HEX[1..]));
     v.push(format!("{}zz", &SHA1_HEX[..38]));
+    // Bytes past ASCII, which `git__fromhex` indexes its table with unsigned.
+    v.push(format!("\u{e9}{}", &SHA1_HEX[1..]));
+    v.push(format!("{}\u{e9}", &SHA1_HEX[..39]));
     v.push("0".repeat(64));
     v.push("ffff".to_owned());
     v
@@ -896,6 +899,58 @@ fn comparisons_match_c() {
             // The owned values order as their handles.
             assert_eq!(r_a.cmp(&r_b), c.0);
             assert_eq!(r_a == r_b, c.1);
+        }
+    }
+}
+
+/// `Oid::zero` is the header's `GIT_OID_SHA1_ZERO` / `GIT_OID_SHA256_ZERO` value,
+/// `{ type, { 0 } }`: byte for byte, and as `git_oid_is_zero`, `git_oid_tostr_s`
+/// (`GIT_OID_SHA1_HEXZERO` / `GIT_OID_SHA256_HEXZERO`), the comparisons and
+/// `git_oid_from_string` of that hex form see it, against every sample oid.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn zero_ids_match_c() {
+    init();
+    let (c_hex, rust_hex) = hex_cstrings();
+    for kind in [OidType::Sha1, OidType::Sha256] {
+        let c_zero = ffi::git_oid {
+            type_: kind.raw() as u8,
+            id: [0; 32],
+        };
+        let r_zero = Oid::zero(kind);
+        assert_eq!(c_bytes(&c_zero), rust_bytes(&r_zero));
+
+        // SAFETY: a live `git_oid`, read for the call only.
+        let c_is_zero = unsafe { ffi::git_oid_is_zero(&c_zero) };
+        assert_eq!(c_is_zero != 0, r_zero.as_ref().is_zero());
+        // SAFETY: a live `git_oid` of a known type, formatted into this thread's
+        // string, which is read before the next libgit2 call on the thread.
+        let c_hexzero = unsafe { CStr::from_ptr(ffi::git_oid_tostr_s(&c_zero)) }.to_owned();
+        assert_eq!(
+            c_hexzero.to_str().unwrap(),
+            r_zero.as_ref().to_hex_string().unwrap()
+        );
+        assert_eq!(c_hexzero.to_bytes(), "0".repeat(kind.hex_size()).as_bytes());
+
+        let mut c_parsed = ffi::git_oid::default();
+        // SAFETY: `out` is a live `git_oid`; `c_hexzero` is NUL-terminated.
+        let rc = unsafe { ffi::git_oid_from_string(&mut c_parsed, c_hexzero.as_ptr(), kind.raw()) };
+        assert_eq!(rc, 0);
+        assert_eq!(c_bytes(&c_parsed), c_bytes(&c_zero));
+        assert_eq!(Oid::from_string(&c_hexzero, kind).unwrap(), r_zero);
+
+        for other in oid_bytes() {
+            let (c_o, r_o) = (c_oid(other), rust_oid(other));
+            assert_eq!(
+                c_compare(&c_zero, &c_o, &c_hex),
+                rust_compare(r_zero.as_ref(), r_o.as_ref(), &rust_hex),
+                "{kind:?} zero vs {other:?}"
+            );
+            assert_eq!(
+                c_compare(&c_o, &c_zero, &c_hex),
+                rust_compare(r_o.as_ref(), r_zero.as_ref(), &rust_hex),
+                "{other:?} vs {kind:?} zero"
+            );
         }
     }
 }
