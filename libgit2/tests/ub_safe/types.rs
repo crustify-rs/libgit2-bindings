@@ -1,11 +1,14 @@
-//! UB tests for `git2/types.h`: the enums `SubmoduleRecurse` and `SubmoduleUpdate`.
+//! UB tests for `git2/types.h`: first the enums `ObjectType`, `ReferenceType`,
+//! `SubmoduleRecurse` and `SubmoduleUpdate`.
 //!
-//! Both are fieldless enums over C's `git_submodule_recurse_t` /
-//! `git_submodule_update_t`. The only safe way in from a raw value is `from_raw` /
-//! `try_from`, which must reject every value without a variant rather than produce
-//! an invalid discriminant (which Miri and UBSan would flag on the next read); an `as`
-//! cast to either does not compile (`compile_fail/`). None of them calls libgit2, so
-//! they also run under Miri.
+//! Each is a fieldless enum over its C enum: `git_object_t` (signed),
+//! `git_reference_t`, `git_submodule_recurse_t` and `git_submodule_update_t`
+//! (unsigned). The only safe way in from a raw value is `from_raw` / `try_from`, which
+//! must reject every value without a variant rather than produce an invalid
+//! discriminant (which Miri and UBSan would flag on the next read); an `as` cast to
+//! any of them, or an infallible conversion to `ObjectType` or `ReferenceType`, does
+//! not compile (`compile_fail/`). None of them owns or points at anything, and none of
+//! these tests calls libgit2, so they also run under Miri.
 //!
 //! Then the `Time` value (`git_time`) and its handles.
 //!
@@ -28,7 +31,10 @@ use std::thread;
 
 use ffibox::CZeroable;
 use libgit2::ffi;
-use libgit2::libgit2::core::types::{SubmoduleRecurse, SubmoduleUpdate, Time, TimeMut, TimeRef};
+use libgit2::libgit2::core::types::{
+    NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
+    SubmoduleUpdate, Time, TimeMut, TimeRef,
+};
 
 /// Every value around the declared ones, then a coarse stride across the whole
 /// type; BorrowSanitizer instruments each comparison, so the probe set stays small.
@@ -122,6 +128,134 @@ fn values_cross_threads() {
         }
         for (v, h) in update.iter().zip(u) {
             assert_eq!(h.join().unwrap(), v.raw());
+        }
+    });
+}
+
+/// Every value around the declared ones, then a coarse stride across the whole type;
+/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+fn object_probes() -> impl Iterator<Item = ffi::git_object_t> {
+    (-300..=300)
+        .chain((ffi::git_object_t::MIN..=ffi::git_object_t::MAX).step_by(1 << 26))
+        .chain([
+            ffi::git_object_t::MIN + 1,
+            ffi::git_object_t::MAX - 1,
+            ffi::git_object_t::MAX,
+        ])
+}
+
+/// As [`object_probes`], over the unsigned `git_reference_t`.
+fn reference_probes() -> impl Iterator<Item = ffi::git_reference_t> {
+    (0..=300)
+        .chain((0..=ffi::git_reference_t::MAX).step_by(1 << 26))
+        .chain([ffi::git_reference_t::MAX - 1, ffi::git_reference_t::MAX])
+}
+
+#[test]
+fn object_from_raw_yields_only_valid_types() {
+    let mut seen = HashSet::new();
+    for raw in object_probes() {
+        // `black_box` keeps the conversion from being folded at compile time.
+        if let Some(kind) = ObjectType::from_raw(black_box(raw)) {
+            // Reading the discriminant back validates it.
+            assert_eq!(kind.raw(), raw);
+            assert_eq!(ObjectType::raw_or_any(Some(kind)), raw);
+            assert!(!format!("{kind:?}").is_empty());
+            seen.insert(kind);
+        } else {
+            assert_eq!(
+                ObjectType::try_from(raw).map_err(NotAnObjectType::raw),
+                Err(raw)
+            );
+        }
+    }
+    assert_eq!(seen.len(), 4);
+}
+
+#[test]
+fn reference_from_raw_yields_only_valid_types() {
+    let mut seen = HashSet::new();
+    for raw in reference_probes() {
+        if let Some(kind) = ReferenceType::from_raw(black_box(raw)) {
+            assert_eq!(kind.raw(), raw);
+            assert!(!format!("{kind:?}").is_empty());
+            seen.insert(kind);
+        } else {
+            assert_eq!(
+                ReferenceType::try_from(raw).map_err(NotAReferenceType::raw),
+                Err(raw)
+            );
+        }
+    }
+    assert_eq!(seen.len(), 2);
+}
+
+#[test]
+fn object_and_reference_option_niches_hold() {
+    // `Option<_>` stores `None` in a value no variant uses: a rejected value must
+    // never alias a variant, nor a variant read as `None`.
+    for raw in object_probes() {
+        let kind = black_box(ObjectType::from_raw(raw));
+        assert_eq!(kind.map(ObjectType::raw).unwrap_or(raw), raw);
+        // The "any" filter is the one value `None` maps back to.
+        let filter = black_box(ObjectType::raw_or_any(kind));
+        assert_eq!(filter, kind.map_or(ffi::GIT_OBJECT_ANY, ObjectType::raw));
+    }
+    for raw in reference_probes() {
+        let kind = black_box(ReferenceType::from_raw(raw));
+        assert_eq!(kind.map(ReferenceType::raw).unwrap_or(raw), raw);
+    }
+}
+
+#[test]
+fn errors_format_every_extreme() {
+    // Formatting the signed and unsigned extremes overflows nothing.
+    for raw in [ffi::git_object_t::MIN, -1, 0, ffi::git_object_t::MAX] {
+        let e = black_box(ObjectType::try_from(raw)).unwrap_err();
+        assert!(e.to_string().contains(&raw.to_string()));
+    }
+    for raw in [0, 3, ffi::git_reference_t::MAX] {
+        let e = black_box(ReferenceType::try_from(raw)).unwrap_err();
+        assert!(e.to_string().contains(&raw.to_string()));
+    }
+}
+
+#[test]
+fn types_cross_threads() {
+    // Plain values: `Send` and `Sync` without an assertion, so sharing them races
+    // nothing for TSan to report.
+    let objects = [
+        ObjectType::Commit,
+        ObjectType::Tree,
+        ObjectType::Blob,
+        ObjectType::Tag,
+    ];
+    let references = [ReferenceType::Direct, ReferenceType::Symbolic];
+    thread::scope(|s| {
+        let objects: Vec<_> = objects
+            .iter()
+            .map(|kind| s.spawn(move || ObjectType::from_raw(kind.raw())))
+            .collect();
+        let references: Vec<_> = references
+            .iter()
+            .map(|kind| s.spawn(move || ReferenceType::from_raw(kind.raw())))
+            .collect();
+        for (kind, h) in [
+            ObjectType::Commit,
+            ObjectType::Tree,
+            ObjectType::Blob,
+            ObjectType::Tag,
+        ]
+        .into_iter()
+        .zip(objects)
+        {
+            assert_eq!(h.join().unwrap(), Some(kind));
+        }
+        for (kind, h) in [ReferenceType::Direct, ReferenceType::Symbolic]
+            .into_iter()
+            .zip(references)
+        {
+            assert_eq!(h.join().unwrap(), Some(kind));
         }
     });
 }

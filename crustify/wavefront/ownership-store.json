@@ -106,6 +106,12 @@
    "fields": []
   },
   {
+   "name": "git_object_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "Fieldless C enum (GIT_OBJECT_ANY = -2, GIT_OBJECT_INVALID = -1, COMMIT 1, TREE 2, BLOB 3, TAG 4; bindgen types it c_int). No storage, no pointers, no lifecycle: passed and returned by value, and through out-params (git_odb_read_header, git_odb_read_prefix-style backend callbacks in sys/odb_backend.h, git_odb_expand_id.type in/out). Only 1..=4 name an object's type: git_object_type_is_valid (object.c:344) accepts exactly those (git_objects_table size > 0); type2string gives '' for any other value; string2type returns INVALID for unknown, NULL or empty names (it prefix-matches, so 'commitx' -> COMMIT). GIT_OBJECT_ANY is a lookup/peel filter only (object_lookup*, git_object_peel, git_reference_peel, tree_entry_to_object, odb expand_ids), never an object's type; INVALID is an error/unset answer (git_object_type(NULL), git_tag_target_type(NULL), git_tree_entry_type(NULL), string2type misses, parse placeholders). The pack-entry types 6/7 are the GIT_PACKFILE_OFS_DELTA/REF_DELTA macros (pack.h:37), packfile-only, never a public out-param; cache.c's per-type limit table still reserves slots 0 and 5..7, so GIT_OPT_SET_CACHE_OBJECT_LIMIT accepts any of 0..=7 and rejects others 'type out of range' (cache.c:36). git_odb_expand_ids reads 0 as ANY and writes 0 back on a miss. HAZARD (probed, plain build): git_odb_write(..., type 0) succeeds - normalize_options (object.c:630) reads object_type 0 as BLOB for the id, but the loose backend formats its header from type2string(0) = '', so it stores an object under a blob id that git_odb_read_header then fails on ('failed to read loose object header'), and a later real write of the same blob is skipped by git_odb__freshen. Every other unnamed value (<0, >=5) is rejected 'invalid object type'. Rust side (core/types.rs): ObjectType {Commit, Tree, Blob, Tag}, #[repr(i32)], non_exhaustive; never transmute: from_raw/TryFrom<git_object_t> -> NotAnObjectType for every other value; filters spell ANY as None through ObjectType::raw_or_any(Option<ObjectType>), so a typed write/hash wrapper cannot pass 0.",
+   "fields": []
+  },
+  {
    "name": "git_oid",
    "defined_in": "include/git2/oid.h",
    "_comment_agent": "Plain value type with no pointer fields: `type` (unsigned char holding a git_oid_t value, 0 = GIT_OID_NONE/unset) and `id` (32-byte inline array, GIT_OID_MAX_SIZE). Never heap-allocated by libgit2's public API on its own; callers hold it by value or receive `const git_oid *` into a parent object. Nothing to release. Every bit pattern is accepted by oid.c: an unknown `type` makes git_oid_size/hexsize return 0 and the formatters report 'unknown type' (git_oid_nfmt/pathfmt) - BUT git_oid_tostr_s then returns its per-thread buffer without writing it (uninitialised on the thread's first call, no NUL: ASan heap-buffer-overflow in strlen confirmed with a zeroed oid), so its wrapper must reject unknown types. All-zero is libgit2's own GIT_OID_NONE. Constructors (init into caller storage): git_oid_from_string, git_oid_from_prefix, git_oid_from_raw; cloner: git_oid_cpy (memcpy of the whole struct; overlapping out/src would be UB).",
@@ -160,6 +166,12 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_reference_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "Fieldless C enum (GIT_REFERENCE_INVALID = 0, DIRECT = 1, SYMBOLIC = 2, ALL = DIRECT|SYMBOLIC = 3; bindgen types it c_uint). No storage, no pointers, no lifecycle. Its only public flow is the return of git_reference_type (refs.c:339), which answers ref->type: DIRECT or SYMBOLIC for every git_reference libgit2 builds (git_reference__alloc / __alloc_symbolic, refs.c:60/85); with NULL it GIT_ASSERT_ARGs, returning -1 (u32::MAX through the unsigned enum) in a release build and aborting in the Debug/coverage build. INVALID is internal only (transaction.c node with no target set); ALL is a list-filter mask that no non-deprecated API takes (only deprecated GIT_REF_LISTALL). No public routine takes a git_reference_t argument. Rust side (core/types.rs): ReferenceType {Direct, Symbolic}, #[repr(u32)], non_exhaustive; from_raw/TryFrom<git_reference_t> -> NotAReferenceType for INVALID, ALL and every unnamed value; never transmute.",
+   "fields": []
   },
   {
    "name": "git_submodule_recurse_t",

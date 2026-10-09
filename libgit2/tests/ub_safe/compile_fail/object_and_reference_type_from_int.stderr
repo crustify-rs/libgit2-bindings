@@ -1,0 +1,27 @@
+error[E0277]: the trait bound `ObjectType: From<i32>` is not satisfied
+  --> tests/ub_safe/compile_fail/object_and_reference_type_from_int.rs:10:29
+   |
+10 |     let _: ObjectType = raw.into();
+   |                             ^^^^ the trait `From<i32>` is not implemented for `ObjectType`
+   |
+   = note: required for `i32` to implement `Into<ObjectType>`
+
+error[E0277]: the trait bound `ReferenceType: From<u32>` is not satisfied
+  --> tests/ub_safe/compile_fail/object_and_reference_type_from_int.rs:11:33
+   |
+11 |     let _: ReferenceType = 3u32.into();
+   |                                 ^^^^ the trait `From<u32>` is not implemented for `ReferenceType`
+   |
+   = note: required for `u32` to implement `Into<ReferenceType>`
+
+error[E0605]: non-primitive cast: `i32` as `ObjectType`
+ --> tests/ub_safe/compile_fail/object_and_reference_type_from_int.rs:8:13
+  |
+8 |     let _ = raw as ObjectType;
+  |             ^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `u32` as `ReferenceType`
+ --> tests/ub_safe/compile_fail/object_and_reference_type_from_int.rs:9:13
+  |
+9 |     let _ = 0u32 as ReferenceType;
+  |             ^^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

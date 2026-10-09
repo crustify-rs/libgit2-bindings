@@ -1,14 +1,37 @@
-//! Equivalence of `git2/types.h`'s [`SubmoduleRecurse`] and [`SubmoduleUpdate`] with
-//! the `git_submodule_recurse_t` / `git_submodule_update_t` values libgit2 declares,
-//! reads, reports and writes.
+//! Equivalence of `git2/types.h`'s enums with the values libgit2 declares, accepts,
+//! reads, reports and writes, then of [`Time`] with the `git_time` values it builds.
 //!
-//! Each Rust type must name exactly the values of its C enum, each with its C value,
-//! except `GIT_SUBMODULE_UPDATE_DEFAULT`, which libgit2 never produces and refuses to
-//! write. libgit2 observes the types through a submodule: `git_submodule_lookup` reads
-//! the `.gitmodules` setting into the value `git_submodule_update_strategy` /
-//! `git_submodule_fetch_recurse_submodules` report, and
-//! `git_submodule_set_update` / `git_submodule_set_fetch_recurse_submodules` write a
-//! value back to `.gitmodules`, or refuse it; `git_submodule_init` copies the update
+//! [`ObjectType`] must name exactly the values libgit2 treats as an object's type:
+//! those `git_object_type_is_valid` accepts and `git_object_type2string` names, each
+//! with the C value `git_object_string2type` reads its name back as. Through an object
+//! database, a sequence of `git_odb_write` and `git_odb_read_header` calls over one
+//! repository, value by value, must succeed exactly for the values
+//! [`ObjectType::from_raw`] accepts and report each object back with the type it was
+//! written as; every other value, [`ObjectType::raw_or_any`]'s `GIT_OBJECT_ANY`
+//! included, must fail as an invalid object type. Each step is compared as it runs.
+//!
+//! [`ReferenceType`] must name what `git_reference_type` answers for the references
+//! libgit2 builds: a fresh repository's symbolic `HEAD`, and a direct reference
+//! created over an object, each read back after a lookup.
+//!
+//! Documented divergences for object and reference types, outside these comparisons:
+//!
+//! - `git_odb_write` accepts the unnamed type `0`: it hashes the data as a blob but
+//!   stores it under an empty type name, so `git_odb_read_header` cannot read the
+//!   object back, and a later write of the same blob is skipped as already present.
+//!   [`ObjectType`] cannot carry `0`; the C behaviour is pinned here alone.
+//! - `git_reference_type(NULL)` returns `-1` through the unsigned `git_reference_t`
+//!   in a release build, which [`ReferenceType::from_raw`] refuses; a debug build's C
+//!   assertion aborts instead, so that probe is skipped under the `coverage` variant,
+//!   the one debug build.
+//!
+//! [`SubmoduleRecurse`] and [`SubmoduleUpdate`] must each name exactly the values of
+//! its C enum, each with its C value, except `GIT_SUBMODULE_UPDATE_DEFAULT`, which
+//! libgit2 never produces and refuses to write. libgit2 observes the types through a
+//! submodule: `git_submodule_lookup` reads the `.gitmodules` setting into the value
+//! `git_submodule_update_strategy` / `git_submodule_fetch_recurse_submodules` report,
+//! and `git_submodule_set_update` / `git_submodule_set_fetch_recurse_submodules` write
+//! a value back to `.gitmodules`, or refuse it; `git_submodule_init` copies the update
 //! setting into the repository's config by name. Each probe runs the C routines on a
 //! fresh repository and predicts their result from the Rust conversion alone; a
 //! sequence of writes is compared after every step, both the value reported back and
@@ -41,7 +64,8 @@ use std::ptr;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
+    NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
+    SubmoduleUpdate, Time, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
 };
 
 /// Every `git_submodule_recurse_t` constant, beside the variant that must carry it.
@@ -660,4 +684,361 @@ fn zeroed_is_what_a_zoneless_parse_leaves() {
     init();
     let c = Signature::parse(c"A <a@b>").when();
     assert_eq!(Time::from(c), Time::zeroed());
+}
+
+/// Every `git_object_t` constant that names an object's type, beside its variant.
+const OBJECT_TYPES: [(ffi::git_object_t, ObjectType); 4] = [
+    (ffi::GIT_OBJECT_COMMIT, ObjectType::Commit),
+    (ffi::GIT_OBJECT_TREE, ObjectType::Tree),
+    (ffi::GIT_OBJECT_BLOB, ObjectType::Blob),
+    (ffi::GIT_OBJECT_TAG, ObjectType::Tag),
+];
+
+/// Every value around the declared ones, past the packfile's delta types (6, 7), and
+/// the extremes.
+fn object_probes() -> impl Iterator<Item = ffi::git_object_t> {
+    (-300..=300).chain([
+        ffi::git_object_t::MIN,
+        ffi::git_object_t::MIN + 1,
+        ffi::git_object_t::MAX - 1,
+        ffi::git_object_t::MAX,
+    ])
+}
+
+/// `git_object_type2string(raw)`, copied.
+fn type_name(raw: ffi::git_object_t) -> CString {
+    // SAFETY: `git_object_type2string` takes any value and returns a static string,
+    // "" for a value it does not name.
+    unsafe { CStr::from_ptr(ffi::git_object_type2string(raw)) }.to_owned()
+}
+
+/// `git_object_string2type(name)`.
+fn type_of_name(name: &CStr) -> ffi::git_object_t {
+    // SAFETY: `name` is NUL-terminated and read for the call only.
+    unsafe { ffi::git_object_string2type(name.as_ptr()) }
+}
+
+/// `git_object_type_is_valid` must accept exactly the values `from_raw` maps to a
+/// variant, `git_object_type2string` must name exactly those, and each name must read
+/// back as the variant's C value.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn object_types_are_what_libgit2_accepts() {
+    init();
+    for raw in object_probes() {
+        let kind = ObjectType::from_raw(raw);
+        // SAFETY: `git_object_type_is_valid` takes any value.
+        let valid = unsafe { ffi::git_object_type_is_valid(raw) };
+        assert_eq!(valid != 0, kind.is_some(), "type_is_valid({raw})");
+        assert_eq!(kind.map(ObjectType::raw), kind.is_some().then_some(raw));
+        assert_eq!(
+            ObjectType::try_from(raw).map_err(NotAnObjectType::raw),
+            kind.ok_or(raw)
+        );
+
+        let name = type_name(raw);
+        assert_eq!(
+            name.is_empty(),
+            kind.is_none(),
+            "type2string({raw}) = {name:?}"
+        );
+        let back = type_of_name(&name);
+        assert_eq!(ObjectType::from_raw(back), kind, "string2type({name:?})");
+    }
+    // The names, as C spells them, beside the variants.
+    for ((raw, kind), name) in OBJECT_TYPES
+        .into_iter()
+        .zip([c"commit", c"tree", c"blob", c"tag"])
+    {
+        assert_eq!(kind.raw(), raw);
+        assert_eq!(type_name(raw).as_c_str(), name);
+        assert_eq!(type_of_name(name), raw);
+    }
+    // What C answers for a name it does not know, which no variant is.
+    for name in [c"", c"any", c"ANY", c"invalid", c"ofs-delta"] {
+        let raw = type_of_name(name);
+        assert_eq!(raw, ffi::GIT_OBJECT_INVALID, "{name:?}");
+        assert_eq!(ObjectType::from_raw(raw), None);
+    }
+    // SAFETY: `git_object_string2type` checks for NULL, answering `GIT_OBJECT_INVALID`.
+    let raw = unsafe { ffi::git_object_string2type(ptr::null()) };
+    assert_eq!(raw, ffi::GIT_OBJECT_INVALID);
+    assert_eq!(ObjectType::from_raw(raw), None);
+}
+
+/// A scratch directory for one bare repository, removed on drop.
+struct TempRepo {
+    path: PathBuf,
+    repo: *mut ffi::git_repository,
+}
+
+impl TempRepo {
+    /// `git_repository_init_ext(path)`, bare, with default options.
+    fn new(tag: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("crustify-types-equiv-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let mut opts = ffi::git_repository_init_options::default();
+        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+        let rc = unsafe {
+            ffi::git_repository_init_options_init(
+                &mut opts,
+                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(rc, 0);
+        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+        let mut repo = ptr::null_mut();
+        // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
+        // options struct, all read for the call only; the result is a fresh
+        // repository on success.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        assert_eq!(rc, 0, "{:?}", c_last());
+        assert!(!repo.is_null());
+        Self { path, repo }
+    }
+
+    /// The repository's object database, released with [`Odb`].
+    fn odb(&self) -> Odb {
+        let mut odb = ptr::null_mut();
+        // SAFETY: `self.repo` is live; the result is a new reference to its odb.
+        let rc = unsafe { ffi::git_repository_odb(&mut odb, self.repo) };
+        assert_eq!(rc, 0);
+        assert!(!odb.is_null());
+        Odb(odb)
+    }
+}
+
+impl Drop for TempRepo {
+    fn drop(&mut self) {
+        // SAFETY: `self.repo` is the live repository `new` produced, freed once; every
+        // `Odb` taken from it holds its own reference.
+        unsafe { ffi::git_repository_free(self.repo) };
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+/// One reference to a repository's object database.
+struct Odb(*mut ffi::git_odb);
+
+impl Drop for Odb {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the reference `git_repository_odb` returned, released
+        // once.
+        unsafe { ffi::git_odb_free(self.0) };
+    }
+}
+
+/// A `git_oid`'s type byte and id bytes.
+type Id = (u8, [u8; 32]);
+
+/// What one step reported: the id it wrote, or the type and length
+/// `git_odb_read_header` read back, or the return and the thread's last error after
+/// a failure.
+#[derive(Debug, PartialEq)]
+enum OdbStep {
+    Written(Id),
+    Header(ffi::git_object_t, usize),
+    Failed(c_int, (c_int, String)),
+}
+
+impl Odb {
+    /// `git_odb_write(data, raw)`.
+    fn write(&self, data: &[u8], raw: ffi::git_object_t) -> OdbStep {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: `id` is a writable `git_oid`; `data` is live for its length, read
+        // for the call only.
+        let rc =
+            unsafe { ffi::git_odb_write(&mut id, self.0, data.as_ptr().cast(), data.len(), raw) };
+        if rc == 0 {
+            OdbStep::Written((id.type_, id.id))
+        } else {
+            OdbStep::Failed(rc, c_last())
+        }
+    }
+
+    /// `git_odb_read_header(id)`.
+    fn read_header(&self, &(type_, id): &Id) -> OdbStep {
+        let id = ffi::git_oid { type_, id };
+        let (mut len, mut raw) = (usize::MAX, ffi::git_object_t::MAX);
+        // SAFETY: `len` and `raw` are writable slots; `id` is a live `git_oid`, read
+        // for the call only.
+        let rc = unsafe { ffi::git_odb_read_header(&mut len, &mut raw, self.0, &id) };
+        if rc == 0 {
+            OdbStep::Header(raw, len)
+        } else {
+            OdbStep::Failed(rc, c_last())
+        }
+    }
+}
+
+/// The failure libgit2 reports for a value that is no object's type.
+fn invalid_object_type() -> OdbStep {
+    OdbStep::Failed(
+        -1,
+        (
+            ffi::GIT_ERROR_INVALID as c_int,
+            "invalid object type".to_owned(),
+        ),
+    )
+}
+
+/// Writes one object per probed value to one object database, reading each back,
+/// and compares every step with what the Rust conversion predicts.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn object_types_round_trip_through_the_odb() {
+    init();
+    let repo = TempRepo::new("object-odb");
+    let odb = repo.odb();
+    let probes = (-4..=8)
+        .chain([ObjectType::raw_or_any(None)])
+        .chain([ffi::git_object_t::MIN, ffi::git_object_t::MAX])
+        .filter(|&raw| raw != 0);
+    for raw in probes {
+        let data = format!("probe {raw}");
+        let written = odb.write(data.as_bytes(), raw);
+        match ObjectType::from_raw(raw) {
+            Some(kind) => {
+                let OdbStep::Written(id) = written else {
+                    panic!("write({raw}) = {written:?}")
+                };
+                let header = odb.read_header(&id);
+                assert_eq!(
+                    header,
+                    OdbStep::Header(kind.raw(), data.len()),
+                    "header({raw})"
+                );
+                let OdbStep::Header(read, _) = header else {
+                    unreachable!()
+                };
+                assert_eq!(ObjectType::try_from(read), Ok(kind));
+            }
+            None => assert_eq!(written, invalid_object_type(), "write({raw})"),
+        }
+    }
+
+    // A filter is not a type: an object cannot be written as "any".
+    assert_eq!(
+        odb.write(b"any", ObjectType::raw_or_any(None)),
+        invalid_object_type()
+    );
+}
+
+/// C alone: the unnamed `0`, which `ObjectType` cannot carry, is hashed as a blob but
+/// stored under no type name, unreadable, and shadows a later blob of the same data.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn odb_write_of_type_zero_stores_an_unreadable_blob() {
+    init();
+    assert_eq!(ObjectType::from_raw(0), None);
+    let repo = TempRepo::new("object-zero");
+    let odb = repo.odb();
+    let OdbStep::Written(id) = odb.write(b"zero", 0) else {
+        panic!("C refused type 0")
+    };
+    let OdbStep::Failed(rc, _) = odb.read_header(&id) else {
+        panic!("C read back an object of type 0")
+    };
+    assert!(rc < 0);
+    assert_eq!(
+        odb.write(b"zero", ObjectType::Blob.raw()),
+        OdbStep::Written(id),
+        "the blob's id"
+    );
+    assert!(matches!(odb.read_header(&id), OdbStep::Failed(..)));
+}
+
+/// `git_reference_lookup(name)`, released with [`Reference`].
+fn lookup_reference(repo: &TempRepo, name: &CStr) -> Reference {
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a live slot, `repo.repo` live, `name` NUL-terminated and read
+    // for the call only; the result is a fresh reference on success.
+    let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.repo, name.as_ptr()) };
+    assert_eq!(rc, 0, "lookup {name:?}: {:?}", c_last());
+    Reference(out)
+}
+
+/// A reference libgit2 built.
+struct Reference(*mut ffi::git_reference);
+
+impl Reference {
+    /// `git_reference_type`.
+    fn raw_type(&self) -> ffi::git_reference_t {
+        // SAFETY: `self.0` is a live reference.
+        unsafe { ffi::git_reference_type(self.0) }
+    }
+}
+
+impl Drop for Reference {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the live reference its constructor returned, freed once.
+        unsafe { ffi::git_reference_free(self.0) };
+    }
+}
+
+/// `git_reference_type` must answer, for the references libgit2 builds, the value of
+/// the variant the reference's kind predicts.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn reference_types_follow_c() {
+    init();
+    let repo = TempRepo::new("reference-kinds");
+
+    // A fresh repository's HEAD names a branch: symbolic.
+    let head = lookup_reference(&repo, c"HEAD");
+    assert_eq!(head.raw_type(), ReferenceType::Symbolic.raw());
+    assert_eq!(
+        ReferenceType::from_raw(head.raw_type()),
+        Some(ReferenceType::Symbolic)
+    );
+
+    // A reference created over an object id: direct, at creation and on lookup.
+    let OdbStep::Written(id) = repo.odb().write(b"target", ObjectType::Blob.raw()) else {
+        panic!("blob write failed")
+    };
+    let id = ffi::git_oid {
+        type_: id.0,
+        id: id.1,
+    };
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a live slot, `repo.repo` live, the name NUL-terminated and `id`
+    // a live `git_oid`, all read for the call only; no log message.
+    let rc = unsafe {
+        ffi::git_reference_create(
+            &mut out,
+            repo.repo,
+            c"refs/tags/probe".as_ptr(),
+            &id,
+            0,
+            ptr::null(),
+        )
+    };
+    assert_eq!(rc, 0, "{:?}", c_last());
+    let created = Reference(out);
+    assert_eq!(
+        ReferenceType::try_from(created.raw_type()),
+        Ok(ReferenceType::Direct)
+    );
+    let found = lookup_reference(&repo, c"refs/tags/probe");
+    assert_eq!(found.raw_type(), ReferenceType::Direct.raw());
+
+    // HEAD again, after the repository changed: still symbolic.
+    assert_eq!(
+        ReferenceType::from_raw(lookup_reference(&repo, c"HEAD").raw_type()),
+        Some(ReferenceType::Symbolic)
+    );
+
+    // No reference: a release build answers -1, which no variant is.
+    if std::env::var("CRUSTIFY_BUILD_VARIANT").as_deref() != Ok("coverage") {
+        // SAFETY: a release build's `git_reference_type` checks its argument and
+        // returns -1 for NULL; the debug build, which asserts, is excluded above.
+        let raw = unsafe { ffi::git_reference_type(ptr::null()) };
+        assert_eq!(raw, -1i32 as ffi::git_reference_t);
+        assert_eq!(
+            ReferenceType::try_from(raw).map_err(NotAReferenceType::raw),
+            Err(ffi::git_reference_t::MAX)
+        );
+    }
 }
