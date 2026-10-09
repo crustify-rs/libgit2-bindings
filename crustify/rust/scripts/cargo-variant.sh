@@ -34,12 +34,14 @@ case $variant in
   bsan)
     # trybuild's nested cargo build does not finish under BorrowSanitizer, and the
     # compile-fail suite is a compile-time check the plain variant already runs.
-    # Tests run on one thread: BorrowSanitizer's garbage collector can wait forever for
-    # an exited test thread to reach a safepoint when many threads churn at once.
+    # Under parallel test threads BorrowSanitizer's GC can take longer than its default
+    # 10 s hang threshold to bring every thread to a safepoint, and then aborts; give it
+    # 120 s rather than serialize the tests.
+    export BSAN_OPTIONS=${BSAN_OPTIONS:-gc_hang_threshold_ms=120000}
     if [ "${1:-}" = test ]; then
       case " $* " in
-        *" -- "*) exec cargo bsan "$@" --skip compile_fail --test-threads=1 ;;
-        *) exec cargo bsan "$@" -- --skip compile_fail --test-threads=1 ;;
+        *" -- "*) exec cargo bsan "$@" --skip compile_fail ;;
+        *) exec cargo bsan "$@" -- --skip compile_fail ;;
       esac
     fi
     exec cargo bsan "$@" ;;
