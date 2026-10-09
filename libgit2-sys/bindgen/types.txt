@@ -19,3 +19,5 @@ git_repository_open_flag_t
 git_strarray
 git_submodule_recurse_t
 git_submodule_update_t
+git_time
+git_trace_level_t

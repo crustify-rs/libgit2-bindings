@@ -17,6 +17,7 @@ mod oidarray;
 mod sys_alloc;
 mod sys_errors;
 mod sys_odb_backend;
+mod trace;
 mod types;
 
 /// Illegal safe paths that must fail to compile, one file each under `compile_fail/`.

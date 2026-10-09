@@ -1,0 +1,21 @@
+error[E0502]: cannot borrow `time` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/time_mut_aliased.rs:8:13
+   |
+ 7 |     let mut a = time.as_mut();
+   |                 ---- mutable borrow occurs here
+ 8 |     let r = time.as_ref();
+   |             ^^^^ immutable borrow occurs here
+ 9 |     let mut b = time.as_mut();
+10 |     a.set_seconds(1);
+   |     - mutable borrow later used here
+
+error[E0499]: cannot borrow `time` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/time_mut_aliased.rs:9:17
+   |
+ 7 |     let mut a = time.as_mut();
+   |                 ---- first mutable borrow occurs here
+ 8 |     let r = time.as_ref();
+ 9 |     let mut b = time.as_mut();
+   |                 ^^^^ second mutable borrow occurs here
+10 |     a.set_seconds(1);
+   |     - first borrow later used here
