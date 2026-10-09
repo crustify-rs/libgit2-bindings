@@ -1,0 +1,177 @@
+{
+  "crate_path": "/target/crustify/.worktrees/crustify/batches/20261008-170008/libgit2/core/wave-1/batch-0/crustify/rust",
+  "counts": {
+    "unsafe_blocks": 310,
+    "unsafe_block_stmts": 18,
+    "unsafe_block_lines": 434,
+    "unsafe_block_code_lines": 410,
+    "unsafe_blocks_wrapper_impl": 157,
+    "unsafe_blocks_ffi_export": 9,
+    "unsafe_fns": 99,
+    "unsafe_fns_seam": 48,
+    "unsafe_fns_pub_smell": 34,
+    "unsafe_fns_priv_smell": 17,
+    "unsafe_impls": 76,
+    "unsafe_traits": 1,
+    "ffi_calls": 74,
+    "wrapper_newtypes": 12,
+    "wrapper_newtypes_declared": 10,
+    "wrapper_declared_nonconformant": 0,
+    "wrapper_newtypes_undeclared": 2,
+    "raw_ptr_args": 49,
+    "raw_ptr_rets": 49,
+    "raw_ptr_seam": 81,
+    "raw_ptr_wrapped": 5,
+    "raw_ptr_pub_smell": 0,
+    "raw_ptr_priv_smell": 17,
+    "ref_to_type_wrapper": 44,
+    "field_ref_wrapped": 0,
+    "field_proj_wrapped": 60,
+    "field_proj_outside_impl": 4,
+    "void_ptr_seam": 31,
+    "void_ptr_pub_smell": 0,
+    "void_ptr_priv_smell": 0,
+    "raw_ptr_derefs": 65,
+    "raw_ptr_derefs_outside_impl": 5,
+    "total_stmts": 783,
+    "code_lines": 3196,
+    "raw_ptr_smell_sites": [
+      {
+        "file": "libgit2/libgit2/core/buffer.rs",
+        "count": 1,
+        "lines": [
+          197
+        ]
+      },
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 5,
+        "lines": [
+          1066,
+          1330,
+          1567,
+          1724,
+          1802
+        ]
+      },
+      {
+        "file": "libgit2/libgit2/odb/sys/odb_backend.rs",
+        "count": 7,
+        "lines": [
+          85,
+          206,
+          217,
+          257,
+          289,
+          299,
+          489
+        ]
+      },
+      {
+        "file": "libgit2/libgit2/util/sys/alloc.rs",
+        "count": 1,
+        "lines": [
+          312
+        ]
+      }
+    ],
+    "void_ptr_sites": [],
+    "field_proj_sites": [
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 3,
+        "lines": [
+          1068,
+          1569,
+          1804
+        ]
+      }
+    ],
+    "field_ref_sites": [],
+    "raw_deref_sites": [
+      {
+        "file": "libgit2/libgit2/core/types.rs",
+        "count": 3,
+        "lines": [
+          1068,
+          1569,
+          1804
+        ]
+      }
+    ]
+  },
+  "counts_unavailable": null,
+  "seed": "--name git_signature",
+  "entries": [
+    {
+      "name": "git_signature",
+      "raw_ptr_sites": [
+        {
+          "file": "/opt/venv/share/ffibox/src/macros.rs",
+          "count": 4,
+          "lines": [
+            203,
+            215,
+            256,
+            267
+          ]
+        },
+        {
+          "file": "libgit2/libgit2/core/types.rs",
+          "count": 1,
+          "lines": [
+            1066
+          ]
+        }
+      ],
+      "raw_deref_sites": [
+        {
+          "file": "libgit2/libgit2/core/types.rs",
+          "count": 8,
+          "lines": [
+            1068,
+            1197,
+            1210,
+            1220,
+            1276,
+            1296,
+            1307,
+            1319
+          ]
+        }
+      ],
+      "deref_impl_sites": [],
+      "deref_mut_impl_sites": [],
+      "slice_ref_sites": [],
+      "slice_mut_sites": [],
+      "crate": "libgit2"
+    }
+  ],
+  "undocumented_unsafe": {
+    "sites": 1089,
+    "documented": 1067,
+    "undocumented": 22,
+    "per_file": {
+      "libgit2/libgit2/core/common.rs": 3,
+      "libgit2/libgit2/oid/oid.rs": 3,
+      "libgit2/libgit2/core/strarray.rs": 2,
+      "libgit2/libgit2/util/sys/alloc.rs": 2,
+      "libgit2/tests/equiv/buffer.rs": 2,
+      "libgit2/tests/equiv/common.rs": 2,
+      "libgit2/tests/equiv/oid.rs": 2,
+      "libgit2/tests/equiv/types.rs": 2,
+      "libgit2/tests/equiv/oidarray.rs": 1,
+      "libgit2/tests/equiv/strarray.rs": 1,
+      "libgit2/tests/equiv/sys_odb_backend.rs": 1,
+      "libgit2/tests/ub_safe/fixture.rs": 1
+    }
+  },
+  "derived": {
+    "unsafe_fn_pub_ratio": 0.3434,
+    "unsafe_fn_smell": 51,
+    "raw_ptr_smell": 17,
+    "raw_ptr_seam_ratio": 0.8265,
+    "unsafe_loc_ratio": 0.1283,
+    "loc_per_unsafe_block": 10.3
+  }
+}
