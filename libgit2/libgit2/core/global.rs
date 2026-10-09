@@ -7,8 +7,10 @@
 //! that brings the count back to 0 tears them down again. A [`Runtime`] is one counted
 //! reference: [`init`] takes it, and dropping it (or [`Runtime::shutdown`]) releases
 //! exactly that one, so the count can never be released more often than it was taken.
-//! A C caller can call `git_libgit2_shutdown` unbalanced, driving the count negative,
-//! after which libgit2 never sets itself up again.
+//! A C caller can call `git_libgit2_shutdown` unbalanced, driving the count negative;
+//! libgit2 then sets itself up again only once as many initialisations have brought
+//! the count back through 1, and [`init`] reports the 0 it returns on the way as a
+//! failure.
 //!
 //! Every safe wrapper that needs libgit2's global state holds a reference of its own,
 //! taken on first use and kept for the rest of the process (`runtime_pinned`, in
@@ -62,11 +64,13 @@ pub struct Runtime {
 /// Returns the reference, which knows how many references were live once it was
 /// taken, itself included ([`Runtime::count`]): 1 when this call set libgit2 up.
 ///
-/// Fails when libgit2 cannot be initialised ([`InitError::Failed`]); from then on
-/// every call fails ([`InitError::Poisoned`]), where C's `git_libgit2_init` would
-/// report success over half-initialised state. It also refuses to let the count grow
-/// past `c_int::MAX / 2` ([`InitError::TooManyReferences`]), so a program leaking
-/// references cannot wrap it around.
+/// Fails when libgit2 cannot be initialised ([`InitError::Failed`]), or when an
+/// unbalanced C `git_libgit2_shutdown` had driven the count negative, so that this
+/// call only brought it to 0 and set nothing up; from then on every call fails
+/// ([`InitError::Poisoned`]), where C's `git_libgit2_init` would report success over
+/// half-initialised state. It also refuses to let the count grow past `c_int::MAX / 2`
+/// ([`InitError::TooManyReferences`]), so a program leaking references cannot wrap it
+/// around.
 ///
 /// No libgit2 error is set or reported: after a failed initialisation, the per-thread
 /// error state may have no TLS key to be looked up under.
@@ -108,9 +112,11 @@ impl Runtime {
     /// remain, as `git_libgit2_shutdown` returns it: 0 when this one was the last and
     /// libgit2 tore its global state down.
     ///
-    /// Fails only when libgit2 cannot take or release its initialisation mutex; the
-    /// reference may then stay counted, which keeps the state alive rather than
-    /// tearing it down under another holder.
+    /// Fails when libgit2 cannot take or release its initialisation mutex, in which
+    /// case the reference may stay counted, which keeps the state alive rather than
+    /// tearing it down under another holder; or when an unbalanced C
+    /// `git_libgit2_shutdown` had already released this reference's count, so that
+    /// libgit2 reports a negative one.
     ///
     /// Wraps: git_libgit2_shutdown
     pub fn shutdown(self) -> Result<usize, ShutdownError> {
@@ -142,7 +148,9 @@ fn release() -> Result<usize, ShutdownError> {
 #[non_exhaustive]
 pub enum InitError {
     /// `git_libgit2_init` failed: libgit2 could not take its initialisation mutex, or
-    /// a subsystem could not be set up (an allocator refusing requests, say).
+    /// a subsystem could not be set up (an allocator refusing requests, say); or it
+    /// answered 0, having set nothing up, because an unbalanced C
+    /// `git_libgit2_shutdown` had driven the count negative.
     Failed,
     /// An earlier initialisation through [`init`] failed, leaving libgit2
     /// half-initialised for the rest of the process.
@@ -164,7 +172,8 @@ impl fmt::Display for InitError {
 impl std::error::Error for InitError {}
 
 /// [`Runtime::shutdown`] failed: libgit2 could not take or release its
-/// initialisation mutex.
+/// initialisation mutex, or reported a negative count, an unbalanced C
+/// `git_libgit2_shutdown` having released the reference's count before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ShutdownError;
 
@@ -309,6 +318,70 @@ mod unit_tests {
                 assert_eq!(init().unwrap().count().get(), 64, "not poisoned");
                 drop(held);
                 assert_eq!(init().unwrap().count().get(), 1);
+            },
+        );
+    }
+
+    /// An unbalanced C shutdown drives the count negative: the `init` that brings it
+    /// to 0 sets nothing up and fails, poisoning later ones, while C's next
+    /// initialisation sets libgit2 up again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn an_unbalanced_c_shutdown_fails_the_next_init() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::an_unbalanced_c_shutdown_fails_the_next_init"
+            ),
+            || {
+                // SAFETY: no arguments; releases a reference never taken, which is
+                // this test's subject, in a child of its own.
+                assert_eq!(unsafe { ffi::git_libgit2_shutdown() }, -1);
+                assert_eq!(init().unwrap_err(), InitError::Failed, "answered 0");
+                assert_eq!(init().unwrap_err(), InitError::Poisoned);
+                // SAFETY: no arguments; balanced by the shutdown below.
+                assert_eq!(unsafe { ffi::git_libgit2_init() }, 1, "C sets up again");
+                let mut buf = ffi::git_buf {
+                    ptr: core::ptr::null_mut(),
+                    reserved: 0,
+                    size: 0,
+                };
+                // SAFETY: `GIT_OPT_GET_USER_AGENT` fills the zeroed `git_buf *` it is
+                // given; libgit2 is initialised; disposed below.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT as c_int, &raw mut buf)
+                };
+                assert_eq!(rc, 0);
+                // SAFETY: libgit2 filled the buffer with a NUL-terminated string.
+                let agent = unsafe { CStr::from_ptr(buf.ptr) }.to_owned();
+                // SAFETY: as libgit2 left it.
+                unsafe { ffi::git_buf_dispose(&raw mut buf) };
+                assert!(agent.to_bytes().starts_with(b"libgit2 "));
+                // SAFETY: releases the reference just taken.
+                assert_eq!(unsafe { ffi::git_libgit2_shutdown() }, 0);
+            },
+        );
+    }
+
+    /// An unbalanced C shutdown that released a `Runtime`'s count before it makes
+    /// the `Runtime`'s own release fail.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn an_unbalanced_c_shutdown_fails_the_runtimes_release() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::an_unbalanced_c_shutdown_fails_the_runtimes_release"
+            ),
+            || {
+                let r = init().unwrap();
+                assert_eq!(r.count().get(), 1);
+                // SAFETY: no arguments; releases the Rust reference's count from C,
+                // which is this test's subject, in a child of its own.
+                assert_eq!(unsafe { ffi::git_libgit2_shutdown() }, 0);
+                assert_eq!(r.shutdown(), Err(ShutdownError), "the count went to -1");
+                // SAFETY: no arguments; brings the count back to 0, setting nothing up.
+                assert_eq!(unsafe { ffi::git_libgit2_init() }, 0);
             },
         );
     }
