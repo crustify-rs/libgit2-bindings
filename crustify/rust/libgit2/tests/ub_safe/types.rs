@@ -38,6 +38,10 @@
 //! `1..=4`): converting C values is checked before any variant exists, so no value can
 //! reach an invalid discriminant. Rust only, so Miri runs it; the sweep stays small
 //! for BSan.
+//!
+//! Then `BranchType` (`git_branch_t`): its raw conversions yield only valid variants
+//! for every input, so a C value can never make an invalid enum; pure Rust, so Miri runs
+//! it.
 
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -48,8 +52,8 @@ use std::thread;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleIgnore,
-    SubmoduleRecurse, SubmoduleUpdate, Time, TimeMut, TimeRef,
+    BranchType, FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType,
+    SubmoduleIgnore, SubmoduleRecurse, SubmoduleUpdate, Time, TimeMut, TimeRef,
 };
 
 /// Every value around the declared ones, then a coarse stride across the whole
@@ -989,4 +993,41 @@ fn submodule_ignore_conversions_never_build_an_invalid_variant() {
     assert_eq!(named, 5);
     let none: Option<SubmoduleIgnore> = SubmoduleIgnore::from_raw(0);
     assert!(none.is_none());
+}
+
+// --- `BranchType` ------------------------------------------------------------
+
+#[test]
+fn every_raw_value_converts_to_a_variant_or_none() {
+    let edges = [
+        u32::MAX,
+        u32::MAX - 1,
+        0x8000_0000,
+        0x8000_0001,
+        0x8000_0003,
+    ];
+    for raw in (0..=300).chain(edges) {
+        match BranchType::from_raw(raw) {
+            Some(kind) => {
+                assert_eq!(kind.raw(), raw);
+                assert!(matches!(
+                    kind,
+                    BranchType::Local | BranchType::Remote | BranchType::All
+                ));
+            }
+            None => assert!(!(1..=3).contains(&raw)),
+        }
+        assert_eq!(BranchType::try_from(raw).ok(), BranchType::from_raw(raw));
+    }
+    assert_eq!(BranchType::All.raw(), ffi::GIT_BRANCH_ALL);
+}
+
+#[test]
+fn branch_types_cross_threads() {
+    fn send_sync<T: Send + Sync + Copy>() {}
+    send_sync::<BranchType>();
+    let kind = std::thread::spawn(|| BranchType::Local | BranchType::Remote)
+        .join()
+        .unwrap();
+    assert_eq!(kind, BranchType::All);
 }

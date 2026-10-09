@@ -93,6 +93,17 @@
 //! refuses `GIT_SUBMODULE_IGNORE_UNSPECIFIED` like any unnamed value, but `Unspecified`
 //! is a variant (status queries take it), so a typed setter wrapper must refuse it
 //! itself.
+//!
+//! Then [`BranchType`] against `git_branch_t` as libgit2 reads and writes it:
+//! `git_branch_iterator_new` filters by it and `git_branch_next` reports it. On the
+//! `testrepo.git` fixture, which has local branches and one remote-tracking branch, the C
+//! side lists the branches for every raw selection; the Rust side predicts each listing
+//! from the full one with [`BranchType::contains`] and converts every reported kind with
+//! [`BranchType::from_raw`]. An iterator takes any bits, listing nothing for `0` and
+//! ignoring bits beyond `GIT_BRANCH_ALL`; [`BranchType`] names only the three values every
+//! branch routine accepts (`git_branch_lookup` asserts on the rest), so
+//! [`BranchType::from_raw`] rejects those selections, which the test checks list nothing
+//! new: a documented divergence.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -103,9 +114,9 @@ use std::ptr;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleIgnore,
-    SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedFileMode, UnnamedSubmoduleRecurse,
-    UnnamedSubmoduleUpdate,
+    BranchType, FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType,
+    SubmoduleIgnore, SubmoduleRecurse, SubmoduleUpdate, Time, UnnamedFileMode,
+    UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
 };
 
 /// Every `git_submodule_recurse_t` constant, beside the variant that must carry it.
@@ -2359,4 +2370,103 @@ fn set_ignore_takes_the_variants_values() {
             }
         }
     }
+}
+
+// --- `BranchType` ------------------------------------------------------------
+
+fn open_fixture() -> *mut ffi::git_repository {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git\0"
+    );
+    let mut repo = ptr::null_mut();
+    // SAFETY: no arguments; the extra reference dies with the process.
+    assert!(unsafe { ffi::git_libgit2_init() } > 0);
+    // SAFETY: `repo` receives the repository; `path` is NUL-terminated; no ceiling
+    // directories.
+    let rc = unsafe {
+        ffi::git_repository_open_ext(
+            &mut repo,
+            path.as_ptr().cast(),
+            ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+            ptr::null(),
+        )
+    };
+    assert_eq!(rc, 0);
+    repo
+}
+
+/// The branches `git_branch_next` lists for `flags`, with the kind it reports for each.
+fn c_list(
+    repo: *mut ffi::git_repository,
+    flags: ffi::git_branch_t,
+) -> Vec<(String, ffi::git_branch_t)> {
+    let mut iter = ptr::null_mut();
+    // SAFETY: `iter` receives the iterator; `repo` is open; any flags are accepted.
+    let rc = unsafe { ffi::git_branch_iterator_new(&mut iter, repo, flags) };
+    assert_eq!(rc, 0);
+    let mut out = Vec::new();
+    loop {
+        let mut reference = ptr::null_mut();
+        let mut kind: ffi::git_branch_t = 0;
+        // SAFETY: both out-parameters are writable; `iter` is live.
+        let rc = unsafe { ffi::git_branch_next(&mut reference, &mut kind, iter) };
+        if rc == ffi::GIT_ITEROVER {
+            break;
+        }
+        assert_eq!(rc, 0);
+        // SAFETY: `reference` is live until freed; its name is copied out first.
+        let name = unsafe { CStr::from_ptr(ffi::git_reference_name(reference)) };
+        out.push((name.to_string_lossy().into_owned(), kind));
+        // SAFETY: `reference` is the caller's, released once.
+        unsafe { ffi::git_reference_free(reference) };
+    }
+    // SAFETY: `iter` is live, released once.
+    unsafe { ffi::git_branch_iterator_free(iter) };
+    out.sort();
+    out
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn branch_iterators_filter_and_report_as_branch_type_says() {
+    let repo = open_fixture();
+    let all = c_list(repo, ffi::GIT_BRANCH_ALL);
+    assert!(all.iter().any(|(n, _)| n.starts_with("refs/heads/")));
+    assert!(all.iter().any(|(n, _)| n.starts_with("refs/remotes/")));
+
+    // Every kind libgit2 reports is a named one, and one that names a single kind.
+    for (name, kind) in &all {
+        let kind = BranchType::from_raw(*kind).expect("a named kind");
+        let expected = if name.starts_with("refs/heads/") {
+            BranchType::Local
+        } else {
+            BranchType::Remote
+        };
+        assert_eq!(kind, expected, "{name}");
+        assert_eq!(kind.raw(), expected.raw());
+    }
+
+    // Each selection lists exactly the branches whose kind it contains.
+    for selection in [BranchType::Local, BranchType::Remote, BranchType::All] {
+        let predicted: Vec<_> = all
+            .iter()
+            .filter(|(_, kind)| selection.contains(BranchType::from_raw(*kind).unwrap()))
+            .cloned()
+            .collect();
+        assert_eq!(c_list(repo, selection.raw()), predicted, "{selection:?}");
+    }
+    let union = BranchType::Local | BranchType::Remote;
+    assert_eq!(c_list(repo, union.raw()), all);
+
+    // Selections the type does not name list nothing, or what their named bits do.
+    for raw in [0, 4, 5, 6, 7, 8, 0x8000_0003] {
+        assert!(BranchType::from_raw(raw).is_none());
+        let named = raw & ffi::GIT_BRANCH_ALL;
+        let expected = BranchType::from_raw(named).map_or(Vec::new(), |k| c_list(repo, k.raw()));
+        assert_eq!(c_list(repo, raw), expected, "raw {raw:#x}");
+    }
+
+    // SAFETY: `repo` is open, released once.
+    unsafe { ffi::git_repository_free(repo) };
 }

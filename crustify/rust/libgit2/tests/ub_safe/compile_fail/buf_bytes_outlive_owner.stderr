@@ -1,0 +1,11 @@
+error[E0597]: `buf` does not live long enough
+ --> tests/ub_safe/compile_fail/buf_bytes_outlive_owner.rs:7:9
+  |
+5 |     let bytes = {
+  |         ----- borrow later stored here
+6 |         let buf = Buf::new();
+  |             --- binding `buf` declared here
+7 |         buf.as_ref().as_bytes()
+  |         ^^^ borrowed value does not live long enough
+8 |     };
+  |     - `buf` dropped here while still borrowed

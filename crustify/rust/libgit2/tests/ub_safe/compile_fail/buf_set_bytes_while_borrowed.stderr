@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `buf` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/buf_set_bytes_while_borrowed.rs:8:5
+  |
+7 |     let s = buf.as_ref().as_c_str();
+  |             --- immutable borrow occurs here
+8 |     buf.as_mut().set_bytes(b"replaced");
+  |     ^^^^^^^^^^^^ mutable borrow occurs here
+9 |     let _ = s.to_bytes();
+  |             - immutable borrow later used here

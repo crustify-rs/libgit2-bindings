@@ -1,6 +1,7 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C types names.
 # Add only the items a batch needs; keep entries sorted.
 git_allocator
+git_branch_t
 git_buf
 git_buildinfo_t
 git_error

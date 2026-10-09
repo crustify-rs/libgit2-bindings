@@ -60,6 +60,34 @@
    ]
   },
   {
+   "name": "git_branch_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "core wave 0 batch 0 (2026-10-09). Flag-shaped enum: LOCAL = 1, REMOTE = 2, ALL = LOCAL|REMOTE. git_branch_iterator_new stores it as unsigned flags and git_branch_next tests each bit (0 lists nothing, extra bits are ignored) and writes only LOCAL or REMOTE to *out_type; git_branch_lookup switches on it and hits GIT_ASSERT(false) for any other value (-1 'unrecoverable internal error' in release, abort in the Debug/coverage build). Wrapped as the closed Rust enum BranchType, so the asserting values are unrepresentable.",
+   "fields": []
+  },
+  {
+   "name": "git_buf",
+   "defined_in": "include/git2/buffer.h",
+   "_comment_agent": "core wave 0 batch 0 (2026-10-09). Wrapped as Buf / BufRef / BufMut, owned by value as BufVal = CVal<Buf, BufDispose>; the safe API keeps the invariant 'reserved == 0 owns nothing and reads empty; reserved > 0 owns a libgit2-allocator buffer with size < reserved and ptr[size] == NUL'. BufDispose calls git_buf_dispose only when reserved > 0.",
+   "fields": [
+    {
+     "name": "ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "A byte buffer of `size` bytes, NUL-terminated at ptr[size] (contents may hold interior NULs: diff/patch/pack output). Ownership is runtime-conditional: libgit2's producers (git_buf_fromstr) leave reserved = git_str asize, so reserved > 0 means ptr is a git__malloc buffer of >= reserved bytes the struct owns, writable and reusable (git_buf_sanitize writes ptr[0], git_buf_tostr adopts it as git_str asize and may git__realloc it). reserved == 0 means it owns nothing: ptr is NULL (GIT_BUF_INIT) or the hidden static git_str__initstr (size 0), which git_buf_tostr/sanitize replace without freeing. git_buf_dispose itself frees any ptr != git_str__initstr (git__free(NULL) for GIT_BUF_INIT, which reads git__allocator unsynchronised against a first git_libgit2_init), so a reserved == 0 buffer with a foreign non-NULL ptr would be freed by dispose yet dropped by sanitize. The one producer of that shape is the internal git_merge_driver__builtin_apply (merged_out reserved = 0 over an owned, non-NUL-terminated merge result, disposed by merge_conflict_invoke_driver); no public routine hands it out. The header's 'reserved and unused' comment is wrong."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_buildinfo_t",
    "defined_in": "include/git2/common.h",
    "_comment_agent": "Fieldless enum, passed by value only; no pointer, no lifecycle (core wave 0 batch 1, 2026-10-09). Sole consumer git_libgit2_buildinfo (settings.c:478) switches on it: GIT_BUILDINFO_CPU (1) returns the static string GIT_BUILD_CPU, GIT_BUILDINFO_COMMIT (2) the static GIT_BUILD_COMMIT, each only when cmake defined it (CPU always, COMMIT when `git rev-parse HEAD` succeeded at configure time); every other value, 0 included, returns NULL without setting an error. The returned strings are static, never freed. Rust: `BuildInfo` (#[repr(u32)], fallible from_raw) in core/common.rs.",
@@ -810,6 +838,36 @@
        "lifetime": "other"
       },
       "note": "Out-parameter: the new blob's id, written on success only (git_blob__create_from_paths)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_buf_dispose",
+   "defined_in": "src/libgit2/buf.c",
+   "lifetime": {
+    "for": "buf",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "buf",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The caller's git_buf, held by value (stack or embedded); NULL is a no-op. Frees buf->ptr with git__free unless it is the static git_str__initstr (NULL included), then resets the struct to {git_str__initstr, 0, 0}: reusable, never freed itself."
      }
     }
    ]

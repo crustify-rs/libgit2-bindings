@@ -502,3 +502,37 @@ pub fn set_extensions(names: &[&CStr]) {
     };
     assert_eq!(rc, 0);
 }
+
+// --- `git2/buffer.h` ---------------------------------------------------------------
+
+use libgit2::libgit2::core::buffer::{Buf, BufVal};
+
+/// Sets a string option of `git_libgit2_opts` (`GIT_OPT_SET_USER_AGENT`,
+/// `GIT_OPT_SET_TEMPLATE_PATH`); NULL restores the default. Stands in for the
+/// `git_libgit2_opts` wrapper (`core`), which replaces it.
+///
+/// The options need an initialised libgit2: this takes a reference of its own, which
+/// the process keeps.
+pub fn set_str_option(option: u32, value: Option<&CStr>) {
+    // SAFETY: no arguments; libgit2 counts initialisations under its own lock.
+    assert!(unsafe { ffi::git_libgit2_init() } > 0);
+    let value = value.map_or(core::ptr::null(), CStr::as_ptr);
+    // SAFETY: the string options copy their `const char *`, or restore their default
+    // for NULL.
+    assert_eq!(unsafe { ffi::git_libgit2_opts(option as c_int, value) }, 0);
+}
+
+/// Has libgit2 fill `buf` through a `GIT_OPT_GET_*` option taking a `git_buf *`
+/// (`GIT_OPT_GET_USER_AGENT`, `GIT_OPT_GET_TEMPLATE_PATH`), reusing what it owns, and
+/// adopts the result. Stands in for the `git_libgit2_opts` wrapper (`core`) and the
+/// other routines returning a `git_buf`, which replace it.
+pub fn fill_from_option(option: u32, buf: &mut BufVal) {
+    let mut raw = buf.as_mut().take().into_inner().into_raw();
+    // SAFETY: the `GET` options taking a `git_buf *` accept one that is zeroed or owns
+    // a libgit2 allocation, which they reuse or replace.
+    let rc = unsafe { ffi::git_libgit2_opts(option as c_int, &raw mut raw) };
+    assert_eq!(rc, 0);
+    // SAFETY: `raw` is as libgit2 left it: owning a NUL-terminated allocation of its
+    // allocator, or nothing.
+    buf.as_mut().set(unsafe { Buf::from_raw(raw) });
+}
