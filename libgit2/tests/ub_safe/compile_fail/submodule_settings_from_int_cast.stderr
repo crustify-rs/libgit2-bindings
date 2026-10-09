@@ -1,0 +1,23 @@
+error[E0605]: non-primitive cast: `u32` as `SubmoduleRecurse`
+ --> tests/ub_safe/compile_fail/submodule_settings_from_int_cast.rs:7:13
+  |
+7 |     let _ = raw as SubmoduleRecurse;
+  |             ^^^^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `i32` as `SubmoduleRecurse`
+ --> tests/ub_safe/compile_fail/submodule_settings_from_int_cast.rs:8:13
+  |
+8 |     let _ = 3 as SubmoduleRecurse;
+  |             ^^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `u32` as `SubmoduleUpdate`
+ --> tests/ub_safe/compile_fail/submodule_settings_from_int_cast.rs:9:13
+  |
+9 |     let _ = raw as SubmoduleUpdate;
+  |             ^^^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `i32` as `SubmoduleUpdate`
+  --> tests/ub_safe/compile_fail/submodule_settings_from_int_cast.rs:10:13
+   |
+10 |     let _ = 5 as SubmoduleUpdate;
+   |             ^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

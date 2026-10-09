@@ -38,3 +38,10 @@ git_repository_init_options_init
 git_repository_oid_type
 git_repository_open_ext
 git_strarray_dispose
+git_submodule_fetch_recurse_submodules
+git_submodule_free
+git_submodule_init
+git_submodule_lookup
+git_submodule_set_fetch_recurse_submodules
+git_submodule_set_update
+git_submodule_update_strategy

@@ -15,3 +15,5 @@ git_repository_init_flag_t
 git_repository_init_options
 git_repository_open_flag_t
 git_strarray
+git_submodule_recurse_t
+git_submodule_update_t
