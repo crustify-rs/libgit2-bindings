@@ -606,7 +606,7 @@ every instrument, BorrowSanitizer included. From `libgit2/core` on, by the opera
   failing translated-wave gate hands its log to the review wave as `bsan-gate.log`;
 - reviewers keep BSan.
 
-The translator prompt for these rules is crustify `e9ff79a`
+The translator prompt for these rules is crustify `e9ff79a` and `0fcfcae`
 (`policy/wave-reviews-orchestrator-bsan`). Review rows before and after the change are
 therefore not like-for-like: earlier review rows are per translation batch, later ones per
 wave and route.
