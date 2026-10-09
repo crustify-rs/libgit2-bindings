@@ -41,6 +41,7 @@
 use core::cmp::Ordering;
 use core::ffi::{CStr, c_int};
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::ptr::{NonNull, addr_of, addr_of_mut};
 
@@ -167,9 +168,10 @@ define_ctype!(
     /// A plain value of 33 bytes, resource-free: `Copy`, held inline, never released.
     /// Parse one with [`from_string`](Self::from_string),
     /// [`from_prefix`](Self::from_prefix) or [`from_raw`](Self::from_raw), or start
-    /// from [`Oid::zeroed`](ffibox::CZeroable::zeroed), libgit2's `GIT_OID_NONE`. Read
-    /// and write its fields through [`as_ref`](Self::as_ref) /
-    /// [`as_mut`](Self::as_mut).
+    /// from [`zero`](Self::zero), the typed null id, or
+    /// [`Oid::zeroed`](ffibox::CZeroable::zeroed), libgit2's typeless `GIT_OID_NONE`.
+    /// Read and write its fields through [`as_ref`](Self::as_ref) /
+    /// [`as_mut`](Self::as_mut). It hashes as it compares, over all 33 bytes.
     ///
     /// Wraps: git_oid
     #[derive(Clone, Copy)]
@@ -275,6 +277,19 @@ impl Oid {
         let rc =
             unsafe { ffi::git_oid_from_raw(oid.as_mut().as_mut_ptr(), raw.as_ptr(), kind.raw()) };
         parsed(rc, oid)
+    }
+
+    /// The null id of type `kind`: `kind` and all-zero id bytes, the value of the
+    /// header's `GIT_OID_SHA1_ZERO` / `GIT_OID_SHA256_ZERO` initializers, which
+    /// formats as `GIT_OID_SHA1_HEXZERO` / `GIT_OID_SHA256_HEXZERO` and which
+    /// [`is_zero`](OidRef::is_zero) recognises. Unlike [`Oid::zeroed`], libgit2's
+    /// typeless `GIT_OID_NONE`, it has a type, so every formatter accepts it.
+    ///
+    /// Handwritten
+    pub fn zero(kind: OidType) -> Oid {
+        let mut oid = Oid::zeroed();
+        oid.as_mut().set_kind(kind);
+        oid
     }
 }
 
@@ -576,6 +591,14 @@ impl<'b> PartialEq<OidRef<'b>> for OidRef<'_> {
 
 impl Eq for OidRef<'_> {}
 
+impl Hash for OidRef<'_> {
+    /// Hashes the 33 bytes [`PartialEq`] compares: the type byte, then the raw id.
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.raw_kind().hash(state);
+        self.id().hash(state);
+    }
+}
+
 impl PartialOrd for OidRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -602,6 +625,12 @@ impl PartialEq for Oid {
 }
 
 impl Eq for Oid {}
+
+impl Hash for Oid {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
 
 impl PartialOrd for Oid {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -800,7 +829,10 @@ impl<'a, 's> OidShortenerMut<'a, 's> {
     /// When libgit2 cannot grow the trie, C keeps NULL in its place, which the next
     /// addition dereferences; only freeing the shortener stays safe, which a borrowed
     /// handle cannot enforce. The process is aborted instead, as Rust aborts on an
-    /// allocation failure.
+    /// allocation failure. A lost trie is told from a full one only by the error C
+    /// reports, so a full trie whose "OID set full" error libgit2 could not record
+    /// (the thread's error buffer has already failed to grow, which leaves it unusable
+    /// for the thread's lifetime) aborts too, rather than risk the next addition.
     ///
     /// Wraps: git_oid_shorten_add
     pub fn add(&mut self, id: &'s str) -> Result<usize, ErrorBuf> {
@@ -1493,6 +1525,106 @@ mod unit_tests {
                 unreachable!("add returned with the trie lost");
             },
         );
+    }
+
+    /// The typed null ids, without libgit2: `GIT_OID_SHA1_ZERO` is `{ GIT_OID_SHA1, { 0 } }`.
+    #[test]
+    fn zero_is_the_typed_null_id() {
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let zero = Oid::zero(kind);
+            assert_eq!(zero.as_ref().kind(), Some(kind));
+            assert_eq!(zero.as_ref().raw_kind(), kind.raw() as u8);
+            assert_eq!(zero.as_ref().id(), [0; MAX_SIZE]);
+            let mut by_hand = Oid::zeroed();
+            by_hand.as_mut().set_kind(kind);
+            assert_eq!(rust_hash(&zero), rust_hash(&by_hand));
+        }
+        assert_eq!(
+            format!("{:?}", Oid::zero(OidType::Sha1)),
+            format!("Oid {{ kind: Sha1, id: {} }}", "0".repeat(64))
+        );
+    }
+
+    /// libgit2 sees the typed null id as zero, formats it as `GIT_OID_SHA1_HEXZERO` /
+    /// `GIT_OID_SHA256_HEXZERO`, and parses those back to it; the typeless
+    /// `GIT_OID_NONE` is zero too, but another value.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn zero_formats_as_hexzero_and_is_zero() {
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let zero = Oid::zero(kind);
+            assert!(zero.as_ref().is_zero());
+            let hex = "0".repeat(kind.hex_size());
+            assert_eq!(zero.as_ref().to_hex_string().unwrap(), hex);
+            let parsed = Oid::from_string(&CString::new(hex).unwrap(), kind).unwrap();
+            assert_eq!(parsed, zero);
+            assert_ne!(zero, Oid::zeroed());
+            assert_eq!(zero.cmp(&Oid::zeroed()), Ordering::Greater);
+        }
+        assert!(Oid::zeroed().as_ref().is_zero());
+        assert_ne!(Oid::zero(OidType::Sha1), Oid::zero(OidType::Sha256));
+    }
+
+    /// `std`'s default hasher over a value.
+    fn rust_hash<T: core::hash::Hash>(value: &T) -> u64 {
+        use std::hash::{BuildHasher, RandomState};
+        thread_local!(static STATE: RandomState = RandomState::new());
+        STATE.with(|s| s.hash_one(value))
+    }
+
+    /// `Hash` follows the bytes `Eq` compares (`memcmp` over the type and the id), on
+    /// the value and its shared handle alike, without libgit2.
+    #[test]
+    fn hash_follows_the_compared_bytes() {
+        let mut a = Oid::zeroed();
+        a.as_mut().set_kind(OidType::Sha1);
+        a.as_mut().set_id(padded(&SHA1_RAW));
+        let b = a;
+        assert_eq!(rust_hash(&a), rust_hash(&b));
+        assert_eq!(rust_hash(&a), rust_hash(&a.as_ref()));
+        assert_eq!(rust_hash(&a.as_ref()), rust_hash(&b.as_ref()));
+
+        // Any byte apart, type included, is another hash (with overwhelming
+        // probability; the pairs here are fixed).
+        let mut other_kind = a;
+        other_kind.as_mut().set_raw_kind(2);
+        assert_ne!(rust_hash(&a), rust_hash(&other_kind));
+        let mut other_tail = a;
+        assert!(other_tail.as_mut().id_mut().set_elem(31, 1));
+        assert_ne!(rust_hash(&a), rust_hash(&other_tail));
+        assert_ne!(
+            rust_hash(&Oid::zeroed()),
+            rust_hash(&Oid::zero(OidType::Sha1))
+        );
+    }
+
+    /// Hashed collections of oids deduplicate by `git_oid_equal`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn oids_key_hashed_collections() {
+        use std::collections::{HashMap, HashSet};
+        let sha1 = Oid::from_string(SHA1_HEX, OidType::Sha1).unwrap();
+        let prefix = Oid::from_prefix(b"a94a8", OidType::Sha1).unwrap();
+        let oids = [
+            sha1,
+            prefix,
+            Oid::zero(OidType::Sha1),
+            Oid::zero(OidType::Sha256),
+            Oid::zeroed(),
+            sha1.as_ref().to_oid(),
+            Oid::from_raw(&SHA1_RAW, OidType::Sha1).unwrap(),
+            Oid::from_prefix(b"a94a8", OidType::Sha1).unwrap(),
+        ];
+        let set: HashSet<Oid> = oids.iter().copied().collect();
+        assert_eq!(set.len(), 5);
+        assert!(set.contains(&sha1) && set.contains(&Oid::zeroed()));
+        let mut counts: HashMap<OidRef<'_>, usize> = HashMap::new();
+        for oid in &oids {
+            *counts.entry(oid.as_ref()).or_default() += 1;
+        }
+        assert_eq!(counts.len(), 5);
+        assert_eq!(counts[&sha1.as_ref()], 3);
+        assert_eq!(counts[&prefix.as_ref()], 2);
     }
 
     #[test]
