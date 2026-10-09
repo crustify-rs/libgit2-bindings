@@ -1,0 +1,112 @@
+{
+  "crate_path": "/target/crustify/.worktrees/crustify/batches/20261008-170008/libgit2/oid/wave-0/batch-0/crustify/rust",
+  "counts": {
+    "unsafe_blocks": 84,
+    "unsafe_block_stmts": 2,
+    "unsafe_block_lines": 97,
+    "unsafe_block_code_lines": 97,
+    "unsafe_blocks_wrapper_impl": 47,
+    "unsafe_blocks_ffi_export": 4,
+    "unsafe_fns": 26,
+    "unsafe_fns_seam": 13,
+    "unsafe_fns_pub": 8,
+    "unsafe_impls": 27,
+    "unsafe_traits": 1,
+    "ffi_calls": 16,
+    "wrapper_newtypes": 5,
+    "wrapper_newtypes_declared": 4,
+    "wrapper_declared_nonconformant": 0,
+    "wrapper_newtypes_undeclared": 1,
+    "raw_ptr_args": 22,
+    "raw_ptr_rets": 20,
+    "raw_ptr_seam": 31,
+    "raw_ptr_wrapped": 0,
+    "raw_ptr_in_wrapper": 1,
+    "ref_to_type_wrapper": 20,
+    "field_ref_wrapped": 0,
+    "field_proj_wrapped": 14,
+    "field_proj_outside_impl": 0,
+    "void_ptr_sanctioned": 13,
+    "void_ptr_smell": 0,
+    "raw_ptr_derefs": 14,
+    "raw_ptr_derefs_outside_impl": 0,
+    "total_stmts": 293,
+    "code_lines": 817,
+    "raw_ptr_sites": [],
+    "void_ptr_sites": [],
+    "field_proj_sites": [],
+    "field_ref_sites": [],
+    "raw_deref_sites": []
+  },
+  "counts_unavailable": null,
+  "seed": "--name git_oid git_oid_shorten",
+  "entries": [
+    {
+      "name": "git_oid",
+      "raw_ptr_sites": [
+        {
+          "file": "/opt/venv/share/ffibox/src/macros.rs",
+          "count": 4,
+          "lines": [
+            203,
+            215,
+            256,
+            267
+          ]
+        }
+      ],
+      "raw_deref_sites": [
+        {
+          "file": "libgit2/libgit2/oid/oid.rs",
+          "count": 6,
+          "lines": [
+            291,
+            301,
+            312,
+            368,
+            377,
+            389
+          ]
+        }
+      ],
+      "deref_impl_sites": [],
+      "deref_mut_impl_sites": [],
+      "slice_ref_sites": [],
+      "slice_mut_sites": [],
+      "crate": "libgit2"
+    },
+    {
+      "name": "git_oid_shorten",
+      "raw_ptr_sites": [
+        {
+          "file": "libgit2/libgit2/oid/oid.rs",
+          "count": 2,
+          "lines": [
+            493,
+            501
+          ]
+        }
+      ],
+      "raw_deref_sites": [],
+      "deref_impl_sites": [],
+      "deref_mut_impl_sites": [],
+      "slice_ref_sites": [],
+      "slice_mut_sites": [],
+      "crate": "libgit2"
+    }
+  ],
+  "undocumented_unsafe": {
+    "sites": 0,
+    "documented": 0,
+    "undocumented": 0,
+    "per_file": {}
+  },
+  "derived": {
+    "unsafe_fn_pub_ratio": 0.3077,
+    "unsafe_fn_smell": 13,
+    "raw_ptr_smell": 11,
+    "raw_ptr_seam_ratio": 0.7381,
+    "unsafe_loc_ratio": 0.1187,
+    "loc_per_unsafe_block": 9.7
+  }
+}
