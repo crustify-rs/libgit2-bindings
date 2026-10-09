@@ -148,6 +148,18 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_submodule_recurse_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "Fieldless C enum (GIT_SUBMODULE_RECURSE_NO = 0, _YES = 1, _ONDEMAND = 2, include/git2/types.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. Producers: submodule_parse_recurse (submodule.c:2034) maps .gitmodules/config fetchRecurseSubmodules through _sm_recurse_map (bool false->NO, true->YES, 'on-demand' case-insensitive->ONDEMAND); an unreadable spelling writes YES to *out then fails git_submodule_lookup with GIT_EINVALID 'invalid value for submodule 'recurse' property: '<v>''; an unset setting leaves the alloc default NO (submodule.c:1962). git_submodule_fetch_recurse_submodules returns sm->fetch_recurse unchanged (only named values; NULL sm -> GIT_ASSERT_ARG, NO in release, abort in the Debug/coverage build). Consumer: git_submodule_set_fetch_recurse_submodules -> write_mapped_var -> git_config_lookup_map_enum: unnamed values fail -1 GIT_ERROR_SUBMODULE 'invalid value for fetchRecurseSubmodules'; YES writes 'true', ONDEMAND 'on-demand', NO (CONFIGMAP_FALSE, str NULL) DELETES the .gitmodules key and so fails GIT_ENOTFOUND (GIT_ERROR_CONFIG 'could not find key 'submodule.<name>.fetchRecurseSubmodules' to delete') when the key is absent, although the submodule already reads NO. Rust: SubmoduleRecurse in core/types.rs, converted fallibly (from_raw/TryFrom -> UnnamedSubmoduleRecurse), Default = No (unset). The submodule symbol batch should treat that ENOTFOUND as success or pre-check, and route returned values through from_raw.",
+   "fields": []
+  },
+  {
+   "name": "git_submodule_update_t",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "Fieldless C enum (GIT_SUBMODULE_UPDATE_CHECKOUT = 1, _REBASE = 2, _MERGE = 3, _NONE = 4, _DEFAULT = 0, include/git2/types.h; bindgen types it c_uint). No storage, no pointers, no lifecycle: passed and returned by value. DEFAULT (0) is never produced and never accepted: git_submodule_parse_update (submodule.c:2020) maps only via _sm_update_map ('checkout','rebase','merge','none' case-insensitive, bool true->CHECKOUT, false->NONE; an unreadable spelling writes CHECKOUT to *out and fails git_submodule_lookup with GIT_EINVALID 'invalid value for submodule 'update' property: '<v>''), an unset setting keeps the alloc default CHECKOUT (submodule.c:1961), git_submodule_update_strategy maps any value < CHECKOUT to CHECKOUT (NULL sm -> GIT_ASSERT_ARG, NONE in release, abort in Debug), and git_submodule_set_update -> write_mapped_var refuses 0 and every other unnamed value with -1 GIT_ERROR_SUBMODULE 'invalid value for update'; named values are written to .gitmodules by name ('checkout','rebase','merge','none'). git_submodule_init writes submodule.<name>.update into .git/config via submodule_update_to_str for every value but CHECKOUT (whose entry it removes); its NULL return is unreachable. The header's GIT_SUBMODULE_UPDATE_RESET does not exist. Rust: SubmoduleUpdate in core/types.rs has no variant for DEFAULT (from_raw(0) = None, UnnamedSubmoduleUpdate), Default = Checkout so from_raw(raw).unwrap_or_default() resolves 0 as C does; typed setters can then never send a value C refuses.",
+   "fields": []
   }
  ],
  "symbols": [
