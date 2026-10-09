@@ -1,0 +1,6 @@
+   Compiling libgit2 v0.1.0 (/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/core/wave-0/batch-0/crustify/rust/libgit2)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.70s
+     Running tests/equiv/main.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/513596211f61704a/out/equiv-513596211f61704a)
+running 1 test
+test types::from_raw_names_exactly_the_c_modes has been running for over 60 seconds
+rc=124 elapsed=300s
