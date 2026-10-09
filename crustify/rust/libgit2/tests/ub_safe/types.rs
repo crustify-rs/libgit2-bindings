@@ -1327,6 +1327,34 @@ mod signatures {
         assert_eq!(sig.as_ref().name(), Some(c"m"));
     }
 
+    /// Constructors succeed and fail on many threads at once: each thread's refusals
+    /// land in its own error state, and nothing but libgit2's allocator is shared
+    /// (TSan). `now` is left out: glibc's zone lock is invisible to TSan.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn constructors_run_concurrently() {
+        init();
+        let rounds = if cfg!(bsan) { 4 } else { 16 };
+        thread::scope(|s| {
+            for i in 0..8usize {
+                s.spawn(move || {
+                    for j in 0..rounds {
+                        let name = text(1 + (i + j) % 40, j as u8);
+                        let built = Signature::new(&name, c"c@x", j as i64, 0).unwrap();
+                        let line = [name.as_bytes(), b" <c@x> 7 +0100"].concat();
+                        let parsed = Signature::parse(&CString::new(line).unwrap()).unwrap();
+                        assert_eq!(built.as_ref().name(), parsed.as_ref().name());
+                        assert_eq!(parsed.as_ref().when().offset_minutes(), 60);
+                        let refused = Signature::new(c"<", c"c@x", 0, 0).unwrap_err();
+                        assert_eq!(refused.class(), Some(ErrorClass::Invalid));
+                        assert!(Signature::parse(c"no email").is_err());
+                        drop(parsed.as_ref().to_signature().unwrap());
+                    }
+                });
+            }
+        });
+    }
+
     /// Before `git_libgit2_init`, constructors and copies pin the runtime first, and
     /// views need nothing from libgit2.
     #[test]
