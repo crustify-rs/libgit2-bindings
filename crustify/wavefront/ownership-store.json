@@ -224,9 +224,123 @@
    "defined_in": "include/git2/trace.h",
    "_comment_agent": "C enum, values 0..6 (NONE..TRACE), passed by value. Consumers: git_trace_set stores any value in git_trace__data.level (GIT_ASSERT_ARG level == 0 || callback != NULL, an abort in Debug builds); git_trace() emits when git_trace__data.level >= level, so the integer order is the verbosity order; internal emitters only pass named levels (INFO/DEBUG/TRACE) to git_trace_cb. Wrapped as the fieldless TraceLevel enum (repr u32, Ord over the C values) with a fallible from_raw in core/trace.rs.",
    "fields": []
+  },
+  {
+   "name": "git_writestream",
+   "defined_in": "include/git2/types.h",
+   "_comment_agent": "git_writestream is a vtable header embedded as the first member of a concrete stream (blob_writestream, buffered_stream, buf_stream, checkout_stream, user filter streams); its three members take the header pointer and cast it back to the container, so a header is never valid detached from its container (never copied or held by value). Ownership: git_blob_create_from_stream returns an owned stream (released by its own `free`, or consumed by git_blob_create_from_stream_commit); git_filter_list_stream_{buffer,file,blob} borrow a caller target for the call and write/close (never free) it; a user filter's git_filter_stream_fn returns an owned stream to libgit2, which frees it with its `free` member after closing the chain, and gets `next` borrowed for the chain's life. Rust wrapper: WriteStream/WriteStreamRef/WriteStreamMut (core/types.rs), WriteStreamBox = CBox<WriteStream, WriteStreamFree> (free through the object's own member), RustWriteStream<W: StreamWriter> for Rust implementations.",
+   "fields": [
+    {
+     "name": "close",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Function pointer, set once at construction, never NULL. Finishes the stream; afterwards only `free` is valid (buf_stream/checkout_stream GIT_ASSERT on a second close, buffered_stream reruns its filter and closes its target again, blob close zeroes the filebuf so commit/write call a NULL fn). git_filter_list_stream_* call it exactly once on the head of the chain, and each buffered stream closes its target once; the user-supplied target is closed but never freed by libgit2. git_blob_create_from_stream documents that its stream must not be closed by the caller (commit flushes the filebuf close discarded)."
+     }
+    },
+    {
+     "name": "free",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Function pointer, set once at construction, never NULL: the stream's own destructor, releasing the CONTAINING object (blob_writestream_free: filebuf cleanup + git__free(hintpath) + git__free(stream); buffered_stream_free: disposes its bufs + git__free; buf_stream_free / checkout_stream_free: no-op for stack streams). It is the type's dropper, recoverable from the object, so the Rust release strategy (WriteStreamFree) is stateless. Valid after close or without close. libgit2 frees the streams it creates (filter_streams_free) and a user filter's stream returned through git_filter_stream_fn, never the caller's target; git_blob_create_from_stream_commit frees its argument."
+     }
+    },
+    {
+     "name": "write",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Function pointer (code, static lifetime), set once by every producer at construction (blob_writestream_write, buffered_stream_write, buf_stream_write, checkout_stream_write) and never rewritten; never NULL. Called as stream->write(stream, buf, len) with `stream` = the header itself, which each implementation casts back to its container struct (git_writestream is the first member `parent`/`base`), so the member is only valid for the object it was read from. `< 0` is failure (callers test `< 0`; buffered_stream_close tests `== 0`). Calling it after `close` is invalid: blob streams then call a NULL filebuf write fn (git_filebuf_cleanup zeroes the filebuf), checkout streams write to a closed (possibly reused) fd, buf_stream fails GIT_ASSERT (abort in Debug builds)."
+     }
+    }
+   ]
   }
  ],
  "symbols": [
+  {
+   "name": "blob_writestream_free",
+   "defined_in": "src/libgit2/blob.c",
+   "lifetime": {
+    "for": "_stream",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "_stream",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "nullable": false,
+      "mutable": true,
+      "owned": true,
+      "borrowed": null,
+      "note": "The blob_writestream header (cast back to its container), released with its filebuf and hintpath; installed as git_writestream.free by git_blob_create_from_stream, and called by git_blob_create_from_stream_commit and on its own error path."
+     }
+    }
+   ]
+  },
+  {
+   "name": "buffered_stream_free",
+   "defined_in": "src/libgit2/filter.c",
+   "lifetime": {
+    "for": "s",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "s",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "nullable": false,
+      "mutable": true,
+      "owned": true,
+      "borrowed": null,
+      "note": "The buffered_stream header (cast back to its container); disposes input/temp_buf and git__frees the container, leaving the target alone. Installed as git_writestream.free; called by filter_streams_free."
+     }
+    }
+   ]
+  },
   {
    "name": "calloc",
    "defined_in": null,
@@ -551,6 +665,119 @@
      "note": "Fresh git__malloc(n+1) storage holding the n bytes at str plus a terminator: a byte-run-to-string cloner. NULL on OOM or when n+1 overflows to 0 only through malloc(0) semantics (no overflow check). Internal; released by git__free (publicly git_odb_backend_data_free)."
     }
    }
+  },
+  {
+   "name": "git_blob_create_from_stream",
+   "defined_in": "src/libgit2/blob.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "hintpath",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional filter hint path; git__strdup'd into the stream, so borrowed for the call only."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-slot (GIT_ASSERT_ARG): on success receives a fresh git__calloc'd blob_writestream header, owned by the caller and released by its own `free` member or consumed by git_blob_create_from_stream_commit; untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; stored unretained in the stream (stream->repo), which commit later uses: the repository must outlive the stream."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_create_from_stream_commit",
+   "defined_in": "src/libgit2/blob.c",
+   "lifetime": {
+    "for": "_stream",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "_stream",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "nullable": false,
+      "mutable": true,
+      "owned": true,
+      "borrowed": null,
+      "note": "Must be a stream from git_blob_create_from_stream (cast to blob_writestream unchecked) that was never closed (close zeroes the filebuf; the flush then calls a NULL write fn). Consumed on every path: blob_writestream_free runs on success and failure."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "nullable": false,
+      "mutable": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "note": "Out-parameter: the new blob's id, written on success only (git_blob__create_from_paths)."
+     }
+    }
+   ]
   },
   {
    "name": "git_error_clear",

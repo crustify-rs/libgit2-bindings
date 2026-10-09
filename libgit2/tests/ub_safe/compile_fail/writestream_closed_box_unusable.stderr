@@ -1,0 +1,9 @@
+error[E0382]: borrow of moved value: `stream`
+ --> tests/ub_safe/compile_fail/writestream_closed_box_unusable.rs:8:13
+  |
+6 |     let mut stream = RustWriteStream::new(Vec::new()).into_box();
+  |         ---------- move occurs because `stream` has type `ffibox::refs::CBox<WriteStream, WriteStreamFree>`, which does not implement the `Copy` trait
+7 |     WriteStream::close(stream).unwrap();
+  |                        ------ value moved here
+8 |     let _ = stream.as_mut().write(b"after close");
+  |             ^^^^^^ value borrowed here after move

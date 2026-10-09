@@ -1,0 +1,11 @@
+error[E0599]: no associated function or constant named `zeroed` found for struct `WriteStream` in the current scope
+ --> tests/ub_safe/compile_fail/writestream_no_bare_header.rs:5:26
+  |
+5 |     let _ = WriteStream::zeroed();
+  |                          ^^^^^^ associated function or constant not found in `WriteStream`
+
+error[E0614]: type `WriteStreamRef<'_>` cannot be dereferenced
+ --> tests/ub_safe/compile_fail/writestream_no_bare_header.rs:7:30
+  |
+7 |     let _copy: WriteStream = *stream.as_ref();
+  |                              ^^^^^^^^^^^^^^^^ can't be dereferenced

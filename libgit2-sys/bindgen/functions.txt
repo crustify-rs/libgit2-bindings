@@ -1,12 +1,21 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C functions names.
 # Add only the items a batch needs; keep entries sorted.
 crustify_GIT_OID_DEFAULT
+git_blob_create_from_stream
+git_blob_create_from_stream_commit
 git_buf_dispose
 git_error_clear
 git_error_last
 git_error_set
 git_error_set_oom
 git_error_set_str
+git_filter_init
+git_filter_list_free
+git_filter_list_new
+git_filter_list_push
+git_filter_list_stream_buffer
+git_filter_lookup
+git_filter_register
 git_libgit2_buildinfo
 git_libgit2_feature_backend
 git_libgit2_features

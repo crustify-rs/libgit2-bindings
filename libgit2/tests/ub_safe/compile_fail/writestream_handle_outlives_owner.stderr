@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `stream` because it is borrowed
+ --> tests/ub_safe/compile_fail/writestream_handle_outlives_owner.rs:8:10
+  |
+6 |     let mut stream = RustWriteStream::new(Vec::new());
+  |         ---------- binding `stream` declared here
+7 |     let mut handle = stream.as_mut();
+  |                      ------ borrow of `stream` occurs here
+8 |     drop(stream);
+  |          ^^^^^^ move out of `stream` occurs here
+9 |     let _ = handle.write(b"freed");
+  |             ------ borrow later used here
