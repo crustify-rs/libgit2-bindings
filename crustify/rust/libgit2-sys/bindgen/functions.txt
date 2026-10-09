@@ -66,6 +66,9 @@ git_reference_lookup
 git_reference_name
 git_reference_normalize_name
 git_reference_type
+git_remote_connect
+git_remote_create_detached
+git_remote_free
 git_repository_free
 git_repository_init_ext
 git_repository_init_options_init

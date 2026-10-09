@@ -1,0 +1,7 @@
+error[E0133]: call to unsafe function `TraceCallback::from_fn` is unsafe and requires unsafe block
+  --> tests/ub_safe/compile_fail/trace_callback_from_fn_requires_unsafe.rs:11:13
+   |
+11 |     let _ = TraceCallback::from_fn(c_tracer);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+   |
+   = note: consult the function's documentation for information on how to avoid undefined behavior

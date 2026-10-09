@@ -1033,6 +1033,75 @@ mod options {
         assert_eq!(common::features(), common::features());
     }
 
+    /// Every named feature: the same literal as C's, a backend only for a feature
+    /// compiled in, and the same answer on every call, interleaved with C's.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn feature_backend_matches_c() {
+        use libgit2::libgit2::core::common::Feature;
+        let set = common::features();
+        for _ in 0..3 {
+            for feature in Feature::ALL {
+                // SAFETY: a named feature, by value; no state is read.
+                let c = unsafe { ffi::git_libgit2_feature_backend(feature.raw()) };
+                let rust = common::feature_backend(feature);
+                assert_eq!(rust.map_or(ptr::null(), CStr::as_ptr), c, "{feature:?}");
+                if let Some(backend) = rust {
+                    assert!(set.contains(feature), "{feature:?}: {backend:?}");
+                    assert!(
+                        !backend.is_empty() && backend.to_str().is_ok(),
+                        "{backend:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(common::feature_backend(Feature::Http), None);
+        // The campaign's builds (`crustify/build.json`).
+        for (feature, backend) in [
+            (Feature::Threads, c"pthread"),
+            (Feature::Https, c"openssl"),
+            (Feature::Nsec, c"mtim"),
+            (Feature::HttpParser, c"builtin"),
+            (Feature::Regex, c"pcre2"),
+            (Feature::AuthNtlm, c"builtin"),
+            (Feature::Compression, c"zlib"),
+            (Feature::Sha1, c"builtin"),
+            (Feature::Sha256, c"openssl"),
+        ] {
+            assert_eq!(
+                common::feature_backend(feature),
+                Some(backend),
+                "{feature:?}"
+            );
+        }
+        for feature in [Feature::Ssh, Feature::I18n, Feature::AuthNegotiate] {
+            assert_eq!(common::feature_backend(feature), None, "{feature:?}");
+        }
+    }
+
+    /// Every named item: the same literal as C's, on every call, interleaved with C's.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn build_info_matches_c() {
+        use libgit2::libgit2::core::common::BuildInfo;
+        for _ in 0..3 {
+            for item in [BuildInfo::Cpu, BuildInfo::Commit] {
+                // SAFETY: a named item, by value; no state is read.
+                let c = unsafe { ffi::git_libgit2_buildinfo(item.raw()) };
+                let rust = common::build_info(item);
+                assert_eq!(rust.map_or(ptr::null(), CStr::as_ptr), c, "{item:?}");
+            }
+        }
+        assert_eq!(common::build_info(BuildInfo::Cpu), Some(c"x86_64"));
+        if let Some(commit) = common::build_info(BuildInfo::Commit) {
+            let commit = commit.to_bytes();
+            assert!(
+                matches!(commit.len(), 40 | 64) && commit.iter().all(u8::is_ascii_hexdigit),
+                "{commit:?}"
+            );
+        }
+    }
+
     type SizeOption = (
         ffi::git_libgit2_opt_t,
         ffi::git_libgit2_opt_t,
