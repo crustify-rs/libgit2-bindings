@@ -54,6 +54,26 @@
 //!
 //! Documented divergences: none. A `Time` is a plain value, so the comparisons are
 //! field by field (`git_signature__equal`'s rule) and never cover padding.
+//!
+//! Then [`FileMode`], against the `git_filemode_t` values libgit2 declares, accepts
+//! and returns.
+//!
+//! [`FileMode`] must name exactly the `git_filemode_t` constants, each with its C
+//! value. libgit2 observes a mode through its tree API, and each probe predicts the C
+//! result from the Rust conversion alone:
+//!
+//! - `git_treebuilder_insert` accepts exactly the named modes but
+//!   [`FileMode::Unreadable`], and refuses the rest with `GIT_ERROR_TREE` while
+//!   leaving the builder as it was; an accepted entry reads back its mode through
+//!   `git_tree_entry_filemode` and `git_tree_entry_filemode_raw`, in the builder and
+//!   in the tree it writes. One builder takes a sequence of insertions, compared
+//!   after every step. Every accepted mode but [`FileMode::Commit`] must also name an
+//!   object of its kind.
+//! - A parsed tree keeps whatever 16-bit mode its object spells:
+//!   `git_tree_entry_filemode_raw` returns it, which [`FileMode::from_raw`] names
+//!   exactly when the header does, and `git_tree_entry_filemode` normalises it to a
+//!   mode `from_raw` names and the builder accepts; a mode past 16 bits fails the
+//!   parse.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::fs;
@@ -64,8 +84,8 @@ use std::ptr;
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::core::types::{
-    NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
-    SubmoduleUpdate, Time, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
+    FileMode, NotAReferenceType, NotAnObjectType, ObjectType, ReferenceType, SubmoduleRecurse,
+    SubmoduleUpdate, Time, UnnamedFileMode, UnnamedSubmoduleRecurse, UnnamedSubmoduleUpdate,
 };
 
 /// Every `git_submodule_recurse_t` constant, beside the variant that must carry it.
@@ -1041,4 +1061,418 @@ fn reference_types_follow_c() {
             Err(ffi::git_reference_t::MAX)
         );
     }
+}
+
+/// Every `git_filemode_t` constant, beside the variant that must carry it.
+const MODES: [(ffi::git_filemode_t, FileMode); 6] = [
+    (ffi::GIT_FILEMODE_UNREADABLE, FileMode::Unreadable),
+    (ffi::GIT_FILEMODE_TREE, FileMode::Tree),
+    (ffi::GIT_FILEMODE_BLOB, FileMode::Blob),
+    (ffi::GIT_FILEMODE_BLOB_EXECUTABLE, FileMode::BlobExecutable),
+    (ffi::GIT_FILEMODE_LINK, FileMode::Link),
+    (ffi::GIT_FILEMODE_COMMIT, FileMode::Commit),
+];
+
+/// Whether the builder takes `mode`, as the Rust type predicts it.
+fn insertable(mode: Option<FileMode>) -> bool {
+    mode.is_some_and(|m| m != FileMode::Unreadable)
+}
+
+/// The class and message of the calling thread's last error.
+fn last_error() -> (c_int, CString) {
+    // SAFETY: the runtime is initialised; the result is a static error or this
+    // thread's, live until the next libgit2 call on this thread.
+    let e = unsafe { ffi::git_error_last() };
+    assert!(!e.is_null());
+    // SAFETY: `e` is a live `git_error` whose message is NULL or a C string.
+    unsafe {
+        let message = (*e).message;
+        let message = if message.is_null() {
+            c""
+        } else {
+            CStr::from_ptr(message)
+        };
+        ((*e).klass, message.to_owned())
+    }
+}
+
+/// Clears the calling thread's last error, so a step reads only its own.
+fn clear() {
+    // SAFETY: the runtime is initialised.
+    unsafe { ffi::git_error_clear() };
+}
+
+/// A bare repository of its own under the temp dir, with an empty tree and one blob
+/// written to it; closed and removed when dropped.
+struct TreeRepo {
+    path: PathBuf,
+    repo: *mut ffi::git_repository,
+    blob: ffi::git_oid,
+    empty_tree: ffi::git_oid,
+}
+
+impl TreeRepo {
+    fn new(tag: &str) -> Self {
+        init();
+        let path =
+            std::env::temp_dir().join(format!("crustify-types-equiv-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let mut opts = ffi::git_repository_init_options::default();
+        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+        let rc = unsafe {
+            ffi::git_repository_init_options_init(
+                &mut opts,
+                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(rc, 0);
+        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+        let mut repo = ptr::null_mut();
+        // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
+        // options struct, all read for the call only.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        assert_eq!(rc, 0, "{:?}", last_error());
+        let mut repo = Self {
+            path,
+            repo,
+            blob: Default::default(),
+            empty_tree: Default::default(),
+        };
+        repo.blob = repo.write(b"blob\n", ffi::GIT_OBJECT_BLOB).unwrap();
+        repo.empty_tree = repo.write(b"", ffi::GIT_OBJECT_TREE).unwrap();
+        repo
+    }
+
+    /// `git_odb_write` of `data` as an object of `kind`.
+    fn write(&self, data: &[u8], kind: ffi::git_object_t) -> Result<ffi::git_oid, c_int> {
+        let mut odb = ptr::null_mut();
+        // SAFETY: `odb` is a live slot and `self.repo` a live repository.
+        assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, self.repo) }, 0);
+        let mut id = ffi::git_oid::default();
+        // SAFETY: `id` is a writable oid, `odb` the live database just taken, and
+        // `data` readable for `data.len()` bytes; `odb` is released once, after.
+        let rc = unsafe {
+            let rc = ffi::git_odb_write(&mut id, odb, data.as_ptr().cast(), data.len(), kind);
+            ffi::git_odb_free(odb);
+            rc
+        };
+        if rc == 0 { Ok(id) } else { Err(rc) }
+    }
+
+    /// The id an entry of `mode` must name to pass the builder's object check.
+    fn target(&self, mode: Option<FileMode>) -> ffi::git_oid {
+        match mode {
+            Some(FileMode::Tree) => self.empty_tree,
+            _ => self.blob,
+        }
+    }
+
+    /// `git_tree_lookup(id)`: the tree's entries' raw and normalised modes, or the
+    /// lookup's return and error.
+    fn tree_modes(&self, id: &ffi::git_oid) -> Result<Vec<(u32, u32)>, (c_int, c_int, CString)> {
+        let mut tree = ptr::null_mut();
+        clear();
+        // SAFETY: `tree` is a live slot, `self.repo` a live repository and `id` a
+        // live oid, read for the call only.
+        let rc = unsafe { ffi::git_tree_lookup(&mut tree, self.repo, id) };
+        if rc != 0 {
+            let (class, message) = last_error();
+            return Err((rc, class, message));
+        }
+        // SAFETY: `tree` is the live tree just looked up; every entry is read while
+        // it lives, and it is released once, after.
+        unsafe {
+            let modes = (0..ffi::git_tree_entrycount(tree))
+                .map(|i| {
+                    let entry = ffi::git_tree_entry_byindex(tree, i);
+                    assert!(!entry.is_null());
+                    (
+                        ffi::git_tree_entry_filemode_raw(entry),
+                        ffi::git_tree_entry_filemode(entry),
+                    )
+                })
+                .collect();
+            ffi::git_tree_free(tree);
+            Ok(modes)
+        }
+    }
+}
+
+impl Drop for TreeRepo {
+    fn drop(&mut self) {
+        // SAFETY: `self.repo` is the live repository this value owns, released once.
+        unsafe { ffi::git_repository_free(self.repo) };
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[test]
+fn modes_carry_their_c_values() {
+    for (raw, mode) in MODES {
+        assert_eq!(mode.raw(), raw, "{mode:?}");
+        assert_eq!(FileMode::from_raw(raw), Some(mode));
+    }
+}
+
+#[test]
+fn from_raw_names_exactly_the_c_modes() {
+    // Every mode a tree entry can hold, and the extremes past it.
+    for raw in (0..=0o177777).chain([0o200000, u32::MAX - 1, u32::MAX]) {
+        let c = MODES.iter().find(|(r, _)| *r == raw).map(|&(_, m)| m);
+        assert_eq!(FileMode::from_raw(raw), c, "{raw:#o}");
+        assert_eq!(
+            FileMode::try_from(raw).map_err(UnnamedFileMode::raw),
+            c.ok_or(raw),
+            "{raw:#o}"
+        );
+    }
+}
+
+/// What one insertion reported: its return, the failure's class and message (0 and
+/// empty on success), and the entry's raw and normalised modes as the builder then
+/// holds them, if it holds one.
+type Inserted = (c_int, c_int, CString, Option<(u32, u32)>);
+
+/// `git_treebuilder_insert(bld, name, target(mode), raw)`, then `git_treebuilder_get`.
+fn insert(repo: &TreeRepo, bld: *mut ffi::git_treebuilder, name: &CStr, raw: u32) -> Inserted {
+    insert_naming(repo.target(FileMode::from_raw(raw)), bld, name, raw)
+}
+
+/// `git_treebuilder_insert(bld, name, id, raw)`, then `git_treebuilder_get`, which
+/// must return the entry the insertion handed out.
+fn insert_naming(
+    id: ffi::git_oid,
+    bld: *mut ffi::git_treebuilder,
+    name: &CStr,
+    raw: u32,
+) -> Inserted {
+    let mut out = ptr::null();
+    clear();
+    // SAFETY: `out` is a live slot, `bld` a live builder, `name` NUL-terminated and
+    // `id` a live oid, read for the call only; `out` is compared, never read through.
+    let rc = unsafe { ffi::git_treebuilder_insert(&mut out, bld, name.as_ptr(), &id, raw) };
+    let (class, message) = if rc == 0 {
+        (0, CString::default())
+    } else {
+        last_error()
+    };
+    // SAFETY: `bld` is live; the entry it returns is read before the builder changes.
+    let held = unsafe {
+        let entry = ffi::git_treebuilder_get(bld, name.as_ptr());
+        assert!(
+            rc != 0 || entry == out,
+            "the inserted entry is the one held"
+        );
+        (!entry.is_null()).then(|| {
+            (
+                ffi::git_tree_entry_filemode_raw(entry),
+                ffi::git_tree_entry_filemode(entry),
+            )
+        })
+    };
+    (rc, class, message, held)
+}
+
+/// A builder over `repo` with no source tree; released by the caller.
+fn builder(repo: &TreeRepo) -> *mut ffi::git_treebuilder {
+    let mut bld = ptr::null_mut();
+    // SAFETY: `bld` is a live slot and `repo.repo` a live repository; no source tree.
+    let rc = unsafe { ffi::git_treebuilder_new(&mut bld, repo.repo, ptr::null()) };
+    assert_eq!(rc, 0);
+    bld
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn treebuilder_accepts_exactly_the_insertable_modes() {
+    let repo = TreeRepo::new("insert");
+    let bld = builder(&repo);
+
+    // Each named mode under a name of its own, then unnamed modes, then each named
+    // mode again over the first name, which a refused mode must leave alone.
+    let unnamed = [
+        0o100664,
+        0o100600,
+        0o040755,
+        0o160755,
+        0o120777,
+        1,
+        0o177777,
+        u32::MAX,
+    ];
+    let mut steps: Vec<(CString, u32)> = MODES
+        .iter()
+        .enumerate()
+        .map(|(i, &(raw, _))| (CString::new(format!("named-{i}")).unwrap(), raw))
+        .collect();
+    steps.extend(
+        unnamed
+            .iter()
+            .enumerate()
+            .map(|(i, &raw)| (CString::new(format!("unnamed-{i}")).unwrap(), raw)),
+    );
+    steps.extend(
+        MODES
+            .iter()
+            .chain(MODES.iter().rev())
+            .map(|&(raw, _)| (c"named-1".to_owned(), raw)),
+    );
+
+    // What the tree should end up holding, name by name, as the Rust type predicts.
+    let mut held: Vec<(CString, u32)> = Vec::new();
+    for (step, (name, raw)) in steps.iter().enumerate() {
+        let mode = FileMode::from_raw(*raw);
+        let before = held.iter().find(|(n, _)| n == name).map(|&(_, r)| r);
+        let expected = if insertable(mode) {
+            match held.iter_mut().find(|(n, _)| n == name) {
+                Some(slot) => slot.1 = *raw,
+                None => held.push((name.clone(), *raw)),
+            }
+            (0, 0, CString::default(), Some((*raw, *raw)))
+        } else {
+            let message = format!(
+                "failed to insert entry: invalid filemode for file - {}",
+                name.to_str().unwrap()
+            );
+            (
+                -1,
+                ffi::GIT_ERROR_TREE as c_int,
+                CString::new(message).unwrap(),
+                before.map(|r| (r, r)),
+            )
+        };
+        assert_eq!(
+            insert(&repo, bld, name, *raw),
+            expected,
+            "step {step}: {raw:#o}"
+        );
+    }
+
+    let mut id = ffi::git_oid::default();
+    // SAFETY: `id` is a writable oid and `bld` the live builder, released once, after.
+    let rc = unsafe {
+        let rc = ffi::git_treebuilder_write(&mut id, bld);
+        ffi::git_treebuilder_free(bld);
+        rc
+    };
+    assert_eq!(rc, 0, "{:?}", last_error());
+
+    // The written tree sorts its entries by name; each holds the mode inserted last.
+    held.sort_by(|a, b| a.0.cmp(&b.0));
+    let expected: Vec<(u32, u32)> = held.iter().map(|&(_, r)| (r, r)).collect();
+    assert_eq!(repo.tree_modes(&id), Ok(expected));
+    for (_, raw) in &held {
+        assert!(insertable(FileMode::from_raw(*raw)));
+    }
+}
+
+/// With strict object creation on (the default), a mode also fixes the kind of
+/// object the entry must name: a subtree a tree, a blob, executable or link a blob,
+/// while a submodule's commit is not looked up. Each step names the other kind.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn treebuilder_checks_the_object_a_mode_names() {
+    let repo = TreeRepo::new("object");
+    let bld = builder(&repo);
+    for (step, &(raw, mode)) in MODES.iter().enumerate() {
+        if !insertable(Some(mode)) {
+            continue;
+        }
+        let name = CString::new(format!("wrong-{step}")).unwrap();
+        let wrong = match mode {
+            FileMode::Tree => repo.blob,
+            _ => repo.empty_tree,
+        };
+        let expected = if mode == FileMode::Commit {
+            (0, 0, CString::default(), Some((raw, raw)))
+        } else {
+            let message = format!(
+                "failed to insert entry: invalid object specified - {}",
+                name.to_str().unwrap()
+            );
+            (
+                -1,
+                ffi::GIT_ERROR_TREE as c_int,
+                CString::new(message).unwrap(),
+                None,
+            )
+        };
+        assert_eq!(insert_naming(wrong, bld, &name, raw), expected, "{mode:?}");
+    }
+    // SAFETY: `bld` is the live builder made above, released once.
+    unsafe { ffi::git_treebuilder_free(bld) };
+}
+
+/// A tree object of one entry per mode, spelled in octal as git writes it, all
+/// naming `target`.
+fn raw_tree(modes: &[u32], target: &ffi::git_oid) -> Vec<u8> {
+    let mut data = Vec::new();
+    for (i, raw) in modes.iter().enumerate() {
+        data.extend_from_slice(format!("{raw:o} e{i:06}\0").as_bytes());
+        data.extend_from_slice(&target.id[..20]);
+    }
+    data
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn parsed_trees_keep_any_16_bit_mode() {
+    let repo = TreeRepo::new("parse");
+    // Every 16-bit mode, at a stride under BorrowSanitizer, which instruments each
+    // step; the named modes always.
+    let stride = if cfg!(bsan) { 97 } else { 1 };
+    let mut modes: Vec<u32> = (0..=0o177777).step_by(stride).collect();
+    modes.extend(MODES.iter().map(|&(raw, _)| raw));
+
+    let id = repo
+        .write(&raw_tree(&modes, &repo.blob), ffi::GIT_OBJECT_TREE)
+        .unwrap();
+    let read = repo.tree_modes(&id).unwrap();
+    assert_eq!(read.len(), modes.len());
+    for (&written, &(raw, normalised)) in modes.iter().zip(&read) {
+        // `_raw` returns the mode as spelled; `from_raw` names it iff the header does.
+        assert_eq!(raw, written);
+        let c = MODES.iter().find(|(r, _)| *r == raw).map(|&(_, m)| m);
+        assert_eq!(FileMode::from_raw(raw), c, "{raw:#o}");
+        // The normalised mode is one the builder would take.
+        assert!(
+            insertable(FileMode::from_raw(normalised)),
+            "{raw:#o} -> {normalised:#o}"
+        );
+        // A named insertable mode normalises to itself.
+        if insertable(c) {
+            assert_eq!(normalised, raw);
+        }
+    }
+
+    // A mode past 16 bits does not parse, nor one that is not octal digits.
+    assert_eq!(FileMode::from_raw(0o200000), None);
+    for spelling in [&b" 100644"[..], b"9", b"x", b"-1"] {
+        let mut data = spelling.to_vec();
+        data.extend_from_slice(b" e\0");
+        data.extend_from_slice(&repo.blob.id[..20]);
+        let id = repo.write(&data, ffi::GIT_OBJECT_TREE).unwrap();
+        assert_eq!(
+            repo.tree_modes(&id),
+            Err((
+                -1,
+                ffi::GIT_ERROR_TREE as c_int,
+                c"failed to parse tree: can't parse filemode".to_owned()
+            )),
+            "{}",
+            String::from_utf8_lossy(spelling)
+        );
+    }
+    let id = repo
+        .write(&raw_tree(&[0o200000], &repo.blob), ffi::GIT_OBJECT_TREE)
+        .unwrap();
+    assert_eq!(
+        repo.tree_modes(&id),
+        Err((
+            -1,
+            ffi::GIT_ERROR_TREE as c_int,
+            c"failed to parse tree: can't parse filemode".to_owned()
+        ))
+    );
 }
