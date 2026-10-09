@@ -4,5 +4,6 @@
 //! Miri cannot call libgit2, so every test that allocates through it is ignored
 //! there; the Rust-only paths still run.
 
+mod buffer;
 mod sys_alloc;
 mod sys_odb_backend;
