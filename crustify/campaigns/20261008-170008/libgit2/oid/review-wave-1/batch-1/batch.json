@@ -1,0 +1,131 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_oid_cmp",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_cpy",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_equal",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_fmt",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_from_prefix",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_from_raw",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_from_string",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_is_zero",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_ncmp",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_nfmt",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_pathfmt",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_shorten_add",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_shorten_free",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_shorten_new",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_strcmp",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_streq",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_tostr",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_tostr_s",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    }
+  ]
+}
