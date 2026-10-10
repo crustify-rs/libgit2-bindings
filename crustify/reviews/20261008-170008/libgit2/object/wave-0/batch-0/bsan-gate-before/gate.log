@@ -1,0 +1,13 @@
+build start Sat Oct 10 19:02:35 UTC 2026
+build rc=0 Sat Oct 10 19:03:37 UTC 2026
+run libgit2_sys-f36692337d518c73 start Sat Oct 10 19:03:37 UTC 2026
+run ub_unsafe-e52529d9ce12fe6f start Sat Oct 10 19:03:37 UTC 2026
+run libgit2-4e6bf93dce848249 start Sat Oct 10 19:03:37 UTC 2026
+run ub_safe-16ae9b8797456113 start Sat Oct 10 19:03:37 UTC 2026
+run equiv-513596211f61704a start Sat Oct 10 19:03:37 UTC 2026
+run libgit2_sys-f36692337d518c73 rc=0 Sat Oct 10 19:03:38 UTC 2026
+run ub_unsafe-e52529d9ce12fe6f rc=0 Sat Oct 10 19:04:59 UTC 2026
+run equiv-513596211f61704a rc=0 Sat Oct 10 20:07:12 UTC 2026
+run libgit2-4e6bf93dce848249 rc=124 Sat Oct 10 20:33:37 UTC 2026
+run ub_safe-16ae9b8797456113 rc=124 Sat Oct 10 20:33:38 UTC 2026
+gate done Sat Oct 10 20:33:38 UTC 2026

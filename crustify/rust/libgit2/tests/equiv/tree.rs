@@ -446,6 +446,8 @@ mod builder {
     use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
     use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectRef};
     use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, UpdateAction};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
@@ -554,6 +556,12 @@ mod builder {
     fn free_tree(tree: NonNull<ffi::git_tree>) {
         // SAFETY: a tree `lookup` handed out, released once.
         unsafe { ffi::git_tree_free(tree.as_ptr()) }
+    }
+
+    /// The tree `hex` names in `repo`, as the Rust side holds it: an object owner.
+    fn lookup_object<'r>(repo: &'r RepositoryBox, hex: &str, kind: OidType) -> ObjectArc<'r> {
+        let oid = Oid::from_string(&CString::new(hex).unwrap(), kind).unwrap();
+        Object::lookup(repo.as_ref(), oid.as_ref(), Some(ObjectType::Tree)).unwrap()
     }
 
     /// The names `tree` holds.
@@ -667,14 +675,13 @@ mod builder {
     /// [`clear`](libgit2::libgit2::object::tree::TreeBuilderMut::clear).
     fn rust_run(
         repo: &RepositoryBox,
-        source: Option<NonNull<ffi::git_tree>>,
+        source: Option<ObjectRef<'_, '_>>,
         steps: &[Step],
         names: &BTreeSet<CString>,
     ) -> Vec<State> {
         let mut builder: TreeBuilderBox<'_> = match source {
             None => TreeBuilder::new(repo.as_ref()).unwrap(),
-            // SAFETY: a live tree the caller holds a reference to, through the call.
-            Some(tree) => unsafe { TreeBuilder::from_tree(repo.as_ref(), tree) }.unwrap(),
+            Some(tree) => TreeBuilder::from_tree(repo.as_ref(), tree).unwrap(),
         };
         let mut states = vec![state(builder.as_c_ptr(), names)];
         for step in steps {
@@ -696,7 +703,7 @@ mod builder {
         let rust_fixture = seed.map(|(name, _, _)| open(name));
         let c_tree = seed.map(|(_, hex, kind)| lookup(c_fixture.as_ref().unwrap(), hex, kind));
         let rust_tree =
-            seed.map(|(_, hex, kind)| lookup(rust_fixture.as_ref().unwrap(), hex, kind));
+            seed.map(|(_, hex, kind)| lookup_object(rust_fixture.as_ref().unwrap(), hex, kind));
 
         let mut all: BTreeSet<CString> =
             c_tree.map(names).unwrap_or_default().into_iter().collect();
@@ -707,8 +714,14 @@ mod builder {
         all.insert(c"absent".to_owned());
 
         let c_states = c_run(c_repo.repo(), c_tree, steps, &all);
-        let rust_states = rust_run(rust_repo.repo(), rust_tree, steps, &all);
-        c_tree.into_iter().chain(rust_tree).for_each(free_tree);
+        let rust_states = rust_run(
+            rust_repo.repo(),
+            rust_tree.as_ref().map(|t| t.as_ref()),
+            steps,
+            &all,
+        );
+        c_tree.into_iter().for_each(free_tree);
+        drop(rust_tree);
         for (i, (c, rust)) in c_states.iter().zip(&rust_states).enumerate() {
             assert_eq!(c, rust, "{tag}: state after step {i}");
         }
@@ -768,14 +781,14 @@ mod builder {
         let c_repo = TempRepo::new("seed-empty-c");
         let rust_repo = TempRepo::new("seed-empty-rust");
         let c_tree = lookup(empty.repo(), EMPTY_TREE, OidType::Sha1);
-        let rust_tree = lookup(empty.repo(), EMPTY_TREE, OidType::Sha1);
+        let rust_tree = lookup_object(empty.repo(), EMPTY_TREE, OidType::Sha1);
         let none = BTreeSet::new();
         assert_eq!(
             c_run(c_repo.repo(), Some(c_tree), STEPS, &none),
-            rust_run(rust_repo.repo(), Some(rust_tree), STEPS, &none)
+            rust_run(rust_repo.repo(), Some(rust_tree.as_ref()), STEPS, &none)
         );
         free_tree(c_tree);
-        free_tree(rust_tree);
+        drop(rust_tree);
     }
 
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
@@ -877,6 +890,8 @@ mod builder {
                 let rust_repo = TempRepo::new("oom-rust");
                 let fixture = open("testrepo.git");
                 let tree = lookup(&fixture, NESTED, OidType::Sha1);
+                let rust_fixture = open("testrepo.git");
+                let rust_tree = lookup_object(&rust_fixture, NESTED, OidType::Sha1);
                 let all: BTreeSet<CString> = names(tree).into_iter().collect();
 
                 for source in [None, Some(tree)] {
@@ -906,10 +921,10 @@ mod builder {
                         COUNTDOWN.store(k, SeqCst);
                         let built = match source {
                             None => TreeBuilder::new(rust_repo.repo().as_ref()),
-                            // SAFETY: a live tree, held through the call.
-                            Some(t) => unsafe {
-                                TreeBuilder::from_tree(rust_repo.repo().as_ref(), t)
-                            },
+                            Some(_) => TreeBuilder::from_tree(
+                                rust_repo.repo().as_ref(),
+                                rust_tree.as_ref(),
+                            ),
                         };
                         COUNTDOWN.store(0, SeqCst);
                         let rust: Outcome = match built {
@@ -935,6 +950,7 @@ mod builder {
                     }
                 }
                 free_tree(tree);
+                drop(rust_tree);
                 // SAFETY: NULL restores libgit2's default, libc-backed allocator.
                 let rc = unsafe {
                     ffi::git_libgit2_opts(
@@ -1026,12 +1042,19 @@ mod tree_entry {
     //! [`TreeEntryBox`]'s `clone` / `try_clone` and [`TreeEntryRef::to_tree_entry`] must
     //! copy as `git_tree_entry_dup` does, and its drop release as `git_tree_entry_free`
     //! does. Each side opens `testrepo.git` on its own and takes an owned entry for each
-    //! probe path through `git_tree_entry_bypath` (the Rust side adopting it, as the tree
-    //! wrapper will) from commit `763d71a`'s tree: files and directories at every depth.
+    //! probe path through `git_tree_entry_bypath` ([`TreeEntry::bypath`] on the Rust
+    //! side) from commit `763d71a`'s tree: files and directories at every depth.
     //! Then each side copies the entry, copies the copy, releases the original, the
     //! tree and the repository, and copies once more; after every step the sides are
     //! compared: what C reads out of each live entry (name, id, raw and normalised mode,
     //! type) and `git_tree_entry_cmp` between the side's live entries.
+    //!
+    //! [`path_lookups_match_c`] compares [`TreeEntry::bypath`] with
+    //! `git_tree_entry_bypath` on every probe path, the ones that fail included: the
+    //! entry each finds (as above), or the code, error class and message. Documented
+    //! divergence, outside that comparison: an object that is not a tree is refused by
+    //! the wrapper (`GIT_EINVALIDSPEC`, `GIT_ERROR_TREE`), where the C routine reads it
+    //! as one.
     //!
     //! [`TreeEntryRef::to_tree_entry`]: libgit2::libgit2::object::tree::TreeEntryRef::to_tree_entry
 
@@ -1041,9 +1064,10 @@ mod tree_entry {
     use libgit2::ffi;
     use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::object::object::Object;
-    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::object::tree::{TreeEntry, TreeEntryBox};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     const TESTREPO: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -1156,11 +1180,7 @@ mod tree_entry {
         let c_entries: Vec<_> = PATHS.iter().map(|p| bypath(c_tree, p)).collect();
         let rust_entries: Vec<TreeEntryBox> = PATHS
             .iter()
-            .map(|p| {
-                let raw = bypath(rust_tree.as_c_ptr().cast(), p);
-                // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
-                unsafe { TreeEntryBox::from_c(raw) }.unwrap()
-            })
+            .map(|p| TreeEntry::bypath(rust_tree.as_ref(), p).unwrap())
             .collect();
         let views = |c: &[*mut ffi::git_tree_entry], r: &[TreeEntryBox]| {
             let c: Vec<_> = c.iter().map(|&e| view(e)).collect();
@@ -1214,6 +1234,129 @@ mod tree_entry {
 
         for e in c_copies.into_iter().chain(c_copies2).chain(c_copies3) {
             // SAFETY: each copy is released once.
+            unsafe { ffi::git_tree_entry_free(e) };
+        }
+    }
+
+    /// Every probe path's lookup, successes and failures alike.
+    const PROBES: [&CStr; 17] = [
+        c"README",
+        c"ab",
+        c"ab/",
+        c"ab/de/",
+        c"ab/c/3.txt",
+        c"ab/de/fgh",
+        c"ab/de/fgh/1.txt",
+        c"ab/de/fgh/1.txt/",
+        c"",
+        c"/",
+        c"ab//de",
+        c"README/",
+        c"README/x",
+        c"nope",
+        c"ab/nope",
+        c"./README",
+        c"ab/../README",
+    ];
+
+    /// What a path lookup gave: the entry as C reads it, or the failure.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Found {
+        Entry(View),
+        Failed(c_int, c_int, String),
+    }
+
+    fn c_last() -> (c_int, String) {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread.
+        unsafe {
+            let e = ffi::git_error_last();
+            (
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    #[test]
+    fn path_lookups_match_c() {
+        init();
+        let path = CString::new(TESTREPO).unwrap();
+        let tree_id = Oid::from_string(TREE, OidType::Sha1).unwrap();
+        let mut c_repo = ptr::null_mut();
+        let mut c_tree = ptr::null_mut();
+        let mut c_id = ffi::git_oid::default();
+        // SAFETY: as in `copies_match_c`.
+        unsafe {
+            let rc = ffi::git_repository_open_ext(
+                &mut c_repo,
+                path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            );
+            assert_eq!(rc, 0);
+            assert_eq!(
+                ffi::git_oid_from_string(&mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                0
+            );
+            assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
+        }
+        let rust_repo = Repository::open(&path).unwrap();
+        let rust_tree =
+            Object::lookup(rust_repo.as_ref(), tree_id.as_ref(), Some(ObjectType::Tree)).unwrap();
+
+        let mut c_entries = Vec::new();
+        let mut rust_entries = Vec::new();
+        for probe in PROBES {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot, a live tree and a NUL-terminated path.
+            let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, c_tree, probe.as_ptr()) };
+            let c = if rc < 0 {
+                let (class, message) = c_last();
+                Found::Failed(rc, class, message)
+            } else {
+                c_entries.push(out);
+                Found::Entry(view(out))
+            };
+            let rust = match TreeEntry::bypath(rust_tree.as_ref(), probe) {
+                Ok(entry) => {
+                    let seen = Found::Entry(view(entry.as_c_ptr()));
+                    rust_entries.push(entry);
+                    seen
+                }
+                Err(e) => Found::Failed(
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                ),
+            };
+            assert_eq!(c, rust, "{probe:?}");
+        }
+        assert_eq!(c_entries.len(), 7);
+
+        // The documented divergence: objects that are not trees are refused in Rust.
+        let commit_id =
+            Oid::from_string(c"763d71aadf09a7951596c9746c024e7eece7c7af", OidType::Sha1).unwrap();
+        let commit = Object::lookup(rust_repo.as_ref(), commit_id.as_ref(), None).unwrap();
+        let e = TreeEntry::bypath(commit.as_ref(), c"README").unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec));
+        assert_eq!(e.class(), Some(ErrorClass::Tree));
+        assert_eq!(e.message(), c"the object is not a tree");
+
+        // The tree and the repositories go; the entries are still read alike.
+        // SAFETY: the tree and repository are released once, the tree first.
+        unsafe {
+            ffi::git_tree_free(c_tree);
+            ffi::git_repository_free(c_repo);
+        }
+        drop(commit);
+        drop(rust_tree);
+        drop(rust_repo);
+        let c_views: Vec<_> = c_entries.iter().map(|&e| view(e)).collect();
+        let rust_views: Vec<_> = rust_entries.iter().map(|e| view(e.as_c_ptr())).collect();
+        assert_eq!(c_views, rust_views);
+        for e in c_entries {
+            // SAFETY: each entry is released once.
             unsafe { ffi::git_tree_entry_free(e) };
         }
     }

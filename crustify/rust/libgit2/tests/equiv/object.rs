@@ -413,3 +413,215 @@ fn lookups_of_unparsable_objects_match_c() {
     drop(rust);
     let _ = std::fs::remove_dir_all(&path);
 }
+
+mod peel_and_bypath {
+    //! Equivalence of [`ObjectRef::peel`] with `git_object_peel` and of
+    //! [`ObjectRef::lookup_bypath`] with `git_object_lookup_bypath`.
+    //!
+    //! Each side opens `testrepo.git` on its own and looks up the same base objects: a
+    //! commit, its tree, a blob, a tag of a tag of a commit, a tag of a blob, and the
+    //! commit whose tree nests three levels of subtrees. From each base, every type
+    //! filter is peeled to, the result peeled again to every filter (a chain through a
+    //! nested tag), and every probe path looked up under every filter; after each step
+    //! the sides compare the object found (id and type, as C reads it) or the failure
+    //! (code, error class and message), and whether the result is the very object the
+    //! step started from (`git_object_peel` of an object to its own type takes one more
+    //! reference on it). Each side then releases the bases first, reads every derived
+    //! object back, and releases those.
+    //!
+    //! [`ObjectRef::peel`]: libgit2::libgit2::object::object::ObjectRef::peel
+    //! [`ObjectRef::lookup_bypath`]: libgit2::libgit2::object::object::ObjectRef::lookup_bypath
+
+    use std::ffi::CStr;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use super::{BLOB, COMMIT, CSide, Outcome, TESTREPO, TREE, c_last, found, init, outcome};
+
+    /// `refs/tags/test`: a tag of tag `7b43849`, of commit `e90810b`.
+    const NESTED_TAG: &str = "b25fa35b38051e4ae45d4222e795f9df2e43f1d1";
+    /// `refs/tags/annotated_tag_to_blob`: a tag of blob `1385f26`.
+    const TAG_TO_BLOB: &str = "521d87c1ec3aef9824daf6d96cc0ae3710766d91";
+    /// `refs/heads/subtrees`: its tree holds `ab/de/fgh/1.txt`.
+    const SUBTREES: &str = "763d71aadf09a7951596c9746c024e7eece7c7af";
+    const BASES: [&str; 6] = [COMMIT, TREE, BLOB, NESTED_TAG, TAG_TO_BLOB, SUBTREES];
+    const KINDS: [Option<ObjectType>; 5] = [
+        None,
+        Some(ObjectType::Commit),
+        Some(ObjectType::Tree),
+        Some(ObjectType::Blob),
+        Some(ObjectType::Tag),
+    ];
+    const PATHS: [&CStr; 16] = [
+        c"README",
+        c"ab",
+        c"ab/",
+        c"ab/de/",
+        c"ab/c/3.txt",
+        c"ab/de/fgh/1.txt",
+        c"ab/de/fgh/1.txt/",
+        c"",
+        c"/",
+        c"ab//de",
+        c"README/",
+        c"README/x",
+        c"nope",
+        c"ab/nope",
+        c"./README",
+        c"ab/../README",
+    ];
+
+    /// The C side's derived objects: each with whether it is its base.
+    fn c_peel(
+        base: *mut ffi::git_object,
+        kind: Option<ObjectType>,
+    ) -> (Outcome, bool, *mut ffi::git_object) {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot, a live object and a named type or `GIT_OBJECT_ANY`.
+        let rc = unsafe { ffi::git_object_peel(&mut out, base, ObjectType::raw_or_any(kind)) };
+        if rc < 0 {
+            let (class, message) = c_last();
+            return (Outcome::Failed(rc, class, message), false, ptr::null_mut());
+        }
+        (found(out), out == base, out)
+    }
+
+    fn c_bypath(
+        base: *mut ffi::git_object,
+        path: &CStr,
+        kind: Option<ObjectType>,
+    ) -> (Outcome, *mut ffi::git_object) {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot, a live object, a NUL-terminated path and a named type
+        // or `GIT_OBJECT_ANY`.
+        let rc = unsafe {
+            ffi::git_object_lookup_bypath(
+                &mut out,
+                base,
+                path.as_ptr(),
+                ObjectType::raw_or_any(kind),
+            )
+        };
+        if rc < 0 {
+            let (class, message) = c_last();
+            return (Outcome::Failed(rc, class, message), ptr::null_mut());
+        }
+        (found(out), out)
+    }
+
+    fn rust_peel<'r>(
+        base: &ObjectArc<'r>,
+        kind: Option<ObjectType>,
+    ) -> (Outcome, bool, Option<ObjectArc<'r>>) {
+        let result = base.as_ref().peel(kind);
+        let seen = outcome(&result);
+        match result {
+            Ok(object) => {
+                let same = ObjectArc::ptr_eq(&object, base);
+                (seen, same, Some(object))
+            }
+            Err(_) => (seen, false, None),
+        }
+    }
+
+    fn rust_bypath<'r>(
+        base: &ObjectArc<'r>,
+        path: &CStr,
+        kind: Option<ObjectType>,
+    ) -> (Outcome, Option<ObjectArc<'r>>) {
+        let result = base.as_ref().lookup_bypath(path, kind);
+        (outcome(&result), result.ok())
+    }
+
+    #[test]
+    fn peels_and_path_lookups_match_c() {
+        init();
+        let c = CSide::open(TESTREPO);
+        let rust = Repository::open(&std::ffi::CString::new(TESTREPO).unwrap()).unwrap();
+        let mut c_held: Vec<*mut ffi::git_object> = Vec::new();
+        let mut rust_held: Vec<ObjectArc<'_>> = Vec::new();
+        let mut c_bases = Vec::new();
+        let mut rust_bases = Vec::new();
+        for hex in BASES {
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id and 40 readable hex digits.
+            let rc = unsafe {
+                ffi::git_oid_from_prefix(&mut id, hex.as_ptr().cast(), 40, ffi::GIT_OID_SHA1)
+            };
+            assert_eq!(rc, 0);
+            let mut base = ptr::null_mut();
+            // SAFETY: a writable slot, the live repository and a live id of its type.
+            let rc = unsafe { ffi::git_object_lookup(&mut base, c.repo, &id, ffi::GIT_OBJECT_ANY) };
+            assert_eq!(rc, 0);
+            c_bases.push(base);
+            let oid = Oid::from_prefix(hex.as_bytes(), OidType::Sha1).unwrap();
+            rust_bases.push(Object::lookup(rust.as_ref(), oid.as_ref(), None).unwrap());
+        }
+
+        for (i, (&c_base, rust_base)) in c_bases.iter().zip(&rust_bases).enumerate() {
+            for kind in KINDS {
+                let (c_seen, c_same, c_out) = c_peel(c_base, kind);
+                let (r_seen, r_same, r_out) = rust_peel(rust_base, kind);
+                assert_eq!(
+                    (c_seen, c_same),
+                    (r_seen, r_same),
+                    "peel {} to {kind:?}",
+                    BASES[i]
+                );
+                // The peeled object, peeled once more to every type.
+                if let (false, Some(r_out)) = (c_out.is_null(), r_out) {
+                    for again in KINDS {
+                        let (c_seen, c_same, c_again) = c_peel(c_out, again);
+                        let (r_seen, r_same, r_again) = rust_peel(&r_out, again);
+                        assert_eq!(
+                            (c_seen, c_same),
+                            (r_seen, r_same),
+                            "peel {} to {kind:?} then {again:?}",
+                            BASES[i]
+                        );
+                        if !c_again.is_null() {
+                            c_held.push(c_again);
+                            rust_held.push(r_again.unwrap());
+                        }
+                    }
+                    c_held.push(c_out);
+                    rust_held.push(r_out);
+                }
+            }
+            for path in PATHS {
+                for kind in KINDS {
+                    let (c_seen, c_out) = c_bypath(c_base, path, kind);
+                    let (r_seen, r_out) = rust_bypath(rust_base, path, kind);
+                    assert_eq!(c_seen, r_seen, "{} {path:?} {kind:?}", BASES[i]);
+                    if !c_out.is_null() {
+                        c_held.push(c_out);
+                        rust_held.push(r_out.unwrap());
+                    }
+                }
+            }
+        }
+        assert_eq!(c_held.len(), rust_held.len());
+        assert!(c_held.len() > 50, "{}", c_held.len());
+
+        // The bases go first; every derived object is still readable, and read alike.
+        for base in c_bases {
+            // SAFETY: each base's reference is released once; the derived objects hold
+            // their own.
+            unsafe { ffi::git_object_free(base) };
+        }
+        drop(rust_bases);
+        let c_views: Vec<_> = c_held.iter().map(|&o| found(o)).collect();
+        let rust_views: Vec<_> = rust_held.iter().map(|o| found(o.as_c_ptr())).collect();
+        assert_eq!(c_views, rust_views);
+        for o in c_held {
+            // SAFETY: each derived reference is released once.
+            unsafe { ffi::git_object_free(o) };
+        }
+        drop(rust_held);
+    }
+}

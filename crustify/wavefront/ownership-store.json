@@ -3830,6 +3830,74 @@
    ]
   },
   {
+   "name": "git_object_lookup_bypath",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the object the entry at `path` names, looked up in git_object_owner(treeish) (git_tree_entry_to_object -> git_object_lookup: the cache's object or a fresh parse). Untouched on failure. The peeled tree and the owned entry the routine used are freed before it returns."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated, read for the call, split on '/'; an empty component is 'invalid tree path given' (GIT_ENOTFOUND)."
+     }
+    },
+    {
+     "name": "treeish",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:treeish"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Peeled to a tree for the call (git_object_peel), then its uncounted repository is used for every subtree and the final object lookup: the repository must be live and used by this thread only."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_object_lookup_prefix",
    "defined_in": "src/libgit2/object.c",
    "lifetime": {
@@ -3895,6 +3963,59 @@
       "nullable": false,
       "mutable": true,
       "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_peel",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "peeled",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call (type, id, tag target / commit tree id); its uncounted repository is reached for every lookup, so the repository must be live and used by this thread only."
+     }
+    },
+    {
+     "name": "peeled",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:peeled"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference: the very `object` (git_object_dup, a refcount bump) when it is already of target_type, otherwise the tag's target or the commit's tree looked up through object->repo (git_tag_target / git_commit_tree, i.e. git_object_lookup: the cache's object or a fresh parse). Untouched on failure; every intermediate object of the chain is freed."
      }
     }
    ]
@@ -8321,6 +8442,74 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_bypath",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "entry_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "entry_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success a fresh entry from git_tree_entry_dup (one block: struct and inline name) the caller frees with git_tree_entry_free; it keeps nothing of the tree or its repository. Untouched on failure (every subtree looked up on the way is freed)."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated, read for the call, split on '/': an empty component is 'invalid tree path given'; a trailing '/' is accepted after a tree entry only."
+     }
+    },
+    {
+     "name": "root",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:root"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: its entries by name; for a path of several components the subtrees are looked up through root->object.repo (uncounted), so the tree's repository must be live and used by this thread only. Must be a tree object: a commit/blob/tag pointer is read as a tree."
      }
     }
    ]

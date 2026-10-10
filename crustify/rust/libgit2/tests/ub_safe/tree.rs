@@ -87,7 +87,12 @@ fn conversions_agree_across_threads() {
 
 mod builder {
     //! UB tests for `git2/tree.h`: the `TreeBuilder` owned by its `TreeBuilderBox`, its
-    //! handles, `clear`, and the `git_treebuilder_free` policy.
+    //! handles, `clear`, and the `git_treebuilder_free` policy; and `TreeBuilder::from_tree`
+    //! on every shape of tree object: the empty tree, flat trees, a tree holding a
+    //! subtree, a tree of the builder's own repository or of another, a SHA256
+    //! repository's tree seeding a SHA1 repository's builder, and objects that are not
+    //! trees, refused before libgit2 reads them as one. The builder keeps nothing of the
+    //! tree, so dropping the tree right after the call is fine (ASan).
     //!
     //! Every entry a builder holds is its own allocation, which `clear` and the drop must
     //! each free exactly once, however the builder was filled (ASan: double free, use
@@ -97,8 +102,9 @@ mod builder {
     //! `Send`, so the threaded test gives each thread its own repository (TSan: the
     //! runtime pin and allocator under concurrent constructors). Nothing here runs under
     //! Miri, which cannot call libgit2. Illegal uses are compile-fail doctests on the crate
-    //! and files under `compile_fail/`: a builder outliving its repository or a handle its
-    //! owner, aliased exclusive handles, sending or sharing a builder, a `clone`.
+    //! (sending or sharing a builder, among others) and files under `compile_fail/`: a
+    //! builder outliving its repository or a handle its owner, aliased exclusive handles,
+    //! a `clone`.
 
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -107,11 +113,14 @@ mod builder {
     use std::thread;
 
     use libgit2::ffi;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, TreeBuilderMut};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::util::errors::ErrorClass;
 
     use crate::fixture::init;
-    use crate::fixture::tree::{count, id, insert, mode_of, write};
+    use crate::fixture::tree::{count, entries, id, insert, mode_of, write};
 
     const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -314,6 +323,137 @@ mod builder {
         });
         assert!(ids.windows(2).all(|w| w[0] == w[1]));
     }
+
+    /// Opens the fixture repository `name` under `tests/resources`, read-only.
+    fn open(name: &str) -> RepositoryBox {
+        init();
+        let path = CString::new(format!(
+            "{}/../../../tests/resources/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        Repository::open(&path).unwrap()
+    }
+
+    /// The object `hex` names in `repo`, of any type.
+    fn lookup<'r>(repo: &'r RepositoryBox, hex: &str, kind: OidType) -> ObjectArc<'r> {
+        let id = Oid::from_string(&CString::new(hex).unwrap(), kind).unwrap();
+        Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap()
+    }
+
+    /// Seeds a builder of `target` with `source`, drops `source` at once, then checks
+    /// that the builder holds a copy of each entry.
+    fn seeded<'r>(target: &'r RepositoryBox, source: ObjectArc<'_>) -> TreeBuilderBox<'r> {
+        let expected = entries(&source);
+        let builder = TreeBuilder::from_tree(target.as_ref(), source.as_ref()).unwrap();
+        drop(source);
+        assert_eq!(count(&builder), expected.len());
+        for (name, mode) in &expected {
+            assert_eq!(mode_of(&builder, name), Some(*mode), "{name:?}");
+        }
+        builder
+    }
+
+    /// `testrepo.git`'s `HEAD` tree: three blobs.
+    const FLAT: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
+    /// A `testrepo.git` tree holding three blobs and the subtree `ab`.
+    const NESTED: &str = "ae90f12eea699729ed24555e40b9fd669da12a12";
+    /// `testrepo_256.git`'s `HEAD` tree: three blobs, with SHA256 ids.
+    const FLAT_256: &str = "f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736";
+
+    /// Flat and nested trees, seeding a builder of another repository, are copied whole:
+    /// the builder writes the very tree back, after its source is gone (ASan: use after
+    /// free of the tree; LSan: a leaked copy).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn trees_seed_builders_of_another_repository() {
+        let source = open("testrepo.git");
+        let target = TempRepo::new("another");
+        for hex in [FLAT, NESTED] {
+            let mut builder = seeded(target.repo(), lookup(&source, hex, OidType::Sha1));
+            assert_eq!(write(&mut builder).as_deref(), Ok(hex));
+            builder.as_mut().clear();
+            assert_eq!(count(&builder), 0);
+            assert_eq!(write(&mut builder).as_deref(), Ok(EMPTY_TREE));
+        }
+        // The source repository may go before the builders seeded from it.
+        let tree = lookup(&source, NESTED, OidType::Sha1);
+        let builder = seeded(target.repo(), tree);
+        drop(source);
+        assert_eq!(count(&builder), 4);
+        assert_eq!(mode_of(&builder, c"ab"), Some(ffi::GIT_FILEMODE_TREE));
+    }
+
+    /// A tree of the builder's own repository: the empty tree it wrote, then a tree with
+    /// entries, each builder released with its entries still held.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn trees_seed_builders_of_their_own_repository() {
+        let temp = TempRepo::new("own");
+        let repo = temp.repo();
+        let mut empty = TreeBuilder::new(repo.as_ref()).unwrap();
+        assert_eq!(write(&mut empty).as_deref(), Ok(EMPTY_TREE));
+        drop(empty);
+
+        let builder = seeded(repo, lookup(repo, EMPTY_TREE, OidType::Sha1));
+        assert_eq!(count(&builder), 0);
+        drop(builder);
+
+        let source = open("testrepo.git");
+        let mut builder = seeded(repo, lookup(&source, NESTED, OidType::Sha1));
+        // Written into `repo`, the tree is now its own.
+        let written = write(&mut builder).unwrap();
+        drop(builder);
+        let again = seeded(repo, lookup(repo, &written, OidType::Sha1));
+        let mut copies: Vec<_> = (0..4)
+            .map(|_| seeded(repo, lookup(repo, &written, OidType::Sha1)))
+            .collect();
+        copies[2].as_mut().clear();
+        drop(again);
+        drop(copies);
+    }
+
+    /// A SHA256 repository's tree seeds a SHA1 repository's builder: the ids are copied as
+    /// they are, and writing truncates each to SHA1's 20 bytes, within the id's storage;
+    /// the tree written is malformed but nothing is read or written out of bounds.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn trees_of_another_object_id_type_stay_in_bounds() {
+        let source = open("testrepo_256.git");
+        let target = TempRepo::new("sha256");
+        let mut builder = seeded(target.repo(), lookup(&source, FLAT_256, OidType::Sha256));
+        let written = write(&mut builder).unwrap();
+        assert_ne!(written, FLAT_256);
+        assert_eq!(written.len(), 40);
+        builder.as_mut().clear();
+        assert_eq!(write(&mut builder).as_deref(), Ok(EMPTY_TREE));
+    }
+
+    /// An object that is not a tree is refused before libgit2 reads it as one (ASan would
+    /// flag the read of a smaller object): the commit of `NESTED`, a blob and a tag, with
+    /// a `GIT_ERROR_TREE` error; the object stays usable, and nothing is built.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn only_trees_seed_builders() {
+        let source = open("testrepo.git");
+        let target = TempRepo::new("not-trees");
+        for hex in [
+            "763d71aadf09a7951596c9746c024e7eece7c7af",
+            "a8233120f6ad708f843d861ce2b7228ec4e3dec6",
+            "b25fa35b38051e4ae45d4222e795f9df2e43f1d1",
+        ] {
+            let object = lookup(&source, hex, OidType::Sha1);
+            for _ in 0..2 {
+                let e =
+                    TreeBuilder::from_tree(target.repo().as_ref(), object.as_ref()).unwrap_err();
+                assert_eq!(e.class(), Some(ErrorClass::Tree), "{hex}");
+                assert_eq!(e.message(), c"the object is not a tree");
+            }
+            let _ = object.as_ref().to_object();
+        }
+        let tree = lookup(&source, NESTED, OidType::Sha1);
+        assert_eq!(count(&seeded(target.repo(), tree)), 4);
+    }
 }
 
 mod tree_entry {
@@ -342,13 +482,14 @@ mod tree_entry {
     use libgit2::ffi;
     use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::object::object::{Object, ObjectArc};
-    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::object::tree::{TreeEntry, TreeEntryBox};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::RepositoryRef;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     use crate::fixture::TempRepo;
     use crate::fixture::object_and_tree_entry::{
-        entry_bypath, entry_view, open_testrepo, repository, write_tree,
+        entry_view, object_view, open_testrepo, repository, write_raw, write_tree,
     };
 
     /// Commit `763d71a`'s tree, which nests `ab/de/fgh/1.txt`.
@@ -374,7 +515,7 @@ mod tree_entry {
         let root = tree(repo.as_ref());
         let entries: Vec<TreeEntryBox> = PATHS
             .iter()
-            .map(|p| entry_bypath(&root, p).unwrap())
+            .map(|p| TreeEntry::bypath(root.as_ref(), p).unwrap())
             .collect();
         let expected: Vec<_> = entries.iter().map(entry_view).collect();
         let copies: Vec<_> = entries
@@ -399,7 +540,7 @@ mod tree_entry {
     fn copy_chains_release_every_copy_in_any_order() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
-        let original = entry_bypath(&root, c"ab/de/fgh/1.txt").unwrap();
+        let original = TreeEntry::bypath(root.as_ref(), c"ab/de/fgh/1.txt").unwrap();
         let expected = entry_view(&original);
         for order in 0..3 {
             let mut chain = vec![original.clone()];
@@ -442,7 +583,7 @@ mod tree_entry {
         let id = write_tree(&repo, b"payload\n", &names);
         let root = Object::lookup(repository(&repo), id.as_ref(), Some(ObjectType::Tree)).unwrap();
         for name in &names {
-            let entry = entry_bypath(&root, name).unwrap();
+            let entry = TreeEntry::bypath(root.as_ref(), name).unwrap();
             let copy = entry.as_ref().to_tree_entry().unwrap();
             drop(entry);
             let clone = copy.clone();
@@ -458,7 +599,7 @@ mod tree_entry {
     fn entries_cross_threads() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
-        let shared = entry_bypath(&root, c"ab/c/3.txt").unwrap();
+        let shared = TreeEntry::bypath(root.as_ref(), c"ab/c/3.txt").unwrap();
         let expected = entry_view(&shared);
         drop(root);
         drop(repo);
@@ -513,7 +654,7 @@ mod tree_entry {
     fn shared_handles_coexist() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
-        let mut entry = entry_bypath(&root, c"README").unwrap();
+        let mut entry = TreeEntry::bypath(root.as_ref(), c"README").unwrap();
         let a = entry.as_ref();
         let b = a;
         let (x, y) = (a.to_tree_entry().unwrap(), b.to_tree_entry().unwrap());
@@ -521,5 +662,122 @@ mod tree_entry {
         let m = entry.as_mut();
         assert_eq!(format!("{m:?}"), "TreeEntry { .. }");
         assert_eq!(format!("{:?}", m.as_ref()), "TreeEntry { .. }");
+    }
+
+    /// Lookups by path own their entry alone: every failure, at any depth, leaves
+    /// nothing behind (LSan), every success is released once (ASan), and an entry
+    /// found through a subtree outlives the tree, the repository and the subtrees
+    /// libgit2 read on the way.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn path_lookups_own_their_entry_alone() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let misses: [(&CStr, ErrorCode); 8] = [
+            (c"", ErrorCode::NotFound),
+            (c"/", ErrorCode::NotFound),
+            (c"nope", ErrorCode::NotFound),
+            (c"ab/nope", ErrorCode::NotFound),
+            (c"ab/de/fgh/nope", ErrorCode::NotFound),
+            (c"README/", ErrorCode::NotFound),
+            (c"ab/c/3.txt/x", ErrorCode::NotFound),
+            (c"ab//de", ErrorCode::NotFound),
+        ];
+        for (path, code) in misses {
+            let e = TreeEntry::bypath(root.as_ref(), path).unwrap_err();
+            assert_eq!(e.code(), Some(code), "{path:?}: {e:?}");
+            assert_eq!(e.class(), Some(ErrorClass::Tree), "{path:?}");
+        }
+        let deep = TreeEntry::bypath(root.as_ref(), c"ab/de/fgh/1.txt").unwrap();
+        let dir = TreeEntry::bypath(root.as_ref(), c"ab/de/").unwrap();
+        let again = TreeEntry::bypath(root.as_ref(), c"ab/de/fgh/1.txt").unwrap();
+        assert_ne!(deep.as_c_ptr(), again.as_c_ptr());
+        drop(root);
+        drop(repo);
+        assert_eq!(entry_view(&deep), entry_view(&again));
+        assert_eq!(entry_view(&deep).0.as_c_str(), c"1.txt");
+        assert_eq!(entry_view(&dir).0.as_c_str(), c"de");
+        assert_eq!(entry_view(&dir).2, ffi::GIT_FILEMODE_TREE);
+        drop(again);
+        let copy = deep.clone();
+        drop(deep);
+        assert_eq!(entry_view(&copy).0.as_c_str(), c"1.txt");
+    }
+
+    /// A tree whose subtree entry names an object the database lacks: the lookups
+    /// through it fail with libgit2's "object not found" error (code `-1` from
+    /// `git_tree_entry_bypath`, `GIT_ENOTFOUND` from the odb through
+    /// `ObjectRef::lookup_bypath`'s peel), leaving nothing behind (LSan); the entry
+    /// itself is still found, and a blob entry beside it looked up.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn missing_subtrees_fail_with_libgit2s_error() {
+        let repo = TempRepo::new("tree-entry-missing-subtree");
+        let blob = write_raw(&repo, b"leaf\n", ffi::GIT_OBJECT_BLOB);
+        // Entries in git's order (libgit2 searches them by bisection).
+        let mut raw = b"100644 leaf\0".to_vec();
+        raw.extend(&blob.as_ref().id()[..20]);
+        raw.extend(b"40000 sub\0");
+        raw.extend([0xde; 20]);
+        let id = write_raw(&repo, &raw, ffi::GIT_OBJECT_TREE);
+        let tree = Object::lookup(repository(&repo), id.as_ref(), Some(ObjectType::Tree)).unwrap();
+        // The entry itself, with or without a trailing `/`, needs no subtree.
+        let sub = TreeEntry::bypath(tree.as_ref(), c"sub").unwrap();
+        assert_eq!(entry_view(&sub).1, "de".repeat(20));
+        assert_eq!(entry_view(&sub).2, ffi::GIT_FILEMODE_TREE);
+        assert_eq!(
+            entry_view(&TreeEntry::bypath(tree.as_ref(), c"sub/").unwrap()),
+            entry_view(&sub)
+        );
+        drop(sub);
+        for path in [c"sub/x", c"sub/a/b"] {
+            let e = TreeEntry::bypath(tree.as_ref(), path).unwrap_err();
+            assert_eq!(e.raw_code(), -1, "{path:?}: {e:?}");
+            assert_eq!(e.class(), Some(ErrorClass::Odb));
+            let e = tree.as_ref().lookup_bypath(path, None).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Odb), "{path:?}: {e:?}");
+        }
+        let leaf = TreeEntry::bypath(tree.as_ref(), c"leaf").unwrap();
+        assert_eq!(entry_view(&leaf).0.as_c_str(), c"leaf");
+        let object = tree
+            .as_ref()
+            .lookup_bypath(c"leaf", Some(ObjectType::Blob))
+            .unwrap();
+        assert_eq!(object_view(&object).0, entry_view(&leaf).1);
+        // The missing subtree, as an object: not found.
+        let e = tree.as_ref().lookup_bypath(c"sub", None).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::NotFound), "{e:?}");
+    }
+
+    /// An object that is not a tree is refused before libgit2 reads it as one: a
+    /// commit, a blob and a tag (ASan would flag the read of a smaller object).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn only_trees_are_looked_into() {
+        let repo = open_testrepo();
+        for hex in [
+            c"763d71aadf09a7951596c9746c024e7eece7c7af",
+            c"a8233120f6ad708f843d861ce2b7228ec4e3dec6",
+            c"b25fa35b38051e4ae45d4222e795f9df2e43f1d1",
+        ] {
+            let id = Oid::from_string(hex, OidType::Sha1).unwrap();
+            let object = Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap();
+            for path in [c"README", c"", c"ab/de"] {
+                let e = TreeEntry::bypath(object.as_ref(), path).unwrap_err();
+                assert_eq!(e.code(), Some(ErrorCode::InvalidSpec), "{hex:?} {path:?}");
+                assert_eq!(e.class(), Some(ErrorClass::Tree));
+                assert_eq!(e.message(), c"the object is not a tree");
+            }
+        }
+        // The tree itself is, and the same lookup through the peeled commit agrees.
+        let root = tree(repo.as_ref());
+        let commit_id =
+            Oid::from_string(c"763d71aadf09a7951596c9746c024e7eece7c7af", OidType::Sha1).unwrap();
+        let commit = Object::lookup(repo.as_ref(), commit_id.as_ref(), None).unwrap();
+        let peeled = commit.as_ref().peel(Some(ObjectType::Tree)).unwrap();
+        assert!(ObjectArc::ptr_eq(&peeled, &root));
+        let a = TreeEntry::bypath(root.as_ref(), c"ab/c/3.txt").unwrap();
+        let b = TreeEntry::bypath(peeled.as_ref(), c"ab/c/3.txt").unwrap();
+        assert_eq!(entry_view(&a), entry_view(&b));
     }
 }

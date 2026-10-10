@@ -798,11 +798,19 @@ not an entry
         const TOKENS: [&[u8]; 11] = [
             b"", b" ", b"\t", b"Name ", b"<a@x>", b"<>", b" <>", b"# c", b"<a#b>", b"<", b">",
         ];
+        // BorrowSanitizer tracks every allocation, and tens of thousands of small ones
+        // take it hours: under it, only every 37th combination is built at all.
+        let stride = if cfg!(bsan) { 37 } else { 1 };
         let mut lines = Vec::new();
+        let mut n = 0usize;
         for a in TOKENS {
             for b in TOKENS {
                 for c in TOKENS {
                     for d in TOKENS {
+                        n += 1;
+                        if !n.is_multiple_of(stride) {
+                            continue;
+                        }
                         let line = [a, b, c, d].concat();
                         lines.push([&line[..], b"\n"].concat());
                         lines.push([&line[..], b"\r\n"].concat());
@@ -853,7 +861,11 @@ not an entry
                         unsafe { ffi::git_mailmap_free(out) };
                     }
                 }
-                assert!(refused > 100, "the corpus reaches the defect");
+                // The corpus is sampled under BorrowSanitizer (see `corpus`).
+                assert!(
+                    refused > if cfg!(bsan) { 2 } else { 100 },
+                    "the corpus reaches the defect"
+                );
             },
         );
     }
