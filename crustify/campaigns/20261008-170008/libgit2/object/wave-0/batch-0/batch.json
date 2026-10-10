@@ -1,0 +1,22 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_blob_filter_flag_t",
+      "defined_in": "include/git2/blob.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_commit_header",
+      "defined_in": "include/git2/commit.h",
+      "kind": "type",
+      "field_anchors": [
+        "value",
+        "field"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    }
+  ]
+}

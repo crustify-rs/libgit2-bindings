@@ -1,0 +1,19 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_object",
+      "defined_in": "src/libgit2/object.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/object.rs"
+    },
+    {
+      "name": "git_tree_entry",
+      "defined_in": "src/libgit2/tree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    }
+  ]
+}
