@@ -1,0 +1,12 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_annotated_commit",
+      "defined_in": "src/libgit2/annotated_commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/annotated_commit.rs"
+    }
+  ]
+}
