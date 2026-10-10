@@ -5,10 +5,10 @@
 //! Rust, and compares the verdicts and the calling thread's last error after each
 //! call: libgit2 must leave an error set beforehand untouched, on both sides. The
 //! probes cover every byte-order mark and its truncations, each byte alone and between
-//! printable ones, the printable-to-non-printable ratio on both sides of 128, NULs
-//! past the 8000 bytes `git_blob_is_binary` stops at, and a deterministic stream of
-//! generated inputs. A multi-call sequence grows one buffer a byte at a time,
-//! comparing after each step.
+//! printable ones, the printable-to-non-printable ratio on both sides of 128, runs of
+//! each whitespace byte around that ratio, NULs past the 8000 bytes
+//! `git_blob_is_binary` stops at, and a deterministic stream of generated inputs. A
+//! multi-call sequence grows one buffer a byte at a time, comparing after each step.
 //!
 //! Documented divergence, outside these comparisons: C counts bytes in `int`s, which
 //! overflow (UB, flagged by UBSan at `src/util/str.c:1271`) on a slice holding more
@@ -154,6 +154,28 @@ fn printable_ratio_around_128() {
             assert_equivalent(&data);
         }
     }
+}
+
+/// Each whitespace and control byte the heuristic names, in a run of 128 carrying one
+/// control byte: C counts space, form feed, backspace and escape as printable (text),
+/// and tab, line feed, vertical tab and carriage return as neither (binary).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn whitespace_classes() {
+    init();
+    for ws in [b' ', b'\t', b'\n', 0x0b, 0x0c, b'\r', 0x08, 0x1b, 0x7f] {
+        for count in [127, 128] {
+            let mut run = vec![ws; count];
+            run.push(0x01);
+            assert_equivalent(&run);
+        }
+    }
+    let mut spaces = vec![b' '; 128];
+    spaces.push(0x01);
+    assert!(!c_verdict(&spaces).0);
+    let mut tabs = vec![b'\t'; 128];
+    tabs.push(0x01);
+    assert!(c_verdict(&tabs).0);
 }
 
 /// Unlike `git_blob_is_binary`, both read past 8000 bytes.

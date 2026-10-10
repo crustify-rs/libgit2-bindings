@@ -172,6 +172,36 @@ mod unit_tests {
         );
     }
 
+    /// The reference name grows once for `refs/tags/` and again for a name longer than
+    /// the first allocation's slack: a refusal of that second allocation is the same
+    /// out-of-memory error, and nothing of the first is leaked.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn out_of_memory_growing_the_reference_name_is_an_error() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::out_of_memory_growing_the_reference_name_is_an_error"
+            ),
+            || {
+                install_countdown();
+                set(ErrorClass::Invalid, c"error state allocated");
+                // `refs/tags/` takes a 16-byte block; this name no longer fits it.
+                let name = c"release/2024/q1";
+                ALLOWED.store(1, SeqCst);
+                REFUSING.store(true, SeqCst);
+                let refused = name_is_valid(name);
+                REFUSING.store(false, SeqCst);
+                let error = refused.unwrap_err();
+                assert_eq!(
+                    (error.class(), error.message()),
+                    (Some(ErrorClass::NoMemory), c"Out of memory")
+                );
+                assert_eq!(name_is_valid(name), Ok(true));
+            },
+        );
+    }
+
     /// When libgit2 cannot be initialised, the check reports it without calling
     /// `git_tag_name_is_valid`.
     #[test]

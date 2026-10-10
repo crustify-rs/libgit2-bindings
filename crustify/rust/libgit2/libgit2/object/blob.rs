@@ -332,8 +332,10 @@ impl core::iter::FusedIterator for FilterFlagsIter {}
 /// Whether `data` is most likely binary, by core git's heuristic: it is binary when it
 /// opens with a UTF-16 or UTF-32 byte-order mark, when it holds a NUL byte, or when
 /// fewer than 128 printable bytes come for each non-printable one. Printable bytes are
-/// those above `0x1f` but DEL, and backspace, escape and form feed; whitespace counts as
-/// neither. A UTF-8 byte-order mark is skipped, and empty data is text.
+/// those above `0x1f` but DEL (space included), and backspace, escape and form feed;
+/// tab, line feed, vertical tab and carriage return count as neither; every other byte
+/// below `0x20`, and DEL, is non-printable. A UTF-8 byte-order mark is skipped, and
+/// empty data is text.
 ///
 /// Unlike `git_blob_is_binary`, it reads the whole slice, not its first 8000 bytes.
 ///
@@ -554,6 +556,11 @@ mod unit_tests {
             ratio.extend(std::iter::repeat_n(0x01, nonprintable));
             inputs.push(ratio);
         }
+        for ws in [b' ', b'\t', b'\n', 0x0b, 0x0c, b'\r', 0x08, 0x1b] {
+            let mut run = vec![ws; 128];
+            run.push(0x01);
+            inputs.push(run);
+        }
         inputs.extend((0..=u8::MAX).map(|c| vec![c]));
         inputs.extend((0..=u8::MAX).map(|c| vec![b'a', c, b'b']));
         inputs
@@ -615,6 +622,31 @@ mod unit_tests {
         assert!(wide::is_binary(&ratio));
     }
 
+    /// Space, form feed, backspace and escape are printable: 128 of them carry one
+    /// control byte. Tab, line feed, vertical tab and carriage return count as neither,
+    /// so the same control byte makes the data binary. The Rust heuristic runs under
+    /// Miri too; the end-to-end check reaches libgit2.
+    #[test]
+    fn whitespace_classes() {
+        for (ws, binary) in [
+            (b' ', false),
+            (0x0c, false),
+            (0x08, false),
+            (0x1b, false),
+            (b'\t', true),
+            (b'\n', true),
+            (0x0b, true),
+            (b'\r', true),
+        ] {
+            let mut run = vec![ws; 128];
+            run.push(0x01);
+            assert_eq!(wide::is_binary(&run), binary, "{ws:#x}");
+            if !cfg!(miri) {
+                assert_eq!(data_is_binary(&run), binary, "{ws:#x}");
+            }
+        }
+    }
+
     /// Slices up to `INT_MAX` bytes reach libgit2; one byte more takes the Rust
     /// heuristic.
     #[test]
@@ -623,6 +655,21 @@ mod unit_tests {
         assert!(fits_c_counters(c_int::MAX as usize));
         assert!(!fits_c_counters(c_int::MAX as usize + 1));
         assert!(!fits_c_counters(usize::MAX));
+    }
+
+    /// A slice one byte longer than libgit2's counters can count takes the Rust
+    /// heuristic. The slice is zeroed (never touched by `vec!` past the allocator's
+    /// own zero-filling, and binary at its first byte), so the test costs one
+    /// allocation, not a 2 GiB scan.
+    #[test]
+    #[cfg_attr(miri, ignore = "allocates 2 GiB")]
+    fn oversized_slice_takes_the_rust_heuristic() {
+        let mut data = vec![0u8; c_int::MAX as usize + 1];
+        assert!(data_is_binary(&data));
+        data[..2].copy_from_slice(b"\xff\xfe");
+        assert!(data_is_binary(&data));
+        data[..3].copy_from_slice(b"\xef\xbb\xbf");
+        assert!(data_is_binary(&data));
     }
 
     /// End to end, a slice whose printable bytes would overflow libgit2's `int` counter
