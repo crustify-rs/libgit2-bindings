@@ -14,7 +14,7 @@
 //!
 //! | reference | from | owner | handles |
 //! |---|---|---|---|
-//! | the only one | [`Index::new`], [`Index::open`]; later the merge, cherry-pick, revert and apply routines that build a fresh index | [`IndexBox`] | [`IndexRef`], [`IndexMut`] |
+//! | the only one | [`Index::new`], [`Index::open`] and their `_with_oid_type` forms; later the merge, cherry-pick, revert and apply routines that build a fresh index | [`IndexBox`] | [`IndexRef`], [`IndexMut`] |
 //! | one of several | an [`IndexBox`] converted with `.into()`; later `git_repository_index` and `git_rebase_inmemory_index`, which count one more reference to an index the repository or rebase keeps | [`IndexArc`] | [`IndexRef`] |
 //!
 //! Both owners release their reference through [`IndexFree`]. An [`IndexArc`] has no
@@ -52,6 +52,7 @@ use core::ptr::{self, NonNull};
 use ffibox::{CArc, CBox, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::oid::oid::OidType;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
@@ -60,9 +61,9 @@ define_ctype!(
     /// optionally backed by an index file.
     ///
     /// Opaque, and only ever behind a pointer (see the [module docs](self#ownership)):
-    /// owned as an [`IndexBox`], which [`new`](Self::new) and [`open`](Self::open)
-    /// build, or as an [`IndexArc`] when the reference is shared; borrowed as an
-    /// [`IndexRef`] / [`IndexMut`] from either.
+    /// owned as an [`IndexBox`], which [`new`](Self::new), [`open`](Self::open) and
+    /// their `_with_oid_type` forms build, or as an [`IndexArc`] when the reference is
+    /// shared; borrowed as an [`IndexRef`] / [`IndexMut`] from either.
     ///
     /// There is no value to hold: the layout is libgit2's own.
     ///
@@ -172,11 +173,34 @@ fn constructed(rc: c_int, index: Option<IndexBox>) -> Result<IndexBox, ErrorBuf>
     index.filter(|_| rc >= 0).ok_or_else(last)
 }
 
+/// The options `git_index_new_ext` / `git_index_open_ext` read: this version's struct
+/// with `oid_type`, the only setting it has.
+fn options(oid_type: OidType) -> ffi::git_index_options {
+    ffi::git_index_options {
+        version: ffi::GIT_INDEX_OPTIONS_VERSION,
+        oid_type: oid_type.raw(),
+    }
+}
+
+/// Refuses an empty path, with a `GIT_ERROR_INDEX` error, before libgit2 sees it: see
+/// [`Index::open`].
+fn path_is_usable(path: &CStr) -> bool {
+    if path.is_empty() {
+        set(
+            ErrorClass::Index,
+            c"failed to open index: the path is empty",
+        );
+        return false;
+    }
+    true
+}
+
 impl Index {
     /// A fresh, empty in-memory index, backed by no file and no repository: libgit2
     /// refuses to read or write it, and fails the routines that need a repository's
     /// object database or working directory (adding by path, writing a tree), but every
-    /// in-memory operation works on it. Its object ids are SHA1.
+    /// in-memory operation works on it. Its object ids are SHA1
+    /// ([`with_oid_type`](Self::with_oid_type) chooses).
     ///
     /// Fails, with libgit2's error, only when it runs out of memory or cannot be
     /// initialised. [`IndexBox::new`](CBox::new) and [`IndexArc::new`](CArc::new) build
@@ -200,7 +224,8 @@ impl Index {
 
     /// An index backed by the index file at `path`, without a repository; its contents
     /// are read from the file when it exists, and the index is empty when it does not
-    /// (nor is the file created until the index is written). Its object ids are SHA1.
+    /// (nor is the file created until the index is written). Its object ids are SHA1
+    /// ([`open_with_oid_type`](Self::open_with_oid_type) chooses).
     ///
     /// The path is copied, not retained. The routines that need a repository fail on the
     /// index as on [`new`](Self::new)'s.
@@ -223,11 +248,7 @@ impl Index {
         if !runtime_pinned() {
             return Err(last());
         }
-        if path.is_empty() {
-            set(
-                ErrorClass::Index,
-                c"failed to open index: the path is empty",
-            );
+        if !path_is_usable(path) {
             return Err(last());
         }
         let mut out = ptr::null_mut();
@@ -239,6 +260,53 @@ impl Index {
         // index itself; adopted as `None`), or writes a fresh index holding its only
         // reference, which the caller owns, released by `git_index_free` as `IndexFree`
         // does.
+        constructed(rc, unsafe { IndexBox::from_c(out) })
+    }
+
+    /// As [`new`](Self::new), for an index whose object ids are of `oid_type`; the type
+    /// is the only setting `git_index_options` holds. [`new`](Self::new) is this with
+    /// [`OidType::Sha1`].
+    ///
+    /// libgit2 asserts the type is one it names, which [`OidType`] guarantees.
+    ///
+    /// Wraps: git_index_new_ext
+    pub fn with_oid_type(oid_type: OidType) -> Result<IndexBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let opts = options(oid_type);
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, which libgit2 writes only on success; `opts`
+        // is a live options struct of this version naming a valid type, which the
+        // routine reads for the call and does not retain. The runtime is pinned.
+        let rc = unsafe { ffi::git_index_new_ext(&mut out, &opts) };
+        // SAFETY: as in `new`: `out` is NULL, or a fresh index holding its only
+        // reference, released by `git_index_free` as `IndexFree` does.
+        constructed(rc, unsafe { IndexBox::from_c(out) })
+    }
+
+    /// As [`open`](Self::open), for an index whose object ids are of `oid_type`: an
+    /// existing file is read as an index of that type, and fails to read as one of
+    /// another. [`open`](Self::open) is this with [`OidType::Sha1`]; the type is the
+    /// only setting `git_index_options` holds, and libgit2 asserts it is one it names,
+    /// which [`OidType`] guarantees.
+    ///
+    /// An empty `path` is refused as [`open`](Self::open) refuses it.
+    ///
+    /// Wraps: git_index_open_ext
+    pub fn open_with_oid_type(path: &CStr, oid_type: OidType) -> Result<IndexBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        if !path_is_usable(path) {
+            return Err(last());
+        }
+        let opts = options(oid_type);
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `open`; `opts` is a live options struct of this version naming a
+        // valid type, which the routine reads for the call and does not retain.
+        let rc = unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), &opts) };
+        // SAFETY: as in `open`.
         constructed(rc, unsafe { IndexBox::from_c(out) })
     }
 }
@@ -303,6 +371,15 @@ mod unit_tests {
         assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 0);
     }
 
+    #[test]
+    fn options_carry_this_version_and_the_type() {
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let opts = options(kind);
+            assert_eq!(opts.version, ffi::GIT_INDEX_OPTIONS_VERSION);
+            assert_eq!(OidType::from_raw(opts.oid_type), Some(kind));
+        }
+    }
+
     /// A failure, or a success without an index, reports the thread's error and adopts
     /// nothing.
     #[test]
@@ -326,14 +403,19 @@ mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn empty_path_is_refused_where_c_accepts_it() {
-        let error = Index::open(c"").unwrap_err();
-        assert_eq!(
-            (error.class(), error.message()),
-            (
-                Some(ErrorClass::Index),
-                c"failed to open index: the path is empty"
-            )
-        );
+        for built in [
+            Index::open(c""),
+            Index::open_with_oid_type(c"", OidType::Sha256),
+        ] {
+            let error = built.unwrap_err();
+            assert_eq!(
+                (error.class(), error.message()),
+                (
+                    Some(ErrorClass::Index),
+                    c"failed to open index: the path is empty"
+                )
+            );
+        }
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated path, read for the call; the
         // runtime is pinned (by `open` above).
@@ -455,7 +537,12 @@ mod unit_tests {
                 install_countdown();
                 ALLOWED.store(0, SeqCst);
                 REFUSING.store(true, SeqCst);
-                for built in [Index::new(), Index::open(c"index")] {
+                for built in [
+                    Index::new(),
+                    Index::open(c"index"),
+                    Index::with_oid_type(OidType::Sha256),
+                    Index::open_with_oid_type(c"index", OidType::Sha256),
+                ] {
                     let error = built.unwrap_err();
                     assert_eq!(
                         (error.class(), error.message()),
@@ -547,6 +634,7 @@ mod unit_tests {
                 assert!(runtime_pinned());
 
                 assert!(refuse_each_allocation(Index::new) > 0);
+                assert!(refuse_each_allocation(|| Index::with_oid_type(OidType::Sha256)) > 0);
 
                 let dir = std::env::temp_dir()
                     .join(format!("crustify-index-unit-{}", std::process::id()));
@@ -558,6 +646,10 @@ mod unit_tests {
 
                 write_index_file(&file, 2, &[c"a", c"b/c", c"d"]);
                 assert!(refuse_each_allocation(|| Index::open(&file)) > missing);
+                assert!(
+                    refuse_each_allocation(|| Index::open_with_oid_type(&file, OidType::Sha1))
+                        > missing
+                );
                 let _ = std::fs::remove_dir_all(&dir);
             },
         );

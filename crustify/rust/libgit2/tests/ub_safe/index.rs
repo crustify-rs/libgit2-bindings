@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use ffibox::{CArc, CBox};
 use libgit2::libgit2::index::index::{Index, IndexArc, IndexBox};
+use libgit2::libgit2::oid::oid::OidType;
 
 use crate::fixture::index::{
     add, add_intent_to_add, entry_count, has_owner, isolated_tolerating_leaks, path,
@@ -127,6 +128,48 @@ fn fresh_indexes_are_released_once() {
     let index = IndexArc::new().unwrap();
     let _ = index.as_ref();
     assert_eq!(entry_count(&index), 0);
+}
+
+/// Indexes of each object id type, through the typed constructors: fresh and on
+/// disk, as a box and as an arc, written and read back as their own type, refused as
+/// the other, and released once in either order; an empty path is refused.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn typed_indexes_are_built_and_released_once() {
+    let scratch = Scratch::new("typed");
+    for kind in [OidType::Sha1, OidType::Sha256] {
+        let other = match kind {
+            OidType::Sha1 => OidType::Sha256,
+            _ => OidType::Sha1,
+        };
+        let mut fresh = Index::with_oid_type(kind).unwrap();
+        let _shared = fresh.as_ref();
+        let _exclusive = fresh.as_mut();
+        assert_eq!(
+            (entry_count(&fresh), path(&fresh), has_owner(&fresh)),
+            (0, None, false)
+        );
+        assert_eq!(add(&mut fresh, c"a"), 0);
+        let shared: IndexArc = fresh.into();
+        assert_eq!(entry_count(&shared), 1);
+        drop(shared);
+
+        let file = c_path(&scratch.file(&format!("index-{kind:?}")));
+        let mut index = Index::open_with_oid_type(&file, kind).unwrap();
+        assert_eq!(path(&index).as_deref(), Some(file.as_c_str()));
+        for name in [c"b", c"a", c"dir/c"] {
+            assert_eq!(add(&mut index, name), 0);
+        }
+        assert_eq!(write(&mut index), 0);
+        let reread = Index::open_with_oid_type(&file, kind).unwrap();
+        assert_eq!(entry_count(&reread), 3);
+        drop(index);
+        assert_eq!(entry_count(&reread), 3);
+        assert!(Index::open_with_oid_type(&file, other).is_err());
+        assert_eq!(Index::open(&file).is_ok(), kind == OidType::Sha1);
+        drop(reread);
+        assert!(Index::open_with_oid_type(c"", kind).is_err());
+    }
 }
 
 /// A box shared as an arc is released once, through the arc.

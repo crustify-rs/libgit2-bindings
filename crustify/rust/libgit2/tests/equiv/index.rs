@@ -656,3 +656,193 @@ fn shared_index_lifecycle_matches_git_index_free() {
         }
     ));
 }
+
+/// `Index::with_oid_type` / `Index::open_with_oid_type` against `git_index_new_ext` /
+/// `git_index_open_ext` (repository wave 0 type review).
+mod oid_types {
+    use super::*;
+    use libgit2::libgit2::oid::oid::OidType;
+
+    const TYPES: [OidType; 2] = [OidType::Sha1, OidType::Sha256];
+
+    /// `git_index_open_ext(path, {VERSION, oid_type})` (`git_index_new_ext` for `None`),
+    /// observed as [`c_open`] observes.
+    fn c_open_ext(path: Option<&CStr>, oid_type: OidType) -> (Seen, Option<CIndex>) {
+        clear();
+        let opts = ffi::git_index_options {
+            version: ffi::GIT_INDEX_OPTIONS_VERSION,
+            oid_type: oid_type.raw(),
+        };
+        let mut out = ptr::null_mut();
+        // SAFETY: a live slot, NULL or a NUL-terminated path, and live options of this
+        // version, all read for the call.
+        let rc = unsafe {
+            match path {
+                Some(path) => ffi::git_index_open_ext(&mut out, path.as_ptr(), &opts),
+                None => ffi::git_index_new_ext(&mut out, &opts),
+            }
+        };
+        if rc < 0 {
+            assert_eq!(rc, -1);
+            assert!(out.is_null());
+            let (class, message) = c_last();
+            (Seen::Failed { class, message }, None)
+        } else {
+            assert_eq!(rc, 0);
+            (state(out), Some(CIndex(out)))
+        }
+    }
+
+    /// `Index::open_with_oid_type(path, oid_type)` (`Index::with_oid_type` for `None`),
+    /// observed.
+    fn rust_open_ext(path: Option<&CStr>, oid_type: OidType) -> (Seen, Option<IndexBox>) {
+        clear();
+        let built = match path {
+            Some(path) => Index::open_with_oid_type(path, oid_type),
+            None => Index::with_oid_type(oid_type),
+        };
+        match built {
+            Ok(index) => (state(index.as_c_ptr()), Some(index)),
+            Err(e) => (
+                Seen::Failed {
+                    class: e.raw_class(),
+                    message: e.message().to_owned(),
+                },
+                None,
+            ),
+        }
+    }
+
+    /// `git_index_add` of a regular file at `path` whose id is of `oid_type`.
+    fn add_typed(index: *mut ffi::git_index, path: &CStr, oid_type: OidType) -> (c_int, Seen) {
+        let mut entry = ffi::git_index_entry {
+            mode: 0o100644,
+            path: path.as_ptr(),
+            ..Default::default()
+        };
+        entry.id.id = [0x5a; 32];
+        entry.id.type_ = oid_type.raw() as _;
+        // SAFETY: a live index; `entry` and its path are read and copied for the call.
+        let rc = unsafe { ffi::git_index_add(index, &entry) };
+        (rc, state(index))
+    }
+
+    /// The entries of a built index, with its path checked against `file`.
+    fn relative(seen: Seen, file: &CStr) -> (Vec<(CString, u16)>, bool) {
+        match seen {
+            Seen::Built {
+                path,
+                entries,
+                owned_by_repository,
+            } => {
+                assert_eq!(path.as_deref(), Some(file));
+                (entries, owned_by_repository)
+            }
+            Seen::Failed { .. } => panic!("{seen:?}"),
+        }
+    }
+
+    /// In-memory indexes of each type match `git_index_new_ext`'s, through adding
+    /// entries of that type; `Index::new` is the SHA1 form.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn with_oid_type_matches_git_index_new_ext() {
+        init();
+        for kind in TYPES {
+            let (c, c_index) = c_open_ext(None, kind);
+            let (rust, rust_index) = rust_open_ext(None, kind);
+            assert_eq!(rust, c, "{kind:?}");
+            let (c_index, rust_index) = (c_index.unwrap(), rust_index.unwrap());
+            for name in [c"b", c"a/x", c"a"] {
+                assert_eq!(
+                    add_typed(rust_index.as_c_ptr(), name, kind),
+                    add_typed(c_index.0, name, kind),
+                    "{kind:?} {name:?}"
+                );
+            }
+        }
+        let (c, _c) = c_open(None);
+        let (rust, _rust) = rust_open_ext(None, OidType::Sha1);
+        assert_eq!(rust, c);
+    }
+
+    /// On-disk indexes of each type match `git_index_open_ext`'s: the file written by
+    /// one side is byte for byte the other's, reopens as the same type on both, and is
+    /// refused as the other type by both.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn open_with_oid_type_matches_git_index_open_ext() {
+        init();
+        for kind in TYPES {
+            let other = match kind {
+                OidType::Sha1 => OidType::Sha256,
+                _ => OidType::Sha1,
+            };
+            let c_dir = Scratch::new(&format!("typed-c-{kind:?}"));
+            let rust_dir = Scratch::new(&format!("typed-rust-{kind:?}"));
+            let c_file = c_path(&c_dir.file("index"));
+            let rust_file = c_path(&rust_dir.file("index"));
+
+            let (c, c_index) = c_open_ext(Some(&c_file), kind);
+            let (rust, rust_index) = rust_open_ext(Some(&rust_file), kind);
+            assert_eq!(relative(rust, &rust_file), relative(c, &c_file));
+            let (c_index, rust_index) = (c_index.unwrap(), rust_index.unwrap());
+            for name in [c"z", c"m/n", c"a"] {
+                let (c_rc, c) = add_typed(c_index.0, name, kind);
+                let (rust_rc, rust) = add_typed(rust_index.as_c_ptr(), name, kind);
+                assert_eq!(
+                    (rust_rc, relative(rust, &rust_file)),
+                    (c_rc, relative(c, &c_file))
+                );
+            }
+            assert_eq!(write(rust_index.as_c_ptr()), write(c_index.0));
+            let bytes = std::fs::read(c_dir.file("index")).unwrap();
+            assert_eq!(std::fs::read(rust_dir.file("index")).unwrap(), bytes);
+            drop((c_index, rust_index));
+
+            // Reopened as its own type, then as the other, then as `open` reads it.
+            let (c, _c) = c_open_ext(Some(&c_file), kind);
+            let (rust, _rust) = rust_open_ext(Some(&rust_file), kind);
+            assert_eq!(relative(rust, &rust_file), relative(c, &c_file));
+            let (c, _c) = c_open_ext(Some(&c_file), other);
+            let (rust, _rust) = rust_open_ext(Some(&rust_file), other);
+            assert_eq!(rust, c, "{kind:?} read as {other:?}");
+            let (c, _c) = c_open(Some(&c_file));
+            let (rust, _rust) = rust_open(Some(&rust_file));
+            match (&rust, &c) {
+                (Seen::Built { .. }, Seen::Built { .. }) => {
+                    assert_eq!(kind, OidType::Sha1, "read by open");
+                    assert_eq!(relative(rust, &rust_file), relative(c, &c_file));
+                }
+                _ => assert_eq!(rust, c, "{kind:?} read by open"),
+            }
+        }
+    }
+
+    /// A missing file opens empty as its type; a directory fails alike; the empty path
+    /// is refused by Rust alone, as `open` refuses it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn open_with_oid_type_fails_as_git_index_open_ext_fails() {
+        init();
+        let dir = Scratch::new("typed-failures");
+        let missing = c_path(&dir.file("missing"));
+        let directory = c_path(&dir.0);
+        for kind in TYPES {
+            for path in [&missing, &directory] {
+                let (c, _c) = c_open_ext(Some(path), kind);
+                let (rust, _rust) = rust_open_ext(Some(path), kind);
+                assert_eq!(rust, c, "{kind:?} {path:?}");
+            }
+            let (rust, none) = rust_open_ext(Some(c""), kind);
+            assert!(none.is_none());
+            assert_eq!(
+                rust,
+                Seen::Failed {
+                    class: ffi::GIT_ERROR_INDEX as c_int,
+                    message: c"failed to open index: the path is empty".to_owned(),
+                }
+            );
+        }
+    }
+}

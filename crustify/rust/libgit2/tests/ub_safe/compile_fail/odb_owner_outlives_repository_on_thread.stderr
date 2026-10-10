@@ -1,0 +1,13 @@
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/odb_owner_outlives_repository_on_thread.rs:13:24
+   |
+11 | fn escape(repo: RepositoryBox) {
+   |           ---- binding `repo` declared here
+12 |     let odb = odb_of(repo.as_ref());
+   |                      ---- borrow of `repo` occurs here
+13 |     std::thread::scope(|s| {
+   |                        ^^^ move out of `repo` occurs here
+14 |         s.spawn(|| drop(odb));
+   |                         --- borrow later captured here by closure
+15 |         drop(repo);
+   |              ---- move occurs due to use in closure

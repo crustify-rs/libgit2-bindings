@@ -4,6 +4,8 @@
 //! through a sorted list of backends (loose files, packfiles, alternates, or custom
 //! ones). The C struct is private to libgit2; Rust reaches it only behind a pointer.
 //!
+//! # Ownership
+//!
 //! An odb is reference counted, and shared: libgit2 creates it with one reference,
 //! `git_odb_free` releases one, and a repository given the odb (`git_repository_set_odb`,
 //! `git_repository_wrap_odb`) takes a reference of its own, as does every caller of
@@ -12,73 +14,237 @@
 //! the Rust owner, [`OdbArc`], is one counted reference that does not clone; share one
 //! with [`std::sync::Arc`] instead.
 //!
+//! # The owning repository
+//!
+//! A repository that is given an odb becomes its *owner* (`rc.owner`, set by
+//! `git_repository_set_odb`, `git_repository_wrap_odb` and the repository's own lazy
+//! `git_repository_odb`), and from then on every read and write of the odb goes
+//! through the owner's object cache: `odb_cache()` in `odb.c` follows the owner
+//! pointer, without a reference, to `&owner->objects`. `git_repository_free` clears
+//! the pointer before releasing its reference, but an odb routine that loaded it just
+//! before is left reading a freed repository. So an odb a repository owns must not
+//! be used past that repository: an [`Odb<'r>`] borrows its owning repository for
+//! `'r`, which every owner and handle carries, and an odb no repository owns is
+//! `Odb<'static>`, as the constructors build it.
+//!
+//! The wrappers of the routines that transfer an odb to a repository must keep that
+//! invariant: `git_repository_odb` returns an `OdbArc<'r>` of the repository's borrow;
+//! `git_repository_set_odb` and `git_repository_wrap_odb` consume an `OdbArc<'static>`
+//! (the only proof that no repository owns the odb yet, which libgit2 does not check:
+//! a second owner would leave the first one reading a cache it does not hold), and
+//! may hand it back shortened to the repository's `'r`. The lifetime only shrinks,
+//! as `&'r T`'s does.
+//!
+//! # Threads
+//!
 //! libgit2 locks the odb itself (`docs/threading.md`: "The `git_odb` object uses
 //! locking internally, and is thread-safe to use from multiple threads
 //! simultaneously"): its backends and commit-graph change only under its mutex, its
-//! object cache has its own lock, and its options are fixed once it is built. Every
-//! routine over an odb therefore takes the shared handle, [`OdbRef`], which an
-//! [`OdbArc`] lends through `as_ref()`; nothing hands out an [`OdbMut`], since a
-//! repository holding the odb may use it at any time.
+//! own object cache and an owner's have their own read-write locks, and its options
+//! are fixed once it is built. Every routine over an odb therefore takes the shared
+//! handle, [`OdbRef`], which an [`OdbArc`] lends through `as_ref()`; nothing hands out
+//! an [`OdbMut`], since a repository holding the odb may use it at any time.
 //!
 //! The constructors pin libgit2's runtime first (`runtime_pinned`), since they
 //! allocate, and return the thread's libgit2 error, copied out, as an [`ErrorBuf`].
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
-use core::ptr;
+use core::marker::PhantomData;
+use core::ptr::{self, NonNull};
 
-use ffibox::{CArc, define_ctype, impl_cdrop};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CNew};
 
 use crate::ffi;
 use crate::libgit2::oid::oid::OidType;
 use crate::libgit2::util::errors::{ErrorBuf, last};
 use crate::libgit2::util::sys::errors::runtime_pinned;
 
-define_ctype!(
-    /// An object database (`git_odb`): the layout type named by [`OdbArc`] and the
-    /// handles, never held by value.
-    ///
-    /// Build one with [`new`](Self::new) (no backends), [`open`](Self::open) (the loose
-    /// and packed backends of an `objects` directory, and its alternates), or their
-    /// `_with_oid_type` forms, which choose the object id type the database hashes
-    /// with.
-    ///
-    /// Wraps: git_odb
-    Odb, OdbRef, OdbMut, ffi::git_odb
+/// An object database (`git_odb`): the layout type named by [`OdbArc`] and the
+/// handles, never held by value.
+///
+/// Build one with [`new`](Self::new) (no backends), [`open`](Self::open) (the loose
+/// and packed backends of an `objects` directory, and its alternates), or their
+/// `_with_oid_type` forms, which choose the object id type the database hashes
+/// with. Each is `Odb<'static>`: no repository owns it. `'r` is the borrow of the
+/// repository that owns the odb, through whose object cache the odb then works (see
+/// the [module docs](self#the-owning-repository)); an owner or handle of such an odb
+/// cannot outlive it. The lifetime only shrinks:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::odb::odb::OdbArc;
+///
+/// fn widen<'r>(odb: OdbArc<'r>) -> OdbArc<'static> {
+///     odb
+/// }
+/// ```
+///
+/// and the exclusive handle is invariant in it, as `&mut` is in its pointee:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::odb::odb::OdbMut;
+///
+/// fn shrink<'a, 'r>(m: OdbMut<'a, 'static>) -> OdbMut<'a, 'r> {
+///     m
+/// }
+/// ```
+///
+/// Wraps: git_odb
+/// Handwritten
+#[repr(transparent)]
+pub struct Odb<'r>(
+    ffi::git_odb,
+    PhantomData<(*const (), &'r ffi::git_repository)>,
 );
+
+/// Shared borrow of an [`Odb`]. `Copy`, like `&T`; every odb routine takes it.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct OdbRef<'a, 'r>(CBorrowedPtr<'a, Odb<'r>>);
+
+/// Exclusive borrow of an [`Odb`]. Reaches the shared handle with
+/// [`as_ref`](Self::as_ref); nothing lends one, since a repository may hold the odb.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct OdbMut<'a, 'r>(
+    OdbRef<'a, 'r>,
+    // Invariant in the odb, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Odb<'r>>,
+);
+
+// SAFETY: `Odb` is `#[repr(transparent)]` over `git_odb` with a zero-sized marker; both
+// handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Odb<'r>>` (`OdbMut` through
+// `OdbRef`) with zero-sized markers and no `Drop`, hand out no reference to the odb, and
+// `OdbRef` has no write operation. `OdbMut` is invariant in the odb through its
+// `PhantomData<&'a mut Odb<'r>>`.
+unsafe impl<'r> CCell for Odb<'r> {
+    type C = ffi::git_odb;
+    type Ref<'a>
+        = OdbRef<'a, 'r>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = OdbMut<'a, 'r>
+    where
+        Self: 'a;
+}
 
 // SAFETY: an odb has no thread affinity: libgit2 frees it, its backends and its mutex
 // from whichever thread drops the last reference, and its reference count and owner
 // are atomics. Every routine that changes it takes its mutex (backends, commit-graph)
-// or its cache's rwlock, and the fields read unlocked (options, `do_fsync`) are written
-// only before the odb is published.
-unsafe impl Send for Odb {}
+// or a cache's rwlock, and the fields read unlocked (options, `do_fsync`) are written
+// only before the odb is published. The one object an odb reaches outside itself is
+// its owning repository's object cache (`odb_cache()`), read and written under that
+// cache's rwlock: the repository outlives `'r`, which every owner and handle of the
+// odb carries, so it is live for every such access.
+unsafe impl Send for Odb<'_> {}
 // SAFETY: as above: shared access from several threads is what libgit2's own locking
 // serialises (`docs/threading.md`), and no Rust-side state lives in the object.
-unsafe impl Sync for Odb {}
+unsafe impl Sync for Odb<'_> {}
 // SAFETY: `OdbRef` is a shared borrow, as `&Odb`, and `Odb` is `Sync`.
-unsafe impl Send for OdbRef<'_> {}
+unsafe impl Send for OdbRef<'_, '_> {}
 // SAFETY: as above.
-unsafe impl Sync for OdbRef<'_> {}
+unsafe impl Sync for OdbRef<'_, '_> {}
 // SAFETY: `OdbMut` is an exclusive borrow, as `&mut Odb`, and `Odb` is `Send`.
-unsafe impl Send for OdbMut<'_> {}
+unsafe impl Send for OdbMut<'_, '_> {}
 // SAFETY: `&OdbMut` only reaches the shared handle, and `Odb` is `Sync`.
-unsafe impl Sync for OdbMut<'_> {}
+unsafe impl Sync for OdbMut<'_, '_> {}
 
-impl fmt::Debug for OdbRef<'_> {
+impl<'a, 'r> OdbRef<'a, 'r> {
+    /// Borrows the odb at `ptr`; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live odb that stays live for `'a`, owned by no
+    /// repository or by one that outlives `'r`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_odb) -> Option<Self> {
+        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
+        // contract; `Odb` is transparent over `git_odb`.
+        NonNull::new(ptr.cast::<Odb<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+    }
+
+    /// Pointer to the C object, for the routines that take a `git_odb *` and lock it
+    /// themselves.
+    #[allow(dead_code)]
+    pub(crate) fn as_ptr(&self) -> *mut ffi::git_odb {
+        self.0.as_non_null().as_ptr().cast()
+    }
+}
+
+impl<'a, 'r> OdbMut<'a, 'r> {
+    /// Writable pointer to the C object.
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_odb {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> OdbRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> OdbMut<'_, 'r> {
+        OdbMut(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for OdbRef<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("OdbRef").field(&self.as_ptr()).finish()
     }
 }
 
+impl fmt::Debug for OdbMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 /// Releases one reference to an odb through `git_odb_free`; the last one frees the
-/// odb and its backends, unless a repository still owns it. Stateless.
+/// odb and its backends, unless a repository still owns it. Stateless. Also builds an
+/// odb no repository owns through `git_odb_new`, so [`OdbArc::new`](CArc::new) makes
+/// the odb [`Odb::new`] makes, reporting a failure as `None`.
 ///
 /// Wraps: git_odb_free
+/// Wraps: git_odb_new
+/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbFree;
 
-impl_cdrop!(OdbFree, Odb, ffi::git_odb_free);
+// SAFETY: `git_odb_free` drops exactly the one reference the owner holds: the odb is
+// freed once, when its count reaches zero and no repository owns it. It needs no state
+// beyond the pointer, and reaches no repository.
+unsafe impl<'r> CDrop<Odb<'r>> for OdbFree {
+    unsafe fn c_drop(&self, ptr: NonNull<Odb<'r>>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live odb whose reference
+        // the caller gives up; `Odb` is transparent over `git_odb`.
+        unsafe { ffi::git_odb_free(ptr.as_ptr().cast()) }
+    }
+}
+
+// SAFETY: `git_odb_new` writes a fresh odb with one reference, no backends and no
+// owning repository (so `'static`), that the caller owns and `git_odb_free` releases;
+// it leaves the slot NULL when it fails. The runtime is pinned before the call.
+unsafe impl CNew<Odb<'static>> for OdbFree {
+    fn c_new(&self) -> Option<NonNull<Odb<'static>>> {
+        if !runtime_pinned() {
+            return None;
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
+        // reported on live thread-local state.
+        let rc = unsafe { ffi::git_odb_new(&mut out) };
+        if rc < 0 {
+            return None;
+        }
+        NonNull::new(out.cast())
+    }
+}
 
 /// One counted reference to an object database, released through [`OdbFree`].
 ///
@@ -86,7 +252,26 @@ impl_cdrop!(OdbFree, Odb, ffi::git_odb_free);
 /// does not clone (libgit2 exports no up-ref) and lends no [`OdbMut`]: a repository may
 /// hold another reference. The constructors on [`Odb`] build one safely; a reference
 /// libgit2 hands out (`git_repository_odb`) is adopted by the wrapper of the routine
-/// that returns it.
+/// that returns it, with the repository's borrow as `'r`.
+///
+/// `'static` means no repository owns the odb (see the
+/// [module docs](self#the-owning-repository)); `OdbArc<'r>` borrows the owning
+/// repository, so neither it nor a handle it lends outlives the repository:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::odb::odb::OdbArc;
+/// use libgit2::libgit2::repository::repository::{Repository, RepositoryRef};
+///
+/// // What the wrapper of `git_repository_odb` returns.
+/// fn odb_of<'r>(repo: RepositoryRef<'r>) -> OdbArc<'r> {
+///     unimplemented!()
+/// }
+///
+/// let repo = Repository::new().unwrap();
+/// let odb = odb_of(repo.as_ref());
+/// drop(repo);
+/// drop(odb);
+/// ```
 ///
 /// ```
 /// use libgit2::libgit2::odb::odb::Odb;
@@ -126,7 +311,7 @@ impl_cdrop!(OdbFree, Odb, ffi::git_odb_free);
 /// let mut odb = Odb::new().unwrap();
 /// let _exclusive = odb.get_mut();
 /// ```
-pub type OdbArc = CArc<Odb, OdbFree>;
+pub type OdbArc<'r> = CArc<Odb<'r>, OdbFree>;
 
 /// The options `git_odb_new_ext` / `git_odb_open_ext` read: this version's struct with
 /// `oid_type`, the only setting it has.
@@ -141,7 +326,9 @@ fn options(oid_type: OidType) -> ffi::git_odb_options {
 ///
 /// Pins the runtime first; a constructor that fails leaves the slot NULL (or untouched,
 /// and so NULL) and the thread's libgit2 error set.
-fn construct(fill: impl FnOnce(&mut *mut ffi::git_odb) -> c_int) -> Result<OdbArc, ErrorBuf> {
+fn construct(
+    fill: impl FnOnce(&mut *mut ffi::git_odb) -> c_int,
+) -> Result<OdbArc<'static>, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
     }
@@ -150,19 +337,20 @@ fn construct(fill: impl FnOnce(&mut *mut ffi::git_odb) -> c_int) -> Result<OdbAr
         return Err(last());
     }
     // SAFETY: the constructor succeeded, so `out` is the one reference it created, to
-    // an odb of libgit2's allocation that `git_odb_free` releases; the caller gets it.
+    // an odb of libgit2's allocation that no repository owns (`'static`) and that
+    // `git_odb_free` releases; the caller gets it.
     let odb = unsafe { OdbArc::from_c(out) };
     Ok(odb.expect("a libgit2 odb constructor succeeded without an odb"))
 }
 
-impl Odb {
+impl Odb<'static> {
     /// A new object database with no backends, which hashes SHA-1 ids.
     ///
     /// Nothing can be read from it or written to it until a backend is added. Fails,
     /// with libgit2's error, when the odb cannot be allocated.
     ///
     /// Wraps: git_odb_new
-    pub fn new() -> Result<OdbArc, ErrorBuf> {
+    pub fn new() -> Result<OdbArc<'static>, ErrorBuf> {
         construct(|out| {
             // SAFETY: `out` is a writable slot, which the routine fills with a fresh
             // reference on success. The runtime is pinned.
@@ -176,7 +364,7 @@ impl Odb {
     /// is the only setting `git_odb_options` holds.
     ///
     /// Wraps: git_odb_new_ext
-    pub fn with_oid_type(oid_type: OidType) -> Result<OdbArc, ErrorBuf> {
+    pub fn with_oid_type(oid_type: OidType) -> Result<OdbArc<'static>, ErrorBuf> {
         let opts = options(oid_type);
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
@@ -197,7 +385,7 @@ impl Odb {
     /// `info/alternates` file cannot be read, or when memory runs out.
     ///
     /// Wraps: git_odb_open
-    pub fn open(objects_dir: &CStr) -> Result<OdbArc, ErrorBuf> {
+    pub fn open(objects_dir: &CStr) -> Result<OdbArc<'static>, ErrorBuf> {
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
             // success and set to NULL otherwise; `objects_dir` is NUL-terminated, read
@@ -213,7 +401,10 @@ impl Odb {
     /// and write ids of `oid_type`.
     ///
     /// Wraps: git_odb_open_ext
-    pub fn open_with_oid_type(objects_dir: &CStr, oid_type: OidType) -> Result<OdbArc, ErrorBuf> {
+    pub fn open_with_oid_type(
+        objects_dir: &CStr,
+        oid_type: OidType,
+    ) -> Result<OdbArc<'static>, ErrorBuf> {
         let opts = options(oid_type);
         construct(|out| {
             // SAFETY: as in `open`; `opts` is a live options struct of this version,
@@ -222,6 +413,12 @@ impl Odb {
         })
     }
 }
+
+// The layout type is the C type's size, so an odb pointer converts both ways, and the
+// owner is pointer-sized.
+const _: () = assert!(size_of::<Odb<'static>>() == size_of::<ffi::git_odb>());
+const _: () = assert!(size_of::<OdbArc<'static>>() == size_of::<*mut ffi::git_odb>());
+const _: () = assert!(size_of::<Option<OdbArc<'static>>>() == size_of::<*mut ffi::git_odb>());
 
 #[cfg(test)]
 mod unit_tests {
@@ -287,6 +484,27 @@ mod unit_tests {
         drop(odb);
         // SAFETY: NULL addresses nothing; `from_c` refuses it.
         assert!(unsafe { OdbArc::from_c(ptr::null_mut()) }.is_none());
+    }
+
+    /// The policy's constructor builds the odb `Odb::new` builds, owned by no
+    /// repository, and the handles' raw seams round-trip its pointer.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn policy_constructor_and_handle_seams() {
+        let odb = OdbArc::new().unwrap();
+        assert_eq!(backends(odb.as_c_ptr()), 0);
+        // SAFETY: the arc's live odb, which outlives the handle and is owned by no
+        // repository.
+        let r = unsafe { OdbRef::from_ptr(odb.as_c_ptr()) }.unwrap();
+        assert_eq!(r.as_ptr(), odb.as_c_ptr());
+        // SAFETY: NULL.
+        assert!(unsafe { OdbRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: the arc's live odb, reached through no other handle meanwhile.
+        let shared = unsafe { OdbRef::<'_, 'static>::from_ptr(odb.as_c_ptr()) };
+        let mut m = OdbMut(shared.unwrap(), PhantomData);
+        assert_eq!(m.as_mut_ptr(), odb.as_c_ptr());
+        assert_eq!(m.as_mut().as_ref().as_ptr(), odb.as_c_ptr());
+        assert_eq!(format!("{m:?}"), format!("{:?}", odb.as_ref()));
     }
 
     #[test]
@@ -448,6 +666,7 @@ mod unit_tests {
                     assert_eq!(err.class(), Some(ErrorClass::Invalid));
                     assert_eq!(err.message(), c"library has not been initialized");
                 }
+                assert!(OdbArc::new().is_none());
             },
         );
     }
@@ -465,11 +684,16 @@ mod unit_tests {
                 // The thread's error state is allocated on its first error: allocate it
                 // now, so a refusal below reports itself rather than that.
                 set(ErrorClass::Odb, c"warm up the thread's error state");
-                let constructors: [fn() -> Result<OdbArc, ErrorBuf>; 3] = [
+                let constructors: [fn() -> Result<OdbArc<'static>, ErrorBuf>; 3] = [
                     Odb::new,
                     || Odb::with_oid_type(OidType::Sha1),
                     || Odb::with_oid_type(OidType::Sha256),
                 ];
+                // The policy's constructor reports the first refusal as `None`.
+                LEFT.store(0, SeqCst);
+                let none = OdbArc::new();
+                LEFT.store(-1, SeqCst);
+                assert!(none.is_none());
                 let mut needed = 0;
                 for construct in constructors {
                     let mut refused = 0;
