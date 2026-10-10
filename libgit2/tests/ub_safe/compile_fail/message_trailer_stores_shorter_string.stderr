@@ -1,0 +1,12 @@
+error[E0597]: `local` does not live long enough
+  --> tests/ub_safe/compile_fail/message_trailer_stores_shorter_string.rs:10:36
+   |
+ 7 |     let mut trailer: MessageTrailer<'static> = MessageTrailer::new(c"Fixes", c"#1");
+   |                      ----------------------- type annotation requires that `local` is borrowed for `'static`
+ 8 |     {
+ 9 |         let local = CString::new("#2").unwrap();
+   |             ----- binding `local` declared here
+10 |         trailer.as_mut().set_value(&local);
+   |                                    ^^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `local` dropped here while still borrowed

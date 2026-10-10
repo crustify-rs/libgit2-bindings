@@ -1,0 +1,11 @@
+error[E0597]: `key` does not live long enough
+ --> tests/ub_safe/compile_fail/message_trailer_outlives_strings.rs:8:29
+  |
+6 |     let trailer = {
+  |         ------- borrow later stored here
+7 |         let key = CString::new("Signed-off-by").unwrap();
+  |             --- binding `key` declared here
+8 |         MessageTrailer::new(&key, c"A U Thor")
+  |                             ^^^^ borrowed value does not live long enough
+9 |     };
+  |     - `key` dropped here while still borrowed

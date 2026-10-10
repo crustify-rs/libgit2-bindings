@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `mailmap` because it is borrowed
+ --> tests/ub_safe/compile_fail/mailmap_handle_outlives_box.rs:7:10
+  |
+5 |     let mailmap = Mailmap::new().unwrap();
+  |         ------- binding `mailmap` declared here
+6 |     let handle = mailmap.as_ref();
+  |                  ------- borrow of `mailmap` occurs here
+7 |     drop(mailmap);
+  |          ^^^^^^^ move out of `mailmap` occurs here
+8 |     println!("{handle:?}");
+  |                ------ borrow later used here

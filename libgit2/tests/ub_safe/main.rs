@@ -20,6 +20,8 @@ mod errors;
 mod fixture;
 mod global;
 mod index;
+mod mailmap;
+mod message;
 mod object;
 mod odb;
 mod oid;

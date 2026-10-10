@@ -12,6 +12,8 @@ mod config;
 mod errors;
 mod global;
 mod index;
+mod mailmap;
+mod message;
 mod object;
 mod odb;
 mod oid;
