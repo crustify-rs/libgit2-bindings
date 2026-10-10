@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `list` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/object_id_options_alias_filter_list.rs:12:17
+   |
+11 |     opts.as_mut().set_filters(Some(list.as_mut()));
+   |                                    ---- first mutable borrow occurs here
+12 |     let other = list.as_mut();
+   |                 ^^^^ second mutable borrow occurs here
+13 |     println!("{:?} {other:?}", opts.as_ref().filters());
+   |                                ---- first borrow later used here

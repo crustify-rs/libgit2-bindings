@@ -95,6 +95,8 @@ git_message_trailers
 git_object_dup
 git_object_free
 git_object_id
+git_object_id_from_buffer
+git_object_id_options_init
 git_object_lookup
 git_object_lookup_prefix
 git_object_lookup_bypath

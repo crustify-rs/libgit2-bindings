@@ -32,6 +32,7 @@ git_libgit2_opt_t
 git_mailmap
 git_message_trailer
 git_message_trailer_array
+git_object_id_options
 git_object_t
 git_odb_options
 git_oid

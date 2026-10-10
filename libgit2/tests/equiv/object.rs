@@ -18,6 +18,18 @@
 //! repository's is refused by the wrappers (code `-1`, `GIT_ERROR_INVALID`), where
 //! the C routines format it out of bounds or read an uninitialised buffer; the unit
 //! tests of `object.rs` hold the refusal.
+//!
+//! [`ObjectIdOptions`] must be what C code builds: [`ObjectIdOptions::new`] the struct
+//! `git_object_id_options_init` fills (and `GIT_OBJECT_ID_OPTIONS_INIT` spells), and
+//! each setter the field write C code makes. One script of steps runs on both sides,
+//! each on its own options and its own filter lists, loaded from its own repository of
+//! identical content: every object type and id type, `None` back to the defaults, a
+//! `crlf` list, an empty list, and no list. After every step the sides compare the
+//! options' fields as C reads them (the list as present or not, each side's pointer
+//! being its own list's), and what `git_object_id_from_buffer` makes of each of a few
+//! contents through them: the code, the id, and the error class and message. Loading a
+//! filter list initialises libgit2's filters unsynchronised (see `filter.rs`), so the
+//! script runs alone in a child process.
 
 use std::ffi::{CStr, CString, c_int};
 use std::ptr;
@@ -623,5 +635,300 @@ mod peel_and_bypath {
             unsafe { ffi::git_object_free(o) };
         }
         drop(rust_held);
+    }
+}
+
+/// `git_object_id_options`: [`ObjectIdOptions`] against the struct C code builds.
+mod id_options {
+    use super::{c_last, init};
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::filter::filter::{FilterList, FilterListBox};
+    use libgit2::libgit2::object::object::ObjectIdOptions;
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+    /// Runs `body` alone in a child process: libgit2 initialises a filter, unsynchronised,
+    /// the first time any list selects it, and other modules' tests load lists through raw
+    /// calls the crate cannot order (see `filter.rs`'s module docs).
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The fields of options as C reads them; the list as present or not.
+    fn c_fields(
+        opts: *const ffi::git_object_id_options,
+    ) -> (u32, ffi::git_object_t, ffi::git_oid_t, bool) {
+        // SAFETY: live options, read field by field.
+        unsafe {
+            (
+                (*opts).version,
+                (*opts).object_type,
+                (*opts).oid_type,
+                !(*opts).filters.is_null(),
+            )
+        }
+    }
+
+    /// What `git_object_id_from_buffer` makes of `data` through `opts`: the id's hex, or
+    /// the code and the error.
+    fn c_id(
+        opts: *const ffi::git_object_id_options,
+        data: &[u8],
+    ) -> Result<String, (c_int, c_int, String)> {
+        let mut out = ffi::git_oid::default();
+        let bytes = if data.is_empty() { &[0u8][..] } else { data };
+        // SAFETY: a writable id; `data.len()` readable bytes (a live one for none); live
+        // options whose list, if any, is live and used by nothing else meanwhile.
+        let rc = unsafe {
+            ffi::git_object_id_from_buffer(&mut out, bytes.as_ptr().cast(), data.len(), opts)
+        };
+        if rc < 0 {
+            let (class, message) = c_last();
+            return Err((rc, class, message));
+        }
+        let mut hex = [0u8; 65];
+        // SAFETY: the id libgit2 wrote; 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+        Ok(CStr::from_bytes_until_nul(&hex)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned())
+    }
+
+    /// A repository with a working directory whose `.gitattributes` marks `*.txt` as text,
+    /// so that the `crlf` filter turns CRLF into LF on the way into the database; removed
+    /// on drop.
+    struct Workdir {
+        path: std::path::PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Workdir {
+        /// `safecrlf` makes the repository's `crlf` filter refuse content whose CRLFs
+        /// it would turn into LFs (`core.safecrlf`), so applying it fails.
+        fn new(side: &str, safecrlf: bool) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-id-options-equiv-{}-{side}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let mut repo = Repository::init(&c_path, false).unwrap();
+            std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
+            if safecrlf {
+                drop(repo);
+                let config = path.join(".git/config");
+                let mut text = std::fs::read_to_string(&config).unwrap();
+                text.push_str("[core]\n\tsafecrlf = true\n");
+                std::fs::write(&config, text).unwrap();
+                repo = Repository::open(&c_path).unwrap();
+            }
+            Self {
+                path,
+                repo: Some(repo),
+            }
+        }
+
+        fn lists(&self) -> (FilterListBox<'_>, FilterListBox<'_>) {
+            let repo = self.repo.as_ref().unwrap().as_ref();
+            let crlf = FilterList::load(repo, c"a.txt", ffi::GIT_FILTER_TO_ODB, 0)
+                .unwrap()
+                .unwrap();
+            let empty = FilterList::new(repo, ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+            (crlf, empty)
+        }
+    }
+
+    impl Drop for Workdir {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// One step of the options script.
+    #[derive(Clone, Copy, Debug)]
+    enum IdStep {
+        Object(Option<ObjectType>),
+        Oid(Option<OidType>),
+        Crlf,
+        Empty,
+        Safe,
+        NoList,
+    }
+
+    /// Each list is lent once: the options keep a list borrowed for their whole life.
+    const ID_SCRIPT: [IdStep; 23] = [
+        IdStep::Object(Some(ObjectType::Commit)),
+        IdStep::Object(Some(ObjectType::Tree)),
+        IdStep::Oid(Some(OidType::Sha256)),
+        IdStep::Object(Some(ObjectType::Tag)),
+        IdStep::Object(None),
+        IdStep::Oid(Some(OidType::Sha1)),
+        IdStep::Crlf,
+        IdStep::Oid(Some(OidType::Sha256)),
+        IdStep::Object(Some(ObjectType::Blob)),
+        IdStep::Oid(None),
+        IdStep::Object(Some(ObjectType::Commit)),
+        IdStep::Object(None),
+        IdStep::Empty,
+        IdStep::Object(Some(ObjectType::Blob)),
+        IdStep::NoList,
+        IdStep::Object(None),
+        IdStep::Oid(Some(OidType::Sha256)),
+        IdStep::Safe,
+        IdStep::Oid(None),
+        IdStep::Object(Some(ObjectType::Tag)),
+        IdStep::Object(Some(ObjectType::Blob)),
+        IdStep::NoList,
+        IdStep::Object(None),
+    ];
+
+    const CONTENTS: [&[u8]; 4] = [b"", b"hello\n", b"a\r\nb\r\n", b"mixed\r\nends\n\r\n"];
+
+    type Observed = (
+        (u32, ffi::git_object_t, ffi::git_oid_t, bool),
+        Vec<Result<String, (c_int, c_int, String)>>,
+    );
+
+    /// The options' fields, and C's ids of every content through them.
+    fn observe(opts: *const ffi::git_object_id_options) -> Observed {
+        (
+            c_fields(opts),
+            CONTENTS.iter().map(|d| c_id(opts, d)).collect(),
+        )
+    }
+
+    /// Rust's options, read in place: `ObjectIdOptions` is transparent over the C struct.
+    fn rust_raw(opts: &ObjectIdOptions<'_>) -> *const ffi::git_object_id_options {
+        ptr::from_ref(opts).cast()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_init() {
+        let mut c = ffi::git_object_id_options::default();
+        // SAFETY: writable options, overwritten with the template.
+        let rc =
+            unsafe { ffi::git_object_id_options_init(&mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION) };
+        assert_eq!(rc, 0);
+        let template = ffi::git_object_id_options {
+            version: ffi::GIT_OBJECT_ID_OPTIONS_VERSION,
+            ..Default::default()
+        };
+        let rust = ObjectIdOptions::new();
+        let defaulted = ObjectIdOptions::default();
+        assert_eq!(ObjectIdOptions::VERSION, c.version);
+        assert_eq!(c_fields(rust_raw(&rust)), c_fields(&c));
+        assert_eq!(c_fields(rust_raw(&defaulted)), c_fields(&c));
+        assert_eq!(c_fields(&template), c_fields(&c));
+        assert_eq!(rust.as_ref().version(), c.version);
+        init();
+        assert_eq!(observe(rust_raw(&rust)), observe(&c));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn steps_match() {
+        isolated(concat!(module_path!(), "::steps_match"), || {
+            init();
+            let (c_wd, rust_wd) = (Workdir::new("c", false), Workdir::new("rust", false));
+            let (c_safe_wd, rust_safe_wd) = (
+                Workdir::new("c-safe", true),
+                Workdir::new("rust-safe", true),
+            );
+            let (c_safe, _) = c_safe_wd.lists();
+            let (mut rust_safe, _) = rust_safe_wd.lists();
+            let (c_crlf, c_empty) = c_wd.lists();
+            let (mut rust_crlf, mut rust_empty) = rust_wd.lists();
+            let mut c = ffi::git_object_id_options::default();
+            // SAFETY: writable options, overwritten with the template.
+            let rc = unsafe {
+                ffi::git_object_id_options_init(&mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION)
+            };
+            assert_eq!(rc, 0);
+            let mut rust = ObjectIdOptions::new();
+            assert_eq!(observe(&c), observe(rust_raw(&rust)), "initial");
+            let (mut crlf, mut empty) = (Some(rust_crlf.as_mut()), Some(rust_empty.as_mut()));
+            let mut safe = Some(rust_safe.as_mut());
+            for (i, step) in ID_SCRIPT.into_iter().enumerate() {
+                match step {
+                    IdStep::Object(kind) => {
+                        c.object_type = kind.map_or(0, ObjectType::raw);
+                        rust.as_mut().set_object_type(kind);
+                    }
+                    IdStep::Oid(kind) => {
+                        c.oid_type = kind.map_or(0, OidType::raw);
+                        rust.as_mut().set_oid_type(kind);
+                    }
+                    IdStep::Crlf => {
+                        c.filters = c_crlf.as_c_ptr();
+                        rust.as_mut().set_filters(crlf.take());
+                    }
+                    IdStep::Empty => {
+                        c.filters = c_empty.as_c_ptr();
+                        rust.as_mut().set_filters(empty.take());
+                    }
+                    IdStep::Safe => {
+                        c.filters = c_safe.as_c_ptr();
+                        rust.as_mut().set_filters(safe.take());
+                    }
+                    IdStep::NoList => {
+                        c.filters = ptr::null_mut();
+                        rust.as_mut().set_filters(None);
+                    }
+                }
+                let read = rust.as_ref();
+                let expected_fields = (
+                    read.version(),
+                    read.object_type().map_or(0, ObjectType::raw),
+                    read.oid_type().map_or(0, OidType::raw),
+                    read.filters().is_some(),
+                );
+                assert_eq!(
+                    c_fields(rust_raw(&rust)),
+                    expected_fields,
+                    "step {i}: {step:?}"
+                );
+                let seen = observe(&c);
+                assert_eq!(seen, observe(rust_raw(&rust)), "step {i}: {step:?}");
+                if let IdStep::Safe = step {
+                    // The refusing list fails the CRLF content, on both sides alike.
+                    let refused = (
+                        -1,
+                        ffi::GIT_ERROR_FILTER as c_int,
+                        "CRLF would be replaced by LF in 'a.txt'".to_owned(),
+                    );
+                    assert_eq!(seen.1[2], Err(refused));
+                    assert!(seen.1[1].is_ok());
+                }
+            }
+            // The options are done with: the lists are each side's own again, freed
+            // before their repositories.
+            drop((rust_crlf, rust_empty, c_crlf, c_empty));
+        });
     }
 }

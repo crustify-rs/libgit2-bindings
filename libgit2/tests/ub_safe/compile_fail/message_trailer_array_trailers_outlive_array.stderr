@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `array` because it is borrowed
+ --> tests/ub_safe/compile_fail/message_trailer_array_trailers_outlive_array.rs:8:10
+  |
+6 |     let array = MessageTrailerArray::parse(c"Subject\n\nKey: value\n").unwrap();
+  |         ----- binding `array` declared here
+7 |     let trailers = array.as_ref().trailers();
+  |                    ----- borrow of `array` occurs here
+8 |     drop(array);
+  |          ^^^^^ move out of `array` occurs here
+9 |     println!("{:?}", trailers.get(0).map(|t| t.key()));
+  |                      -------- borrow later used here
