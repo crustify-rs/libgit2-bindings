@@ -102,3 +102,95 @@ mod filesystem {
         assert_eq!(fs, Some(Filesystem::Ntfs));
     }
 }
+
+/// [`is_gitfile`] reads within its component: one cut from a longer buffer, empty,
+/// long, non-UTF-8 and short-name-shaped components, under ASan; and from threads
+/// before anything initialised libgit2, which it needs no runtime for.
+mod is_gitfile {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::repository::sys::path::{Filesystem, GitFile, is_gitfile};
+
+    use crate::fixture::isolated;
+
+    const FILES: [GitFile; 3] = [
+        GitFile::Gitignore,
+        GitFile::Gitmodules,
+        GitFile::Gitattributes,
+    ];
+    const FILESYSTEMS: [Filesystem; 3] = [Filesystem::Generic, Filesystem::Ntfs, Filesystem::Hfs];
+
+    fn components() -> Vec<CString> {
+        let mut out: Vec<CString> = [
+            &b""[..],
+            b".",
+            b".gitmodules",
+            b"GITMOD~1",
+            b"gi7eba~1",
+            b"gitmod~",
+            b"gitmod",
+            b"GITMOD~1 . :",
+            b".gitmodules\xe2\x80\x8c",
+            b"\xe2\x80",
+            b"\xff\xfe",
+            b"~",
+            b"~1",
+        ]
+        .iter()
+        .map(|b| CString::new(*b).unwrap())
+        .collect();
+        out.push(CString::new(vec![b'.'; 8192]).unwrap());
+        out.push(CString::new(vec![b'~'; 9]).unwrap());
+        out
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reads_stop_at_the_nul() {
+        // Bytes past the NUL that would match, if read.
+        let buffer = b"gitmod\0~1\0.gitmodules";
+        let cut = CStr::from_bytes_until_nul(buffer).unwrap();
+        for file in FILES {
+            for fs in FILESYSTEMS {
+                assert!(!is_gitfile(cut, file, fs));
+                for component in components() {
+                    let _ = is_gitfile(&component, file, fs);
+                }
+            }
+        }
+        // The heap copies end right at their NUL, for ASan to see any read past it.
+        for component in components() {
+            let boxed: Box<CStr> = component.into_boxed_c_str();
+            for fs in FILESYSTEMS {
+                let _ = is_gitfile(&boxed, GitFile::Gitmodules, fs);
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_check_before_initialisation() {
+        isolated(
+            concat!(module_path!(), "::threads_check_before_initialisation"),
+            || {
+                thread::scope(|s| {
+                    for fs in FILESYSTEMS {
+                        s.spawn(move || {
+                            for component in components() {
+                                for file in FILES {
+                                    let _ = is_gitfile(&component, file, fs);
+                                }
+                            }
+                            assert!(is_gitfile(
+                                c"GITMOD~1",
+                                GitFile::Gitmodules,
+                                Filesystem::Ntfs
+                            ));
+                        });
+                    }
+                });
+            },
+        );
+    }
+}

@@ -56,6 +56,12 @@
 //!   [`set_refdb`](RepositoryRef::set_refdb) is `unsafe`; and a refdb built for the
 //!   repository itself borrows it, so it takes the shared [`RepositoryRef`].
 //!
+//! # Cleaning up
+//!
+//! [`RepositoryMut::cleanup`] releases what a [`Repository`] has loaded, as freeing it
+//! does first. Like the submodule cache's routines, it takes the exclusive handle.
+//!
+//! [`Repository`]: crate::libgit2::repository::repository::Repository
 //! [`Repository::new`]: crate::libgit2::repository::repository::Repository::new
 //! [`RepositoryFree`]: crate::libgit2::repository::repository::RepositoryFree
 //! [`ConfigBox`]: crate::libgit2::config::config::ConfigBox
@@ -555,6 +561,38 @@ impl RepositoryRef<'_> {
         // shares its object id type.
         let rc = unsafe { ffi::git_repository_set_refdb(repo, refdb.as_c_ptr()) };
         debug_assert_eq!(rc, 0, "git_repository_set_refdb refused a refdb");
+    }
+}
+
+impl RepositoryMut<'_> {
+    /// Releases what the repository has loaded: its object cache, attribute and
+    /// submodule caches, grafts, and its references to its configuration, index,
+    /// object database and reference database, leaving it as if just opened. Counted
+    /// references handed out earlier ([`config`](RepositoryRef::config),
+    /// [`index`](RepositoryRef::index)...) stay valid; the repository loads fresh
+    /// ones on next use. Freeing a repository cleans it up first.
+    ///
+    /// libgit2 does not reload the grafts it releases: commits parsed afterwards
+    /// ignore `info/grafts` and the shallow boundary, and each parse leaves an
+    /// "invalid argument" error on the thread.
+    ///
+    /// It takes the repository exclusively, so nothing borrowed from it is in use:
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let mut repo = Repository::new().unwrap();
+    /// let commondir = repo.as_ref().commondir();
+    /// repo.as_mut().cleanup();
+    /// let _ = commondir;
+    /// ```
+    ///
+    /// Wraps: git_repository__cleanup
+    pub fn cleanup(&mut self) {
+        // SAFETY: a live repository, borrowed exclusively, so no handle reads what this
+        // releases; counted sub-objects handed out keep their own references.
+        let rc = unsafe { ffi::git_repository__cleanup(self.as_mut_ptr()) };
+        debug_assert_eq!(rc, 0, "git_repository__cleanup cannot fail");
     }
 }
 

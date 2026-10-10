@@ -577,37 +577,27 @@ pub fn connect(url: &CStr) -> c_int {
 
 use libgit2::libgit2::repository::repository::Item;
 
-/// `git_repository_item_path(repo, item)`, adopted into a `Buf`: the path, or the
-/// return. Stands in for the `git_repository_item_path` wrapper (`repository`), which
-/// replaces it.
+/// [`RepositoryRef::item_path`](libgit2::libgit2::repository::repository::RepositoryRef::item_path)
+/// as a string: the path, or the return.
 pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
-    let mut raw = ffi::git_buf::default();
-    // SAFETY: an empty buffer, the fixture's live repository, and a value the safe
-    // `Item` produced, which is the only contract this fixture adds: every `Item` is
-    // below `GIT_REPOSITORY_ITEM__LAST`, the bound of the table libgit2 indexes.
-    let rc = unsafe { ffi::git_repository_item_path(&raw mut raw, repo.raw(), item.raw()) };
-    // SAFETY: `raw` is as libgit2 left it: empty, or owning a NUL-terminated allocation
-    // of its allocator.
-    let buf = unsafe { Buf::from_raw(raw) };
-    if rc < 0 {
-        return Err(rc);
+    match repo.repo.as_ref().unwrap().as_ref().item_path(item) {
+        Ok(buf) => Ok(buf.as_ref().to_str().unwrap().to_owned()),
+        Err(error) => Err(error.raw_code()),
     }
-    Ok(buf.as_ref().to_str().unwrap().to_owned())
 }
 
 // --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
 
-/// Fixtures standing in for the routines that hand out commit arrays and repository
-/// configs (`git_repository_commit_parents`, `git_repository_config`), and for the
-/// `git_commit` and config-routine wrappers the tests read through; replace each once
-/// its safe counterpart lands.
+/// Fixtures over the repositories that hand out commit arrays and configs, and
+/// standing in for the `git_commit` and config-routine wrappers the tests read
+/// through; replace each once its safe counterpart lands.
 pub mod commit_and_config {
     use std::ffi::{CStr, c_int};
     use std::ptr;
 
     use libgit2::ffi;
     use libgit2::libgit2::config::config::ConfigArc;
-    use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
+    use libgit2::libgit2::object::commit::CommitArrayVal;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// A fixture repository opened read-only, freed on drop.
@@ -631,15 +621,9 @@ pub mod commit_and_config {
         }
     }
 
-    /// `git_repository_commit_parents`, adopted.
+    /// The commit parents, through the safe wrapper.
     pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal {
-        let mut raw = ffi::git_commitarray::default();
-        // SAFETY: a zeroed array and an open repository.
-        let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.0.as_c_ptr()) };
-        assert_eq!(rc, 0);
-        // SAFETY: what libgit2 left: `{NULL, 0}`, or a buffer of commit references from
-        // its allocator, given up here.
-        unsafe { CommitArray::from_raw(raw) }
+        repo.0.as_ref().commit_parents().unwrap()
     }
 
     /// The hex id of a commit an array holds; stands in for the `git_commit` handle.
@@ -661,15 +645,9 @@ pub mod commit_and_config {
             .to_owned()
     }
 
-    /// `git_repository_config`, adopted as a shared reference.
+    /// The repository's config, through the safe wrapper: a shared reference.
     pub fn config(repo: &OpenRepo) -> ConfigArc {
-        let mut out = ptr::null_mut();
-        // SAFETY: a live slot and an open repository.
-        let rc = unsafe { ffi::git_repository_config(&mut out, repo.0.as_c_ptr()) };
-        assert_eq!(rc, 0);
-        // SAFETY: one up-ref'd reference to the repository's config, released by
-        // `git_config_free`; the repository holds another.
-        unsafe { ConfigArc::from_c(out) }.unwrap()
+        repo.0.as_ref().config().unwrap()
     }
 
     /// `git_config_get_int32` on the config an owner's `as_c_ptr` gives; the value or
@@ -978,18 +956,9 @@ pub mod index {
         }
     }
 
-    /// `git_repository_index` adopted into an `IndexArc`: the one fixture adopting a
-    /// counted reference, standing in for the repository wrapper's index getter, which
-    /// replaces it.
+    /// The repository's index, through the safe wrapper: a counted reference.
     pub fn repository_index(repo: &TempRepo) -> IndexArc {
-        let mut out = core::ptr::null_mut();
-        // SAFETY: a live slot and the fixture's live repository.
-        let rc = unsafe { ffi::git_repository_index(&mut out, repo.raw()) };
-        assert_eq!(rc, 0);
-        // SAFETY: `git_repository_index` hands out one more counted reference to the
-        // index the repository keeps, released by `git_index_free`; it stays valid after
-        // the repository is freed, which releases only its own reference.
-        unsafe { IndexArc::from_c(out) }.unwrap()
+        repo.repo.as_ref().unwrap().as_ref().index().unwrap()
     }
 
     /// `RepositoryMut::set_index` on the fixture's repository, which keeps a
@@ -1635,5 +1604,97 @@ pub mod submodule {
             // SAFETY: the one reference this value holds, released once.
             unsafe { ffi::git_submodule_free(self.0) }
         }
+    }
+}
+
+// --- `git2/repository.h`: routines (head and lookups) --------------------------------
+
+/// Copies of libgit2's test repositories, and a stand-in for the
+/// `git_repository_fetchhead_foreach` wrapper (a later batch), which replaces it.
+pub mod head_and_lookups {
+    use std::ffi::{CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{
+        FetchheadForeachCallback, Repository, RepositoryBox,
+    };
+
+    const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/resources");
+
+    fn copy_tree(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            let kind = entry.file_type().unwrap();
+            if kind.is_symlink() {
+                std::os::unix::fs::symlink(fs::read_link(entry.path()).unwrap(), &target).unwrap();
+            } else if kind.is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// Copies of `tests/resources` repositories under a scratch directory, removed on
+    /// drop: `bare` (`testrepo.git`), `testrepo` with its linked worktree
+    /// `testrepo-worktree`, and `merged` (`mergedrepo`, mid-merge).
+    pub struct Sandbox(pub PathBuf);
+
+    impl Sandbox {
+        pub fn new(tag: &str) -> Self {
+            super::init();
+            let root = std::env::temp_dir()
+                .join(format!("crustify-routines-ub-{}-{tag}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            for (name, to) in [
+                ("testrepo.git", "bare"),
+                ("testrepo", "testrepo"),
+                ("testrepo-worktree", "testrepo-worktree"),
+                ("mergedrepo", "merged"),
+            ] {
+                let to = root.join(to);
+                copy_tree(&Path::new(RESOURCES).join(name), &to);
+                if to.join(".gitted").exists() {
+                    fs::rename(to.join(".gitted"), to.join(".git")).unwrap();
+                }
+            }
+            Self(root)
+        }
+
+        pub fn c_path(&self, rel: &str) -> CString {
+            CString::new(self.0.join(rel).as_os_str().as_bytes()).unwrap()
+        }
+
+        pub fn open(&self, rel: &str) -> RepositoryBox {
+            Repository::open(&self.c_path(rel)).unwrap()
+        }
+
+        pub fn write(&self, rel: &str, contents: &str) {
+            fs::write(self.0.join(rel), contents).unwrap();
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// `git_repository_fetchhead_foreach` with `callback`'s function and payload; its
+    /// return. A caught panic is left for the caller to resume.
+    pub fn fetchhead_foreach(
+        repo: &RepositoryBox,
+        callback: &mut FetchheadForeachCallback<'_>,
+    ) -> c_int {
+        let repo = repo.as_c_ptr();
+        let (f, payload) = callback.raw();
+        // SAFETY: a live repository, used on this thread, and the callback's own
+        // function and payload, which stays put and otherwise unused for the call.
+        unsafe { ffi::git_repository_fetchhead_foreach(repo, f, payload) }
     }
 }

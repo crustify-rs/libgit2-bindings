@@ -4069,6 +4069,29 @@
    ]
   },
   {
+   "name": "git_path_is_gitfile",
+   "defined_in": "src/libgit2/path.c",
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "A path component read for the call. The HFS+ rules honour pathlen; the NTFS rules (GENERIC included) ignore it beyond `len >= filelen` and read name[0..8] and onward to a NUL or ':' (ntfs_end_of_filename), so the pointer must be NUL-terminated: the safe wrapper takes &CStr and passes its full length. With named gitfile/fs it never touches the error state or allocates (no runtime pin needed, safe pre-init); unnamed values give -1 GIT_ERROR_OS."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_refdb_free",
    "defined_in": "src/libgit2/refdb.c",
    "lifetime": {
@@ -4423,6 +4446,29 @@
    ]
   },
   {
+   "name": "git_repository__cleanup",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Clears the object/attr/submodule caches, frees the grafts (NULL afterwards, never reloaded: later commit parses call git_grafts_get(NULL) -> GIT_ASSERT_ARG -1, ignoring grafts and leaving an 'invalid argument' error) and drops the repo's refs to config/index/odb/refdb (disowning them; counted refs handed out stay valid). Always 0. Wrapper: RepositoryMut::cleanup (exclusive, so no borrowed result is live)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_commit_parents",
    "defined_in": "src/libgit2/repository.c",
    "lifetime": {
@@ -4450,7 +4496,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "GIT_ASSERT_ARG (aborts in the Debug/coverage build). Overwritten without releasing what it held (count = 0, commits = NULL first), so a wrapper must clear a reused CommitArray first (CommitArrayMut::clear). On success: the HEAD commit then each MERGE_HEAD commit, as git_commit_lookup references in a git_vector_detach'd libgit2 buffer the caller owns (git_commitarray_dispose). {NULL, 0} for an unborn HEAD (returns 0) and on failure. C DEFECT: on a failure after the first parent is collected (malformed MERGE_HEAD line: 'unable to parse OID - invalid length'; or a MERGE_HEAD id that is not a commit, which insert_mergehead turns into -1), done: frees the collected commits with git__free instead of git_commit_free while the repository's object cache still holds them: the next lookup of that commit, or the cache teardown in git_repository_free, is a heap-use-after-free (ASan-confirmed, repository wave 0 batch 2). The safe wrapper must not reach it (e.g. pre-validate MERGE_HEAD, or rebuild the routine over revparse + mergehead_foreach in Rust)."
+      "note": "GIT_ASSERT_ARG (aborts in the Debug/coverage build). Overwritten without releasing what it held (count = 0, commits = NULL first), so a wrapper must clear a reused CommitArray first (CommitArrayMut::clear). On success: the HEAD commit then each MERGE_HEAD commit, as git_commit_lookup references in a git_vector_detach'd libgit2 buffer the caller owns (git_commitarray_dispose). {NULL, 0} for an unborn HEAD (returns 0) and on failure. C DEFECT: on a failure after the first parent is collected (malformed MERGE_HEAD line: 'unable to parse OID - invalid length'; or a MERGE_HEAD id that is not a commit, which insert_mergehead turns into -1), done: frees the collected commits with git__free instead of git_commit_free while the repository's object cache still holds them: the next lookup of that commit, or the cache teardown in git_repository_free, is a heap-use-after-free (ASan-confirmed, repository wave 0 batch 2). The safe wrapper must not reach it (e.g. pre-validate MERGE_HEAD, or rebuild the routine over revparse + mergehead_foreach in Rust). Further C defects (repository wave 1 batch 2): HEAD resolving to a non-commit is put in the array as a commit (a tag object, or a blob/tree, read later through git_commit_* as the wrong struct); and git_revparse_ext leaks HEAD's reference when HEAD names a missing or unreadable object (revparse_lookup_object drops `ref` when git_object_lookup fails; LSan). The Rust RepositoryRef::commit_parents is a composition (Replaces anchor): git_reference_dwim(\"HEAD\") + git_object_lookup(ANY) (freeing the reference on every path), git_object_peel to COMMIT (tags peel, others GIT_EINVALIDSPEC), git_repository_mergehead_foreach + git_commit_lookup into a Rust Vec released by git_commit_free on error, and an OdbDataVec buffer adopted by CommitArray::from_raw."
      }
     },
     {
@@ -4471,6 +4517,43 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_repository_commondir",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG_WITH_RETVAL(NULL); only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:repo"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "repo->commondir, set at open and freed only by git_repository_free; NULL for git_repository_new (in-memory). Borrowed for the repository's life (RepositoryRef<'a> -> Option<&'a CStr>)."
+    }
+   }
   },
   {
    "name": "git_repository_config",
@@ -4526,6 +4609,205 @@
    ]
   },
   {
+   "name": "git_repository_config_snapshot",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: NULLed by git_config_snapshot, then a fresh git_config_new config (count 1, no owner) holding snapshots of the repo config's backends: the caller's sole reference (ConfigBox), released by git_config_free. Untouched if the repo config itself fails to load (returns that error first)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Loads and caches repo->_config (weak) through the shared pointer; not retained by the snapshot."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_detach_head",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Looks up HEAD, resolves it (git_repository_head: EUNBORNBRANCH for a missing branch), looks the target up as a COMMIT (so a HEAD detached at a tag FAILS, contrary to the header's 'peeled'), and rewrites HEAD with a reflog entry (signature from repo ident/config + git_signature_now: glibc tzset, which TSan reports across threads). 0 or error; HEAD untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_discover",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "ceiling_dirs",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ceiling_dirs"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL = empty; ':'-separated absolute paths; read for the call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_buf filled by git_buf_fromstr WITHOUT git_buf_tostr's sanitize: a reused reserved>0 allocation is overwritten and leaked, so the wrapper fills a fresh Buf::new(). Result: the gitdir with a trailing '/'. Untouched on failure."
+     }
+    },
+    {
+     "name": "start_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:start_path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call. A missing or unresolvable start (\"\" included) fails ENOTFOUND."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_fetchhead_foreach_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "ref_name: sole invoker git_repository_fetchhead_foreach passes git_str_cstr of a per-line buffer reused for the next line (refs/heads/<n>, refs/tags/<n>, or a quoted name), or NULL when the line names none. Valid for the call only."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "remote_url: points into the file buffer freed after the iteration; NULL for an old-format line (an id alone). Valid for the call only."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg2"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "The entry's id, a stack git_oid of the repository's type; never NULL. Valid for the call only."
+     }
+    },
+    {
+     "name": "arg4",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg4"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Caller's payload passed through untouched. Non-zero returns stop the iteration and are returned by foreach (git_error_set_after_callback names the callback only when no error is set). Single contract (one invoker): Rust FetchheadForeachCallback (closure; GIT_EUSER on Break or caught panic)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_free",
    "defined_in": "src/libgit2/repository.c",
    "lifetime": {
@@ -4549,6 +4831,438 @@
       "nullable": true,
       "mutable": true,
       "note": "Released: cleanup drops the counted odb/refdb/config/index references, then every owned string, cache and array, then the struct (git__free). NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_get_namespace",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only read (no assert: NULL crashes)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:repo"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "repo->namespace: set by open (FROM_ENV GIT_NAMESPACE) and replaced/freed by git_repository_set_namespace (git__free then strdup) and git_repository_free. Borrowed until the next set_namespace: that wrapper must take RepositoryMut."
+    }
+   }
+  },
+  {
+   "name": "git_repository_hashfile",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "as_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:as_path"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL: derive from path when under the workdir, else no filters; \"\": no filters."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG; written only on success, an id of repo->oid_type."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; relative paths join the workdir."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG; workdir (NULL for bare/in-memory: a relative path is then taken from the cwd), oid_type, filter/attr caches."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_head",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "head_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "head_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:head_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG(head_out). On success a fresh reference (HEAD itself when direct, else the resolved branch) attached to repo's refdb, whose db->repo is uncounted: the wrapper returns ReferenceBox<'r> tied to the repo borrow. Untouched on failure: EUNBORNBRANCH (missing branch), ENOTFOUND (no HEAD, or in-memory repo)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Refdb loaded through the shared pointer."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_head_detached",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Loads odb (in-memory repo: -1 'path cannot exist in repository') and HEAD; 1 only when HEAD is direct AND git_odb_exists(target) - a HEAD at a missing object reads as 0. -1 collapses every error."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_head_detached_for_worktree",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; read for the call."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Through git_repository_head_for_worktree: NULL commondir (in-memory repo) is strlen(NULL) in git_worktree_lookup. C DEFECT: tests the type of the FULLY RESOLVED reference, which is always direct, so an attached worktree HEAD answers 1. Rust replaces it: head_for_worktree's result is named \"HEAD\" exactly when HEAD is direct."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_head_for_worktree",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; joined to <commondir>/worktrees/<name>, never retained."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "NULLed first. On success a resolved (direct) reference read through a repository opened for the worktree (git_repository_open_from_worktree) which is FREED before returning: its db->repo dangles (ASan-confirmed UAF via git_reference_owner/git_repository_path). Only name/target/peel/type and git_reference_free are safe: the wrapper copies it into an UnattachedReference (git_reference__alloc) and frees the original. ENOTFOUND for a missing worktree (stale error message) or unborn worktree branch."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; only read. commondir NULL (git_repository_new) -> git_worktree_lookup strlen(NULL): SIGSEGV/UBSan nonnull; the wrapper refuses first (ENOTFOUND, GIT_ERROR_WORKTREE)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_head_unborn",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_repository_head then clears the error on EUNBORNBRANCH -> 1; any other error collapses to -1."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_ident",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "email",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "arg:repo"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:email"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As name, for repo->ident_email. (The slot itself is written; mutable=false for the const char pointee.)"
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "arg:repo"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Out slot (no assert) receiving repo->ident_name: NULL or the repo's own string, replaced (atomic swap, then freed) by git_repository_set_ident and freed by git_repository_free; borrowed until then (set_ident wrapper must take RepositoryMut). (The slot itself is written; mutable=false for the const char pointee.)"
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only read; always returns 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_index",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one more counted reference (GIT_REFCOUNT_INC) to repo->_index (rc.owner = repo, uncounted, cleared when the repo releases it): IndexArc. On failure *out may hold the repo's own (uncounted for the caller) pointer or NULL, returns -1 whatever the cause (in-memory repo: 'path cannot exist in repository'). Must not be adopted on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Index loaded and cached through the shared pointer."
      }
     }
    ]
@@ -4701,6 +5415,138 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller storage (usually a stack local) overwritten whole with GIT_REPOSITORY_INIT_OPTIONS_INIT (memcpy) after the version check; no NULL check, so NULL crashes. Version != 1 returns -1 with GIT_ERROR_INVALID and leaves the storage untouched. No allocation, no global state."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_is_bare",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; only read; 0/1."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_is_empty",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "HEAD lookup error returned as is (ENOTFOUND when missing); otherwise symbolic HEAD == init.defaultBranch (or master) && no reference; repo_contains_no_reference's negative error is truthy in the && chain (reads as empty)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_is_shallow",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "lstat <commondir>/shallow: 1 when non-empty, 0 when missing/empty; commondir NULL (in-memory) joins to plain 'shallow' in the process cwd."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_is_worktree",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; only read; 0/1."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_item_path",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_buf via GIT_BUF_WRAP_PRIVATE (sanitize, reuse, tostr): fill a fresh Buf::new()."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only read. The item indexes items[] unchecked: GIT_REPOSITORY_ITEM__LAST and above read out of bounds; the wrapper takes the Item enum."
      }
     }
    ]

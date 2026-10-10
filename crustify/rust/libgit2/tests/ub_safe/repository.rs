@@ -1788,3 +1788,359 @@ mod heads_and_parts {
         drop(repo);
     }
 }
+
+/// The routines on [`RepositoryRef`] / [`RepositoryMut`], [`discover`] and the
+/// `FETCH_HEAD` callback: every borrowed result read while its repository lives, every
+/// owned one used after it is gone, each corrected C path driven (a `MERGE_HEAD` C
+/// would free cached commits over, a worktree's `HEAD` whose repository C frees, a
+/// pathless repository's worktrees), the callback reentered and panicking through C,
+/// and repositories used on threads of their own.
+mod head_and_lookups {
+    use std::cell::Cell;
+    use std::ffi::{CStr, CString};
+    use std::ops::ControlFlow;
+    use std::thread;
+
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::commit::CommitArrayVal;
+    use libgit2::libgit2::repository::repository::{
+        FetchheadEntry, FetchheadForeachCallback, Item, Repository, RepositoryBox, discover,
+    };
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    use crate::fixture::commit_and_config::commit_id;
+    use crate::fixture::head_and_lookups::{Sandbox, fetchhead_foreach};
+    use crate::fixture::isolated;
+    use crate::fixture::refs::view_unattached;
+
+    const ITEMS: [Item; 15] = [
+        Item::GitDir,
+        Item::WorkDir,
+        Item::CommonDir,
+        Item::Index,
+        Item::Objects,
+        Item::Refs,
+        Item::PackedRefs,
+        Item::Remotes,
+        Item::Config,
+        Item::Info,
+        Item::Hooks,
+        Item::Logs,
+        Item::Modules,
+        Item::Worktrees,
+        Item::WorktreeConfig,
+    ];
+
+    fn ids(array: &CommitArrayVal) -> Vec<String> {
+        array
+            .as_ref()
+            .commit_ptrs()
+            .elems()
+            .map(commit_id)
+            .collect()
+    }
+
+    /// Every read-only routine, its borrowed results read before the repository goes.
+    fn read_everything(repo: &RepositoryBox, sandbox: Option<&Sandbox>) -> usize {
+        let r = repo.as_ref();
+        let mut read = 0;
+        let mut touch = |s: Option<&CStr>| read += s.map_or(0, |s| s.to_bytes().len());
+        touch(r.commondir());
+        touch(r.namespace());
+        let (name, email) = r.ident();
+        touch(name);
+        touch(email);
+        let _ = (r.is_bare(), r.is_worktree(), r.is_shallow(), r.is_empty());
+        let _ = (r.is_head_detached(), r.is_head_unborn());
+        for item in ITEMS {
+            if let Ok(path) = r.item_path(item) {
+                touch(Some(path.as_ref().as_c_str()));
+            }
+        }
+        drop((r.config(), r.config_snapshot(), r.index(), r.head()));
+        drop((
+            r.head_for_worktree(c"testrepo-worktree"),
+            r.is_head_detached_for_worktree(c"x"),
+        ));
+        if let Ok(parents) = r.commit_parents() {
+            read += ids(&parents).len();
+        }
+        if let Some(sandbox) = sandbox {
+            let _ = r.hash_file(&sandbox.c_path("bare/HEAD"), ObjectType::Blob, None);
+            let _ = r.hash_file(c"relative", ObjectType::Tree, Some(c""));
+        }
+        read
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn routines_on_every_kind_of_repository() {
+        let sandbox = Sandbox::new("every-kind");
+        for rel in ["bare", "testrepo", "testrepo-worktree", "merged"] {
+            let repo = sandbox.open(rel);
+            assert!(read_everything(&repo, Some(&sandbox)) > 0);
+        }
+        // Without paths: the worktree routines are refused before C reads a NULL path.
+        let repo = Repository::new().unwrap();
+        read_everything(&repo, Some(&sandbox));
+        let error = repo
+            .as_ref()
+            .head_for_worktree(c"testrepo-worktree")
+            .unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::NotFound));
+    }
+
+    /// Owned results stay valid after the repository is freed: counted configs and
+    /// indexes, snapshots, commit arrays, buffers, ids and worktree `HEAD` copies.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owned_results_outlive_their_repository() {
+        let sandbox = Sandbox::new("outlive");
+        let main = sandbox.open("testrepo");
+        let merged = sandbox.open("merged");
+        let config = main.as_ref().config().unwrap();
+        let snapshot = main.as_ref().config_snapshot().unwrap();
+        let index = main.as_ref().index().unwrap();
+        let parents = merged.as_ref().commit_parents().unwrap();
+        let gitdir = main.as_ref().item_path(Item::GitDir).unwrap();
+        let id = main
+            .as_ref()
+            .hash_file(&sandbox.c_path("bare/HEAD"), ObjectType::Blob, Some(c""))
+            .unwrap();
+        let head = main
+            .as_ref()
+            .head_for_worktree(c"testrepo-worktree")
+            .unwrap();
+        drop((main, merged));
+        assert_eq!(ids(&parents).len(), 2);
+        assert!(
+            gitdir
+                .as_ref()
+                .to_str()
+                .unwrap()
+                .ends_with("/testrepo/.git/")
+        );
+        assert_eq!(id.as_ref().to_hex_string().unwrap().len(), 40);
+        assert_eq!(
+            view_unattached(&head).name.as_c_str(),
+            c"refs/heads/testrepo-worktree"
+        );
+        drop((config, snapshot, index, parents, head));
+    }
+
+    /// The copy of a worktree's `HEAD` reaches no repository: neither the worktree's,
+    /// which libgit2 frees inside the call, nor the main one. Copies are dropped before
+    /// and after the main repository, and read across threads (it is `Send + Sync`).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn worktree_heads_reach_no_freed_repository() {
+        let sandbox = Sandbox::new("worktree-head");
+        let main = sandbox.open("testrepo");
+        let early = main
+            .as_ref()
+            .head_for_worktree(c"testrepo-worktree")
+            .unwrap();
+        let late = main
+            .as_ref()
+            .head_for_worktree(c"testrepo-worktree")
+            .unwrap();
+        assert!(
+            !main
+                .as_ref()
+                .is_head_detached_for_worktree(c"testrepo-worktree")
+                .unwrap()
+        );
+        drop(early);
+        drop(main);
+        let view = thread::spawn(move || view_unattached(&late))
+            .join()
+            .unwrap();
+        assert_eq!(view.name.as_c_str(), c"refs/heads/testrepo-worktree");
+    }
+
+    /// The `MERGE_HEAD`s after which `git_repository_commit_parents` frees cached
+    /// commits: the wrapper fails, and the commits stay usable through the cache
+    /// (looked up again) and are released with the repository. ASan watches.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failing_merge_heads_leave_the_cache_intact() {
+        let sandbox = Sandbox::new("merge-head");
+        let repo = sandbox.open("merged");
+        let good = ids(&repo.as_ref().commit_parents().unwrap());
+        for merge_head in [
+            "\n",
+            "short\n",
+            "3a34580a35add43a4cf361e8e9a30060a905c876",
+            "1385f264afb75a56a5bec74243be9b367ba4ca08\n",
+        ] {
+            sandbox.write("merged/.git/MERGE_HEAD", merge_head);
+            assert!(repo.as_ref().commit_parents().is_err(), "{merge_head:?}");
+            sandbox.write(
+                "merged/.git/MERGE_HEAD",
+                "e2809157a7766f272e4cfe26e61ef2678a5357ff\n",
+            );
+            let again = repo.as_ref().commit_parents().unwrap();
+            assert_eq!(ids(&again), good);
+        }
+        let kept = repo.as_ref().commit_parents().unwrap();
+        drop(repo);
+        assert_eq!(ids(&kept), good);
+    }
+
+    /// Cleaning up while counted results are out: they stay valid, the repository
+    /// loads fresh ones, and commits parse again (without grafts).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_keeps_what_was_handed_out() {
+        let sandbox = Sandbox::new("cleanup");
+        let mut repo = sandbox.open("merged");
+        let config = repo.as_ref().config().unwrap();
+        let index = repo.as_ref().index().unwrap();
+        let parents = repo.as_ref().commit_parents().unwrap();
+        repo.as_mut().cleanup();
+        let fresh = repo.as_ref().index().unwrap();
+        assert_eq!(ids(&repo.as_ref().commit_parents().unwrap()), ids(&parents));
+        repo.as_mut().cleanup();
+        drop(repo);
+        drop((config, index, fresh, parents));
+        let mut pathless = Repository::new().unwrap();
+        pathless.as_mut().cleanup();
+        pathless.as_mut().cleanup();
+    }
+
+    /// The callback driven by C, reentering the repository from its closure, then
+    /// stopping; and a closure's panic, caught in C's call and resumed after it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_callback_reenters_and_panics_through_c() {
+        let sandbox = Sandbox::new("fetchhead");
+        sandbox.write(
+            "bare/FETCH_HEAD",
+            "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'master' of git://example.com/x.git\n\
+             258f0e2a959a364e40ed6603d5d44fbb24765b10\tnot-for-merge\tbranch 'haacked' of git://example.com/x.git\n\
+             a4a7dce85cf63874e984719f4fdd239f5145052f\n",
+        );
+        let repo = sandbox.open("bare");
+        let seen = Cell::new(0);
+        let mut reenter = |entry: FetchheadEntry<'_>| {
+            seen.set(seen.get() + 1);
+            let r = repo.as_ref();
+            assert!(r.is_bare());
+            let _ = (
+                r.head(),
+                r.commit_parents(),
+                r.config(),
+                entry.id.to_hex_string(),
+            );
+            if seen.get() == 2 {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+        let mut callback = FetchheadForeachCallback::new(&mut reenter);
+        assert_eq!(
+            fetchhead_foreach(&repo, &mut callback),
+            ErrorCode::User.raw()
+        );
+        assert!(callback.stopped());
+        callback.resume_panic();
+        drop(callback);
+        assert_eq!(seen.get(), 2);
+
+        let mut panicking = |entry: FetchheadEntry<'_>| -> ControlFlow<()> {
+            panic!("entry {:?}", entry.ref_name);
+        };
+        let mut callback = FetchheadForeachCallback::new(&mut panicking);
+        assert_eq!(
+            fetchhead_foreach(&repo, &mut callback),
+            ErrorCode::User.raw()
+        );
+        let resumed =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback.resume_panic()));
+        assert!(
+            resumed
+                .unwrap_err()
+                .downcast::<String>()
+                .unwrap()
+                .contains("refs/heads/master")
+        );
+        // Nothing is left to resume, and the callback is reusable.
+        callback.resume_panic();
+    }
+
+    /// `HEAD` detached, in a child: writing it reads the time through glibc's
+    /// `tzset`, which TSan reports against other threads of this binary.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn detach_head_rewrites_head() {
+        isolated(
+            concat!(module_path!(), "::detach_head_rewrites_head"),
+            || {
+                let sandbox = Sandbox::new("detach");
+                let repo = sandbox.open("bare");
+                let head = repo.as_ref().head().unwrap();
+                repo.as_ref().detach_head().unwrap();
+                assert!(repo.as_ref().is_head_detached().unwrap());
+                repo.as_ref().detach_head().unwrap();
+                drop(head);
+                sandbox.write("bare/HEAD", "ref: refs/heads/missing\n");
+                let error = repo.as_ref().detach_head().unwrap_err();
+                assert_eq!(error.code(), Some(ErrorCode::UnbornBranch));
+                let pathless = Repository::new().unwrap();
+                assert!(pathless.as_ref().detach_head().is_err());
+            },
+        );
+    }
+
+    /// Repositories of their own on concurrent threads, each driven through every
+    /// read-only routine, beside discoveries.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_use_repositories_of_their_own() {
+        let sandbox = Sandbox::new("threads");
+        thread::scope(|s| {
+            let sandbox = &sandbox;
+            let handles: Vec<_> = ["bare", "testrepo", "testrepo-worktree", "merged"]
+                .into_iter()
+                .map(|rel| {
+                    s.spawn(move || {
+                        for _ in 0..4 {
+                            let repo = sandbox.open(rel);
+                            read_everything(&repo, None);
+                            let found = discover(&sandbox.c_path(rel), false, None).unwrap();
+                            assert!(found.as_ref().to_str().unwrap().ends_with('/'));
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+    }
+
+    /// The first libgit2 calls of a process are discoveries racing on two threads:
+    /// each pins the runtime before C allocates.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn first_discoveries_race_to_pin_the_runtime() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::first_discoveries_race_to_pin_the_runtime"
+            ),
+            || {
+                let start = CString::new(env!("CARGO_MANIFEST_DIR")).unwrap();
+                thread::scope(|s| {
+                    let a = s.spawn(|| discover(&start, true, None).map(|b| b.as_ref().len()));
+                    let b = s.spawn(|| discover(c"/nonexistent/path", false, Some(c"/")).is_err());
+                    let found = a.join().unwrap();
+                    assert!(b.join().unwrap());
+                    // The worktree is checked out somewhere in a repository.
+                    assert!(found.unwrap() > 0);
+                });
+            },
+        );
+    }
+}

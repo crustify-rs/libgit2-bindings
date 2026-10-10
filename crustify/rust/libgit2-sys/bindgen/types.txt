@@ -35,6 +35,7 @@ git_refdb_backend
 git_refdb_t
 git_reference_format_t
 git_reference_t
+git_repository_fetchhead_foreach_cb
 git_repository_init_flag_t
 git_repository_init_mode_t
 git_repository_init_options
