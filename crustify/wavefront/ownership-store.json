@@ -244,6 +244,55 @@
    ]
   },
   {
+   "name": "git_path_gitfile",
+   "defined_in": "include/git2/sys/path.h",
+   "_comment_agent": "Fieldless enum; git_path_is_gitfile indexes path.c's gitfiles[] table (gitignore, gitmodules, gitattributes) with the raw value and refuses anything outside 0..=2 with GIT_ERROR_OS \"invalid gitfile for path validation\" (plus errno text), returning -1. Rust: GitFile with fallible from_raw. Note for git_path_is_gitfile's wrapper: its NTFS checks (validate_dotgit_ntfs_generic) read name[6], name[7] and up to a NUL regardless of pathlen, so the path must be NUL-terminated.",
+   "fields": []
+  },
+  {
+   "name": "git_refdb",
+   "defined_in": "src/libgit2/refdb.h",
+   "_comment_agent": "Opaque in the public API (forward-declared in git2/types.h, defined in src/libgit2/refdb.h). Refcounted (rc) with an owner slot: GIT_REFCOUNT_DEC frees only when the count reaches 0 and rc.owner is NULL; a repository's own refdb is owned (GIT_REFCOUNT_OWN in set_refdb / git_repository_refdb__weakptr) and freed when the repository clears ownership and drops its reference. Public lifecycle: constructors git_refdb_open (with the backend the repo's refdb_type names) and git_refdb_new (no backend; usable only after git_refdb_set_backend), down-ref git_refdb_free (NULL-safe). No public up_ref: git_repository_refdb hands out a new reference (GIT_REFCOUNT_INC) and git_repository_set_refdb takes one. Rust: Refdb<'r> borrowing the repository for 'r, RefdbBox (sole: new/open) and RefdbArc (shared, no Clone) under RefdbFree = git_refdb_free; Refdb::new = git_refdb_new + git_refdb_set_backend so no handle designates a backendless refdb.",
+   "fields": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Owned vtable-headed backend, released through its own `free` member by refdb_free_backend (git_refdb__free, and git_refdb_set_backend before replacing it). NULL after git_refdb_new until git_refdb_set_backend: every routine reaching the backend (git_refdb_compress, lookup, write, init...) dereferences it unchecked, so a backendless refdb segfaults on git_refdb_compress (probed). git_refdb_set_backend takes ownership only on success (version check, required members, lock without unlock refused with GIT_EINVALID leave it to the caller); setting the same backend again frees it and keeps the dangling pointer."
+     }
+    },
+    {
+     "name": "rc",
+     "refcount": true
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Back pointer to the repository the refdb was built for (git_refdb_new/git_refdb_open store their repo argument; git_repository_set_refdb does not update it). Not refcounted: the refdb borrows the repository, whose config cache, paths and odb its backends (which keep the same pointer) read and update on every reference operation, so a refdb must not be used after its repository is freed. Never NULL (GIT_ASSERT_ARG on construction). Freeing a refdb does not touch it with the files or reftable backend."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_reference_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Fieldless C enum (GIT_REFERENCE_INVALID = 0, DIRECT = 1, SYMBOLIC = 2, ALL = DIRECT|SYMBOLIC = 3; bindgen types it c_uint). No storage, no pointers, no lifecycle. Its only public flow is the return of git_reference_type (refs.c:339), which answers ref->type: DIRECT or SYMBOLIC for every git_reference libgit2 builds (git_reference__alloc / __alloc_symbolic, refs.c:60/85); with NULL it GIT_ASSERT_ARGs, returning -1 (u32::MAX through the unsigned enum) in a release build and aborting in the Debug/coverage build. INVALID is internal only (transaction.c node with no target set); ALL is a list-filter mask that no non-deprecated API takes (only deprecated GIT_REF_LISTALL). No public routine takes a git_reference_t argument. Rust side (core/types.rs): ReferenceType {Direct, Symbolic}, #[repr(u32)], non_exhaustive; from_raw/TryFrom<git_reference_t> -> NotAReferenceType for INVALID, ALL and every unnamed value; never transmute.",
@@ -2225,6 +2274,140 @@
       "nullable": false,
       "mutable": true,
       "note": "The caller's git_oidarray, borrowed for the call: its ids buffer is released with git__free, the struct itself is not (the caller holds it inline). Dereferenced unconditionally, so NULL crashes. The fields are left as they were: ids dangles afterwards, so the struct must not be read or disposed again without reinitialising it. Accepts {NULL, 0} and any ids from libgit2's allocator."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_refdb_free",
+   "defined_in": "src/libgit2/refdb.c",
+   "lifetime": {
+    "for": "db",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Down-ref (GIT_REFCOUNT_DEC); NULL is a no-op. Frees (backend->free, memzero, git__free) only when the count reaches 0 and no repository owns the refdb; an owned one is freed when its repository lets go. Releases exactly the caller's reference, whether from git_refdb_new/open or git_repository_refdb."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_refdb_new",
+   "defined_in": "src/libgit2/refdb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written only on success: a fresh git__calloc'd refdb with one reference and NO backend, owned by the caller (git_refdb_free); unusable until git_refdb_set_backend succeeds (every backend routine dereferences NULL; git_refdb_compress segfaults). GIT_ASSERT_ARG non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Stored as db->repo without a reference: must outlive the refdb."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_refdb_open",
+   "defined_in": "src/libgit2/refdb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written NULL first; receives a fresh refdb with one reference and the backend repo->refdb_type names (files or reftable), owned by the caller (git_refdb_free). Stays NULL on failure (backend setup failure, unknown storage format: GIT_EINVALID). GIT_ASSERT_ARG non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained without a reference by the refdb (db->repo) and its backend: must outlive the refdb. GIT_ASSERT_ARG non-NULL."
      }
     }
    ]

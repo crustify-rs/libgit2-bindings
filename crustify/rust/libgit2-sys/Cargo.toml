@@ -10,6 +10,11 @@ build = "build.rs"
 
 # Generated bindings are exempt from the workspace lints.
 
+[lib]
+# bindgen copies libgit2's C comments, whose indented C examples (such as
+# `git_reference_iterator`'s) rustdoc would compile as Rust doctests.
+doctest = false
+
 [build-dependencies]
 bindgen = "0.73"
 cc = "1.2"

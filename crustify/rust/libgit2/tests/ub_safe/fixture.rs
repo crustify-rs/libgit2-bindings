@@ -725,3 +725,19 @@ pub mod commit_and_config {
         (added, set)
     }
 }
+
+// --- `git2/refdb.h`: `git_refdb` ---------------------------------------------------
+
+use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox};
+
+impl TempRepo {
+    /// A refdb of this repository, through the unsafe [`Refdb::open`]: the one fixture
+    /// adopting a refdb, standing in for the repository wrapper, which replaces it with
+    /// a safe borrow. The borrow of the fixture is the refdb's `'r`, so the repository
+    /// outlives it.
+    pub fn refdb(&self) -> RefdbBox<'_> {
+        // SAFETY: the live repository, freed only when the fixture drops, after the
+        // borrow `'r` ends; the tests use each refdb on the thread that opened it.
+        unsafe { Refdb::open(NonNull::new(self.repo).unwrap()) }.unwrap()
+    }
+}

@@ -7,6 +7,7 @@
 mod buffer;
 mod commit;
 mod common;
+mod refdb;
 mod sys_alloc;
 mod sys_odb_backend;
 mod trace;

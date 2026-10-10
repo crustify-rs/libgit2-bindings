@@ -1,1 +1,545 @@
 //! Safe wrappers over `include/git2/refdb.h`.
+//!
+//! A [`Refdb`] is a `git_refdb`: a repository's reference database, an opaque C object
+//! that dispatches every reference read and write to one backend (`git_refdb_backend`,
+//! the loose-and-packed files backend or the reftable one, or a custom one).
+//!
+//! # Ownership
+//!
+//! A refdb is reference counted, but libgit2 publishes only the down-ref,
+//! `git_refdb_free`, which releases the object and its backend once the last reference
+//! goes. The count is raised only inside libgit2: `git_repository_refdb` hands out a
+//! new reference to the database the repository keeps, and `git_repository_set_refdb`
+//! takes one of its own. So Rust holds a refdb in one of two owners, both released by
+//! [`RefdbFree`]:
+//!
+//! - [`RefdbBox`], a reference known to be the only one: what [`Refdb::open`] and
+//!   [`Refdb::new`] build. It lends the exclusive [`RefdbMut`] handle.
+//! - [`RefdbArc`], one of several references, the others held by libgit2 (a
+//!   repository's own database). It lends the shared [`RefdbRef`] handle only, and does
+//!   not clone, having no up_ref to call. A [`RefdbBox`] converts into one
+//!   (`RefdbArc::from`) before libgit2 is given a reference of its own.
+//!
+//! # The repository
+//!
+//! Every refdb points back at the repository it was built for, without a reference
+//! to it: libgit2's files and reftable backends keep the same pointer, and read and
+//! update the repository (its configuration cache, its paths, its object database)
+//! on every reference operation. A refdb therefore borrows its repository: `'r` is the
+//! repository's lifetime, and an owner must be dropped within it. A repository that
+//! drops its own database while Rust still holds a reference leaves that reference
+//! alive, and pointing at a freed repository; `'r` rules that out. Freeing a refdb
+//! does not touch the repository with libgit2's own backends; a custom backend's
+//! `free` member might.
+//!
+//! # Backends
+//!
+//! `git_refdb_new` builds a refdb without a backend, which only
+//! `git_refdb_set_backend` makes usable: every routine that reaches the backend
+//! dereferences it unchecked (`git_refdb_compress` crashes on one). [`Refdb::new`]
+//! therefore takes the backend too, and hands out the database only once it has one,
+//! so every handle designates a refdb with a backend.
+//!
+//! The reftable backend fsyncs every table it writes, through libgit2's `p_fsync`,
+//! which counts its calls in an unsynchronised global (`p_fsync__cnt`): reftable writes
+//! on different threads race on that counter, whatever refdbs and repositories they go
+//! through. Wrappers of the routines that write (`git_refdb_compress` among them) must
+//! serialise them, or leave that to their caller.
+//!
+//! The constructors take the repository, and [`Refdb::new`] the backend, as raw
+//! pointers: neither `git_repository` nor `git_refdb_backend` is wrapped yet. The runs
+//! wrapping them replace these seams with borrowed handles, which then supply `'r`.
+//!
+//! The constructors can fail and set the calling thread's libgit2 error, so they pin
+//! libgit2's runtime first (`runtime_pinned`) and return the error, copied out, as an
+//! [`ErrorBuf`].
+
+use core::ffi::c_int;
+use core::fmt;
+use core::marker::PhantomData;
+use core::ptr::{self, NonNull};
+
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop};
+
+use crate::ffi;
+use crate::libgit2::util::errors::{ErrorBuf, last};
+use crate::libgit2::util::sys::errors::runtime_pinned;
+
+/// A reference database (`git_refdb`) of the repository it borrows for `'r`.
+///
+/// libgit2 allocates and frees it, so it is only ever reached through a [`RefdbBox`]
+/// or a [`RefdbArc`] and their handles. It is opaque: no field is published. See the
+/// [module docs](self) for its ownership and its tie to the repository.
+///
+/// The exclusive handle is invariant in `'r`, as `&mut` is in its pointee:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::refs::refdb::RefdbMut;
+///
+/// fn shrink<'a, 'r>(m: RefdbMut<'a, 'static>) -> RefdbMut<'a, 'r> {
+///     m
+/// }
+/// ```
+///
+/// An owner cannot outlive the repository it borrows:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::refs::refdb::RefdbBox;
+///
+/// fn keep<'r>(db: RefdbBox<'r>) -> RefdbBox<'static> {
+///     db
+/// }
+/// ```
+///
+/// A handle cannot outlive its owner, nor alias an exclusive one:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::refs::refdb::{RefdbBox, RefdbRef};
+///
+/// fn escape(make: impl Fn() -> RefdbBox<'static>) {
+///     let r: RefdbRef<'_, 'static>;
+///     {
+///         let db = make();
+///         r = db.as_ref();
+///     }
+///     let _ = r;
+/// }
+/// ```
+///
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::refs::refdb::RefdbBox;
+///
+/// fn alias(mut db: RefdbBox<'static>) {
+///     let a = db.as_mut();
+///     let b = db.as_mut();
+///     drop((a, b));
+/// }
+/// ```
+///
+/// No refdb crosses threads: libgit2's backends reach the repository unsynchronised.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::refs::refdb::RefdbBox;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn check(db: RefdbBox<'static>) {
+///     send(db);
+/// }
+/// ```
+///
+/// Wraps: git_refdb
+/// Handwritten
+#[repr(transparent)]
+pub struct Refdb<'r>(
+    ffi::git_refdb,
+    PhantomData<(*const (), &'r ffi::git_repository)>,
+);
+
+/// Shared borrow of a [`Refdb`]. `Copy`, like `&T`.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct RefdbRef<'a, 'r>(CBorrowedPtr<'a, Refdb<'r>>);
+
+/// Exclusive borrow of a [`Refdb`]. Reaches the shared handle with
+/// [`as_ref`](Self::as_ref).
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct RefdbMut<'a, 'r>(
+    RefdbRef<'a, 'r>,
+    // Invariant in the refdb, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Refdb<'r>>,
+);
+
+// SAFETY: `Refdb` is `#[repr(transparent)]` over `git_refdb` with a zero-sized marker;
+// both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Refdb<'r>>`
+// (`RefdbMut` through `RefdbRef`) with zero-sized markers and no `Drop`, hand out no
+// reference to the refdb, and `RefdbRef` has no write operation. `RefdbMut` is
+// invariant in the refdb through its `PhantomData<&'a mut Refdb<'r>>`.
+unsafe impl<'r> CCell for Refdb<'r> {
+    type C = ffi::git_refdb;
+    type Ref<'a>
+        = RefdbRef<'a, 'r>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = RefdbMut<'a, 'r>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'r> RefdbRef<'a, 'r> {
+    /// Borrows the refdb at `ptr`; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live refdb with a backend, of a repository
+    /// that outlives `'r`, which stays live for `'a` and is not written through
+    /// another handle meanwhile.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_refdb) -> Option<Self> {
+        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
+        // contract; `Refdb` is transparent over `git_refdb`.
+        NonNull::new(ptr.cast::<Refdb<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+    }
+
+    /// Read-only pointer to the C object.
+    #[allow(dead_code)]
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_refdb {
+        self.0.as_non_null().as_ptr().cast()
+    }
+}
+
+impl<'a, 'r> RefdbMut<'a, 'r> {
+    /// Writable pointer to the C object.
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_refdb {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> RefdbRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> RefdbMut<'_, 'r> {
+        RefdbMut(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for RefdbRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Refdb").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for RefdbMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Releases one reference to a refdb through `git_refdb_free`, the down-ref: the last
+/// one frees the backend (through its `free` member) and then the refdb, unless a
+/// repository still owns it, in which case the repository frees it when it lets go.
+///
+/// Wraps: git_refdb_free
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RefdbFree;
+
+// SAFETY: `git_refdb_free` drops exactly the one reference the owner holds, whichever
+// of a box or an arc holds it: the refdb is freed once, when its count reaches zero
+// and no repository owns it. It needs no state beyond the pointer.
+unsafe impl<'r> CDrop<Refdb<'r>> for RefdbFree {
+    unsafe fn c_drop(&self, ptr: NonNull<Refdb<'r>>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live refdb whose reference
+        // the caller gives up; `Refdb` is transparent over `git_refdb`. Its repository
+        // outlives `'r`, which the owner being dropped is still within.
+        unsafe { ffi::git_refdb_free(ptr.as_ptr().cast()) }
+    }
+}
+
+/// The only reference to a [`Refdb`], released by `git_refdb_free` on drop.
+pub type RefdbBox<'r> = CBox<Refdb<'r>, RefdbFree>;
+
+/// One of several references to a [`Refdb`], released by `git_refdb_free` on drop;
+/// shared access only.
+pub type RefdbArc<'r> = CArc<Refdb<'r>, RefdbFree>;
+
+/// The refdb a constructor returning `rc` handed out, or libgit2's error.
+fn constructed<'r>(rc: c_int, db: Option<RefdbBox<'r>>) -> Result<RefdbBox<'r>, ErrorBuf> {
+    db.filter(|_| rc >= 0).ok_or_else(last)
+}
+
+impl<'r> Refdb<'r> {
+    /// The reference database of `repo` with the backend its reference storage format
+    /// names: the files backend (loose and packed references), or the reftable one.
+    ///
+    /// The refdb is independent of the database the repository itself keeps (which
+    /// `git_repository_refdb` lends): both read and write the same storage.
+    ///
+    /// Fails, with libgit2's error, when the backend cannot be set up, or when the
+    /// repository's reference storage format is unknown (`GIT_EINVALID`, "unknown
+    /// reference storage format").
+    ///
+    /// Raw seam: `git_repository` is not wrapped yet; the run wrapping it replaces `repo`
+    /// with a borrow of the repository that supplies `'r`.
+    ///
+    /// # Safety
+    ///
+    /// `repo` must address a live `git_repository` that outlives `'r`, so is freed only
+    /// after the returned refdb is dropped. The refdb's operations read and update the
+    /// repository, so no other thread may use `repo` while one of them runs.
+    ///
+    /// Wraps: git_refdb_open
+    pub unsafe fn open(repo: NonNull<ffi::git_repository>) -> Result<RefdbBox<'r>, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; `repo` a live repository, as libgit2 asserts,
+        // which the refdb and its backend keep pointers to for `'r`, per this function's
+        // contract. libgit2 writes the slot NULL on failure. The runtime is pinned, so a
+        // failure is reported on live thread-local state.
+        let rc = unsafe { ffi::git_refdb_open(&mut out, repo.as_ptr()) };
+        // SAFETY: `git_refdb_open` leaves `out` NULL on failure (adopted as `None`), or
+        // writes a fresh refdb with one reference, held by nothing else and released by
+        // `git_refdb_free` as `RefdbFree` does. Its repository outlives `'r` per this
+        // function's contract.
+        constructed(rc, unsafe { RefdbBox::from_c(out) })
+    }
+
+    /// A reference database of `repo` dispatching to `backend`: `git_refdb_new`, then
+    /// `git_refdb_set_backend`.
+    ///
+    /// On success the refdb owns `backend`, and releases it through its `free` member
+    /// when the last reference to the refdb is dropped. On failure the caller still
+    /// owns it. Fails, with libgit2's error:
+    ///
+    /// - when `backend`'s `version` is not one libgit2 knows (`GIT_ERROR_INVALID`,
+    ///   "invalid version `n` on git_refdb_backend");
+    /// - when a member libgit2 requires is unset, or `lock` is set without `unlock`
+    ///   (`GIT_EINVALID`, "incomplete refdb backend implementation");
+    /// - when libgit2 runs out of memory.
+    ///
+    /// Raw seam: neither `git_repository` nor `git_refdb_backend` is wrapped yet; the
+    /// runs wrapping them replace `repo` with a borrow of the repository that supplies
+    /// `'r`, and `backend` with an owned backend.
+    ///
+    /// # Safety
+    ///
+    /// `repo` must be as [`open`](Self::open) requires. `backend` must address a live
+    /// `git_refdb_backend` that nothing else owns, whose members, once libgit2 accepts
+    /// them, behave as `git2/sys/refdb_backend.h` specifies for a backend of `repo`, and
+    /// whose `free` member releases it. When the call succeeds, the caller must no
+    /// longer use or free `backend`.
+    ///
+    /// Wraps: git_refdb_new
+    pub unsafe fn new(
+        repo: NonNull<ffi::git_repository>,
+        backend: NonNull<ffi::git_refdb_backend>,
+    ) -> Result<RefdbBox<'r>, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `open`; `git_refdb_new` only records `repo`.
+        let rc = unsafe { ffi::git_refdb_new(&mut out, repo.as_ptr()) };
+        // Owned before the backend is set: a refdb without a backend frees nothing but
+        // itself, so a refused backend stays the caller's.
+        // SAFETY: `git_refdb_new` leaves `out` NULL on failure (adopted as `None`), or
+        // writes a fresh refdb with one reference, held by nothing else and released by
+        // `git_refdb_free` as `RefdbFree` does. Its repository outlives `'r` per this
+        // function's contract.
+        let mut db = constructed(rc, unsafe { RefdbBox::from_c(out) })?;
+        // SAFETY: the box's pointer to a fresh refdb nothing else references, and a live
+        // backend per this function's contract. libgit2 reads its version and members,
+        // and takes it only on success; the fresh refdb has no backend to free first.
+        let rc = unsafe { ffi::git_refdb_set_backend(db.as_mut().as_mut_ptr(), backend.as_ptr()) };
+        if rc < 0 {
+            return Err(last());
+        }
+        Ok(db)
+    }
+}
+
+// The layout type is the C type's size, so a refdb pointer converts both ways.
+const _: () = assert!(size_of::<Refdb<'static>>() == size_of::<ffi::git_refdb>());
+const _: () = assert!(size_of::<RefdbBox<'static>>() == size_of::<*mut ffi::git_refdb>());
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    use std::ffi::CString;
+    use std::path::PathBuf;
+
+    use crate::libgit2::util::errors::ErrorClass;
+
+    /// A fresh bare repository with reference storage `format`, freed and removed on
+    /// drop.
+    struct TempRepo {
+        path: PathBuf,
+        repo: NonNull<ffi::git_repository>,
+    }
+
+    impl TempRepo {
+        fn new(tag: &str, format: ffi::git_refdb_t) -> Self {
+            assert!(runtime_pinned());
+            let path = std::env::temp_dir()
+                .join(format!("crustify-refdb-unit-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+            opts.refdb_type = format;
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
+            // call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+            assert_eq!(rc, 0, "{:?}", last());
+            Self {
+                path,
+                repo: NonNull::new(repo).unwrap(),
+            }
+        }
+
+        /// A refdb of this repository, which the borrow keeps alive.
+        fn open(&self) -> RefdbBox<'_> {
+            // SAFETY: the live repository, freed only after the borrow ends.
+            unsafe { Refdb::open(self.repo) }.unwrap()
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository this fixture opened, freed once, after every refdb
+            // borrowing it.
+            unsafe { ffi::git_repository_free(self.repo.as_ptr()) };
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn handles_reborrow_and_debug() {
+        let repo = TempRepo::new("handles", ffi::GIT_REFDB_FILES);
+        let mut db = repo.open();
+        assert_eq!(format!("{:?}", db.as_ref()), "Refdb { .. }");
+        let mut m = db.as_mut();
+        assert_eq!(format!("{m:?}"), "Refdb { .. }");
+        let p = m.as_mut().as_mut_ptr();
+        assert_eq!(m.as_ref().as_ptr(), p.cast_const());
+        assert_eq!(db.as_c_ptr(), p);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn from_ptr_borrows_without_releasing() {
+        let repo = TempRepo::new("from-ptr", ffi::GIT_REFDB_FILES);
+        let db = repo.open();
+        // SAFETY: NULL.
+        assert!(unsafe { RefdbRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: the box's live refdb, which outlives the handle and is not written
+        // meanwhile.
+        let r = unsafe { RefdbRef::from_ptr(db.as_c_ptr()) }.unwrap();
+        assert_eq!(r.as_ptr(), db.as_c_ptr().cast_const());
+        // The box still holds its reference: compressing reaches the backend.
+        // SAFETY: the box's live refdb, with a backend.
+        assert_eq!(unsafe { ffi::git_refdb_compress(db.as_c_ptr()) }, 0);
+    }
+
+    /// The raw constructor's result adopted through `from_c` is released once by the
+    /// policy (LSan flags a leak, ASan a double free).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn from_c_adopts_a_raw_refdb() {
+        let repo = TempRepo::new("from-c", ffi::GIT_REFDB_FILES);
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot and the live repository.
+        let rc = unsafe { ffi::git_refdb_open(&mut out, repo.repo.as_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: a fresh refdb with one reference, held by nothing else.
+        let db: RefdbBox<'_> = unsafe { RefdbBox::from_c(out) }.unwrap();
+        let arc = RefdbArc::from(db);
+        assert_eq!(arc.as_c_ptr(), out);
+        drop(arc);
+        // SAFETY: NULL.
+        assert!(unsafe { RefdbBox::from_c(ptr::null_mut()) }.is_none());
+    }
+
+    /// A repository's own refdb, lent by `git_repository_refdb`, is one reference of
+    /// several: dropping the arc releases that reference only, and the repository
+    /// lends the same database again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn arc_releases_one_reference_of_a_repository_refdb() {
+        let repo = TempRepo::new("arc", ffi::GIT_REFDB_FILES);
+        let lend = || {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot and the live repository.
+            let rc = unsafe { ffi::git_repository_refdb(&mut out, repo.repo.as_ptr()) };
+            assert_eq!(rc, 0);
+            // SAFETY: a new reference to the repository's refdb, given to the caller;
+            // the repository outlives the arc.
+            unsafe { RefdbArc::<'_>::from_c(out) }.unwrap()
+        };
+        let first = lend();
+        let second = lend();
+        assert!(RefdbArc::ptr_eq(&first, &second));
+        let p = first.as_c_ptr();
+        drop(first);
+        drop(second);
+        let third = lend();
+        assert_eq!(third.as_c_ptr(), p);
+        // SAFETY: the arc's live refdb, with a backend.
+        assert_eq!(unsafe { ffi::git_refdb_compress(third.as_c_ptr()) }, 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn open_follows_the_storage_format() {
+        for (tag, format) in [
+            ("files", ffi::GIT_REFDB_FILES),
+            ("reftable", ffi::GIT_REFDB_REFTABLE),
+        ] {
+            let repo = TempRepo::new(tag, format);
+            let a = repo.open();
+            let b = repo.open();
+            assert_ne!(a.as_c_ptr(), b.as_c_ptr());
+            // SAFETY: the box's live refdb, with a backend.
+            assert_eq!(unsafe { ffi::git_refdb_compress(a.as_c_ptr()) }, 0);
+            drop(b);
+            drop(a);
+        }
+    }
+
+    /// `new` hands out the refdb only with a backend; a refused backend stays the
+    /// caller's, untouched.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_refuses_bad_backends() {
+        let repo = TempRepo::new("bad-backend", ffi::GIT_REFDB_FILES);
+        let mut backend = ffi::git_refdb_backend::default();
+        for version in [0, ffi::GIT_REFDB_BACKEND_VERSION + 1, u32::MAX] {
+            backend.version = version;
+            // SAFETY: a live backend; the call fails, so it stays the caller's.
+            let err = unsafe { Refdb::new(repo.repo, NonNull::from(&mut backend)) }.unwrap_err();
+            assert_eq!(err.class(), Some(ErrorClass::Invalid));
+            let want = format!("invalid version {} on git_refdb_backend", version as i32);
+            assert_eq!(err.message().to_str().unwrap(), want);
+        }
+        backend.version = ffi::GIT_REFDB_BACKEND_VERSION;
+        // SAFETY: as above.
+        let err = unsafe { Refdb::new(repo.repo, NonNull::from(&mut backend)) }.unwrap_err();
+        assert_eq!(err.class(), Some(ErrorClass::Reference));
+        assert_eq!(err.message(), c"incomplete refdb backend implementation");
+        assert_eq!(backend.version, ffi::GIT_REFDB_BACKEND_VERSION);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_takes_an_fs_backend() {
+        let repo = TempRepo::new("fs-backend", ffi::GIT_REFDB_FILES);
+        let mut backend = ptr::null_mut();
+        // SAFETY: a writable slot and the live repository.
+        let rc = unsafe { ffi::git_refdb_backend_fs(&mut backend, repo.repo.as_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: a fresh files backend of this repository, given to the refdb.
+        let db = unsafe { Refdb::new(repo.repo, NonNull::new(backend).unwrap()) }.unwrap();
+        // SAFETY: the box's live refdb, with the backend just set.
+        assert_eq!(unsafe { ffi::git_refdb_compress(db.as_c_ptr()) }, 0);
+    }
+}
