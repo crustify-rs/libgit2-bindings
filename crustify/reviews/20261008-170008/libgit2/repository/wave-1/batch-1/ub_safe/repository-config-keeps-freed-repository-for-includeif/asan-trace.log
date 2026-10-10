@@ -1,0 +1,99 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running `/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif`
+=================================================================
+==3923465==ERROR: AddressSanitizer: heap-use-after-free on address 0x70b8e3406ee0 at pc 0x7378e501a6e3 bp 0x7ffdb3facce0 sp 0x7ffdb3faccd8
+READ of size 8 at 0x70b8e3406ee0 thread T0
+    #0 0x7378e501a6e2 in git_repository_path /target/src/libgit2/repository.c:3348:15
+    #1 0x7378e501a6e2 in resolved_parent_path /target/src/libgit2/repository.c:3292:13
+    #2 0x7378e501a6e2 in git_repository__item_path /target/src/libgit2/repository.c:3323:23
+    #3 0x7378e4ecf7b4 in do_match_gitdir /target/src/libgit2/config_file.c:630:15
+    #4 0x7378e4ecef60 in parse_conditional_include /target/src/libgit2/config_file.c:759:16
+    #5 0x7378e4ece23a in read_on_variable /target/src/libgit2/config_file.c:841:12
+    #6 0x7378e4edb2f8 in git_config_parse /target/src/libgit2/config_parse.c:564:14
+    #7 0x7378e4ecdc3d in config_file_read_buffer /target/src/libgit2/config_file.c:880:10
+    #8 0x7378e4ed1fb1 in config_file_refresh_from_buffer /target/src/libgit2/config_file.c:216:15
+    #9 0x7378e4ed0ffc in config_file_write /target/src/libgit2/config_file.c:1209:16
+    #10 0x7378e4ecc9c8 in config_file_set /target/src/libgit2/config_file.c:327:15
+    #11 0x7378e4ec4ff3 in git_config_set_string /target/src/libgit2/config.c:725:10
+    #12 0x7378e501b2ca in git_repository_set_bare /target/src/libgit2/repository.c:3458:15
+    #13 0x59855a59522b in <libgit2::libgit2::repository::repository::RepositoryMut>::set_bare /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-1/batch-1/crustify/rust/libgit2/libgit2/repository/sys/repository.rs:427:27
+    #14 0x59855a58ab47 in repository_config_keeps_freed_repository_for_includeif::main /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-1/batch-1/crustify/reviews/20261008-170008/libgit2/repository/wave-1/batch-1/ub_safe/repository-config-keeps-freed-repository-for-includeif/src/main.rs:49:16
+    #15 0x59855a58c12a in <fn() as core::ops::function::FnOnce<()>>::call_once /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+    #16 0x59855a58c4fd in std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+    #17 0x59855a589450 in std::rt::lang_start::<()>::{closure#0} /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+    #18 0x59855a5b96f7 in <&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe as core::ops::function::FnOnce<()>>::call_once /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/core/src/ops/function.rs:287:21
+    #19 0x59855a5b96f7 in std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:573:43
+    #20 0x59855a5b96f7 in std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:541:19
+    #21 0x59855a5b96f7 in std::panic::catch_unwind::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panic.rs:359:14
+    #22 0x59855a5b96f7 in std::rt::lang_start_internal::{closure#0} /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/rt.rs:175:24
+    #23 0x59855a5b96f7 in std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:573:43
+    #24 0x59855a5b96f7 in std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:541:19
+    #25 0x59855a5b96f7 in std::panic::catch_unwind::<std::rt::lang_start_internal::{closure#0}, isize> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panic.rs:359:14
+    #26 0x59855a5b96f7 in std::rt::lang_start_internal /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/rt.rs:171:5
+    #27 0x59855a5893bf in std::rt::lang_start::<()> /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+    #28 0x59855a58ae6d in main (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x120e6d) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+    #29 0x7378e49ca1c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #30 0x7378e49ca28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #31 0x59855a4c0074 in _start (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x56074) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+
+0x70b8e3406ee0 is located 160 bytes inside of 400-byte region [0x70b8e3406e40,0x70b8e3406fd0)
+freed by thread T0 here:
+    #0 0x59855a556d56 in free (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0xecd56) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+    #1 0x59855a595aef in <libgit2::libgit2::repository::repository::RepositoryFree as ffibox::traits::CDrop<libgit2::libgit2::repository::repository::Repository>>::c_drop /opt/venv/share/ffibox/src/macros.rs:367:34
+    #2 0x59855a58ab03 in repository_config_keeps_freed_repository_for_includeif::main /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-1/batch-1/crustify/reviews/20261008-170008/libgit2/repository/wave-1/batch-1/ub_safe/repository-config-keeps-freed-repository-for-includeif/src/main.rs:45:5
+    #3 0x59855a58c12a in <fn() as core::ops::function::FnOnce<()>>::call_once /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+    #4 0x59855a5893bf in std::rt::lang_start::<()> /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+    #5 0x59855a58ae6d in main (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x120e6d) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+    #6 0x7378e49ca28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #7 0x59855a4c0074 in _start (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x56074) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+
+previously allocated by thread T0 here:
+    #0 0x59855a557324 in malloc (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0xed324) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+    #1 0x7378e4e1cbd2 in git__malloc /target/src/util/alloc.h:19:12
+    #2 0x7378e4e1cbd2 in git__calloc /target/src/util/alloc.c:31:13
+    #3 0x7378e500ed60 in repository_alloc /target/src/libgit2/repository.c:310:25
+    #4 0x7378e50100c3 in git_repository_open_ext /target/src/libgit2/repository.c:1177:9
+    #5 0x7378e5018290 in git_repository_open /target/src/libgit2/repository.c:1244:9
+    #6 0x7378e5018290 in git_repository_init_ext /target/src/libgit2/repository.c:3025:15
+    #7 0x7378e5017264 in git_repository_init /target/src/libgit2/repository.c:2911:9
+    #8 0x59855a594d32 in <libgit2::libgit2::repository::repository::Repository>::init /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-1/batch-1/crustify/rust/libgit2/libgit2/repository/repository.rs:1889:27
+    #9 0x59855a58a3e7 in repository_config_keeps_freed_repository_for_includeif::main /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-1/batch-1/crustify/reviews/20261008-170008/libgit2/repository/wave-1/batch-1/ub_safe/repository-config-keeps-freed-repository-for-includeif/src/main.rs:32:13
+    #10 0x59855a58c12a in <fn() as core::ops::function::FnOnce<()>>::call_once /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+    #11 0x59855a5893bf in std::rt::lang_start::<()> /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+    #12 0x59855a58ae6d in main (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x120e6d) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+    #13 0x7378e49ca28a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #14 0x59855a4c0074 in _start (/tmp/rw1b1-review/repro-target/x86_64-unknown-linux-gnu/debug/repository-config-keeps-freed-repository-for-includeif+0x56074) (BuildId: 266c4e58b7ae59dbcbcd4df87bb437ecfe6548d5)
+
+SUMMARY: AddressSanitizer: heap-use-after-free /target/src/libgit2/repository.c:3348:15 in git_repository_path
+Shadow bytes around the buggy address:
+  0x70b8e3406c00: fa fa fa fa fa fa fa fa fd fd fd fd fd fd fd fd
+  0x70b8e3406c80: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x70b8e3406d00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x70b8e3406d80: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fa
+  0x70b8e3406e00: fa fa fa fa fa fa fa fa fd fd fd fd fd fd fd fd
+=>0x70b8e3406e80: fd fd fd fd fd fd fd fd fd fd fd fd[fd]fd fd fd
+  0x70b8e3406f00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x70b8e3406f80: fd fd fd fd fd fd fd fd fd fd fa fa fa fa fa fa
+  0x70b8e3407000: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x70b8e3407080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x70b8e3407100: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==3923465==ABORTING
