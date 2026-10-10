@@ -13,6 +13,14 @@
 //! that `git_repository_open_ext` takes; an [`OpenFlags`] set ORs them. libgit2 only
 //! tests the bits it names and ignores the others, so a set keeps any bit it is given
 //! ([`OpenFlags::from_bits_retain`]) and passes it through unchanged.
+//!
+//! # Repository state
+//!
+//! A [`RepositoryState`] is a `git_repository_state_t`: the multi-step operation a
+//! repository is in the middle of, as `git_repository_state` reads it from the marker
+//! files git leaves in the git directory. Its one producer returns it as an `int`, and
+//! `-1` when it cannot build the path it probes, so a raw value is converted fallibly
+//! ([`RepositoryState::from_raw`] and `TryFrom`) and never transmuted.
 
 use core::ffi::c_uint;
 use core::fmt;
@@ -859,6 +867,131 @@ impl Iterator for OpenFlagsIter {
 
 impl core::iter::FusedIterator for OpenFlagsIter {}
 
+/// The operation a repository is in the middle of: a merge, revert, cherry-pick,
+/// bisect, rebase or mailbox application that has stopped, typically on a conflict,
+/// and left its marker files in the git directory for a later step to resume.
+///
+/// `git_repository_state` probes the markers in a fixed order and reports the first it
+/// finds, so a repository carrying several (an interrupted rebase whose last step
+/// stopped on a merge) reports the earliest-probed one. The order is
+/// [`RebaseInteractive`](Self::RebaseInteractive), [`RebaseMerge`](Self::RebaseMerge),
+/// [`Rebase`](Self::Rebase), [`ApplyMailbox`](Self::ApplyMailbox),
+/// [`ApplyMailboxOrRebase`](Self::ApplyMailboxOrRebase), [`Merge`](Self::Merge), the
+/// revert states, the cherry-pick states, then [`Bisect`](Self::Bisect); a sequence
+/// state refines its single-commit one. `git_repository_state_cleanup` removes every
+/// marker, the rebase directories and the sequencer included, which leaves the
+/// repository [`Clean`](Self::Clean).
+///
+/// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name.
+///
+/// Wraps: git_repository_state_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum RepositoryState {
+    /// No operation is in progress (`GIT_REPOSITORY_STATE_NONE`).
+    Clean = ffi::GIT_REPOSITORY_STATE_NONE,
+    /// A merge has stopped: `MERGE_HEAD` exists.
+    Merge = ffi::GIT_REPOSITORY_STATE_MERGE,
+    /// A revert of one commit has stopped: the `REVERT_HEAD` reference resolves.
+    Revert = ffi::GIT_REPOSITORY_STATE_REVERT,
+    /// A revert of a series of commits has stopped: `REVERT_HEAD` resolves and
+    /// `sequencer/todo` exists.
+    RevertSequence = ffi::GIT_REPOSITORY_STATE_REVERT_SEQUENCE,
+    /// A cherry-pick of one commit has stopped: the `CHERRY_PICK_HEAD` reference
+    /// resolves.
+    CherryPick = ffi::GIT_REPOSITORY_STATE_CHERRYPICK,
+    /// A cherry-pick of a series of commits has stopped: `CHERRY_PICK_HEAD` resolves
+    /// and `sequencer/todo` exists.
+    CherryPickSequence = ffi::GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE,
+    /// A bisection is in progress: `BISECT_LOG` exists.
+    Bisect = ffi::GIT_REPOSITORY_STATE_BISECT,
+    /// A patch-based rebase has stopped: `rebase-apply/rebasing` exists.
+    Rebase = ffi::GIT_REPOSITORY_STATE_REBASE,
+    /// An interactive rebase has stopped: `rebase-merge/interactive` exists.
+    RebaseInteractive = ffi::GIT_REPOSITORY_STATE_REBASE_INTERACTIVE,
+    /// A merge-based rebase has stopped: the `rebase-merge/` directory exists.
+    RebaseMerge = ffi::GIT_REPOSITORY_STATE_REBASE_MERGE,
+    /// A mailbox application (`git am`) has stopped: `rebase-apply/applying` exists.
+    ApplyMailbox = ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX,
+    /// A mailbox application or a patch-based rebase has stopped: the `rebase-apply/`
+    /// directory exists, without the file that tells the two apart.
+    ApplyMailboxOrRebase = ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE,
+}
+
+impl RepositoryState {
+    /// The variant whose C value is `raw`; `None` for a value this version of
+    /// libgit2's header does not name.
+    pub const fn from_raw(raw: ffi::git_repository_state_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_REPOSITORY_STATE_NONE => Some(Self::Clean),
+            ffi::GIT_REPOSITORY_STATE_MERGE => Some(Self::Merge),
+            ffi::GIT_REPOSITORY_STATE_REVERT => Some(Self::Revert),
+            ffi::GIT_REPOSITORY_STATE_REVERT_SEQUENCE => Some(Self::RevertSequence),
+            ffi::GIT_REPOSITORY_STATE_CHERRYPICK => Some(Self::CherryPick),
+            ffi::GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE => Some(Self::CherryPickSequence),
+            ffi::GIT_REPOSITORY_STATE_BISECT => Some(Self::Bisect),
+            ffi::GIT_REPOSITORY_STATE_REBASE => Some(Self::Rebase),
+            ffi::GIT_REPOSITORY_STATE_REBASE_INTERACTIVE => Some(Self::RebaseInteractive),
+            ffi::GIT_REPOSITORY_STATE_REBASE_MERGE => Some(Self::RebaseMerge),
+            ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX => Some(Self::ApplyMailbox),
+            ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE => Some(Self::ApplyMailboxOrRebase),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2 reports it.
+    pub const fn raw(self) -> ffi::git_repository_state_t {
+        self as ffi::git_repository_state_t
+    }
+
+    /// Whether no operation is in progress: the state is [`Clean`](Self::Clean).
+    pub const fn is_clean(self) -> bool {
+        matches!(self, Self::Clean)
+    }
+}
+
+impl TryFrom<ffi::git_repository_state_t> for RepositoryState {
+    type Error = UnnamedRepositoryState;
+
+    fn try_from(raw: ffi::git_repository_state_t) -> Result<Self, UnnamedRepositoryState> {
+        Self::from_raw(raw).ok_or(UnnamedRepositoryState(raw))
+    }
+}
+
+impl From<RepositoryState> for ffi::git_repository_state_t {
+    fn from(value: RepositoryState) -> ffi::git_repository_state_t {
+        value.raw()
+    }
+}
+
+/// A repository state that this version of libgit2's header does not name.
+/// [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedRepositoryState(ffi::git_repository_state_t);
+
+impl UnnamedRepositoryState {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_repository_state_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedRepositoryState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 repository state {} is not named by git2/repository.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedRepositoryState {}
+
 #[cfg(test)]
 mod unit_tests {
     mod init_flags_and_modes {
@@ -1100,6 +1233,122 @@ mod unit_tests {
             assert_eq!(
                 format!("{:?}", OpenFlags::from_bits_retain(1 << 5)),
                 "OpenFlags {0x20}"
+            );
+        }
+    }
+
+    mod state {
+        use super::super::*;
+        use std::collections::HashSet;
+        use std::error::Error;
+
+        /// Every `git_repository_state_t` constant, beside the variant that must carry it.
+        const STATES: [(ffi::git_repository_state_t, RepositoryState); 12] = [
+            (ffi::GIT_REPOSITORY_STATE_NONE, RepositoryState::Clean),
+            (ffi::GIT_REPOSITORY_STATE_MERGE, RepositoryState::Merge),
+            (ffi::GIT_REPOSITORY_STATE_REVERT, RepositoryState::Revert),
+            (
+                ffi::GIT_REPOSITORY_STATE_REVERT_SEQUENCE,
+                RepositoryState::RevertSequence,
+            ),
+            (
+                ffi::GIT_REPOSITORY_STATE_CHERRYPICK,
+                RepositoryState::CherryPick,
+            ),
+            (
+                ffi::GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE,
+                RepositoryState::CherryPickSequence,
+            ),
+            (ffi::GIT_REPOSITORY_STATE_BISECT, RepositoryState::Bisect),
+            (ffi::GIT_REPOSITORY_STATE_REBASE, RepositoryState::Rebase),
+            (
+                ffi::GIT_REPOSITORY_STATE_REBASE_INTERACTIVE,
+                RepositoryState::RebaseInteractive,
+            ),
+            (
+                ffi::GIT_REPOSITORY_STATE_REBASE_MERGE,
+                RepositoryState::RebaseMerge,
+            ),
+            (
+                ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX,
+                RepositoryState::ApplyMailbox,
+            ),
+            (
+                ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE,
+                RepositoryState::ApplyMailboxOrRebase,
+            ),
+        ];
+
+        /// Every value around the declared ones, and the extremes; `u32::MAX` is the
+        /// `-1` `git_repository_state` returns on failure, read as the enum's type.
+        fn probes() -> impl Iterator<Item = ffi::git_repository_state_t> {
+            (0..=300).chain([u32::MAX - 1, u32::MAX])
+        }
+
+        #[test]
+        fn variants_carry_their_c_values() {
+            for (raw, state) in STATES {
+                assert_eq!(state.raw(), raw);
+                assert_eq!(ffi::git_repository_state_t::from(state), raw);
+                assert_eq!(RepositoryState::from_raw(raw), Some(state));
+                assert_eq!(RepositoryState::try_from(raw), Ok(state));
+            }
+            let distinct: HashSet<_> = STATES.iter().map(|(_, s)| *s).collect();
+            assert_eq!(distinct.len(), STATES.len());
+        }
+
+        #[test]
+        fn unnamed_values_are_refused_with_their_value() {
+            for raw in probes() {
+                match STATES.iter().find(|(r, _)| *r == raw) {
+                    Some((_, state)) => assert_eq!(RepositoryState::from_raw(raw), Some(*state)),
+                    None => {
+                        assert_eq!(RepositoryState::from_raw(raw), None);
+                        let err = RepositoryState::try_from(raw).unwrap_err();
+                        assert_eq!(err, UnnamedRepositoryState(raw));
+                        assert_eq!(err.raw(), raw);
+                        assert_eq!(
+                            err.to_string(),
+                            format!(
+                                "libgit2 repository state {raw} is not named by git2/repository.h"
+                            )
+                        );
+                        assert!(err.source().is_none());
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn only_clean_is_clean() {
+            for (raw, state) in STATES {
+                assert_eq!(state.is_clean(), raw == ffi::GIT_REPOSITORY_STATE_NONE);
+            }
+        }
+
+        #[test]
+        fn option_niche_never_aliases_a_variant() {
+            // `Option<RepositoryState>` stores `None` in a value no variant uses.
+            assert_eq!(
+                size_of::<Option<RepositoryState>>(),
+                size_of::<ffi::git_repository_state_t>()
+            );
+            for raw in probes() {
+                let state = core::hint::black_box(RepositoryState::from_raw(raw));
+                assert_eq!(state.map(RepositoryState::raw).unwrap_or(raw), raw);
+            }
+        }
+
+        #[test]
+        fn debug_names_the_variant() {
+            assert_eq!(format!("{:?}", RepositoryState::Clean), "Clean");
+            assert_eq!(
+                format!("{:?}", RepositoryState::CherryPickSequence),
+                "CherryPickSequence"
+            );
+            assert_eq!(
+                format!("{:?}", UnnamedRepositoryState(12)),
+                "UnnamedRepositoryState(12)"
             );
         }
     }

@@ -276,3 +276,75 @@ mod items_and_open_flags {
         }
     }
 }
+
+/// The enum `RepositoryState` (`git_repository_state_t`, unsigned, `0..=11`).
+///
+/// The only safe way in from a raw value is `from_raw` / `try_from`, which must
+/// reject every value without a variant rather than produce an invalid discriminant
+/// (which Miri and UBSan would flag on the next read); an `as` cast to it does not
+/// compile (`compile_fail/`). It owns and points at nothing, and none of these tests
+/// calls libgit2, so they also run under Miri; the sweep stays small for BSan.
+mod state {
+    use std::collections::HashSet;
+    use std::hint::black_box;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{RepositoryState, UnnamedRepositoryState};
+
+    /// Every value around the declared ones, and the extremes; `u32::MAX` is the `-1`
+    /// `git_repository_state` returns on failure.
+    fn probes() -> impl Iterator<Item = ffi::git_repository_state_t> {
+        (0..=300).chain([1 << 31, u32::MAX - 1, u32::MAX])
+    }
+
+    #[test]
+    fn from_raw_yields_only_valid_states() {
+        let mut seen = HashSet::new();
+        for raw in probes() {
+            // `black_box` keeps the conversion from being folded at compile time.
+            match RepositoryState::from_raw(black_box(raw)) {
+                Some(state) => {
+                    // Reading the discriminant back validates it.
+                    assert_eq!(state.raw(), raw);
+                    assert_eq!(state.is_clean(), raw == 0);
+                    assert!(!format!("{state:?}").is_empty());
+                    seen.insert(state);
+                }
+                None => {
+                    let err: UnnamedRepositoryState = RepositoryState::try_from(raw).unwrap_err();
+                    assert_eq!(err.raw(), raw);
+                    assert!(!err.to_string().is_empty());
+                }
+            }
+        }
+        assert_eq!(seen.len(), 12);
+    }
+
+    #[test]
+    fn option_niche_holds_for_every_value() {
+        // `Option<RepositoryState>` stores `None` in a value no variant uses: a
+        // rejected value must never alias a variant, nor a variant read as `None`.
+        for raw in probes() {
+            let state = black_box(RepositoryState::from_raw(raw));
+            assert_eq!(state.map(RepositoryState::raw).unwrap_or(raw), raw);
+            assert_eq!(state.is_some(), raw <= 11);
+        }
+    }
+
+    #[test]
+    fn states_cross_threads() {
+        // A plain value: `Send` and `Sync` without an assertion, so sharing one races
+        // nothing for TSan to report.
+        let states: Vec<_> = (0..12).filter_map(RepositoryState::from_raw).collect();
+        thread::scope(|s| {
+            let handles: Vec<_> = states
+                .iter()
+                .map(|state| s.spawn(move || RepositoryState::from_raw(state.raw())))
+                .collect();
+            for (state, h) in states.iter().zip(handles) {
+                assert_eq!(h.join().unwrap(), Some(*state));
+            }
+        });
+    }
+}

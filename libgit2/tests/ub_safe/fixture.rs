@@ -1104,3 +1104,124 @@ pub mod index {
         unsafe { ffi::git_index_write(index.as_c_ptr()) }
     }
 }
+
+// --- `git2/worktree.h` ---------------------------------------------------------------
+
+pub mod worktree {
+    //! Worktrees adopted from `git_worktree_lookup`, and the accessors read through
+    //! their boxes; they stand in for the `Repository` wrapper, `Worktree::lookup` and
+    //! the worktree getters and lock routines, which replace them.
+
+    use std::ffi::{CStr, CString};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::worktree::WorktreeBox;
+
+    /// A non-bare repository in a temporary directory, to which [`add`](Self::add) lays
+    /// out linked worktrees on disk as `git_worktree_add` would; freed and removed on
+    /// drop.
+    pub struct WorktreeRepo {
+        pub base: PathBuf,
+        repo: *mut ffi::git_repository,
+    }
+
+    impl WorktreeRepo {
+        pub fn new(tag: &str) -> Self {
+            super::init();
+            let base = std::env::temp_dir()
+                .join(format!("crustify-worktree-ub-{}-{tag}", std::process::id()));
+            let _ = fs::remove_dir_all(&base);
+            let c_path = CString::new(base.join("repo").as_os_str().as_bytes()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's
+            // defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
+            let mut repo = core::ptr::null_mut();
+            let path = c_path.as_ptr();
+            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
+            // call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, path, &mut opts) };
+            assert_eq!(rc, 0);
+            Self { base, repo }
+        }
+
+        /// Lays out the worktree `name`: its administrative directory under
+        /// `.git/worktrees/` and its working directory beside the repository.
+        pub fn add(&self, name: &str) {
+            let admin = self.base.join("repo/.git/worktrees").join(name);
+            let workdir = self.base.join("worktrees").join(name);
+            fs::create_dir_all(&admin).unwrap();
+            fs::create_dir_all(&workdir).unwrap();
+            fs::write(admin.join("commondir"), "../..\n").unwrap();
+            let gitlink = workdir.join(".git");
+            fs::write(admin.join("gitdir"), format!("{}\n", gitlink.display())).unwrap();
+            fs::write(admin.join("HEAD"), format!("ref: refs/heads/{name}\n")).unwrap();
+            fs::write(gitlink, format!("gitdir: {}\n", admin.display())).unwrap();
+        }
+
+        /// The worktree `name`, adopted from `git_worktree_lookup`.
+        pub fn lookup(&self, name: &CStr) -> WorktreeBox {
+            let mut out = core::ptr::null_mut();
+            // SAFETY: a live slot, the live repository and a NUL-terminated name, only
+            // read.
+            let rc = unsafe { ffi::git_worktree_lookup(&mut out, self.repo, name.as_ptr()) };
+            assert_eq!(rc, 0);
+            // SAFETY: a fresh worktree the caller owns, released by `git_worktree_free`.
+            unsafe { WorktreeBox::from_c(out) }.unwrap()
+        }
+
+        /// Frees the repository and removes its directory, leaving the worktrees looked
+        /// up in it.
+        pub fn close(self) {}
+    }
+
+    impl Drop for WorktreeRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository this fixture opened, freed once; the worktrees do
+            // not borrow it.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// `git_worktree_name` through the box.
+    pub fn name(w: &WorktreeBox) -> CString {
+        // SAFETY: the box's live worktree, only read; the name lives as long as it.
+        unsafe { CStr::from_ptr(ffi::git_worktree_name(w.as_c_ptr())) }.to_owned()
+    }
+
+    /// `git_worktree_path` through the box.
+    pub fn path(w: &WorktreeBox) -> CString {
+        // SAFETY: as above.
+        unsafe { CStr::from_ptr(ffi::git_worktree_path(w.as_c_ptr())) }.to_owned()
+    }
+
+    /// `git_worktree_is_locked(NULL, w)`: 1 when locked, 0 when not.
+    pub fn is_locked(w: &WorktreeBox) -> i32 {
+        // SAFETY: the box's live worktree, only read; a NULL reason is not filled.
+        unsafe { ffi::git_worktree_is_locked(core::ptr::null_mut(), w.as_c_ptr()) }
+    }
+
+    /// `git_worktree_lock(w, reason)`, which writes the worktree's `locked` bit.
+    pub fn lock(w: &mut WorktreeBox, reason: &CStr) -> i32 {
+        // SAFETY: the box's live worktree, exclusively borrowed for the write; the
+        // reason is read for the call.
+        unsafe { ffi::git_worktree_lock(w.as_c_ptr(), reason.as_ptr()) }
+    }
+
+    /// `git_worktree_unlock(w)`, which clears the `locked` bit.
+    pub fn unlock(w: &mut WorktreeBox) -> i32 {
+        // SAFETY: as above.
+        unsafe { ffi::git_worktree_unlock(w.as_c_ptr()) }
+    }
+}

@@ -1369,3 +1369,233 @@ mod items_and_open_flags {
         });
     }
 }
+
+/// Equivalence of [`RepositoryState`] with the `git_repository_state_t` values
+/// libgit2 declares and reports.
+///
+/// [`RepositoryState`] must name exactly the header's constants, each with its C
+/// value, and must name what `git_repository_state` reports for a repository
+/// carrying each operation's marker files. A sequence on one repository adds
+/// markers so that each step changes the state libgit2 reports (its probe order
+/// decides which of several markers wins), then removes them with
+/// `git_repository_state_cleanup`; after every step the value C reports, converted
+/// with [`RepositoryState::from_raw`], must be the variant the markers predict and
+/// convert back to the same C value. A bare repository, with its markers at the
+/// top of the git directory, runs the same sequence.
+///
+/// `git_repository_state` reports `-1` only when copying the git directory's path
+/// runs out of memory, which these tests cannot provoke; the unit tests pin that
+/// [`RepositoryState::from_raw`] refuses it.
+mod state {
+    use std::ffi::{CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::RepositoryState;
+
+    /// Every `git_repository_state_t` constant, beside the variant that must carry it.
+    const STATES: [(ffi::git_repository_state_t, RepositoryState); 12] = [
+        (ffi::GIT_REPOSITORY_STATE_NONE, RepositoryState::Clean),
+        (ffi::GIT_REPOSITORY_STATE_MERGE, RepositoryState::Merge),
+        (ffi::GIT_REPOSITORY_STATE_REVERT, RepositoryState::Revert),
+        (
+            ffi::GIT_REPOSITORY_STATE_REVERT_SEQUENCE,
+            RepositoryState::RevertSequence,
+        ),
+        (
+            ffi::GIT_REPOSITORY_STATE_CHERRYPICK,
+            RepositoryState::CherryPick,
+        ),
+        (
+            ffi::GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE,
+            RepositoryState::CherryPickSequence,
+        ),
+        (ffi::GIT_REPOSITORY_STATE_BISECT, RepositoryState::Bisect),
+        (ffi::GIT_REPOSITORY_STATE_REBASE, RepositoryState::Rebase),
+        (
+            ffi::GIT_REPOSITORY_STATE_REBASE_INTERACTIVE,
+            RepositoryState::RebaseInteractive,
+        ),
+        (
+            ffi::GIT_REPOSITORY_STATE_REBASE_MERGE,
+            RepositoryState::RebaseMerge,
+        ),
+        (
+            ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX,
+            RepositoryState::ApplyMailbox,
+        ),
+        (
+            ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE,
+            RepositoryState::ApplyMailboxOrRebase,
+        ),
+    ];
+
+    /// An object id for the `*_HEAD` references, which libgit2 resolves without
+    /// reading the object.
+    const HEAD_ID: &str = "0123456789abcdef0123456789abcdef01234567\n";
+
+    /// One step: what it does to the git directory.
+    enum Step {
+        File(&'static str, &'static str),
+        Dir(&'static str),
+        RemoveDir(&'static str),
+        Cleanup,
+    }
+
+    /// The sequence, each step with the state libgit2 must report after it: every
+    /// state appears, and each marker outranks the ones added before it.
+    fn sequence() -> Vec<(Step, RepositoryState)> {
+        use RepositoryState::*;
+        vec![
+            (Step::File("BISECT_LOG", "# bisect\n"), Bisect),
+            (Step::File("CHERRY_PICK_HEAD", HEAD_ID), CherryPick),
+            (Step::Dir("sequencer"), CherryPick),
+            (
+                Step::File("sequencer/todo", "pick 0123456\n"),
+                CherryPickSequence,
+            ),
+            (Step::File("REVERT_HEAD", HEAD_ID), RevertSequence),
+            (Step::RemoveDir("sequencer"), Revert),
+            (Step::File("MERGE_HEAD", HEAD_ID), Merge),
+            (Step::Dir("rebase-apply"), ApplyMailboxOrRebase),
+            (Step::File("rebase-apply/applying", ""), ApplyMailbox),
+            (Step::File("rebase-apply/rebasing", ""), Rebase),
+            (Step::Dir("rebase-merge"), RebaseMerge),
+            (
+                Step::File("rebase-merge/interactive", ""),
+                RebaseInteractive,
+            ),
+            (Step::Cleanup, Clean),
+            // Nothing left to remove, the references included: still clean.
+            (Step::Cleanup, Clean),
+        ]
+    }
+
+    /// A repository of its own under the temp dir, freed and removed on drop.
+    struct StateRepo {
+        base: PathBuf,
+        gitdir: PathBuf,
+        repo: *mut ffi::git_repository,
+    }
+
+    impl StateRepo {
+        fn new(tag: &str, bare: bool) -> Self {
+            // SAFETY: no arguments; the reference is never released.
+            assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+            let base = std::env::temp_dir().join(format!(
+                "crustify-repository-state-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&base);
+            let c_path = CString::new(base.as_os_str().as_bytes()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's
+            // defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
+            if bare {
+                opts.flags |= ffi::GIT_REPOSITORY_INIT_BARE;
+            }
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
+            // call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+            assert_eq!(rc, 0);
+            let gitdir = if bare {
+                base.clone()
+            } else {
+                base.join(".git")
+            };
+            Self { base, gitdir, repo }
+        }
+
+        /// `git_repository_state`'s raw answer.
+        fn state(&self) -> c_int {
+            // SAFETY: the live repository, only read.
+            unsafe { ffi::git_repository_state(self.repo) }
+        }
+
+        fn apply(&self, step: &Step) {
+            let at = |p: &str| -> PathBuf { Path::new(&self.gitdir).join(p) };
+            match step {
+                Step::File(p, content) => fs::write(at(p), content).unwrap(),
+                Step::Dir(p) => fs::create_dir(at(p)).unwrap(),
+                Step::RemoveDir(p) => fs::remove_dir_all(at(p)).unwrap(),
+                Step::Cleanup => {
+                    // SAFETY: the live repository.
+                    let rc = unsafe { ffi::git_repository_state_cleanup(self.repo) };
+                    assert_eq!(rc, 0);
+                }
+            }
+        }
+    }
+
+    impl Drop for StateRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository this fixture opened, freed once.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// The variant C's answer names, checked to convert back to that answer.
+    fn converted(raw: c_int) -> Option<RepositoryState> {
+        let raw = ffi::git_repository_state_t::try_from(raw).ok()?;
+        let state = RepositoryState::from_raw(raw)?;
+        assert_eq!(state.raw(), raw);
+        assert_eq!(ffi::git_repository_state_t::from(state), raw);
+        Some(state)
+    }
+
+    #[test]
+    fn variants_are_the_header_constants() {
+        for (raw, state) in STATES {
+            assert_eq!(state.raw(), raw, "{state:?}");
+            assert_eq!(RepositoryState::from_raw(raw), Some(state));
+        }
+        // The constants are dense from 0: nothing past the last is named.
+        assert_eq!(
+            RepositoryState::from_raw(ffi::GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE + 1),
+            None
+        );
+    }
+
+    fn run(tag: &str, bare: bool) {
+        let repo = StateRepo::new(tag, bare);
+        let mut seen = vec![converted(repo.state())];
+        assert_eq!(seen[0], Some(RepositoryState::Clean));
+        for (i, (step, expected)) in sequence().iter().enumerate() {
+            repo.apply(step);
+            let raw = repo.state();
+            let state = converted(raw);
+            assert_eq!(state, Some(*expected), "step {i}: C reported {raw}");
+            assert_eq!(state.unwrap().is_clean(), raw == 0);
+            seen.push(state);
+        }
+        // Every state was reported once the sequence ran.
+        for (_, state) in STATES {
+            assert!(seen.contains(&Some(state)), "{state:?} never reported");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reported_states_match_the_markers() {
+        run("workdir", false);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reported_states_match_the_markers_in_a_bare_repository() {
+        run("bare", true);
+    }
+}

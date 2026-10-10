@@ -37,12 +37,14 @@ git_repository_init_mode_t
 git_repository_init_options
 git_repository_item_t
 git_repository_open_flag_t
+git_repository_state_t
 git_strarray
 git_submodule_ignore_t
 git_submodule_recurse_t
 git_submodule_update_t
 git_time
 git_trace_level_t
+git_worktree
 git_worktree_prune_options
 git_worktree_prune_t
 git_writestream

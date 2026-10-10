@@ -15,6 +15,31 @@
 //! [`PruneOptions::new`] fills one through `git_worktree_prune_options_init`, as
 //! `GIT_WORKTREE_PRUNE_OPTIONS_INIT` does: the current version and no flags. All-zero
 //! is not that default (libgit2 refuses version 0), so there is no `zeroed`.
+//!
+//! # Worktrees
+//!
+//! A [`Worktree`] is a `git_worktree`: one of a repository's linked working trees, as
+//! described by its administrative directory `<commondir>/worktrees/<name>/`. The
+//! header only forward-declares the struct, so Rust never reads its fields; libgit2's
+//! own accessors (`git_worktree_name`, `git_worktree_path`, ...) take it by pointer.
+//!
+//! libgit2 hands a worktree out from three constructors, each through an
+//! out-parameter and each given a repository: `git_worktree_lookup` (by name),
+//! `git_worktree_open_from_repository` (the worktree a repository was opened from)
+//! and `git_worktree_add` (which creates one first). Each allocates the struct and six
+//! strings from libgit2's allocator, and the caller owns the result: Rust holds it as
+//! a [`WorktreeBox`], which `git_worktree_free` releases on drop. libgit2 has no copy
+//! and no reference count for a worktree, so the box is its sole owner and not
+//! `Clone`.
+//!
+//! A worktree copies every string it needs (its name, its paths, the parent's working
+//! directory), so it does not borrow the repository it was looked up in and may
+//! outlive it: the box carries no lifetime.
+//!
+//! Two of the constructors need care from their wrappers: `git_worktree_lookup` sets
+//! its out slot to NULL before failing, but `git_worktree_open_from_repository` leaves
+//! it untouched on failure (so the slot must start NULL), and dereferences its
+//! repository without the NULL check the others assert.
 
 use core::fmt;
 use core::hash::{Hash, Hasher};
@@ -22,7 +47,7 @@ use core::marker::PhantomData;
 use core::ops::{BitOr, BitOrAssign};
 use core::ptr::{addr_of, addr_of_mut};
 
-use ffibox::define_ctype;
+use ffibox::{CBox, define_ctype, impl_cdrop};
 
 use crate::ffi;
 
@@ -534,6 +559,103 @@ const _: () = assert!(
         && align_of::<PruneOptions>() == align_of::<ffi::git_worktree_prune_options>()
 );
 
+define_ctype!(
+    /// A linked working tree of a repository (`git_worktree`): its name, its working
+    /// directory, and the paths that tie it to the repository it shares objects and
+    /// references with.
+    ///
+    /// Only ever behind a pointer (see the [module docs](self#worktrees)): owned as a
+    /// [`WorktreeBox`], read through a [`WorktreeRef`], and written (locked or
+    /// unlocked) through a [`WorktreeMut`]. There is no bare value: libgit2 alone
+    /// builds a worktree, and the header does not publish its layout.
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::repository::worktree::Worktree;
+    ///
+    /// let _ = <Worktree as ffibox::CZeroable>::zeroed();
+    /// ```
+    ///
+    /// Wraps: git_worktree
+    Worktree, WorktreeRef, WorktreeMut, ffi::git_worktree
+);
+
+// SAFETY: a worktree is a struct and six strings, all allocations of libgit2's
+// allocator that the struct owns exclusively; `git__free` releases them on any thread,
+// and no libgit2 routine keeps thread-local state about a worktree or records its
+// address, so moving the owner moves sole ownership of them.
+unsafe impl Send for Worktree {}
+// SAFETY: `WorktreeMut` is an exclusive borrow of such a worktree, as `&mut Worktree`.
+unsafe impl Send for WorktreeMut<'_> {}
+
+// SAFETY: libgit2 writes a worktree only in `git_worktree_lock` and
+// `git_worktree_unlock` (its `locked` bit), whose wrappers take a `WorktreeMut`, which
+// excludes every other handle. Every other routine taking one (`git_worktree_name`,
+// `_path`, `_validate`, `_is_locked`, `_is_prunable`, `_prune`,
+// `git_repository_open_from_worktree`) only reads the struct and its strings, so
+// shared handles race nothing in memory.
+unsafe impl Sync for Worktree {}
+// SAFETY: as above; `WorktreeRef` is a shared borrow, as `&Worktree`.
+unsafe impl Send for WorktreeRef<'_> {}
+// SAFETY: as above.
+unsafe impl Sync for WorktreeRef<'_> {}
+// SAFETY: `&WorktreeMut` only reaches the reads, through `as_ref`.
+unsafe impl Sync for WorktreeMut<'_> {}
+
+/// Releases a worktree through `git_worktree_free`, which hands its six strings, then
+/// the struct, to `git__free`.
+///
+/// Wraps: git_worktree_free
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorktreeFree;
+
+impl_cdrop!(WorktreeFree, Worktree, ffi::git_worktree_free);
+
+/// An owned [`Worktree`], freed by `git_worktree_free` on drop.
+///
+/// Not `Clone`: libgit2 cannot copy a worktree. Look it up again for a second owner.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::repository::worktree::WorktreeBox;
+///
+/// fn copyable<T: Clone>() {}
+/// copyable::<WorktreeBox>();
+/// ```
+///
+/// Its handles borrow it, so none outlives it:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::repository::worktree::{WorktreeBox, WorktreeRef};
+///
+/// fn escape(w: WorktreeBox) -> WorktreeRef<'static> {
+///     let r = w.as_ref();
+///     drop(w);
+///     r
+/// }
+/// ```
+///
+/// and an exclusive handle excludes every other:
+///
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::repository::worktree::WorktreeBox;
+///
+/// fn alias(w: &mut WorktreeBox) {
+///     let a = w.as_mut();
+///     let b = w.as_mut();
+///     drop((a, b));
+/// }
+/// ```
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::repository::worktree::WorktreeBox;
+///
+/// fn alias(w: &mut WorktreeBox) {
+///     let shared = w.as_ref();
+///     let exclusive = w.as_mut();
+///     drop((shared, exclusive));
+/// }
+/// ```
+pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
+
 #[cfg(test)]
 mod unit_tests {
     mod prune_options {
@@ -674,6 +796,165 @@ mod unit_tests {
             assert_eq!(opts, PruneOptions::default());
             assert_eq!(opts.as_ref().version(), PruneOptions::VERSION);
             assert!(opts.as_ref().flags().is_empty());
+        }
+    }
+
+    mod worktree {
+        use super::super::*;
+        use core::ptr;
+        use std::ffi::{CStr, CString};
+        use std::fs;
+        use std::os::unix::ffi::OsStrExt;
+        use std::path::PathBuf;
+
+        use crate::libgit2::util::sys::errors::runtime_pinned;
+
+        /// A non-bare repository with a linked worktree `wt` laid out on disk, as
+        /// `git_worktree_add` leaves one; the repository is freed and the directory
+        /// removed on drop.
+        struct Layout {
+            base: PathBuf,
+            repo: *mut ffi::git_repository,
+        }
+
+        impl Layout {
+            fn new(tag: &str) -> Self {
+                assert!(runtime_pinned());
+                let base = std::env::temp_dir().join(format!(
+                    "crustify-worktree-unit-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = fs::remove_dir_all(&base);
+                let repo_dir = base.join("repo");
+                let wt_dir = base.join("wt");
+                let admin = repo_dir.join(".git/worktrees/wt");
+                let c_path = CString::new(repo_dir.as_os_str().as_bytes()).unwrap();
+                let mut opts = ffi::git_repository_init_options::default();
+                // SAFETY: `opts` is a live options struct, filled with the version's
+                // defaults.
+                let rc = unsafe {
+                    ffi::git_repository_init_options_init(
+                        &mut opts,
+                        ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                    )
+                };
+                assert_eq!(rc, 0);
+                opts.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
+                let mut repo = ptr::null_mut();
+                let path = c_path.as_ptr();
+                // SAFETY: a live slot, a NUL-terminated path and live options, all read
+                // for the call only.
+                let rc = unsafe { ffi::git_repository_init_ext(&mut repo, path, &mut opts) };
+                assert_eq!(rc, 0);
+                fs::create_dir_all(&admin).unwrap();
+                fs::create_dir_all(&wt_dir).unwrap();
+                fs::write(admin.join("commondir"), "../..\n").unwrap();
+                fs::write(
+                    admin.join("gitdir"),
+                    format!("{}\n", wt_dir.join(".git").display()),
+                )
+                .unwrap();
+                fs::write(admin.join("HEAD"), "ref: refs/heads/wt\n").unwrap();
+                fs::write(
+                    wt_dir.join(".git"),
+                    format!("gitdir: {}\n", admin.display()),
+                )
+                .unwrap();
+                Self { base, repo }
+            }
+
+            /// `git_worktree_lookup(name)`: the raw worktree, or the error code.
+            fn lookup(&self, name: &CStr) -> Result<*mut ffi::git_worktree, i32> {
+                let mut out = ptr::null_mut();
+                // SAFETY: a live slot, the live repository and a NUL-terminated name,
+                // only read.
+                let rc = unsafe { ffi::git_worktree_lookup(&mut out, self.repo, name.as_ptr()) };
+                if rc == 0 { Ok(out) } else { Err(rc) }
+            }
+        }
+
+        impl Drop for Layout {
+            fn drop(&mut self) {
+                // SAFETY: the repository this layout opened, freed once.
+                unsafe { ffi::git_repository_free(self.repo) };
+                let _ = fs::remove_dir_all(&self.base);
+            }
+        }
+
+        /// The worktree's name, as `git_worktree_name` reads it through the box.
+        fn name(w: &WorktreeBox) -> CString {
+            // SAFETY: the box's live worktree, only read; its name lives as long as it.
+            unsafe { CStr::from_ptr(ffi::git_worktree_name(w.as_c_ptr())) }.to_owned()
+        }
+
+        #[test]
+        fn box_is_one_pointer_with_a_null_niche() {
+            assert_eq!(
+                size_of::<WorktreeBox>(),
+                size_of::<*mut ffi::git_worktree>()
+            );
+            assert_eq!(
+                size_of::<Option<WorktreeBox>>(),
+                size_of::<*mut ffi::git_worktree>()
+            );
+            // SAFETY: NULL adopts nothing.
+            assert!(unsafe { WorktreeBox::from_c(ptr::null_mut()) }.is_none());
+        }
+
+        #[test]
+        fn owners_and_handles_cross_threads() {
+            fn send_sync<T: Send + Sync>() {}
+            send_sync::<Worktree>();
+            send_sync::<WorktreeBox>();
+            send_sync::<WorktreeRef<'static>>();
+            send_sync::<WorktreeMut<'static>>();
+            send_sync::<WorktreeFree>();
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn adopted_lookup_is_released_by_its_policy() {
+            let layout = Layout::new("adopt");
+            let raw = layout.lookup(c"wt").unwrap();
+            // SAFETY: a fresh worktree from `git_worktree_lookup`, owned by the caller
+            // and released by `git_worktree_free`.
+            let w = unsafe { WorktreeBox::from_c(raw) }.unwrap();
+            assert_eq!(w.as_c_ptr(), raw);
+            assert_eq!(w.as_ref().as_ptr().cast::<ffi::git_worktree>(), raw);
+            assert_eq!(name(&w), c"wt");
+            drop(w);
+            // ASan's leak check sees the six strings and the struct released.
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn into_c_surrenders_the_worktree_to_c() {
+            let layout = Layout::new("into-c");
+            // SAFETY: as above.
+            let w = unsafe { WorktreeBox::from_c(layout.lookup(c"wt").unwrap()) }.unwrap();
+            let raw = w.into_c();
+            // SAFETY: the box gave the worktree up, so it is freed here once.
+            unsafe { ffi::git_worktree_free(raw) };
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn worktree_outlives_its_repository() {
+            let layout = Layout::new("outlive");
+            // SAFETY: as above.
+            let w = unsafe { WorktreeBox::from_c(layout.lookup(c"wt").unwrap()) }.unwrap();
+            drop(layout);
+            // The repository is freed and its directory gone: the worktree holds copies.
+            assert_eq!(name(&w), c"wt");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn failed_lookups_leave_nothing_to_adopt() {
+            let layout = Layout::new("missing");
+            assert_eq!(layout.lookup(c"absent"), Err(ffi::GIT_ENOTFOUND));
+            fs::remove_file(layout.base.join("repo/.git/worktrees/wt/HEAD")).unwrap();
+            assert_eq!(layout.lookup(c"wt"), Err(-1));
         }
     }
 }
