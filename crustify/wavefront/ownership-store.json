@@ -2303,6 +2303,29 @@
    ]
   },
   {
+   "name": "git_blob_data_is_binary",
+   "defined_in": "src/libgit2/blob.c",
+   "ptr_args": [
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only byte buffer of `len` bytes, not NUL-terminated (may contain NUL, which is itself the binary signal). Read only during the call via git_str_attach_notowned (not owned, never freed or retained). When len == 0, attach_notowned replaces it with git_str__initstr, so NULL (or any pointer) is never dereferenced; with len > 0 it must be a live buffer of len bytes. No allocation and no error state touched."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_buf_dispose",
    "defined_in": "src/libgit2/buf.c",
    "lifetime": {
@@ -7330,6 +7353,44 @@
       "nullable": true,
       "mutable": true,
       "note": "The caller's struct, borrowed for the call (libgit2 never allocates a git_strarray). NULL returns. Frees strings[0..count) and then `strings` with git__free, then memsets the struct to zero, leaving it reusable. Requires the struct to own its array and strings (the OUTPUT contract of git_strarray.strings); a NULL `strings` with count > 0 derefs NULL. With NULL `strings` and count 0 it still calls git__free(NULL), which reads git__allocator unsynchronised against a concurrent first git_libgit2_init, so the Rust policy skips C for that empty state."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_name_is_valid",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NUL-terminated tag name, read during the call only and copied into a temporary git_str (git__malloc; needs initialized runtime, else allocation fails with -1). NULL yields *valid = 0 and returns 0. An invalid name leaves a GIT_ERROR_REFERENCE error set (from git_reference__normalize_name) while returning 0; only OOM returns < 0."
+     }
+    },
+    {
+     "name": "valid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:valid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: written 0 first, then 1 if `refs/tags/<name>` is a valid reference name. NULL fails GIT_ASSERT (returns -1, sets GIT_ERROR_INTERNAL)."
      }
     }
    ]
