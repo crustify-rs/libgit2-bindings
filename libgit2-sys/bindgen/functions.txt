@@ -9,8 +9,10 @@ git_annotated_commit_id
 git_annotated_commit_lookup
 git_annotated_commit_ref
 git_blob_create_from_buffer
+git_blob_create_from_disk
 git_blob_create_from_stream
 git_blob_create_from_stream_commit
+git_blob_create_from_workdir
 git_blob_data_is_binary
 git_blob_dup
 git_blob_filter
@@ -31,7 +33,10 @@ git_checkout_tree
 git_commit_create_buffer
 git_commit_create_ext
 git_commit_create_ext_options_init
+git_commit_create_from_callback
+git_commit_create_with_signature
 git_commit_dup
+git_commit_extract_signature
 git_commit_free
 git_commit_header_field
 git_commit_id
@@ -94,6 +99,7 @@ git_mailmap_from_repository
 git_mailmap_new
 git_mailmap_resolve
 git_merge_bases
+git_message_prettify
 git_message_trailer_array_free
 git_message_trailers
 git_object_dup

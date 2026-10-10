@@ -676,7 +676,7 @@ mod create_ext_options {
             ] {
                 assert_eq!(read(r), expected);
                 assert_eq!(r.version(), 1);
-                assert!(r.sign_callback().0.is_none());
+                assert!(!r.has_signer());
             }
             assert_eq!(read(run[i + 1].as_ref()), (None, None, Vec::new()));
         }
@@ -751,4 +751,353 @@ mod create_ext_options {
         assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
     }
 
+}
+
+/// UB tests for writing and reading commit signatures: `create_with_signature` and
+/// `extract_signature`.
+///
+/// libgit2 reads the contents, signature and field it is given for the call only, and
+/// fills two fresh buffers it owns: every input is an exact-length heap string,
+/// overwritten and freed right after the call (ASan flags a read past one, BSan a
+/// pointer kept), and every buffer is released once (LSan: leak; ASan: double free). The
+/// commits parsed and rejected along the way take libgit2's error paths: contents that
+/// do not parse, a signed one without a blank line, a missing tree, a repository
+/// without paths. An id of another type than the repository's, which libgit2 would
+/// format out of bounds, and an empty field, which it would scan for forever, are
+/// refused before the call. Each thread writes into its own repository at once (TSan).
+mod signatures {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::{create_with_signature, extract_signature};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::{repository, write_raw};
+
+    const SIGNATURE: &str =
+        "-----BEGIN SIGNATURE-----\nline one\n\nline three\n-----END SIGNATURE-----";
+
+    /// The contents of a commit of `tree` with `parents`.
+    fn content(tree: &Oid, parents: &[&Oid], message: &str) -> String {
+        let mut s = format!("tree {}\n", tree.as_ref().to_hex_string().unwrap());
+        for p in parents {
+            s += &format!("parent {}\n", p.as_ref().to_hex_string().unwrap());
+        }
+        s + "author A U Thor <a@example.com> 1700000000 +0000\n\
+             committer A U Thor <a@example.com> 1700000000 +0000\n\n"
+            + message
+    }
+
+    /// `s` in a heap buffer of exactly its length, NUL included.
+    fn exact(s: &str) -> Box<CStr> {
+        CString::new(s).unwrap().into_boxed_c_str()
+    }
+
+    /// A bare repository holding the empty tree.
+    fn repo_with_tree(tag: &str) -> (TempRepo, Oid) {
+        let repo = TempRepo::new(&format!("signatures-{tag}"));
+        let tree = write_raw(&repo, b"", ffi::GIT_OBJECT_TREE);
+        (repo, tree)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_round_trip() {
+        let (temp, tree) = repo_with_tree("round-trip");
+        let repo = repository(&temp);
+        let root_content = content(&tree, &[], "root\n");
+        let root = create_with_signature(repo, &exact(&root_content), None, None).unwrap();
+        let unsigned = content(&tree, &[&root], "signed\n");
+        for field in [None, Some("x-signature"), Some("gpgsig-sha256")] {
+            let (mut text, mut sig) = (exact(&unsigned), exact(SIGNATURE));
+            let f = field.map(exact);
+            let id = create_with_signature(repo, &text, Some(&sig), f.as_deref()).unwrap();
+            // libgit2 kept none of them.
+            drop((
+                std::mem::replace(&mut text, exact("")),
+                std::mem::replace(&mut sig, exact("")),
+            ));
+            drop(f);
+            let f = field.map(exact);
+            let (signature, signed) = extract_signature(repo, id.as_ref(), f.as_deref()).unwrap();
+            drop(f);
+            assert_eq!(signature.as_ref().as_bytes(), SIGNATURE.as_bytes());
+            assert_eq!(signed.as_ref().as_bytes(), unsigned.as_bytes());
+            drop(signature);
+            assert_eq!(signed.as_ref().len(), unsigned.len());
+        }
+        // Unsigned contents are written as they are, and have no signature.
+        let id = create_with_signature(repo, &exact(&unsigned), None, Some(c"ignored")).unwrap();
+        let e = extract_signature(repo, id.as_ref(), None).unwrap_err();
+        assert_eq!(
+            (e.code(), e.class()),
+            (Some(ErrorCode::NotFound), Some(ErrorClass::Object))
+        );
+        assert_eq!(e.message(), c"this commit is not signed");
+    }
+
+    /// Every failure leaves nothing behind: contents that do not parse, a signed one
+    /// without a blank line, a tree that does not exist, an object that is not a commit,
+    /// an id that names nothing, and a repository without paths.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failures_leave_nothing_behind() {
+        let (temp, tree) = repo_with_tree("failures");
+        let repo = repository(&temp);
+        let good = content(&tree, &[], "m\n");
+        for bad in [
+            "",
+            "tree xyz\n",
+            "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+        ] {
+            let e = create_with_signature(repo, &exact(bad), Some(c"sig"), None).unwrap_err();
+            assert_eq!(e.raw_code(), -1, "{bad:?}: {e:?}");
+        }
+        let headers_only = good.split_once("\n\n").unwrap().0.to_owned() + "\n";
+        let e = create_with_signature(repo, &exact(&headers_only), Some(c"sig"), None).unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        assert_eq!(e.message(), c"malformed commit contents");
+        let missing = Oid::from_raw(&[7; 20], OidType::Sha1).unwrap();
+        let orphan = content(&missing, &[], "m\n");
+        assert!(create_with_signature(repo, &exact(&orphan), None, None).is_err());
+        let pathless = Repository::new().unwrap();
+        assert!(create_with_signature(pathless.as_ref(), &exact(&good), None, None).is_err());
+
+        let unended = headers_only.trim_end().to_owned() + "\ngpgsig a\n b";
+        let id = create_with_signature(repo, &exact(&unended), None, None).unwrap();
+        let e = extract_signature(repo, id.as_ref(), None).unwrap_err();
+        assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Object)));
+        assert_eq!(e.message(), c"malformed header");
+
+        let blob = write_raw(&temp, b"not a commit", ffi::GIT_OBJECT_BLOB);
+        let e = extract_signature(repo, blob.as_ref(), None).unwrap_err();
+        assert_eq!(
+            (e.code(), e.class()),
+            (Some(ErrorCode::NotFound), Some(ErrorClass::Invalid))
+        );
+        let e = extract_signature(repo, missing.as_ref(), None).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+        assert!(extract_signature(pathless.as_ref(), missing.as_ref(), None).is_err());
+    }
+
+    /// An id of another type than the repository's, at any type byte, and an empty
+    /// field are refused before libgit2 reads anything.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn foreign_ids_and_empty_fields_are_refused() {
+        let (temp, tree) = repo_with_tree("refused");
+        let repo = repository(&temp);
+        let id = create_with_signature(repo, &exact(&content(&tree, &[], "m\n")), Some(c"s"), None)
+            .unwrap();
+        let mut wide = Oid::from_raw(&id.as_ref().id(), OidType::Sha256).unwrap();
+        for kind in [OidType::Sha256.raw() as u8, 0, 9, u8::MAX] {
+            wide.as_mut().set_raw_kind(kind);
+            let e = extract_signature(repo, wide.as_ref(), None).unwrap_err();
+            assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+        }
+        let e = extract_signature(repo, id.as_ref(), Some(c"")).unwrap_err();
+        assert_eq!(e.message(), c"the signature header field name is empty");
+        let (signature, _) = extract_signature(repo, id.as_ref(), Some(c"gpgsig")).unwrap();
+        assert_eq!(signature.as_ref().as_bytes(), b"s");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_on_many_threads() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let (temp, tree) = repo_with_tree(&format!("thread-{t}"));
+                    let repo = repository(&temp);
+                    let text = content(&tree, &[], &format!("thread {t}\n"));
+                    let id =
+                        create_with_signature(repo, &exact(&text), Some(c"sig"), None).unwrap();
+                    let (sig, signed) = extract_signature(repo, id.as_ref(), None).unwrap();
+                    assert_eq!(sig.as_ref().as_bytes(), b"sig");
+                    assert_eq!(signed.as_ref().as_bytes(), text.as_bytes());
+                });
+            }
+        });
+    }
+}
+
+/// UB tests for signing through `CreateExtOptionsMut::set_signer`, which stores a
+/// `SignatureCallback` in the options for `git_commit_create_ext` (driven through the
+/// `create_ext` fixture until that routine is wrapped).
+///
+/// libgit2 calls the trampoline once per commit, with a builder lent for the call and
+/// contents it frees when a header is added: the closure reads its copy of the contents
+/// after adding headers (ASan: use after free), and its own state is written between
+/// calls (BSan: nothing keeps a pointer into it). A refusal fails the commit with its
+/// code, a panic with `GIT_EUSER`, kept until resumed. The options borrow the callback
+/// for as long as they live (`compile_fail/`), replaced and cleared ones included, and
+/// each thread signs in its own repository at once (TSan).
+mod signers {
+    use std::cell::{Cell, RefCell};
+    use std::ffi::CStr;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::StreamError;
+    use libgit2::libgit2::object::commit::{
+        CommitBuilderMut, CreateExtOptions, Header, SignatureCallback,
+    };
+    use libgit2::libgit2::repository::repository::RepositoryRef;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::create_ext::create;
+
+    /// What the closure is told to return, and what it saw.
+    struct Signer {
+        rc: Cell<i32>,
+        calls: Cell<usize>,
+        content: RefCell<Vec<u8>>,
+    }
+
+    impl Signer {
+        fn new() -> Self {
+            Self {
+                rc: Cell::new(0),
+                calls: Cell::new(0),
+                content: RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Adds `signature` as `gpgsig`, then reads the contents again, and returns
+        /// the code it is told to.
+        fn sign(
+            &self,
+            mut builder: CommitBuilderMut<'_>,
+            content: &CStr,
+            signature: &CStr,
+        ) -> Result<(), StreamError> {
+            self.calls.set(self.calls.get() + 1);
+            builder
+                .add_header(c"gpgsig", signature)
+                .map_err(StreamError::from)?;
+            *self.content.borrow_mut() = content.to_bytes().to_vec();
+            match self.rc.get() {
+                rc if rc >= 0 => Ok(()),
+                rc => Err(StreamError::new(ErrorClass::Callback, c"refused")
+                    .with_code(ErrorCode::from_raw(rc).unwrap())),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signers_sign_each_commit_once() {
+        let repo = TempRepo::new("signer-each");
+        let state = Signer::new();
+        let mut f = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, content: &CStr| {
+            state.sign(builder, content, c"-----BEGIN-----\nsig\n-----END-----")
+        };
+        let mut signer = SignatureCallback::new(&mut f);
+        let headers = [Header::new(c"x-extra", c"before the signature")];
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_extra_headers(&headers);
+        options.as_mut().set_signer(Some(&mut signer));
+        let text = create(&repo, &options).unwrap();
+        assert_eq!(state.calls.get(), 1);
+        assert!(
+            text.contains(
+                "\nx-extra before the signature\ngpgsig -----BEGIN-----\n sig\n -----END-----\n"
+            ),
+            "{text}"
+        );
+        let unsigned = String::from_utf8(state.content.borrow().clone()).unwrap();
+        assert!(!unsigned.contains("gpgsig") && unsigned.ends_with("\nmsg\n"));
+
+        for (code, written) in [(1, true), (-30, false), (-1, false), (-7, false)] {
+            state.rc.set(code);
+            let result = create(&repo, &options);
+            assert_eq!(result.as_ref().err(), (!written).then_some(&code), "{code}");
+            assert_eq!(result.map(|t| t.contains("gpgsig")).unwrap_or(false), written);
+        }
+        drop(signer);
+        assert_eq!(state.calls.get(), 5);
+    }
+
+    /// A replaced signer is not called again, a cleared one calls nothing, and both
+    /// stay borrowed until the options are dropped.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn replaced_and_cleared_signers() {
+        let repo = TempRepo::new("signer-replaced");
+        let (first, second) = (Signer::new(), Signer::new());
+        let mut f1 = |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| first.sign(b, c, c"1");
+        let mut f2 = |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| second.sign(b, c, c"2");
+        let (mut s1, mut s2) = (SignatureCallback::new(&mut f1), SignatureCallback::new(&mut f2));
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_signer(Some(&mut s1));
+        options.as_mut().set_signer(Some(&mut s2));
+        assert!(options.as_ref().has_signer());
+        assert!(create(&repo, &options).unwrap().contains("\ngpgsig 2\n"));
+        assert!(create(&repo, &options).unwrap().contains("\ngpgsig 2\n"));
+        options.as_mut().set_signer(None);
+        assert!(!options.as_ref().has_signer());
+        assert!(!create(&repo, &options).unwrap().contains("gpgsig"));
+        drop((s1, s2));
+        assert_eq!((first.calls.get(), second.calls.get()), (0, 2));
+    }
+
+    /// A panic fails its commit with `GIT_EUSER` and every later one until it is
+    /// resumed, once the options are gone; the callback then signs again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signer_panics_are_kept_until_resumed() {
+        let repo = TempRepo::new("signer-panics");
+        let state = Signer::new();
+        let mut f = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, content: &CStr| {
+            if state.calls.get() == 1 {
+                state.calls.set(2);
+                panic!("signing panicked");
+            }
+            state.sign(builder, content, c"ok")
+        };
+        let mut signer = SignatureCallback::new(&mut f);
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_signer(Some(&mut signer));
+        assert!(create(&repo, &options).is_ok());
+        assert_eq!(create(&repo, &options), Err(ErrorCode::User.raw()));
+        assert_eq!(create(&repo, &options), Err(ErrorCode::User.raw()));
+        let caught = catch_unwind(AssertUnwindSafe(|| signer.resume_panic()));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"signing panicked")
+        );
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_signer(Some(&mut signer));
+        assert!(create(&repo, &options).unwrap().contains("\ngpgsig ok\n"));
+        drop(signer);
+        assert_eq!(state.calls.get(), 3);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signers_on_many_threads() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let repo = TempRepo::new(&format!("signer-thread-{t}"));
+                    let state = Signer::new();
+                    let mut f =
+                        |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| state.sign(b, c, c"t");
+                    let mut signer = SignatureCallback::new(&mut f);
+                    let mut options = CreateExtOptions::new();
+                    options.as_mut().set_signer(Some(&mut signer));
+                    for _ in 0..4 {
+                        assert!(create(&repo, &options).unwrap().contains("\ngpgsig t\n"));
+                    }
+                    drop(signer);
+                    assert_eq!(state.calls.get(), 4);
+                });
+            }
+        });
+    }
 }

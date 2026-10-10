@@ -315,3 +315,77 @@ fn arrays_cross_threads() {
     });
     thread::spawn(move || drop((array, owners))).join().unwrap();
 }
+
+/// UB tests for `prettify` (`git_message_prettify`): libgit2 reads the message for the
+/// call only and fills a fresh buffer it owns, released once (LSan, ASan). Messages
+/// sit in exact-length heap strings, overwritten and freed after the call: blank,
+/// whitespace-only, comment-only, unterminated last lines, long lines, and every
+/// comment byte, those above `0x7f` (negative as a C `char`) included. Runs on many
+/// threads at once (TSan).
+mod prettify {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::object::message::prettify;
+
+    fn exact(bytes: &[u8]) -> Box<CStr> {
+        CString::new(bytes).unwrap().into_boxed_c_str()
+    }
+
+    fn messages() -> Vec<Vec<u8>> {
+        let mut out: Vec<Vec<u8>> = [
+            &b""[..],
+            b"\n",
+            b" \t\r\n\x0b\x0c",
+            b"subject",
+            b"subject\n\n\n\nbody   \n\n",
+            b"# only a comment",
+            b"#\n#\n#",
+            b"\xff\xfe line\n\x80 other",
+            b"a\n \n\t\nb\n",
+        ]
+        .iter()
+        .map(|m| m.to_vec())
+        .collect();
+        out.push([b'x'; 9000].iter().chain(b"   \n").copied().collect());
+        out
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn messages_are_read_during_the_call_only() {
+        let comments = if cfg!(bsan) {
+            vec![None, Some(b'#'), Some(0xff)]
+        } else {
+            std::iter::once(None)
+                .chain((0..=u8::MAX).map(Some))
+                .collect()
+        };
+        for message in messages() {
+            for &comment in &comments {
+                let mut text = exact(&message);
+                let out = prettify(&text, comment).unwrap();
+                text = exact(b"");
+                drop(text);
+                let bytes = out.as_ref().as_bytes();
+                assert!(bytes.is_empty() || bytes.ends_with(b"\n"));
+                assert!(!bytes.windows(3).any(|w| w == b"\n\n\n"));
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn prettify_on_many_threads() {
+        thread::scope(|s| {
+            for t in 0..4u8 {
+                s.spawn(move || {
+                    for message in messages() {
+                        let out = prettify(&exact(&message), Some(b'#' + t)).unwrap();
+                        drop(out);
+                    }
+                });
+            }
+        });
+    }
+}

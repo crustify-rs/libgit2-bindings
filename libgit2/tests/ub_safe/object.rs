@@ -39,19 +39,20 @@
 //!
 //! Every test calls libgit2, so Miri skips them all.
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 use libgit2::ffi;
 use libgit2::libgit2::core::types::ObjectType;
 use libgit2::libgit2::filter::filter::FilterList;
 use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectIdOptions, ObjectIdOptionsMut};
 use libgit2::libgit2::oid::oid::{Oid, OidType};
-use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
+use libgit2::libgit2::repository::repository::{
+    Repository, RepositoryBox, RepositoryError, RepositoryRef,
+};
 use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
 use crate::fixture::object_and_tree_entry::{
-    enable_caching, object_owner, object_view, open_testrepo, repository, set_cache_max_size,
-    write_raw,
+    enable_caching, object_view, open_testrepo, repository, set_cache_max_size, write_raw,
 };
 use crate::fixture::{TempRepo, isolated, object_id};
 
@@ -88,6 +89,12 @@ fn hex(object: &ObjectArc<'_>) -> String {
     object_view(object).0
 }
 
+/// Whether `owner` is the repository `repo` holds: one `git_repository` lends one copy
+/// of its path, which another repository over the same directory does not share.
+fn is_owner(owner: RepositoryRef<'_>, repo: &RepositoryBox) -> bool {
+    owner.path().map(CStr::as_ptr) == repo.as_ref().path().map(CStr::as_ptr)
+}
+
 fn assert_failed(result: Result<ObjectArc<'_>, RepositoryError>, code: i32, class: ErrorClass) {
     let e = result.unwrap_err();
     assert_eq!((e.raw_code(), e.class()), (code, Some(class)), "{e:?}");
@@ -113,7 +120,7 @@ fn lookups_and_clones_share_one_object() {
         assert_eq!(ObjectArc::ptr_eq(&any, &typed), cached);
         assert_eq!(ObjectArc::ptr_eq(&any, &short), cached);
         assert_eq!(object_view(&any), (hex_id.to_owned(), kind.raw()));
-        assert_eq!(object_owner(&any), repo.as_c_ptr());
+        assert!(is_owner(any.as_ref().owner(), &repo));
         let clone = typed.clone();
         let copy = short.as_ref().to_object();
         drop((any, typed, short));
@@ -297,8 +304,9 @@ fn each_repository_has_its_own_objects() {
     let from_a = Object::lookup(a.as_ref(), id(COMMIT).as_ref(), None).unwrap();
     let from_b = Object::lookup(b.as_ref(), id(COMMIT).as_ref(), None).unwrap();
     assert!(!ObjectArc::ptr_eq(&from_a, &from_b));
-    assert_eq!(object_owner(&from_a), a.as_c_ptr());
-    assert_eq!(object_owner(&from_b), b.as_c_ptr());
+    assert!(is_owner(from_a.as_ref().owner(), &a));
+    assert!(is_owner(from_b.as_ref().owner(), &b));
+    assert!(!is_owner(from_a.as_ref().owner(), &b));
     drop(from_a);
     drop(a);
     assert_eq!(hex(&from_b), COMMIT);
@@ -885,4 +893,64 @@ mod kinds_short_ids_and_contents {
             }
         }
     }
+}
+
+/// An object's id lives in the object, as long as any owner of it does; its owner is
+/// the repository handle it was looked up through, which outlives the object and looks
+/// further objects up into the same cache. An id written over after its lookup does not
+/// change it (BSan: libgit2 copied it).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn ids_and_owners_borrow_from_their_object() {
+    let repo = open_testrepo();
+    for (hex_id, kind) in [
+        (COMMIT, ObjectType::Commit),
+        (TREE, ObjectType::Tree),
+        (BLOB, ObjectType::Blob),
+        (TAG, ObjectType::Tag),
+    ] {
+        let mut probe = id(hex_id);
+        let object = Object::lookup(repo.as_ref(), probe.as_ref(), Some(kind)).unwrap();
+        probe.as_mut().set_id([0x5a; 32]);
+        let clone = object.clone();
+        let handle = clone.as_ref();
+        let object_id = handle.id();
+        drop(object);
+        assert_eq!(object_id.to_hex_string().unwrap(), hex_id);
+        assert_eq!(object_id.kind(), Some(OidType::Sha1));
+        let owner = handle.owner();
+        drop(clone);
+        assert!(is_owner(owner, &repo));
+        let again = Object::lookup(owner, id(hex_id).as_ref(), None).unwrap();
+        assert_eq!(again.as_ref().id(), id(hex_id).as_ref());
+    }
+    // A prefix lookup's object holds the full id; derived objects their own.
+    let short = Object::lookup_prefix(repo.as_ref(), id(COMMIT).as_ref(), 7, None).unwrap();
+    assert_eq!(short.as_ref().id().to_hex_string().unwrap(), COMMIT);
+    let tree = short.as_ref().peel(Some(ObjectType::Tree)).unwrap();
+    assert_eq!(tree.as_ref().id().to_hex_string().unwrap(), TREE);
+    let readme = tree.as_ref().lookup_bypath(c"README", None).unwrap();
+    drop((short, tree));
+    assert_eq!(readme.as_ref().id().to_hex_string().unwrap(), BLOB);
+    assert!(is_owner(readme.as_ref().owner(), &repo));
+}
+
+/// Objects of a repository without paths are never built, and those of a temporary
+/// repository report it as their owner after it wrote them.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn owners_of_written_objects() {
+    let temp = TempRepo::new("owners");
+    let blob = write_raw(&temp, b"owned", ffi::GIT_OBJECT_BLOB);
+    let repo = repository(&temp);
+    let object = Object::lookup(repo, blob.as_ref(), None).unwrap();
+    assert_eq!(object.as_ref().id(), blob.as_ref());
+    let owner = object.as_ref().owner();
+    assert_eq!(owner.path(), repo.path());
+    assert_eq!(
+        owner.path().map(CStr::as_ptr),
+        repo.path().map(CStr::as_ptr)
+    );
+    let pathless = Repository::new().unwrap();
+    assert!(Object::lookup(pathless.as_ref(), blob.as_ref(), None).is_err());
 }

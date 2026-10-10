@@ -1,5 +1,10 @@
 //! Safe wrappers over `include/git2/message.h`.
 //!
+//! # Cleaning up messages
+//!
+//! [`prettify`] cleans up a commit message as `git commit` does (git's `stripspace`),
+//! into a fresh [`BufVal`] of libgit2's allocator.
+//!
 //! # Trailers
 //!
 //! A [`MessageTrailer`] is a `git_message_trailer`: one `key: value` pair of the
@@ -83,8 +88,47 @@ use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use ffibox::{CBorrowedPtr, CCell, CDispose, CSlice, CVal, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::util::errors::{ErrorBuf, last};
 use crate::libgit2::util::sys::errors::runtime_pinned;
+
+/// `message` cleaned up as git cleans up a commit message: trailing whitespace is
+/// removed from every line, runs of blank lines are collapsed into one, blank lines at
+/// the start and end are removed, and the result ends with a newline unless it is empty.
+/// With a `comment` byte, the lines that start with it are removed first (git's
+/// `--strip-comments`, `#` by default there); a comment line is any line whose first
+/// byte is the comment byte, whitespace before it making it a line like any other.
+///
+/// Pins the runtime first. Fails, with libgit2's error, when the result cannot be
+/// allocated or libgit2 cannot be initialised.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::object::message::prettify;
+///
+/// let message = prettify(c"\n\nsubject  \n\n\n# comment\nbody\t\n\n", Some(b'#')).unwrap();
+/// assert_eq!(message.as_ref().as_bytes(), b"subject\n\nbody\n");
+/// let kept = prettify(c"subject\n# comment", None).unwrap();
+/// assert_eq!(kept.as_ref().as_bytes(), b"subject\n# comment\n");
+/// ```
+///
+/// Wraps: git_message_prettify
+pub fn prettify(message: &CStr, comment: Option<u8>) -> Result<BufVal, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut out = Buf::new();
+    let buf = out.as_mut().as_mut_ptr();
+    let (strip, comment) = match comment {
+        Some(c) => (1, c as core::ffi::c_char),
+        None => (0, 0),
+    };
+    // SAFETY: `buf` addresses the fresh, empty buffer `out` holds, which libgit2 fills
+    // (`git_buf_fromstr`) or leaves empty; `message` is NUL-terminated and read for the
+    // call only. The runtime is pinned, so allocations and errors reach live state.
+    let rc = unsafe { ffi::git_message_prettify(buf, message.as_ptr(), strip, comment) };
+    if rc < 0 { Err(last()) } else { Ok(out) }
+}
 
 /// One trailer of a commit message (`git_message_trailer`): a key and its value,
 /// borrowed for `'t` from whatever holds the strings.
@@ -987,5 +1031,68 @@ mod unit_tests {
             s.spawn(move || m.set_value(c"C O Mitter"));
         });
         assert_eq!(moved.as_ref().value(), c"C O Mitter");
+    }
+
+    /// Without libgit2's runtime nothing is cleaned up: the error is synthesised without
+    /// calling libgit2. libgit2 cannot initialise under an allocator that refuses every
+    /// request; alone in a child, where nothing has initialised it yet.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn prettify_without_runtime_fails_cleanly() {
+        use crate::libgit2::util::errors::ErrorClass;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use core::ffi::c_int;
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+        const NAME: &str =
+            "libgit2::object::message::unit_tests::prettify_without_runtime_fails_cleanly";
+
+        /// Refuses every request, which `Alloc` allows.
+        struct Never;
+
+        // SAFETY: every allocation fails, which `Alloc` allows; nothing is ever handed
+        // out, so `free` never receives a block.
+        unsafe impl Alloc for Never {
+            fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn realloc(
+                _: Option<NonNull<u8>>,
+                _: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn free(_: NonNull<u8>) {}
+        }
+
+        if std::env::var(CHILD).as_deref() != Ok(NAME) {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([NAME, "--exact", "--test-threads=1"])
+                .env(CHILD, NAME)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "{stdout}"
+            );
+            return;
+        }
+        let allocator = Allocator::new::<Never>();
+        // SAFETY: `Allocator` is transparent over a `git_allocator` with every member
+        // set; libgit2 copies it before anything is allocated in this child.
+        let rc = unsafe {
+            ffi::git_libgit2_opts(
+                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                allocator.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let error = prettify(c"subject", None).unwrap_err();
+        assert!(!runtime_pinned());
+        assert_eq!(error.class(), Some(ErrorClass::Invalid));
+        assert_eq!(error.message(), c"library has not been initialized");
     }
 }

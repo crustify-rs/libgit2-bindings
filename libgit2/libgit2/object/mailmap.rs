@@ -15,11 +15,15 @@
 //! repository's config, working directory and blobs during the call only. So a
 //! [`MailmapBox`] borrows neither, and outlives both.
 //!
-//! The routines over a mailmap go on its handles, which their own runs add: lookups
-//! (`git_mailmap_resolve`, `git_mailmap_resolve_signature`, and the
-//! `git_commit_*_with_mailmap` pair), which take a `const git_mailmap *`, on the shared
-//! [`MailmapRef`]; `git_mailmap_add_entry`, which inserts into the entry vector, on the
-//! exclusive [`MailmapMut`].
+//! The routines over a mailmap go on its handles: lookups ([`MailmapRef::resolve`],
+//! and `git_mailmap_resolve_signature` and the `git_commit_*_with_mailmap` pair, which
+//! their own runs add), which take a `const git_mailmap *`, on the shared [`MailmapRef`];
+//! [`MailmapMut::add_entry`], which inserts into the entry vector, on the exclusive
+//! [`MailmapMut`].
+//!
+//! A lookup returns the strings it resolves to: the ones it was given, or an entry's,
+//! which the mailmap owns until the entry is replaced or the mailmap freed. So the
+//! result borrows both the inputs and the mailmap, which cannot be written meanwhile.
 //!
 //! # Threads
 //!
@@ -31,6 +35,7 @@
 //! returns at once without writing. The one writer, `git_mailmap_add_entry`, needs the
 //! exclusive handle.
 
+use core::ffi::CStr;
 use core::fmt;
 use core::ptr::{self, NonNull};
 use std::borrow::Cow;
@@ -262,6 +267,124 @@ impl Mailmap {
         // `git_mailmap_new` and released by `git_mailmap_free`; it keeps no pointer to
         // `repo`.
         unsafe { MailmapBox::from_c(out) }.ok_or_else(last)
+    }
+}
+
+impl<'a> MailmapRef<'a> {
+    /// The real name and email of the identity `name <email>`, as the mailmap maps it:
+    /// the entry replacing that name and email, or else the entry replacing that email
+    /// alone (emails compare exactly, names too), supplies the real name and email it
+    /// has, and the identity's own fill in the rest. Without a matching entry the
+    /// identity resolves to itself.
+    ///
+    /// The strings returned are `name` and `email` or the entry's, which the mailmap
+    /// keeps, so they borrow both: the mailmap cannot be written while they live.
+    ///
+    /// ```
+    /// # if cfg!(miri) { return; }
+    /// use libgit2::libgit2::object::mailmap::Mailmap;
+    ///
+    /// let mailmap = Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
+    /// let (name, email) = mailmap.as_ref().resolve(c"Someone", c"old@example.com");
+    /// assert_eq!((name, email), (c"Real Name", c"real@example.com"));
+    /// assert_eq!(mailmap.as_ref().resolve(c"A", c"a@example.com"), (c"A", c"a@example.com"));
+    /// ```
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::object::mailmap::Mailmap;
+    ///
+    /// let mut mailmap = Mailmap::new().unwrap();
+    /// let (name, _) = mailmap.as_ref().resolve(c"A", c"a@example.com");
+    /// mailmap.as_mut().add_entry(None, None, None, c"a@example.com").unwrap();
+    /// let _ = name;
+    /// ```
+    ///
+    /// Wraps: git_mailmap_resolve
+    pub fn resolve<'s>(&self, name: &'s CStr, email: &'s CStr) -> (&'s CStr, &'s CStr)
+    where
+        'a: 's,
+    {
+        let (mut real_name, mut real_email) = (ptr::null(), ptr::null());
+        // SAFETY: two writable slots; the handle addresses a live mailmap for `'a`, which
+        // libgit2 only reads (see the module docs); `name` and `email` are NUL-terminated
+        // and read for the call. It needs no allocation and sets no error, and cannot
+        // fail with non-NULL arguments.
+        let rc = unsafe {
+            ffi::git_mailmap_resolve(
+                &mut real_name,
+                &mut real_email,
+                self.as_ptr(),
+                name.as_ptr(),
+                email.as_ptr(),
+            )
+        };
+        debug_assert_eq!(rc, 0);
+        // SAFETY: libgit2 set both slots, each to the string given or to a string of one
+        // of the mailmap's entries, NUL-terminated; the given ones live for `'s`, and the
+        // entries' for `'a`, outliving `'s`, unchanged since nothing writes the mailmap
+        // while it is shared.
+        unsafe { (CStr::from_ptr(real_name), CStr::from_ptr(real_email)) }
+    }
+}
+
+impl MailmapMut<'_> {
+    /// Adds an entry mapping the identity with email `replace_email` (and, with
+    /// `replace_name`, that name only) to `real_name` and `real_email`. An entry for the
+    /// same name and email replaces the previous one. A missing or empty real name or
+    /// email leaves the identity's own in place when it is resolved; a missing or empty
+    /// `replace_name` matches any name. The strings are copied.
+    ///
+    /// Refuses an empty `replace_email` before calling libgit2, with libgit2's own error
+    /// for it (`GIT_ERROR_INVALID`, "invalid argument: 'replace_email && *replace_email'"),
+    /// which libgit2 raises only after allocating the entry, leaking it (and aborts a
+    /// debug build). Fails with libgit2's error when the entry cannot be allocated.
+    ///
+    /// ```
+    /// # if cfg!(miri) { return; }
+    /// use libgit2::libgit2::object::mailmap::Mailmap;
+    ///
+    /// let mut mailmap = Mailmap::new().unwrap();
+    /// mailmap
+    ///     .as_mut()
+    ///     .add_entry(Some(c"Real Name"), None, Some(c"Old Name"), c"old@example.com")
+    ///     .unwrap();
+    /// let resolved = mailmap.as_ref().resolve(c"Old Name", c"old@example.com");
+    /// assert_eq!(resolved, (c"Real Name", c"old@example.com"));
+    /// ```
+    ///
+    /// Wraps: git_mailmap_add_entry
+    pub fn add_entry(
+        &mut self,
+        real_name: Option<&CStr>,
+        real_email: Option<&CStr>,
+        replace_name: Option<&CStr>,
+        replace_email: &CStr,
+    ) -> Result<(), ErrorBuf> {
+        if replace_email.is_empty() {
+            set(
+                ErrorClass::Invalid,
+                c"invalid argument: 'replace_email && *replace_email'",
+            );
+            return Err(last());
+        }
+        let opt = |s: Option<&CStr>| s.map_or(ptr::null(), CStr::as_ptr);
+        let mm = self.as_mut_ptr();
+        // SAFETY: the exclusive handle addresses a live mailmap nothing else reaches
+        // meanwhile, into whose entry vector libgit2 inserts (freeing an entry it
+        // replaces, whose strings no shared borrow can still hold); the strings are NULL
+        // (all but `replace_email`) or NUL-terminated, read and copied during the call,
+        // and `replace_email` is not empty. The mailmap was built after the runtime was
+        // pinned, so its allocations and errors reach live state.
+        let rc = unsafe {
+            ffi::git_mailmap_add_entry(
+                mm,
+                opt(real_name),
+                opt(real_email),
+                opt(replace_name),
+                replace_email.as_ptr(),
+            )
+        };
+        if rc < 0 { Err(last()) } else { Ok(()) }
     }
 }
 
@@ -902,5 +1025,89 @@ not an entry
             pair("Real Name", "real@example.com")
         );
         assert_eq!(resolve(parsed.as_ref(), c"N", c""), pair("N", ""));
+    }
+
+    /// An empty replaced email is refused before libgit2 sees it, with the error
+    /// libgit2 raises for it, and nothing is added or leaked (LSan; libgit2 allocates the
+    /// entry before its check and never frees it).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn empty_replaced_emails_are_refused_before_c() {
+        let mut mailmap = Mailmap::new().unwrap();
+        set(ErrorClass::Odb, c"an earlier error");
+        let e = mailmap
+            .as_mut()
+            .add_entry(Some(c"Real"), Some(c"r@x"), None, c"")
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        assert_eq!(
+            e.message(),
+            c"invalid argument: 'replace_email && *replace_email'"
+        );
+        assert_eq!(mailmap.as_ref().resolve(c"A", c""), (c"A", c""));
+    }
+
+    /// Entries added through the exclusive handle resolve through the shared one, as
+    /// libgit2's own lookup reads them: an empty string is no string, a later entry for
+    /// the same identity replaces an earlier one (freeing it: ASan flags a stale read),
+    /// and a named entry wins over the email-only one.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn added_entries_resolve() {
+        let mut mailmap = Mailmap::new().unwrap();
+        let mut m = mailmap.as_mut();
+        m.add_entry(Some(c"Email Only"), Some(c""), None, c"x@example.com")
+            .unwrap();
+        m.add_entry(
+            None,
+            Some(c"named@example.com"),
+            Some(c"Old"),
+            c"x@example.com",
+        )
+        .unwrap();
+        m.add_entry(Some(c"First"), None, Some(c""), c"y@example.com")
+            .unwrap();
+        m.add_entry(Some(c"Second"), None, None, c"y@example.com")
+            .unwrap();
+        let r = mailmap.as_ref();
+        assert_eq!(
+            r.resolve(c"Any", c"x@example.com"),
+            (c"Email Only", c"x@example.com")
+        );
+        assert_eq!(
+            r.resolve(c"Old", c"x@example.com"),
+            (c"Old", c"named@example.com")
+        );
+        assert_eq!(
+            r.resolve(c"Any", c"y@example.com"),
+            (c"Second", c"y@example.com")
+        );
+        assert_eq!(
+            r.resolve(c"Any", c"Y@example.com"),
+            (c"Any", c"Y@example.com")
+        );
+        for (name, email) in [(c"Any", c"x@example.com"), (c"Old", c"x@example.com")] {
+            assert_eq!(r.resolve(name, email), resolve_c(r, name, email));
+        }
+    }
+
+    /// `git_mailmap_resolve` itself, as the C reference: the strings it returns.
+    fn resolve_c<'s>(m: MailmapRef<'s>, name: &'s CStr, email: &'s CStr) -> (&'s CStr, &'s CStr) {
+        let (mut real_name, mut real_email): (*const c_char, *const c_char) =
+            (ptr::null(), ptr::null());
+        // SAFETY: two writable slots; `m` is live and only read; the inputs are
+        // NUL-terminated. The results point at the inputs or at the mailmap's entries,
+        // both live for `'s`.
+        unsafe {
+            let rc = ffi::git_mailmap_resolve(
+                &mut real_name,
+                &mut real_email,
+                m.as_ptr(),
+                name.as_ptr(),
+                email.as_ptr(),
+            );
+            assert_eq!(rc, 0);
+            (CStr::from_ptr(real_name), CStr::from_ptr(real_email))
+        }
     }
 }

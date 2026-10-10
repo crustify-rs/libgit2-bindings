@@ -259,3 +259,105 @@ fn mailmaps_cross_threads() {
     });
     reborrow(&mut sole);
 }
+
+/// UB tests for the mailmap's lookups and entries: `MailmapRef::resolve` and
+/// `MailmapMut::add_entry`.
+///
+/// `resolve` hands back either the strings it was given or an entry's, which the
+/// mailmap owns: each is read after the other side is overwritten (ASan flags a string
+/// read past its end or after it was freed). `add_entry` copies its strings, which are
+/// exact-length heap strings freed right after the call (BSan, ASan), and frees the entry
+/// a later one for the same identity replaces, which no lookup still holds (the borrow
+/// checker; `compile_fail` doctest). An empty replaced email, which libgit2 leaks on,
+/// is refused (LSan). Lookups run on many threads through shared handles at once, and
+/// a mailmap filled on one thread is read on others (TSan).
+mod lookups {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::object::mailmap::Mailmap;
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    fn exact(s: &str) -> Box<CStr> {
+        CString::new(s).unwrap().into_boxed_c_str()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_are_copied_and_resolved_strings_borrow_both_sides() {
+        let mut mailmap = Mailmap::new().unwrap();
+        for i in 0..40 {
+            let (real, email, old) = (
+                exact(&format!("Real {i}")),
+                exact(&format!("real{i}@example.com")),
+                exact(&format!("old{}@example.com", i % 10)),
+            );
+            let name = (i % 3 == 0).then(|| exact(&format!("Old {i}")));
+            mailmap
+                .as_mut()
+                .add_entry(Some(&real), Some(&email), name.as_deref(), &old)
+                .unwrap();
+            drop((real, email, old, name));
+        }
+        let r = mailmap.as_ref();
+        let (name, email) = (exact("Old 30"), exact("old0@example.com"));
+        let (real_name, real_email) = r.resolve(&name, &email);
+        assert_eq!((real_name, real_email), (c"Real 30", c"real30@example.com"));
+        let (other, other_email) = (exact("Someone"), exact("nobody@example.com"));
+        let (same, same_email) = r.resolve(&other, &other_email);
+        assert_eq!(same.as_ptr(), other.as_ptr());
+        assert_eq!(same_email.as_ptr(), other_email.as_ptr());
+        // The email-only entry for `old1@` is the last one added for it.
+        assert_eq!(
+            r.resolve(c"X", c"old1@example.com"),
+            (c"Real 31", c"real31@example.com")
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_and_replaced_entries_leave_nothing_behind() {
+        let mut mailmap = Mailmap::new().unwrap();
+        let mut m = mailmap.as_mut();
+        let e = m.add_entry(Some(c"R"), None, Some(c"N"), c"").unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        for round in 0..8 {
+            let real = exact(&"R".repeat(round + 1));
+            m.add_entry(Some(&real), None, Some(c"N"), c"n@example.com")
+                .unwrap();
+            m.add_entry(Some(&real), None, None, c"n@example.com")
+                .unwrap();
+        }
+        let r = mailmap.as_ref();
+        assert_eq!(r.resolve(c"N", c"n@example.com").0, c"RRRRRRRR");
+        assert_eq!(r.resolve(c"M", c"n@example.com").0, c"RRRRRRRR");
+        assert_eq!(r.resolve(c"N", c""), (c"N", c""));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lookups_on_many_threads() {
+        let mut mailmap = Mailmap::new().unwrap();
+        for i in 0..16 {
+            let email = exact(&format!("u{i}@example.com"));
+            mailmap
+                .as_mut()
+                .add_entry(Some(c"Real"), None, None, &email)
+                .unwrap();
+        }
+        let mailmap = thread::spawn(move || mailmap).join().unwrap();
+        thread::scope(|s| {
+            for t in 0..4 {
+                let r = mailmap.as_ref();
+                s.spawn(move || {
+                    for i in 0..64 {
+                        let email = exact(&format!("u{}@example.com", (i + t) % 20));
+                        let (name, _) = r.resolve(c"Who", &email);
+                        let expected: &CStr = if (i + t) % 20 < 16 { c"Real" } else { c"Who" };
+                        assert_eq!(name, expected);
+                    }
+                });
+            }
+        });
+    }
+}

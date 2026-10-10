@@ -899,9 +899,12 @@ mod array_moves {
 /// Equivalence of [`CreateExtOptions`] with the `git_commit_create_ext_options` C code
 /// builds: [`CreateExtOptions::new`] against `git_commit_create_ext_options_init`, and
 /// a sequence of commits created through `git_commit_create_ext`, one side reading C
-/// structs built for each step, the other one Rust value changed through its setters
-/// from step to step (the reference to update, the encoding, the extra headers, the
-/// signing callback, and back to none of them).
+/// structs built for each step, the other Rust values set through their setters (the
+/// reference to update, the encoding, the extra headers, and none of them), with a
+/// [`SignatureCallback`] for the steps that sign, where C passes a C callback doing the
+/// same: adding the same header, then refusing with the same error class and message
+/// when the step's code is negative. The Rust side builds its options afresh for each
+/// step, since they borrow the callback for as long as they live.
 ///
 /// Each side owns a fresh bare repository and builds the same commits over the empty
 /// tree with fixed signatures, a step's parent being the side's previous commit when
@@ -918,9 +921,15 @@ mod create_ext_options {
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::path::PathBuf;
     use std::ptr;
+    use std::rc::Rc;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::commit::{CreateExtOptions, Header};
+    use libgit2::libgit2::core::types::StreamError;
+    use libgit2::libgit2::object::commit::{
+        CommitBuilderMut, CreateExtOptions, Header, SignatureCallback,
+    };
+    use libgit2::libgit2::repository::repository::RepositoryRef;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     use super::init;
 
@@ -947,8 +956,8 @@ mod create_ext_options {
         assert_eq!(r.update_ref().is_none(), c.update_ref.is_null());
         assert_eq!(r.message_encoding().is_none(), c.message_encoding.is_null());
         assert_eq!(r.extra_headers().len(), c.extra_headers_len);
-        assert_eq!(r.sign_callback().0.is_none(), c.sign.is_none());
-        assert_eq!(r.sign_callback().1, c.payload);
+        assert_eq!(r.has_signer(), c.sign.is_some());
+        assert!(c.payload.is_null());
     }
 
     /// The signing callback's state, one per side, reached through shared borrows.
@@ -977,7 +986,32 @@ mod create_ext_options {
             )
         };
         assert_eq!(rc, 0);
-        signer.rc.get()
+        let rc = signer.rc.get();
+        if rc < 0 {
+            // SAFETY: a named class and a NUL-terminated message, which libgit2 copies.
+            let set = unsafe {
+                ffi::git_error_set_str(ffi::GIT_ERROR_CALLBACK as c_int, REFUSED.as_ptr())
+            };
+            assert_eq!(set, 0);
+        }
+        rc
+    }
+
+    /// The error both sides' signing callbacks refuse with.
+    const REFUSED: &CStr = c"signing refused";
+
+    /// The Rust side's callback: what `sign` does, through the builder's handle, over
+    /// the side's `Signer`.
+    fn rust_sign(signer: &Signer, mut builder: CommitBuilderMut<'_>) -> Result<(), StreamError> {
+        signer.calls.set(signer.calls.get() + 1);
+        builder
+            .add_header(c"gpgsig", c"--sig--\nline")
+            .map_err(StreamError::from)?;
+        match signer.rc.get() {
+            rc if rc >= 0 => Ok(()),
+            rc => Err(StreamError::new(ErrorClass::Callback, REFUSED)
+                .with_code(ErrorCode::from_raw(rc).unwrap())),
+        }
     }
 
     /// One step: the options' fields, and whether the commit's parent is the side's
@@ -1085,7 +1119,7 @@ mod create_ext_options {
         tree: *mut ffi::git_tree,
         sig: *mut ffi::git_signature,
         tip: Option<*mut ffi::git_commit>,
-        signer: Box<Signer>,
+        signer: Rc<Signer>,
     }
 
     impl Side {
@@ -1123,7 +1157,7 @@ mod create_ext_options {
                     0
                 );
             }
-            let signer = Box::new(Signer {
+            let signer = Rc::new(Signer {
                 rc: Cell::new(0),
                 calls: Cell::new(0),
             });
@@ -1278,8 +1312,10 @@ mod create_ext_options {
                     .collect()
             })
             .collect();
-        let mut options = CreateExtOptions::new();
-        let rust_payload = rust.payload();
+        let rust_signer = Rc::clone(&rust.signer);
+        let mut sign_rust = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            rust_sign(&rust_signer, builder)
+        };
         for (i, (&step, run)) in script.iter().zip(&runs).enumerate() {
             let c_headers: Vec<ffi::git_commit_header> = step
                 .headers
@@ -1308,22 +1344,342 @@ mod create_ext_options {
             };
             let expected = c.create(step, &c_opts);
 
+            let mut signer = SignatureCallback::new(&mut sign_rust);
+            let mut options = CreateExtOptions::new();
             let mut m = options.as_mut();
             m.set_update_ref(step.update_ref);
             m.set_message_encoding(step.encoding);
             m.set_extra_headers(run);
-            match step.sign {
-                // SAFETY: `sign` is sound with libgit2's arguments and the Rust side's
-                // live `Signer`, which outlives every call the options are passed to.
-                Some(_) => unsafe { m.set_sign_callback(Some(sign), rust_payload) },
-                // SAFETY: nothing is stored to call.
-                None => unsafe { m.set_sign_callback(None, ptr::null_mut()) },
-            }
+            m.set_signer(step.sign.map(|_| &mut signer));
             let got = rust.create(step, ptr::from_ref(&options).cast());
+            signer.resume_panic();
             assert_eq!(got, expected, "step {i}: {step:?}");
         }
         // Every signing step but the two refused before signing called its callback.
         assert_eq!(c.signer.calls.get(), 4);
         assert_eq!(rust.signer.calls.get(), 4);
+    }
+}
+
+/// Equivalence of `create_with_signature` and `extract_signature` with
+/// `git_commit_create_with_signature` and `git_commit_extract_signature`.
+///
+/// Each side has its own bare repository holding the empty tree, and runs one script:
+/// commits written unsigned and signed (default and custom fields, multi-line
+/// signatures, a parent), contents that do not parse, signed contents without a blank
+/// line, a missing tree; then every written commit's signature extracted under each
+/// field, from commits with no, one and two signature headers, from a blob and from a
+/// missing id. After every step the ids, the two buffers, or the codes, error classes
+/// and messages are compared.
+///
+/// libgit2 matches the field as a prefix of each header line, so a header whose name
+/// only starts with the field (`gpgsig-sha256` for `gpgsig`), placed before the one
+/// taken, loses the field's bytes from the signed data: a C defect the wrapper keeps,
+/// documented on it, and compared here like the rest.
+///
+/// Documented divergences, outside these comparisons: an id of another type than the
+/// repository's (which libgit2 formats out of bounds) and an empty field (which it scans
+/// for forever) are refused by the wrapper; the unit tests of `commit.rs` hold the
+/// refusals.
+mod signatures {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::{create_with_signature, extract_signature};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    use super::init;
+
+    type Failure = (c_int, c_int, String);
+
+    const TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    fn content(parents: &[&str], extra: &str, message: &str) -> String {
+        let mut s = format!("tree {TREE}\n");
+        for p in parents {
+            s += &format!("parent {p}\n");
+        }
+        s + "author A U Thor <a@example.com> 1700000000 +0100\n\
+             committer C O Mitter <c@example.com> 1700000001 -0200\n"
+            + extra
+            + "\n"
+            + message
+    }
+
+    struct Side {
+        dir: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Side {
+        fn new(tag: &str) -> Self {
+            init();
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-commit-sig-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let repo =
+                Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), true).unwrap();
+            let mut tree = ffi::git_oid::default();
+            let mut odb = ptr::null_mut();
+            // SAFETY: writable slots and the live repository; an empty tree is written from
+            // a live (non-NULL) empty buffer, and the odb reference released once.
+            unsafe {
+                assert_eq!(ffi::git_repository_odb(&mut odb, repo.as_c_ptr()), 0);
+                assert_eq!(
+                    ffi::git_odb_write(
+                        &mut tree,
+                        odb,
+                        c"".as_ptr().cast(),
+                        0,
+                        ffi::GIT_OBJECT_TREE
+                    ),
+                    0
+                );
+                ffi::git_odb_free(odb);
+            }
+            Self {
+                dir,
+                repo: Some(repo),
+            }
+        }
+    }
+
+    impl Drop for Side {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn c_failure(code: c_int) -> Failure {
+        // SAFETY: after init `git_error_last` never returns NULL; its message is
+        // NUL-terminated, copied before the next libgit2 call.
+        unsafe {
+            let e = ffi::git_error_last();
+            (
+                code,
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    fn opt(s: Option<&str>) -> Option<CString> {
+        s.map(|s| CString::new(s).unwrap())
+    }
+
+    fn c_create(
+        side: &Side,
+        text: &str,
+        sig: Option<&str>,
+        field: Option<&str>,
+    ) -> Result<[u8; 20], Failure> {
+        let (text, sig, field) = (CString::new(text).unwrap(), opt(sig), opt(field));
+        let mut id = ffi::git_oid::default();
+        // SAFETY: a writable id, the live repository, NUL-terminated or NULL strings.
+        let rc = unsafe {
+            ffi::git_commit_create_with_signature(
+                &mut id,
+                side.repo.as_ref().unwrap().as_c_ptr(),
+                text.as_ptr(),
+                sig.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                field.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+            )
+        };
+        if rc < 0 {
+            Err(c_failure(rc))
+        } else {
+            Ok(id.id[..20].try_into().unwrap())
+        }
+    }
+
+    fn rust_create(
+        side: &Side,
+        text: &str,
+        sig: Option<&str>,
+        field: Option<&str>,
+    ) -> Result<[u8; 20], Failure> {
+        let (text, sig, field) = (CString::new(text).unwrap(), opt(sig), opt(field));
+        let repo = side.repo.as_ref().unwrap().as_ref();
+        create_with_signature(repo, &text, sig.as_deref(), field.as_deref())
+            .map(|id| id.as_ref().id()[..20].try_into().unwrap())
+            .map_err(|e| {
+                (
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                )
+            })
+    }
+
+    type Extracted = Result<(Vec<u8>, Vec<u8>), Failure>;
+
+    fn c_extract(side: &Side, id: [u8; 20], field: Option<&str>) -> Extracted {
+        let field = opt(field);
+        let mut oid = ffi::git_oid::default();
+        oid.id[..20].copy_from_slice(&id);
+        oid.type_ = ffi::GIT_OID_SHA1 as _;
+        let (mut sig, mut data) = (ffi::git_buf::default(), ffi::git_buf::default());
+        // SAFETY: two zeroed buffers, the live repository, a live SHA-1 id, and a NULL
+        // or non-empty field; each buffer is disposed once after its copy.
+        unsafe {
+            let rc = ffi::git_commit_extract_signature(
+                &mut sig,
+                &mut data,
+                side.repo.as_ref().unwrap().as_c_ptr(),
+                &mut oid,
+                field.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+            );
+            let copy = |b: &ffi::git_buf| {
+                if b.ptr.is_null() {
+                    Vec::new()
+                } else {
+                    std::slice::from_raw_parts(b.ptr.cast::<u8>(), b.size).to_vec()
+                }
+            };
+            let out = if rc < 0 {
+                Err(c_failure(rc))
+            } else {
+                Ok((copy(&sig), copy(&data)))
+            };
+            ffi::git_buf_dispose(&mut sig);
+            ffi::git_buf_dispose(&mut data);
+            out
+        }
+    }
+
+    fn rust_extract(side: &Side, id: [u8; 20], field: Option<&str>) -> Extracted {
+        let field = opt(field);
+        let oid = Oid::from_raw(&id, OidType::Sha1).unwrap();
+        let repo = side.repo.as_ref().unwrap().as_ref();
+        extract_signature(repo, oid.as_ref(), field.as_deref())
+            .map(|(s, d)| {
+                (
+                    s.as_ref().as_bytes().to_vec(),
+                    d.as_ref().as_bytes().to_vec(),
+                )
+            })
+            .map_err(|e| {
+                (
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                )
+            })
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_match_c() {
+        let (c, rust) = (Side::new("c"), Side::new("rust"));
+        let root = c_create(&c, &content(&[], "", "root\n"), None, None).unwrap();
+        let root_hex: String = root.iter().map(|b| format!("{b:02x}")).collect();
+        let sig = "-----BEGIN PGP SIGNATURE-----\n\nabc\ndef\n-----END PGP SIGNATURE-----";
+        let creates: Vec<(String, Option<&str>, Option<&str>)> = vec![
+            (content(&[], "", "root\n"), None, None),
+            (content(&[], "", "signed\n"), Some(sig), None),
+            (
+                content(&[&root_hex], "", "child\n"),
+                Some("one line"),
+                Some("x-sig"),
+            ),
+            (
+                content(&[&root_hex], "encoding UTF-8\n", ""),
+                Some(sig),
+                Some("gpgsig"),
+            ),
+            (
+                content(&[], "gpgsig-sha256 other\n", "both\n"),
+                Some(sig),
+                None,
+            ),
+            (
+                content(&[], "gpgsig first\n", "twice\n"),
+                Some("second"),
+                None,
+            ),
+            (content(&[], "", "m\n"), Some(""), Some("")),
+            (content(&[], "", "m\n"), Some("trailing newline\n"), None),
+            (
+                content(&["dededededededededededededededededededede"], "", "m\n"),
+                None,
+                None,
+            ),
+            ("tree xyz\n".into(), Some(sig), None),
+            (String::new(), None, None),
+            (
+                content(&[], "", "x")
+                    .split_once("\n\n")
+                    .unwrap()
+                    .0
+                    .to_owned(),
+                Some(sig),
+                None,
+            ),
+            // A signature header whose continuation never ends: extracting it is malformed.
+            (
+                content(&[], "", "x")
+                    .split_once("\n\n")
+                    .unwrap()
+                    .0
+                    .to_owned()
+                    + "\ngpgsig a\n b",
+                None,
+                None,
+            ),
+        ];
+        let mut written = vec![root];
+        for (text, sig, field) in &creates {
+            let c_out = c_create(&c, text, *sig, *field);
+            assert_eq!(rust_create(&rust, text, *sig, *field), c_out, "{text:?}");
+            written.extend(c_out.ok());
+        }
+        let blob = {
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id, the live repository, a live buffer.
+            let rc = unsafe {
+                ffi::git_blob_create_from_buffer(
+                    &mut id,
+                    rust.repo.as_ref().unwrap().as_c_ptr(),
+                    c"b".as_ptr().cast(),
+                    1,
+                )
+            };
+            assert_eq!(rc, 0);
+            // SAFETY: as above, on the C side's repository.
+            let rc = unsafe {
+                ffi::git_blob_create_from_buffer(
+                    &mut id,
+                    c.repo.as_ref().unwrap().as_c_ptr(),
+                    c"b".as_ptr().cast(),
+                    1,
+                )
+            };
+            assert_eq!(rc, 0);
+            id.id[..20].try_into().unwrap()
+        };
+        written.push(blob);
+        written.push([0xde; 20]);
+        let mut found = 0;
+        for &id in &written {
+            for field in [
+                None,
+                Some("gpgsig"),
+                Some("x-sig"),
+                Some("gpg"),
+                Some("gpgsig-sha256"),
+                Some("encoding"),
+            ] {
+                let c_out = c_extract(&c, id, field);
+                found += usize::from(c_out.is_ok());
+                assert_eq!(rust_extract(&rust, id, field), c_out, "{id:x?} {field:?}");
+            }
+        }
+        assert!(found >= 6, "{found}");
     }
 }

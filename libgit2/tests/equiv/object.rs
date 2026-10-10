@@ -1334,3 +1334,167 @@ mod kind_and_short_id {
         }
     }
 }
+
+/// Equivalence of `ObjectRef::id` and `ObjectRef::owner` with `git_object_id` and
+/// `git_object_owner`.
+///
+/// Each side opens its own `testrepo.git` and looks up every kind of object by full id
+/// and by prefix, and derives objects by peeling and by path. For each object both read
+/// its id (as hex and type byte), and the repository it reports, which on each side must
+/// be the very repository it was looked up in (same address for C; the same path string
+/// for Rust, which the handle lends). The ids are compared, before and after the other
+/// owners of the object are released.
+mod id_and_owner {
+    use std::ffi::{CStr, CString};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use super::{BLOB, COMMIT, TAG, TESTREPO, TREE, init};
+
+    /// One object, by full id or by its first 7 digits, or derived from one.
+    #[derive(Clone, Copy, Debug)]
+    enum Find {
+        Full(&'static str),
+        Prefix(&'static str),
+        Peel(&'static str, ffi::git_object_t),
+        Path(&'static str, &'static CStr),
+    }
+
+    const FINDS: [Find; 9] = [
+        Find::Full(COMMIT),
+        Find::Full(TREE),
+        Find::Full(BLOB),
+        Find::Full(TAG),
+        Find::Prefix(COMMIT),
+        Find::Prefix(TAG),
+        Find::Peel(TAG, ffi::GIT_OBJECT_TREE),
+        Find::Peel(COMMIT, ffi::GIT_OBJECT_TREE),
+        Find::Path(COMMIT, c"README"),
+    ];
+
+    fn sha1(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable id and a NUL-terminated hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    fn c_find(repo: *mut ffi::git_repository, find: Find) -> *mut ffi::git_object {
+        let mut out = ptr::null_mut();
+        // SAFETY: writable slots, the live repository, live ids and paths; every
+        // intermediate object is freed once.
+        unsafe {
+            let rc = match find {
+                Find::Full(hex) => {
+                    ffi::git_object_lookup(&mut out, repo, &sha1(hex), ffi::GIT_OBJECT_ANY)
+                }
+                Find::Prefix(hex) => ffi::git_object_lookup_prefix(
+                    &mut out,
+                    repo,
+                    &sha1(hex),
+                    7,
+                    ffi::GIT_OBJECT_ANY,
+                ),
+                Find::Peel(hex, _) | Find::Path(hex, _) => {
+                    let mut from = ptr::null_mut();
+                    assert_eq!(
+                        ffi::git_object_lookup(&mut from, repo, &sha1(hex), ffi::GIT_OBJECT_ANY),
+                        0
+                    );
+                    let rc = match find {
+                        Find::Peel(_, kind) => ffi::git_object_peel(&mut out, from, kind),
+                        Find::Path(_, path) => ffi::git_object_lookup_bypath(
+                            &mut out,
+                            from,
+                            path.as_ptr(),
+                            ffi::GIT_OBJECT_ANY,
+                        ),
+                        _ => unreachable!(),
+                    };
+                    ffi::git_object_free(from);
+                    rc
+                }
+            };
+            assert_eq!(rc, 0, "{find:?}");
+        }
+        out
+    }
+
+    fn c_id(object: *const ffi::git_object) -> (String, u8) {
+        let mut out = [0u8; 65];
+        // SAFETY: a live object, whose id lives as long as it; 65 writable bytes.
+        unsafe {
+            let id = ffi::git_object_id(object);
+            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id);
+            (
+                CStr::from_bytes_until_nul(&out)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                (*id).type_ as u8,
+            )
+        }
+    }
+
+    fn rust_find<'r>(
+        repo: libgit2::libgit2::repository::repository::RepositoryRef<'r>,
+        find: Find,
+    ) -> ObjectArc<'r> {
+        let id = |hex: &str| Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap();
+        match find {
+            Find::Full(hex) => Object::lookup(repo, id(hex).as_ref(), None),
+            Find::Prefix(hex) => Object::lookup_prefix(repo, id(hex).as_ref(), 7, None),
+            Find::Peel(hex, kind) => Object::lookup(repo, id(hex).as_ref(), None)
+                .unwrap()
+                .as_ref()
+                .peel(ObjectType::from_raw(kind)),
+            Find::Path(hex, path) => Object::lookup(repo, id(hex).as_ref(), None)
+                .unwrap()
+                .as_ref()
+                .lookup_bypath(path, None),
+        }
+        .unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ids_and_owners_match_c() {
+        init();
+        let path = CString::new(TESTREPO).unwrap();
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_open(&mut c_repo, path.as_ptr()) };
+        assert_eq!(rc, 0);
+        let rust_repo = Repository::open(&path).unwrap();
+        let repo = rust_repo.as_ref();
+        for find in FINDS {
+            let c_object = c_find(c_repo, find);
+            let object = rust_find(repo, find);
+            let copy = object.clone();
+            let rust_id = object.as_ref().id();
+            let rust = (rust_id.to_hex_string().unwrap(), rust_id.raw_kind());
+            assert_eq!(rust, c_id(c_object), "{find:?}");
+            // SAFETY: a live object, only read.
+            assert_eq!(unsafe { ffi::git_object_owner(c_object) }, c_repo);
+            let owner = object.as_ref().owner();
+            assert_eq!(
+                owner.path().map(CStr::as_ptr),
+                repo.path().map(CStr::as_ptr)
+            );
+            drop(object);
+            assert_eq!(copy.as_ref().id().to_hex_string().unwrap(), rust.0);
+            // SAFETY: the object C looked up, freed once.
+            unsafe { ffi::git_object_free(c_object) };
+        }
+        // SAFETY: the C side's repository, freed once.
+        unsafe { ffi::git_repository_free(c_repo) };
+    }
+}

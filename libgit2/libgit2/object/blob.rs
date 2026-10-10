@@ -61,22 +61,45 @@
 //! (core git's) to a byte slice. libgit2 reads the bytes for the call only and touches
 //! neither its allocator nor the thread's error state, so the check needs no
 //! initialised runtime and is safe from any thread.
+//!
+//! # Writing blobs
+//!
+//! Four routines write a blob into a repository's object database and give back its
+//! id, never a `git_blob`: [`create_from_buffer`] from bytes in memory,
+//! [`create_from_workdir`] from a file of the working directory and
+//! [`create_from_disk`] from any file, both through the filters its path selects (CRLF
+//! conversion, `ident`, ...), and [`create_from_stream`] from data written piece by
+//! piece into a [`BlobWriter`], committed with [`BlobWriter::commit`]. Each takes the
+//! repository's shared handle: libgit2 loads its object database, filters and
+//! attributes through it, filling the repository's caches, and keeps nothing of it
+//! but in a writer, which borrows it until it is committed or dropped.
+//!
+//! A filter list is loaded for a path relative to the working directory, and
+//! libgit2 asserts that it is (an absolute path fails a release build with
+//! `GIT_ERROR_INTERNAL` and aborts a debug one), so the wrappers taking a path that
+//! selects filters refuse an absolute one, with the release build's error, before
+//! calling libgit2. Loading a list also initialises the built-in filters the first
+//! time, which these wrappers order with the crate's other loads (see
+//! [`filter`](crate::libgit2::filter::filter#threads)).
 
-use core::ffi::c_int;
+use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ops::{BitOr, BitOrAssign};
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::io;
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, define_ctype};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, CZeroable, define_ctype};
 
 use crate::ffi;
-use crate::libgit2::core::types::ObjectType;
+use crate::libgit2::core::types::{ObjectType, StreamError, WriteStreamBox};
+use crate::libgit2::filter::filter::{initialise_builtin_filters, relative};
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
-use crate::libgit2::oid::oid::{OidMut, OidRef};
+use crate::libgit2::oid::oid::{Oid, OidMut, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
+use crate::libgit2::util::errors::ErrorCode;
 
 /// One option of `git_blob_filter`, a single bit of a [`FilterFlags`] set
 /// (`git_blob_filter_flag_t`).
@@ -1158,6 +1181,247 @@ mod wide {
     }
 }
 
+// --- Writing blobs ---------------------------------------------------------------------
+
+/// The failure of a routine that returned `rc`, with the thread's last error.
+fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
+    Err(RepositoryError::from_libgit2(rc))
+}
+
+/// `Ok` for a path that may select filters (a relative one); for an absolute one, the
+/// error a release build of libgit2 reports from its assertion, set as the thread's.
+fn filter_path(path: &CStr) -> Result<(), RepositoryError> {
+    relative(path).or_else(|_| failed(ErrorCode::Generic.raw()))
+}
+
+/// Writes `data` into `repo`'s object database as a blob, unfiltered, and returns its
+/// id. The bytes are hashed and stored as they are, NUL bytes included, and read for
+/// the call only.
+///
+/// Fails with libgit2's error when the object database cannot be loaded (a repository
+/// without paths has none: `GIT_ERROR_INVALID`, "path cannot exist in repository") or
+/// written.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::object::blob::create_from_buffer;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let dir = std::env::temp_dir().join(format!("blob-doc-{}", std::process::id()));
+/// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+/// let repo = Repository::init(&path, true).unwrap();
+/// let id = create_from_buffer(repo.as_ref(), b"hello\n").unwrap();
+/// assert_eq!(id.as_ref().to_hex_string().unwrap(), "ce013625030ba8dba906f756967f9e9ca394464a");
+/// # drop(repo);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// ```
+///
+/// Wraps: git_blob_create_from_buffer
+pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, RepositoryError> {
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository, used on this thread only, whose object database libgit2 loads and
+    // writes through this shared handle, as `RepositoryRef` allows; `data` is live for
+    // `data.len()` bytes, read for the call only (an empty slice's pointer is non-NULL
+    // and never read).
+    let rc = unsafe {
+        ffi::git_blob_create_from_buffer(
+            out,
+            repo.as_ptr().cast_mut(),
+            data.as_ptr().cast(),
+            data.len(),
+        )
+    };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Writes the file at `path`, relative to `repo`'s working directory, into its object
+/// database as a blob, and returns its id. The content goes through the filters the
+/// path selects for the object database (`core.autocrlf`, `.gitattributes`); a
+/// symbolic link is stored as its target.
+///
+/// Refuses an absolute `path` with libgit2's `GIT_ERROR_INTERNAL` error,
+/// "unrecoverable internal error: '!((path)[0] == '/')'", before reading anything (see
+/// the [module docs](self#writing-blobs)). Fails with `GIT_ERROR_REPOSITORY`, "repository
+/// has no working directory", for a bare repository or one without paths; with
+/// [`ErrorCode::Directory`] for a directory; and with libgit2's error when the file
+/// cannot be read or filtered, or the object database cannot be written.
+///
+/// Wraps: git_blob_create_from_workdir
+pub fn create_from_workdir(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
+    filter_path(path)?;
+    initialise_builtin_filters();
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository on this thread, whose caches libgit2 fills through this shared handle;
+    // `path` is a NUL-terminated relative path, read and copied during the call.
+    let rc =
+        unsafe { ffi::git_blob_create_from_workdir(out, repo.as_ptr().cast_mut(), path.as_ptr()) };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Writes the file at `path`, anywhere on the filesystem (relative paths resolve
+/// against the process's working directory), into `repo`'s object database as a blob,
+/// and returns its id. A file inside the repository's working directory goes through
+/// the filters its path there selects, as with [`create_from_workdir`]; any other is
+/// stored as it is. A symbolic link is resolved, as libgit2 resolves the whole path.
+///
+/// Fails with [`ErrorCode::Directory`] for a directory, and with libgit2's error when
+/// the path cannot be resolved, the file cannot be read or filtered, or the object
+/// database cannot be loaded or written.
+///
+/// Wraps: git_blob_create_from_disk
+pub fn create_from_disk(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
+    initialise_builtin_filters();
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository on this thread, whose caches libgit2 fills through this shared handle;
+    // `path` is NUL-terminated, read and copied during the call. The filter path libgit2
+    // derives is the part of the resolved path after the working directory, which ends
+    // in `/`, so it is relative.
+    let rc =
+        unsafe { ffi::git_blob_create_from_disk(out, repo.as_ptr().cast_mut(), path.as_ptr()) };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Opens a [`BlobWriter`] on `repo`: data written into it piece by piece is buffered in
+/// memory, then in a temporary file of the repository's `objects` directory, until
+/// [`commit`](BlobWriter::commit) writes it as a blob. With a `hint_path`, relative to
+/// the working directory, the data goes through the filters that path selects when it
+/// is committed.
+///
+/// Prefer [`create_from_buffer`] for data already in memory.
+///
+/// Refuses an absolute `hint_path` as [`create_from_workdir`] does. Fails with libgit2's
+/// error when the temporary file cannot be created (a repository without paths has no
+/// `objects` directory: [`ErrorCode::NotFound`], "path cannot exist in repository").
+///
+/// The writer keeps the repository, which committing reads, so it lives no longer
+/// than this borrow of it:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::object::blob::create_from_stream;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let repo = Repository::open(c".").unwrap();
+/// let mut writer = create_from_stream(repo.as_ref(), None).unwrap();
+/// drop(repo);
+/// writer.write(b"data").unwrap();
+/// ```
+///
+/// Wraps: git_blob_create_from_stream
+pub fn create_from_stream<'r>(
+    repo: RepositoryRef<'r>,
+    hint_path: Option<&CStr>,
+) -> Result<BlobWriter<'r>, RepositoryError> {
+    if let Some(path) = hint_path {
+        filter_path(path)?;
+    }
+    let mut out = ptr::null_mut();
+    let hint = hint_path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `out` is a writable slot, set only on success; `repo` is a live repository
+    // on this thread, which the stream keeps (uncounted) and reads when committed, so the
+    // writer borrows it for `'r`; `hint` is NULL or a NUL-terminated relative path, which
+    // libgit2 copies.
+    let rc = unsafe { ffi::git_blob_create_from_stream(&mut out, repo.as_ptr().cast_mut(), hint) };
+    if rc < 0 {
+        return failed(rc);
+    }
+    // SAFETY: on success `out` is a fresh, open blob stream the caller owns alone, whose
+    // `free` member releases it; it is never closed, only written, then committed or
+    // freed (see `BlobWriter`).
+    let stream = unsafe { WriteStreamBox::from_c(out) }.expect("a stream opened without a stream");
+    Ok(BlobWriter {
+        stream,
+        _repo: PhantomData,
+    })
+}
+
+/// A blob being written piece by piece into a repository (`git_blob_create_from_stream`):
+/// written with [`write`](Self::write) (or through [`io::Write`]), then committed into
+/// the object database with [`commit`](Self::commit), which gives its id. Dropping it
+/// discards what was written, temporary file included.
+///
+/// The writer is libgit2's blob stream, a `git_writestream`, but never lent as one: a
+/// blob stream that is closed, as code taking a stream to write into closes it, can no
+/// longer be committed (libgit2 would call a NULL function), so the writer only writes
+/// and commits it.
+///
+/// `'r` is the borrow of the repository it writes to, which committing reads. It stays
+/// on that repository's thread:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::blob::BlobWriter;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(writer: BlobWriter<'static>) {
+///     send(writer)
+/// }
+/// ```
+///
+/// Handwritten
+pub struct BlobWriter<'r> {
+    /// The open blob stream, never closed: committed or freed.
+    stream: WriteStreamBox,
+    /// The repository the stream keeps, which committing reads.
+    _repo: PhantomData<RepositoryRef<'r>>,
+}
+
+impl<'r> BlobWriter<'r> {
+    /// Appends `data` to the blob. libgit2 copies it into the writer's buffer, which it
+    /// flushes to the temporary file once full.
+    ///
+    /// Fails with the operating system's error when the temporary file cannot be
+    /// written; the writer then refuses every later write and its commit.
+    pub fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        self.stream.as_mut().write(data)
+    }
+
+    /// Writes the data into the object database as a blob, through the filters the
+    /// writer's hint path selects, and returns its id. The writer is freed either way,
+    /// its temporary file removed.
+    ///
+    /// Fails with libgit2's error when a write failed, the temporary file cannot be
+    /// flushed or read back, the filters fail, or the object database cannot be written.
+    ///
+    /// Wraps: git_blob_create_from_stream_commit
+    pub fn commit(self) -> Result<Oid, RepositoryError> {
+        initialise_builtin_filters();
+        let stream = self.stream.into_c();
+        let mut id = Oid::zeroed();
+        let out = id.as_mut().as_mut_ptr();
+        // SAFETY: `out` addresses `id`, written only on success; `stream` is the open
+        // blob stream `git_blob_create_from_stream` made, only ever written (never
+        // closed), whose ownership passes to the call, which frees it on every path. The
+        // repository it keeps is live for `'r`, which the writer carried, and used on this
+        // thread.
+        let rc = unsafe { ffi::git_blob_create_from_stream_commit(out, stream) };
+        if rc < 0 { failed(rc) } else { Ok(id) }
+    }
+}
+
+/// Every write takes the whole buffer; `flush` does nothing, since only
+/// [`commit`](BlobWriter::commit) ends the blob.
+impl io::Write for BlobWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        BlobWriter::write(self, buf).map_err(io::Error::other)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl fmt::Debug for BlobWriter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlobWriter").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -1725,5 +1989,83 @@ mod unit_tests {
         );
         let mut m = v;
         assert_eq!(format!("{:?}", m.as_mut()), format!("{v:?}"));
+    }
+
+    /// A fresh bare repository in a temporary directory, removed when dropped.
+    struct Bare {
+        dir: std::path::PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Bare {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("crustify-blob-unit-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+            let repo = Repository::init(&path, true);
+            Self {
+                dir,
+                repo: Some(repo.unwrap()),
+            }
+        }
+
+        fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+    }
+
+    impl Drop for Bare {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// An absolute path that would select filters is refused before libgit2 sees it,
+    /// with the error a release build reports from its assertion (a debug build would
+    /// abort): even for a repository without paths, which libgit2 would refuse
+    /// otherwise.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn absolute_filter_paths_are_refused_before_c() {
+        let pathless = Repository::new().unwrap();
+        let bare = Bare::new("absolute");
+        for repo in [pathless.as_ref(), bare.repo()] {
+            let workdir = create_from_workdir(repo, c"/etc/hostname").unwrap_err();
+            let stream = create_from_stream(repo, Some(c"/hint")).unwrap_err();
+            for e in [workdir, stream] {
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Internal)));
+                assert_eq!(
+                    e.message(),
+                    c"unrecoverable internal error: '!((path)[0] == '/')'"
+                );
+            }
+        }
+        // A relative one reaches libgit2, which refuses a repository without a working
+        // directory, or without an `objects` directory, itself.
+        let e = create_from_workdir(pathless.as_ref(), c"file").unwrap_err();
+        assert_eq!(e.message(), c"repository has no working directory");
+        let e = create_from_stream(pathless.as_ref(), Some(c"file")).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+    }
+
+    /// A writer is an `io::Write` that takes whole buffers and flushes nothing, and
+    /// commits what `io::copy` wrote; its `Debug` names it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writer_is_an_io_writer() {
+        use std::io::Write;
+
+        let bare = Bare::new("io");
+        let data: Vec<u8> = (0..70_000u32).map(|i| (i % 251) as u8).collect();
+        let mut writer = create_from_stream(bare.repo(), None).unwrap();
+        assert_eq!(format!("{writer:?}"), "BlobWriter { .. }");
+        assert_eq!(Write::write(&mut writer, &data[..10]).unwrap(), 10);
+        writer.flush().unwrap();
+        std::io::copy(&mut &data[10..], &mut writer).unwrap();
+        writer.write_all(b"").unwrap();
+        let id = writer.commit().unwrap();
+        assert_eq!(id, create_from_buffer(bare.repo(), &data).unwrap());
     }
 }

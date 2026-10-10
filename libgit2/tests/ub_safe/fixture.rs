@@ -234,7 +234,9 @@ impl Drop for TempRepo {
 }
 
 /// `git_blob_create_from_stream` adopted into a `WriteStreamBox`: the one fixture
-/// adopting a C stream, standing in for the blob wrapper, which replaces it.
+/// adopting a C stream. The blob wrapper (`object::blob::BlobWriter`) never lends its
+/// stream as a `WriteStreamBox`, since a closed blob stream can no longer be committed,
+/// so the `git_writestream` tests over a C stream keep this.
 ///
 /// The repository must outlive the stream, which the borrow does not enforce.
 pub fn blob_stream(repo: &TempRepo, hint: Option<&CStr>) -> WriteStreamBox {
@@ -1773,10 +1775,11 @@ pub mod tree {
 /// Fixtures over `git_object` and `git_tree_entry`: C's view of an owner, through the
 /// pointer `as_c_ptr` hands out, standing in for the object and entry getters.
 pub mod object_and_tree_entry {
-    use std::ffi::{CStr, CString};
+    use std::ffi::CString;
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::{FileMode, ObjectType};
+    use libgit2::libgit2::object::blob::create_from_buffer;
     use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tree::{TreeBuilder, TreeEntryBox};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
@@ -1800,41 +1803,18 @@ pub mod object_and_tree_entry {
         repo.repo.as_ref().unwrap().as_ref()
     }
 
-    /// C's hex id and type of the object an owner holds.
+    /// The hex id and C's type of the object an owner holds; the type stands in for
+    /// `git_object_type`'s wrapper (a later run), which replaces it.
     pub fn object_view(object: &ObjectArc<'_>) -> (String, ffi::git_object_t) {
-        let p = object.as_c_ptr();
-        let mut out = [0u8; 65];
-        // SAFETY: `p` is the live object the owner holds; its id lives as long as it
-        // and is formatted into `out`, 65 writable bytes, NUL included.
-        unsafe {
-            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
-            let id = CStr::from_bytes_until_nul(&out).unwrap();
-            (id.to_str().unwrap().to_owned(), ffi::git_object_type(p))
-        }
-    }
-
-    /// `git_object_owner`: the repository an object reaches.
-    pub fn object_owner(object: &ObjectArc<'_>) -> *mut ffi::git_repository {
-        // SAFETY: a live object, whose repository outlives its borrow.
-        unsafe { ffi::git_object_owner(object.as_c_ptr()) }
+        let id = object.as_ref().id().to_hex_string().unwrap();
+        // SAFETY: the live object the owner holds, only read.
+        (id, unsafe { ffi::git_object_type(object.as_c_ptr()) })
     }
 
     /// A new blob of `content` in `repo`, looked up as an object; its hex id is read
     /// through [`object_view`].
     pub fn write_blob<'r>(repo: &'r RepositoryBox, content: &[u8]) -> ObjectArc<'r> {
-        let mut id = ffi::git_oid::default();
-        // SAFETY: a writable id, the box's live repository and `content`, read for the
-        // call.
-        let rc = unsafe {
-            ffi::git_blob_create_from_buffer(
-                &mut id,
-                repo.as_c_ptr(),
-                content.as_ptr().cast(),
-                content.len(),
-            )
-        };
-        assert_eq!(rc, 0);
-        let id = Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap();
+        let id = create_from_buffer(repo.as_ref(), content).unwrap();
         Object::lookup(repo.as_ref(), id.as_ref(), Some(ObjectType::Blob)).unwrap()
     }
 
