@@ -315,11 +315,36 @@ mod filter_flags {
         buf: ffi::git_buf,
     }
 
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+    /// Runs `body` alone in a child process. libgit2 marks a filter initialised on its
+    /// first load under the registry's read lock only (`filter_initialize`), so a
+    /// load racing with another module's first load (the checkout and index fixtures
+    /// add files through raw calls) is a data race (TSan); only a process of its own
+    /// orders every load after the first.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.strip_prefix("equiv::").unwrap_or(test);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     impl Side {
         fn open() -> Self {
-            // libgit2 marks a filter initialised on its first load under the registry's
-            // read lock only (`filter_initialize`), so concurrent first loads race (TSan):
-            // one side runs every call alone first, loading the CRLF and ident filters.
+            // Within the isolated child, one side still runs every call alone first,
+            // loading the CRLF and ident filters before the sides run concurrently.
             static PRIMED: OnceLock<()> = OnceLock::new();
             PRIMED.get_or_init(|| {
                 let mut side = Self::build();
@@ -451,6 +476,16 @@ mod filter_flags {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn git_blob_filter_reads_rust_sets_as_c_flags() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::git_blob_filter_reads_rust_sets_as_c_flags"
+            ),
+            git_blob_filter_reads_rust_sets_as_c_flags_body,
+        );
+    }
+
+    fn git_blob_filter_reads_rust_sets_as_c_flags_body() {
         let (mut c, mut rust) = (Side::open(), Side::open());
         for combo in 0..1u32 << FLAGS.len() {
             for unnamed in [0, UNNAMED] {
@@ -483,6 +518,16 @@ mod filter_flags {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn rust_sets_change_what_git_blob_filter_does() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::rust_sets_change_what_git_blob_filter_does"
+            ),
+            rust_sets_change_what_git_blob_filter_does_body,
+        );
+    }
+
+    fn rust_sets_change_what_git_blob_filter_does_body() {
         let mut side = Side::open();
         let mut opts = c_options();
 
