@@ -1,0 +1,46 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_repository_init_options",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [
+        "flags",
+        "version",
+        "description",
+        "mode",
+        "oid_type",
+        "refdb_type",
+        "initial_head",
+        "origin_url",
+        "template_path",
+        "workdir_path"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_new_options",
+      "defined_in": "include/git2/sys/repository.h",
+      "kind": "type",
+      "field_anchors": [
+        "version",
+        "oid_type"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_worktree_add_options",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [
+        "version",
+        "ref",
+        "lock",
+        "checkout_options",
+        "checkout_existing"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    }
+  ]
+}
