@@ -224,3 +224,122 @@ mod filesystem {
         }
     }
 }
+
+/// [`is_gitfile`] against `git_path_is_gitfile` given the same NUL-terminated
+/// component and its full length: every variant pair over a corpus of each file's
+/// spellings (plain, case-folded, NTFS 8.3 short names and trailing dots, spaces and
+/// streams, HFS+ ignorable code points), near misses, prefixes and long names, and a
+/// seeded sweep of short names drawn from the bytes those rules look at.
+mod is_gitfile {
+    use std::ffi::{CStr, CString};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::sys::path::{Filesystem, GitFile, is_gitfile};
+
+    const FILES: [GitFile; 3] = [
+        GitFile::Gitignore,
+        GitFile::Gitmodules,
+        GitFile::Gitattributes,
+    ];
+    const FILESYSTEMS: [Filesystem; 3] = [Filesystem::Generic, Filesystem::Ntfs, Filesystem::Hfs];
+
+    /// C's answer: whether it matched; it never refuses a named pair.
+    fn c_is_gitfile(component: &CStr, file: GitFile, fs: Filesystem) -> bool {
+        // SAFETY: a live NUL-terminated component with its full length; named values.
+        let rc = unsafe {
+            ffi::git_path_is_gitfile(
+                component.as_ptr(),
+                component.to_bytes().len(),
+                file.raw(),
+                fs.raw(),
+            )
+        };
+        assert!(rc >= 0, "C refused a named pair");
+        rc > 0
+    }
+
+    fn check(component: &CStr) {
+        for file in FILES {
+            for fs in FILESYSTEMS {
+                assert_eq!(
+                    is_gitfile(component, file, fs),
+                    c_is_gitfile(component, file, fs),
+                    "{component:?}, {file:?}, {fs:?}"
+                );
+            }
+        }
+    }
+
+    /// The spellings of each file, near misses and the degenerate components.
+    fn corpus() -> Vec<CString> {
+        let mut out: Vec<Vec<u8>> = Vec::new();
+        for (name, short, hash) in [
+            ("gitignore", "gitign", "gi250a"),
+            ("gitmodules", "gitmod", "gi7eba"),
+            ("gitattributes", "gitatt", "gi7d29"),
+        ] {
+            let upper = name.to_uppercase();
+            for base in [
+                name.to_owned(),
+                upper.clone(),
+                format!("{}{}", &upper[..3], &name[3..]),
+            ] {
+                for suffix in ["", ".", " ", ". .", ":", ":stream", "x", "\\", "/"] {
+                    out.push(format!(".{base}{suffix}").into_bytes());
+                    out.push(format!("{base}{suffix}").into_bytes());
+                }
+            }
+            for prefix in [short, hash, &short.to_uppercase(), &hash.to_uppercase()] {
+                for tail in [
+                    "~1", "~4", "~5", "~9", "~0", "~", "~1 .", "~1:x", "~12", "~1x", "~a",
+                ] {
+                    out.push(format!("{prefix}{tail}").into_bytes());
+                }
+            }
+            // HFS+ ignorable code points (ZWNJ, ZWJ, LRM, the BOM) between letters.
+            for ignorable in ["\u{200c}", "\u{200d}", "\u{200e}", "\u{feff}", "\u{206a}"] {
+                out.push(format!(".{ignorable}{name}").into_bytes());
+                out.push(format!(".{}{ignorable}{}", &name[..3], &name[3..]).into_bytes());
+                out.push(format!(".{name}{ignorable}").into_bytes());
+            }
+            out.push(format!(".{}", &name[..name.len() - 1]).into_bytes());
+            out.push(format!(".{name}{name}").into_bytes());
+        }
+        for other in [
+            "", ".", "..", ".git", ".GIT", "git~1", "a", "~1", "\u{e9}", "\u{ff}x", "\x7f",
+        ] {
+            out.push(other.as_bytes().to_vec());
+        }
+        out.push(vec![0xff; 3]);
+        out.push(vec![b'a'; 4096]);
+        out.into_iter().map(|b| CString::new(b).unwrap()).collect()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn corpus_matches_c() {
+        for component in corpus() {
+            check(&component);
+        }
+    }
+
+    /// Short names of the bytes the rules branch on, from a seeded generator; a stride
+    /// keeps BorrowSanitizer's run short.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn seeded_short_names_match_c() {
+        const ALPHABET: &[u8] = b".~ :\\/gitGITmodulesattr1249aAeEbB\xc2\xa0\xe2\x80\x8c";
+        let rounds = if cfg!(bsan) { 4_000 / 97 } else { 4_000 };
+        let mut seed: u64 = 0x5eed_1e55;
+        for _ in 0..rounds {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let len = (seed % 16) as usize;
+            let bytes: Vec<u8> = (0..len)
+                .map(|i| ALPHABET[((seed >> (i * 4)) as usize ^ i) % ALPHABET.len()])
+                .collect();
+            check(&CString::new(bytes).unwrap());
+        }
+    }
+}

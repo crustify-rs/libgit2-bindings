@@ -9,8 +9,10 @@
 //! libgit2 compares a path component with a git-specific file name (`.gitmodules` and
 //! friends) the way the filesystem it protects would: NTFS also matches 8.3 short names
 //! and trailing dots and spaces, HFS+ ignores Unicode code points it treats as
-//! ignorable. [`Filesystem`] (`git_path_fs`) chooses which rules apply.
+//! ignorable. [`Filesystem`] (`git_path_fs`) chooses which rules apply, and
+//! [`is_gitfile`] applies them to a path component.
 
+use core::ffi::CStr;
 use core::fmt;
 
 use crate::ffi;
@@ -165,6 +167,38 @@ impl fmt::Display for UnnamedFilesystem {
 }
 
 impl std::error::Error for UnnamedFilesystem {}
+
+/// Whether the path component `component` names `file` on `fs`: the file's own name
+/// (`.gitmodules`), or any spelling that filesystem resolves to it, such as NTFS's 8.3
+/// short names (`GITMOD~1`, `gi7eba~1`) and trailing dots and spaces, or HFS+'s case
+/// folding and ignorable Unicode code points. [`Filesystem::Generic`] matches either.
+///
+/// `component` is one component, without separators; it is NUL-terminated because
+/// libgit2's NTFS rules read up to its NUL whatever length they are given.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::repository::sys::path::{Filesystem, GitFile, is_gitfile};
+///
+/// assert!(is_gitfile(c"GITMOD~1", GitFile::Gitmodules, Filesystem::Ntfs));
+/// assert!(!is_gitfile(c"GITMOD~1", GitFile::Gitmodules, Filesystem::Hfs));
+/// assert!(is_gitfile(c".gitignore", GitFile::Gitignore, Filesystem::Generic));
+/// ```
+///
+/// Wraps: git_path_is_gitfile
+pub fn is_gitfile(component: &CStr, file: GitFile, fs: Filesystem) -> bool {
+    let len = component.count_bytes();
+    // SAFETY: `component` is NUL-terminated and holds `len` bytes before its NUL, so
+    // both the length-bounded HFS+ rules and the NUL-bounded NTFS ones read within it,
+    // during the call only. `file` and `fs` are named values, which libgit2 accepts
+    // without touching the error state, so no runtime pin is needed.
+    let rc = unsafe { ffi::git_path_is_gitfile(component.as_ptr(), len, file.raw(), fs.raw()) };
+    debug_assert!(
+        rc >= 0,
+        "git_path_is_gitfile refused a named file or filesystem"
+    );
+    rc > 0
+}
 
 #[cfg(test)]
 mod unit_tests {

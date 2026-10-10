@@ -4291,3 +4291,1367 @@ mod heads_and_parts {
         }
     }
 }
+
+/// The routines of `git2/repository.h` and `git2/sys/repository.h` on
+/// [`RepositoryRef`] / [`RepositoryMut`], [`discover`] and the `FETCH_HEAD` callback,
+/// against the C routines they wrap.
+///
+/// Each side copies the same fixtures from `tests/resources` into a scratch directory
+/// of its own and runs the same steps on its own repositories: the C side through the
+/// raw routines, the Rust side through the safe API, with only the setup (the
+/// namespace and ident setters, files written) and the reading of a returned object
+/// (a config value, a reference's name) through raw calls on both. The outcome of
+/// every step, its value or its failure (code, class, message, with the root masked),
+/// must agree.
+///
+/// `git_repository_commit_parents` is run only where it is defined: the steps never
+/// reach the failures after which it frees cached commits, nor a `HEAD` naming
+/// anything but a commit, nor a missing object (where it leaks); and `git_repository_head_detached_for_worktree` only where
+/// its answer is right: on a detached `HEAD`, or a failure. The unit tests cover those
+/// corrections.
+mod head_and_lookups {
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
+    use std::fs;
+    use std::ops::ControlFlow;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::ptr;
+    use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::repository::repository::{
+        FetchheadEntry, FetchheadForeachCallback, Item, Repository, RepositoryBox, RepositoryError,
+        discover,
+    };
+
+    const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/resources");
+
+    /// Copies the tree at `from` to `to`, symlinks as symlinks.
+    fn copy_tree(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            let kind = entry.file_type().unwrap();
+            if kind.is_symlink() {
+                std::os::unix::fs::symlink(fs::read_link(entry.path()).unwrap(), &target).unwrap();
+            } else if kind.is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A side's scratch directory, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-routines-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        /// `tests/resources/<name>` copied to `<root>/<to>`, its `.gitted` renamed
+        /// `.git` as libgit2's own test sandboxes do.
+        fn sandbox(&self, name: &str, to: &str) {
+            let to = self.0.join(to);
+            copy_tree(&Path::new(RESOURCES).join(name), &to);
+            if to.join(".gitted").exists() {
+                fs::rename(to.join(".gitted"), to.join(".git")).unwrap();
+            }
+        }
+
+        /// The fixtures: `bare` (`testrepo.git`), `empty` (`empty_bare.git`, an unborn
+        /// `HEAD`), `shallow` (`shallow.git`), `testrepo` with its linked worktree
+        /// `testrepo-worktree`, and `merged` (`mergedrepo`, mid-merge).
+        fn with_fixtures(tag: &str) -> Self {
+            let this = Self::new(tag);
+            this.sandbox("testrepo.git", "bare");
+            this.sandbox("empty_bare.git", "empty");
+            this.sandbox("shallow.git", "shallow");
+            this.sandbox("testrepo", "testrepo");
+            this.sandbox("testrepo-worktree", "testrepo-worktree");
+            this.sandbox("mergedrepo", "merged");
+            this
+        }
+
+        /// `rel` under the root; a path starting with `@` is passed as is, without it.
+        fn c_path(&self, rel: &str) -> CString {
+            match rel.strip_prefix('@') {
+                Some(raw) => CString::new(raw).unwrap(),
+                None => CString::new(self.0.join(rel).as_os_str().as_bytes()).unwrap(),
+            }
+        }
+
+        /// `s` with the scratch directory replaced by `<root>`.
+        fn relative(&self, s: &str) -> String {
+            s.replace(&*self.0.to_string_lossy(), "<root>")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// One step on a side's current repository.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        /// Opens the repository at a root-relative path.
+        Open(&'static str),
+        /// A repository without paths.
+        New,
+        /// Writes a root-relative file.
+        Write(&'static str, &'static str),
+        SetNamespace(Option<&'static CStr>),
+        SetIdent(Option<&'static CStr>, Option<&'static CStr>),
+        Commondir,
+        IsBare,
+        IsWorktree,
+        Namespace,
+        Ident,
+        IsShallow,
+        ItemPath(Item),
+        /// Reads an `int32` from the config.
+        Config(&'static CStr),
+        /// Reads an `int32` from a snapshot of the config.
+        Snapshot(&'static CStr),
+        /// The index's path and entry count.
+        Index,
+        /// Hashes a file (see [`Scratch::c_path`]).
+        HashFile(&'static str, ObjectType, Option<&'static CStr>),
+        Head,
+        HeadDetached,
+        HeadUnborn,
+        IsEmpty,
+        HeadForWorktree(&'static CStr),
+        HeadDetachedForWorktree(&'static CStr),
+        DetachHead,
+        CommitParents,
+        Cleanup,
+    }
+
+    /// One step's outcome.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Outcome {
+        Value(String),
+        Failed {
+            code: c_int,
+            class: c_int,
+            message: String,
+        },
+    }
+
+    /// The calling thread's last error, as C reads it.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: the runtime is initialised; the result is a static error or this
+        // thread's, live until the next libgit2 call on this thread, after the copy.
+        unsafe {
+            let e = ffi::git_error_last();
+            let message = (*e).message;
+            let message = if message.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(message).to_string_lossy().into_owned()
+            };
+            ((*e).klass, message)
+        }
+    }
+
+    /// Initialises libgit2 for the C side; never released.
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// A NULL or live C string, copied with the root masked.
+    ///
+    /// # Safety
+    ///
+    /// `s` must be NULL or a live C string.
+    unsafe fn text(scratch: &Scratch, s: *const c_char) -> String {
+        if s.is_null() {
+            return "(null)".into();
+        }
+        // SAFETY: per this function's contract.
+        scratch.relative(&unsafe { CStr::from_ptr(s) }.to_string_lossy())
+    }
+
+    /// An id's hex form.
+    ///
+    /// # Safety
+    ///
+    /// `id` must be NULL or a live id.
+    unsafe fn hex(id: *const ffi::git_oid) -> String {
+        if id.is_null() {
+            return "(none)".into();
+        }
+        let mut out = [0u8; 65];
+        // SAFETY: a live id and 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// A reference's name, target and peeled id.
+    ///
+    /// # Safety
+    ///
+    /// `r` must be a live direct reference; only its fields are read.
+    unsafe fn describe(r: *const ffi::git_reference) -> String {
+        // SAFETY: per this function's contract.
+        unsafe {
+            format!(
+                "{} -> {} (peel {}, type {})",
+                CStr::from_ptr(ffi::git_reference_name(r)).to_string_lossy(),
+                hex(ffi::git_reference_target(r)),
+                hex(ffi::git_reference_target_peel(r)),
+                ffi::git_reference_type(r),
+            )
+        }
+    }
+
+    /// An `int32` read from a live config, or its failure.
+    fn read_int32(scratch: &Scratch, config: *mut ffi::git_config, key: &CStr) -> Outcome {
+        let mut value = 0;
+        // SAFETY: a live config, only read, and a NUL-terminated key.
+        let rc = unsafe { ffi::git_config_get_int32(&mut value, config, key.as_ptr()) };
+        if rc < 0 {
+            c_failed(scratch, rc)
+        } else {
+            Outcome::Value(value.to_string())
+        }
+    }
+
+    /// A live index's path and entry count.
+    fn read_index(scratch: &Scratch, index: *mut ffi::git_index) -> Outcome {
+        // SAFETY: a live index, only read; its path lives as long as it does.
+        unsafe {
+            Outcome::Value(format!(
+                "{} {}",
+                text(scratch, ffi::git_index_path(index)),
+                ffi::git_index_entrycount(index)
+            ))
+        }
+    }
+
+    /// The commits of a live array, by id.
+    ///
+    /// # Safety
+    ///
+    /// `commits` must address `count` live commits.
+    unsafe fn commit_ids(commits: *const *mut ffi::git_commit, count: usize) -> String {
+        let ids: Vec<String> = (0..count)
+            // SAFETY: per this function's contract.
+            .map(|i| unsafe { hex(ffi::git_commit_id(*commits.add(i))) })
+            .collect();
+        format!("[{}]", ids.join(", "))
+    }
+
+    fn c_failed(scratch: &Scratch, rc: c_int) -> Outcome {
+        let (class, message) = c_last();
+        Outcome::Failed {
+            code: rc,
+            class,
+            message: scratch.relative(&message),
+        }
+    }
+
+    fn rust_failed(scratch: &Scratch, error: &RepositoryError) -> Outcome {
+        Outcome::Failed {
+            code: error.raw_code(),
+            class: error.raw_class(),
+            message: scratch.relative(&error.message().to_string_lossy()),
+        }
+    }
+
+    /// A C routine's `int` answer: the value, or the failure for a negative one.
+    fn c_answer(scratch: &Scratch, rc: c_int) -> Outcome {
+        if rc < 0 {
+            c_failed(scratch, rc)
+        } else {
+            Outcome::Value(rc.to_string())
+        }
+    }
+
+    /// A Rust routine's answer, as C's `int`.
+    fn rust_answer<T: Into<c_int>>(
+        scratch: &Scratch,
+        result: Result<T, RepositoryError>,
+    ) -> Outcome {
+        match result {
+            Ok(value) => Outcome::Value(value.into().to_string()),
+            Err(error) => rust_failed(scratch, &error),
+        }
+    }
+
+    /// Steps the sides share: opening, and the raw setup.
+    fn setup(scratch: &Scratch, repo: *mut ffi::git_repository, step: Step) -> Option<Outcome> {
+        // SAFETY: `repo` is the side's live repository; the setters copy their strings.
+        let rc = unsafe {
+            match step {
+                Step::Write(rel, contents) => {
+                    let path = scratch.0.join(rel);
+                    fs::create_dir_all(path.parent().unwrap()).unwrap();
+                    fs::write(path, contents).unwrap();
+                    0
+                }
+                Step::SetNamespace(namespace) => ffi::git_repository_set_namespace(
+                    repo,
+                    namespace.map_or(ptr::null(), CStr::as_ptr),
+                ),
+                Step::SetIdent(name, email) => ffi::git_repository_set_ident(
+                    repo,
+                    name.map_or(ptr::null(), CStr::as_ptr),
+                    email.map_or(ptr::null(), CStr::as_ptr),
+                ),
+                _ => return None,
+            }
+        };
+        Some(c_answer(scratch, rc))
+    }
+
+    /// The C side's repository: freed on drop.
+    struct CRepo(*mut ffi::git_repository);
+
+    impl Drop for CRepo {
+        fn drop(&mut self) {
+            // SAFETY: NULL or the side's own repository, freed once.
+            unsafe { ffi::git_repository_free(self.0) };
+        }
+    }
+
+    /// One step through libgit2's C API.
+    fn c_step(scratch: &Scratch, repo: &mut CRepo, step: Step) -> Outcome {
+        let r = repo.0;
+        match step {
+            Step::Open(rel) => {
+                let path = scratch.c_path(rel);
+                *repo = CRepo(ptr::null_mut());
+                // SAFETY: a writable slot and a NUL-terminated path.
+                let rc = unsafe { ffi::git_repository_open(&mut repo.0, path.as_ptr()) };
+                c_answer(scratch, rc)
+            }
+            Step::New => {
+                *repo = CRepo(ptr::null_mut());
+                // SAFETY: a writable slot.
+                c_answer(scratch, unsafe { ffi::git_repository_new(&mut repo.0) })
+            }
+            Step::Write(..) | Step::SetNamespace(_) | Step::SetIdent(..) => {
+                setup(scratch, r, step).unwrap()
+            }
+            Step::Commondir => {
+                // SAFETY: a live repository, only read; the string lives as long as it does.
+                Outcome::Value(unsafe { text(scratch, ffi::git_repository_commondir(r)) })
+            }
+            // SAFETY: as above.
+            Step::IsBare => c_answer(scratch, unsafe { ffi::git_repository_is_bare(r) }),
+            // SAFETY: as above.
+            Step::IsWorktree => c_answer(scratch, unsafe { ffi::git_repository_is_worktree(r) }),
+            Step::Namespace => {
+                // SAFETY: as above.
+                Outcome::Value(unsafe { text(scratch, ffi::git_repository_get_namespace(r)) })
+            }
+            Step::Ident => {
+                let (mut name, mut email) = (ptr::null(), ptr::null());
+                // SAFETY: as above, with two writable slots.
+                let rc = unsafe { ffi::git_repository_ident(&mut name, &mut email, r) };
+                assert_eq!(rc, 0);
+                // SAFETY: both NULL or the repository's own strings.
+                Outcome::Value(unsafe {
+                    format!("{} <{}>", text(scratch, name), text(scratch, email))
+                })
+            }
+            // SAFETY: as above.
+            Step::IsShallow => c_answer(scratch, unsafe { ffi::git_repository_is_shallow(r) }),
+            Step::ItemPath(item) => {
+                let mut buf = ffi::git_buf::default();
+                // SAFETY: an empty buffer, a live repository and a named item.
+                let rc = unsafe { ffi::git_repository_item_path(&mut buf, r, item.raw()) };
+                let outcome = if rc < 0 {
+                    c_failed(scratch, rc)
+                } else {
+                    // SAFETY: what libgit2 left in the buffer, read before it is disposed.
+                    Outcome::Value(unsafe { text(scratch, buf.ptr) })
+                };
+                // SAFETY: as above.
+                unsafe { ffi::git_buf_dispose(&mut buf) };
+                outcome
+            }
+            Step::Config(key) | Step::Snapshot(key) => {
+                let mut config = ptr::null_mut();
+                // SAFETY: a writable slot and a live repository.
+                let rc = unsafe {
+                    if matches!(step, Step::Config(_)) {
+                        ffi::git_repository_config(&mut config, r)
+                    } else {
+                        ffi::git_repository_config_snapshot(&mut config, r)
+                    }
+                };
+                if rc < 0 {
+                    return c_failed(scratch, rc);
+                }
+                let outcome = read_int32(scratch, config, key);
+                // SAFETY: the reference the call handed out, released once.
+                unsafe { ffi::git_config_free(config) };
+                outcome
+            }
+            Step::Index => {
+                let mut index = ptr::null_mut();
+                // SAFETY: a writable slot and a live repository.
+                let rc = unsafe { ffi::git_repository_index(&mut index, r) };
+                if rc < 0 {
+                    return c_failed(scratch, rc);
+                }
+                let outcome = read_index(scratch, index);
+                // SAFETY: the reference the call handed out, released once.
+                unsafe { ffi::git_index_free(index) };
+                outcome
+            }
+            Step::HashFile(path, kind, as_path) => {
+                let path = scratch.c_path(path);
+                let mut id = ffi::git_oid::default();
+                // SAFETY: a writable id, a live repository, NUL-terminated strings.
+                let rc = unsafe {
+                    ffi::git_repository_hashfile(
+                        &mut id,
+                        r,
+                        path.as_ptr(),
+                        kind.raw(),
+                        as_path.map_or(ptr::null(), CStr::as_ptr),
+                    )
+                };
+                if rc < 0 {
+                    c_failed(scratch, rc)
+                } else {
+                    // SAFETY: the id the call wrote.
+                    Outcome::Value(unsafe { hex(&id) })
+                }
+            }
+            Step::Head | Step::HeadForWorktree(_) => {
+                let mut out = ptr::null_mut();
+                // SAFETY: a writable slot, a live repository and a NUL-terminated name.
+                let rc = unsafe {
+                    match step {
+                        Step::HeadForWorktree(name) => {
+                            ffi::git_repository_head_for_worktree(&mut out, r, name.as_ptr())
+                        }
+                        _ => ffi::git_repository_head(&mut out, r),
+                    }
+                };
+                if rc < 0 {
+                    return c_failed(scratch, rc);
+                }
+                // SAFETY: the fresh reference the call handed out, read and freed once.
+                unsafe {
+                    let described = describe(out);
+                    ffi::git_reference_free(out);
+                    Outcome::Value(described)
+                }
+            }
+            Step::HeadDetached => {
+                // SAFETY: a live repository.
+                c_answer(scratch, unsafe { ffi::git_repository_head_detached(r) })
+            }
+            // SAFETY: as above.
+            Step::HeadUnborn => c_answer(scratch, unsafe { ffi::git_repository_head_unborn(r) }),
+            // SAFETY: as above.
+            Step::IsEmpty => c_answer(scratch, unsafe { ffi::git_repository_is_empty(r) }),
+            Step::HeadDetachedForWorktree(name) => {
+                // SAFETY: as above, with a NUL-terminated name.
+                c_answer(scratch, unsafe {
+                    ffi::git_repository_head_detached_for_worktree(r, name.as_ptr())
+                })
+            }
+            Step::DetachHead => {
+                // SAFETY: as above.
+                let rc = unsafe { ffi::git_repository_detach_head(r) };
+                if rc < 0 {
+                    c_failed(scratch, rc)
+                } else {
+                    Outcome::Value(head_file(scratch, r))
+                }
+            }
+            Step::CommitParents => {
+                let mut array = ffi::git_commitarray::default();
+                // SAFETY: an empty array and a live repository whose HEAD names a commit
+                // or nothing, and whose MERGE_HEAD (if any) names commits only.
+                let rc = unsafe { ffi::git_repository_commit_parents(&mut array, r) };
+                if rc < 0 {
+                    return c_failed(scratch, rc);
+                }
+                // SAFETY: the array the call filled, read and disposed once.
+                unsafe {
+                    let ids = commit_ids(array.commits, array.count);
+                    ffi::git_commitarray_dispose(&mut array);
+                    Outcome::Value(ids)
+                }
+            }
+            Step::Cleanup => {
+                // SAFETY: a live repository nothing else uses.
+                c_answer(scratch, unsafe { ffi::git_repository__cleanup(r) })
+            }
+        }
+    }
+
+    /// The contents of the repository's `HEAD` file.
+    fn head_file(scratch: &Scratch, repo: *mut ffi::git_repository) -> String {
+        // SAFETY: a live repository, only read; its path lives as long as it does.
+        let gitdir = unsafe { CStr::from_ptr(ffi::git_repository_path(repo)) };
+        let head = fs::read_to_string(Path::new(&*gitdir.to_string_lossy()).join("HEAD")).unwrap();
+        scratch.relative(&head)
+    }
+
+    /// One step through the Rust API.
+    fn rust_step(scratch: &Scratch, repo: &mut Option<RepositoryBox>, step: Step) -> Outcome {
+        let opened = |result: Result<RepositoryBox, RepositoryError>,
+                      repo: &mut Option<RepositoryBox>| match result {
+            Ok(r) => {
+                *repo = Some(r);
+                Outcome::Value("0".into())
+            }
+            Err(error) => rust_failed(scratch, &error),
+        };
+        match step {
+            Step::Open(rel) => {
+                *repo = None;
+                return opened(Repository::open(&scratch.c_path(rel)), repo);
+            }
+            Step::New => {
+                *repo = None;
+                return opened(Repository::new(), repo);
+            }
+            Step::Cleanup => {
+                repo.as_mut().unwrap().as_mut().cleanup();
+                return Outcome::Value("0".into());
+            }
+            _ => {}
+        }
+        let owner = repo.as_ref().unwrap();
+        if let Some(outcome) = setup(scratch, owner.as_c_ptr(), step) {
+            return outcome;
+        }
+        let r = owner.as_ref();
+        let text = |s: Option<&CStr>| {
+            s.map_or("(null)".into(), |s| scratch.relative(&s.to_string_lossy()))
+        };
+        match step {
+            Step::Commondir => Outcome::Value(text(r.commondir())),
+            Step::IsBare => Outcome::Value(c_int::from(r.is_bare()).to_string()),
+            Step::IsWorktree => Outcome::Value(c_int::from(r.is_worktree()).to_string()),
+            Step::Namespace => Outcome::Value(text(r.namespace())),
+            Step::Ident => {
+                let (name, email) = r.ident();
+                Outcome::Value(format!("{} <{}>", text(name), text(email)))
+            }
+            Step::IsShallow => rust_answer(scratch, r.is_shallow()),
+            Step::ItemPath(item) => match r.item_path(item) {
+                Ok(buf) => Outcome::Value(text(Some(buf.as_ref().as_c_str()))),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::Config(key) => match r.config() {
+                Ok(config) => read_int32(scratch, config.as_c_ptr(), key),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::Snapshot(key) => match r.config_snapshot() {
+                Ok(config) => read_int32(scratch, config.as_c_ptr(), key),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::Index => match r.index() {
+                Ok(index) => read_index(scratch, index.as_c_ptr()),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::HashFile(path, kind, as_path) => {
+                match r.hash_file(&scratch.c_path(path), kind, as_path) {
+                    Ok(id) => Outcome::Value(id.as_ref().to_hex_string().unwrap()),
+                    Err(error) => rust_failed(scratch, &error),
+                }
+            }
+            Step::Head => match r.head() {
+                // SAFETY: a live reference the box owns; only its fields are read.
+                Ok(head) => Outcome::Value(unsafe { describe(head.as_c_ptr()) }),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::HeadForWorktree(name) => match r.head_for_worktree(name) {
+                // SAFETY: as above.
+                Ok(head) => Outcome::Value(unsafe { describe(head.as_c_ptr()) }),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::HeadDetached => rust_answer(scratch, r.is_head_detached()),
+            Step::HeadUnborn => rust_answer(scratch, r.is_head_unborn()),
+            Step::IsEmpty => rust_answer(scratch, r.is_empty()),
+            Step::HeadDetachedForWorktree(name) => {
+                rust_answer(scratch, r.is_head_detached_for_worktree(name))
+            }
+            Step::DetachHead => match r.detach_head() {
+                Ok(()) => Outcome::Value(head_file(scratch, owner.as_c_ptr())),
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::CommitParents => match r.commit_parents() {
+                Ok(array) => {
+                    let commits: Vec<_> = array.as_ref().commit_ptrs().elems().collect();
+                    // SAFETY: the array keeps its commits alive.
+                    Outcome::Value(unsafe { commit_ids(commits.as_ptr(), commits.len()) })
+                }
+                Err(error) => rust_failed(scratch, &error),
+            },
+            Step::Open(_)
+            | Step::New
+            | Step::Cleanup
+            | Step::Write(..)
+            | Step::SetNamespace(_)
+            | Step::SetIdent(..) => unreachable!(),
+        }
+    }
+
+    /// Runs `steps` on each side, each on a thread and in fixtures of its own, and
+    /// compares the outcomes step by step.
+    fn compare(tag: &str, steps: &'static [Step]) {
+        init();
+        let c = thread::spawn({
+            let tag = format!("{tag}-c");
+            move || {
+                let scratch = Scratch::with_fixtures(&tag);
+                let mut repo = CRepo(ptr::null_mut());
+                steps
+                    .iter()
+                    .map(|&s| c_step(&scratch, &mut repo, s))
+                    .collect::<Vec<_>>()
+            }
+        })
+        .join()
+        .unwrap();
+        let rust = thread::spawn({
+            let tag = format!("{tag}-rust");
+            move || {
+                let scratch = Scratch::with_fixtures(&tag);
+                let mut repo = None;
+                steps
+                    .iter()
+                    .map(|&s| rust_step(&scratch, &mut repo, s))
+                    .collect::<Vec<_>>()
+            }
+        })
+        .join()
+        .unwrap();
+        for (i, ((c, rust), step)) in c.iter().zip(&rust).zip(steps).enumerate() {
+            assert_eq!(c, rust, "step {i}: {step:?}");
+        }
+        assert_eq!(c.len(), rust.len());
+    }
+
+    /// Every item, on the current repository.
+    const ITEMS: [Step; 15] = [
+        Step::ItemPath(Item::GitDir),
+        Step::ItemPath(Item::WorkDir),
+        Step::ItemPath(Item::CommonDir),
+        Step::ItemPath(Item::Index),
+        Step::ItemPath(Item::Objects),
+        Step::ItemPath(Item::Refs),
+        Step::ItemPath(Item::PackedRefs),
+        Step::ItemPath(Item::Remotes),
+        Step::ItemPath(Item::Config),
+        Step::ItemPath(Item::Info),
+        Step::ItemPath(Item::Hooks),
+        Step::ItemPath(Item::Logs),
+        Step::ItemPath(Item::Modules),
+        Step::ItemPath(Item::Worktrees),
+        Step::ItemPath(Item::WorktreeConfig),
+    ];
+
+    /// The getters and predicates on each kind of repository: bare, unborn, shallow,
+    /// with a working directory, a linked worktree's, mid-merge, and without paths.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_read_what_c_reads() {
+        const fn on(open: Step) -> [Step; 16] {
+            [
+                open,
+                Step::Commondir,
+                Step::IsBare,
+                Step::IsWorktree,
+                Step::Namespace,
+                Step::Ident,
+                Step::IsShallow,
+                Step::Config(c"core.repositoryformatversion"),
+                Step::Config(c"core.bare"),
+                Step::Snapshot(c"core.repositoryformatversion"),
+                Step::Snapshot(c"no.such"),
+                Step::Index,
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                Step::IsEmpty,
+            ]
+        }
+        const STEPS: &[Step] = &concat_steps();
+        const fn concat_steps() -> [Step; 7 * 16 + 15 * 3] {
+            let opens = [
+                Step::Open("bare"),
+                Step::Open("empty"),
+                Step::Open("shallow"),
+                Step::Open("testrepo"),
+                Step::Open("testrepo-worktree"),
+                Step::Open("merged"),
+                Step::New,
+            ];
+            let mut out = [Step::IsBare; 7 * 16 + 15 * 3];
+            let mut n = 0;
+            let mut i = 0;
+            while i < opens.len() {
+                let steps = on(opens[i]);
+                let mut j = 0;
+                while j < steps.len() {
+                    out[n] = steps[j];
+                    n += 1;
+                    j += 1;
+                }
+                // Every item of a bare, a linked worktree's and a pathless repository.
+                if i == 0 || i == 4 || i == 6 {
+                    let mut k = 0;
+                    while k < ITEMS.len() {
+                        out[n] = ITEMS[k];
+                        n += 1;
+                        k += 1;
+                    }
+                }
+                i += 1;
+            }
+            out
+        }
+        compare("getters", STEPS);
+    }
+
+    /// The namespace and ident read back what the setters stored, across replacements
+    /// and resets.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn namespace_and_ident_read_back_what_was_set() {
+        compare(
+            "setters",
+            &[
+                Step::Open("bare"),
+                Step::Namespace,
+                Step::SetNamespace(Some(c"foo")),
+                Step::Namespace,
+                Step::SetNamespace(Some(c"foo/bar")),
+                Step::Namespace,
+                Step::SetNamespace(None),
+                Step::Namespace,
+                Step::Ident,
+                Step::SetIdent(Some(c"Name"), Some(c"name@example.com")),
+                Step::Ident,
+                Step::SetIdent(None, Some(c"other@example.com")),
+                Step::Ident,
+                Step::SetIdent(None, None),
+                Step::Ident,
+                Step::New,
+                Step::SetNamespace(Some(c"in-memory")),
+                Step::Namespace,
+                Step::SetIdent(Some(c"x"), None),
+                Step::Ident,
+            ],
+        );
+    }
+
+    /// `HEAD` in each state: attached, detached, at a missing object, at a tag, at a
+    /// missing branch, missing altogether; and the parents a commit would get.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn head_states_read_as_c_reads_them() {
+        compare(
+            "head",
+            &[
+                Step::Open("bare"),
+                Step::CommitParents,
+                // Detached at a commit.
+                Step::Write("bare/HEAD", "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\n"),
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                Step::IsEmpty,
+                Step::CommitParents,
+                // Detached at a missing object.
+                Step::Write("bare/HEAD", "0123456789012345678901234567890123456789\n"),
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                // Detached at a tag.
+                Step::Write("bare/HEAD", "b25fa35b38051e4ae45d4222e795f9df2e43f1d1\n"),
+                Step::Head,
+                Step::HeadDetached,
+                // At a missing branch, then a symbolic chain.
+                Step::Write("bare/HEAD", "ref: refs/heads/missing\n"),
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                Step::IsEmpty,
+                Step::CommitParents,
+                Step::Write("bare/HEAD", "ref: refs/heads/packed\n"),
+                Step::Head,
+                Step::CommitParents,
+                // Garbage, then no HEAD at all.
+                Step::Write("bare/HEAD", "garbage\n"),
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                Step::IsEmpty,
+                Step::CommitParents,
+                Step::Open("empty"),
+                Step::Head,
+                Step::CommitParents,
+                Step::Write(
+                    "empty/refs/heads/other",
+                    "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\n",
+                ),
+                Step::IsEmpty,
+                Step::Open("merged"),
+                Step::CommitParents,
+                Step::Write(
+                    "merged/.git/MERGE_HEAD",
+                    "e2809157a7766f272e4cfe26e61ef2678a5357ff\n3a34580a35add43a4cf361e8e9a30060a905c876\n",
+                ),
+                Step::CommitParents,
+                Step::New,
+                Step::Head,
+                Step::HeadDetached,
+                Step::HeadUnborn,
+                Step::IsEmpty,
+                Step::CommitParents,
+            ],
+        );
+    }
+
+    /// A linked worktree's `HEAD` through its main repository, and the routines'
+    /// answers for worktrees that do not exist or are broken.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn worktree_heads_read_as_c_reads_them() {
+        compare(
+            "worktree",
+            &[
+                Step::Open("testrepo"),
+                // Attached: C answers 1 (see the unit tests), so only the reference is
+                // compared.
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::HeadForWorktree(c"missing"),
+                Step::HeadDetachedForWorktree(c"missing"),
+                // Detached, then at a missing branch.
+                Step::Write(
+                    "testrepo/.git/worktrees/testrepo-worktree/HEAD",
+                    "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\n",
+                ),
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::HeadDetachedForWorktree(c"testrepo-worktree"),
+                Step::Write(
+                    "testrepo/.git/worktrees/testrepo-worktree/HEAD",
+                    "ref: refs/heads/missing\n",
+                ),
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::HeadDetachedForWorktree(c"testrepo-worktree"),
+                // A packed branch, whose reference may carry a peeled id.
+                Step::Write(
+                    "testrepo/.git/worktrees/testrepo-worktree/HEAD",
+                    "ref: refs/heads/packed\n",
+                ),
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                // The worktree's own repository, and one with no worktrees.
+                Step::Open("testrepo-worktree"),
+                Step::Head,
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::Open("bare"),
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::HeadDetachedForWorktree(c"testrepo-worktree"),
+                // A broken worktree: its gitdir is gone.
+                Step::Open("testrepo"),
+                Step::Write(
+                    "testrepo/.git/worktrees/testrepo-worktree/gitdir",
+                    "/nonexistent/.git\n",
+                ),
+                Step::HeadForWorktree(c"testrepo-worktree"),
+                Step::HeadDetachedForWorktree(c"testrepo-worktree"),
+            ],
+        );
+    }
+
+    /// Files hashed as each type, with and without the repository's filters; then a
+    /// filter that is required but missing, and a very long path. (No attribute
+    /// macros: loading one takes libgit2's attribute-cache locks in the order freeing
+    /// the repository reverses, which TSan reports as a lock-order inversion.)
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn hash_file_matches_c() {
+        // Statics, not leaks, so LSan sees them reachable.
+        static LONG: LazyLock<String> = LazyLock::new(|| format!("@{}", "a/".repeat(2100)));
+        static FAILING: LazyLock<Vec<Step>> = LazyLock::new(|| {
+            vec![
+                Step::Open("testrepo"),
+                Step::HashFile(&LONG, ObjectType::Blob, None),
+                Step::HashFile(&LONG, ObjectType::Blob, Some(c"")),
+                Step::Write("testrepo/.gitattributes", "*.txt filter=missing ident\n"),
+                Step::Write(
+                    "testrepo/.git/config",
+                    "[core]\n\tbare = false\n[filter \"missing\"]\n\trequired = true\n",
+                ),
+                Step::Write("testrepo/x.txt", "$Id$\n"),
+                Step::HashFile("testrepo/x.txt", ObjectType::Blob, None),
+            ]
+        });
+        compare("hash-failing", &FAILING);
+        compare(
+            "hash",
+            &[
+                Step::Open("testrepo"),
+                Step::Write("testrepo/.gitattributes", "*.txt text eol=lf\n"),
+                Step::Write("testrepo/crlf.txt", "a\r\nb\r\n"),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, None),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, Some(c"")),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, Some(c"other.txt")),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, Some(c"other.bin")),
+                Step::HashFile("@crlf.txt", ObjectType::Blob, None),
+                Step::HashFile("@missing.txt", ObjectType::Blob, None),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Commit, None),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Tree, None),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Tag, None),
+                Step::HashFile("testrepo", ObjectType::Blob, None),
+                Step::HashFile("bare/HEAD", ObjectType::Blob, None),
+                Step::Open("bare"),
+                Step::HashFile("bare/HEAD", ObjectType::Blob, None),
+                Step::HashFile("bare/HEAD", ObjectType::Blob, Some(c"x.txt")),
+                Step::New,
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, None),
+                Step::HashFile("testrepo/crlf.txt", ObjectType::Blob, Some(c"crlf.txt")),
+            ],
+        );
+    }
+
+    /// The repository cleaned up, then used again: everything is loaded afresh.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_resets_what_c_resets() {
+        compare(
+            "cleanup",
+            &[
+                Step::Open("testrepo"),
+                Step::Index,
+                Step::Config(c"core.repositoryformatversion"),
+                Step::Head,
+                Step::Cleanup,
+                Step::Cleanup,
+                Step::Index,
+                Step::Config(c"core.repositoryformatversion"),
+                Step::Head,
+                Step::CommitParents,
+                Step::Write(
+                    "testrepo/.git/config",
+                    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[x]\n\ty = 7\n",
+                ),
+                Step::Config(c"x.y"),
+                Step::Cleanup,
+                Step::Config(c"x.y"),
+                // A config that no longer parses, loaded afresh after a cleanup. (Not
+                // read through the config already loaded: its file backend refreshes,
+                // fails, and `git_config_get_*` then forms `&be->entry` from a NULL
+                // entry, config.c:811, which UBSan reports.)
+                Step::Write("testrepo/.git/config", "[core\n"),
+                Step::Cleanup,
+                Step::Config(c"x.y"),
+                Step::Snapshot(c"x.y"),
+                Step::Index,
+                Step::New,
+                Step::Cleanup,
+                Step::IsBare,
+            ],
+        );
+    }
+
+    /// Runs `body` alone in a child process (`test` is its path), with LSan off when
+    /// `tolerating_leaks`.
+    fn in_child(test: &str, tolerating_leaks: bool, body: fn()) {
+        const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name);
+        if tolerating_leaks {
+            let asan = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+            command.env("ASAN_OPTIONS", format!("{asan}:detect_leaks=0"));
+        }
+        let out = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// `git_repository_detach_head` and its wrapper, on each kind of `HEAD`. Writing a
+    /// reference takes the reflog's time through glibc's `tzset`, which TSan reports
+    /// against other tests of this binary, so this runs alone in a child process.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn detach_head_moves_what_c_moves() {
+        in_child(
+            concat!(module_path!(), "::detach_head_moves_what_c_moves"),
+            false,
+            || {
+                compare(
+                    "detach",
+                    &[
+                        Step::Open("bare"),
+                        Step::SetIdent(Some(c"Name"), Some(c"name@example.com")),
+                        Step::DetachHead,
+                        Step::HeadDetached,
+                        Step::DetachHead,
+                        Step::Write("bare/HEAD", "b25fa35b38051e4ae45d4222e795f9df2e43f1d1\n"),
+                        Step::DetachHead,
+                        Step::Write("bare/HEAD", "ref: refs/heads/missing\n"),
+                        Step::DetachHead,
+                        Step::Write("bare/HEAD", "ref: refs/tags/point_to_blob\n"),
+                        Step::DetachHead,
+                        Step::Open("empty"),
+                        Step::DetachHead,
+                        Step::Open("testrepo-worktree"),
+                        Step::DetachHead,
+                        Step::Head,
+                        Step::Open("testrepo"),
+                        Step::HeadDetachedForWorktree(c"testrepo-worktree"),
+                        Step::New,
+                        Step::DetachHead,
+                    ],
+                );
+            },
+        );
+    }
+
+    /// A `HEAD` naming a missing object gives no parents on either side, and one naming
+    /// an unreadable object fails alike. C leaks `HEAD`'s reference in both (inside
+    /// `git_revparse_ext`), so this runs in a child with leak detection off; the unit
+    /// tests hold the wrapper to no leak.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn a_head_at_a_missing_object_has_no_parents() {
+        in_child(
+            concat!(
+                module_path!(),
+                "::a_head_at_a_missing_object_has_no_parents"
+            ),
+            true,
+            || {
+                compare(
+                    "missing-head",
+                    &[
+                        Step::Open("bare"),
+                        Step::Write("bare/HEAD", "0123456789012345678901234567890123456789\n"),
+                        Step::CommitParents,
+                        Step::Write("bare/HEAD", "ref: refs/heads/master\n"),
+                        Step::Write(
+                            "bare/refs/heads/master",
+                            "0123456789012345678901234567890123456789\n",
+                        ),
+                        Step::CommitParents,
+                        Step::Open("merged"),
+                        Step::Write(
+                            "merged/.git/HEAD",
+                            "0123456789012345678901234567890123456789\n",
+                        ),
+                        Step::CommitParents,
+                        // An object that cannot be read: a failure, before any is collected.
+                        Step::Write(
+                            "merged/.git/objects/01/23456789012345678901234567890123456789",
+                            "garbage",
+                        ),
+                        Step::CommitParents,
+                    ],
+                );
+            },
+        );
+    }
+
+    /// Discovery from each start, across filesystems or not, under ceilings.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn discover_finds_what_c_finds() {
+        init();
+        let scratch = Scratch::with_fixtures("discover");
+        fs::create_dir_all(scratch.0.join("testrepo/a/b")).unwrap();
+        fs::create_dir_all(scratch.0.join("plain/a")).unwrap();
+        fs::write(scratch.0.join("plain/a/.git"), "gitdir: ../../missing\n").unwrap();
+        let root = scratch.0.to_str().unwrap().to_owned();
+        let starts = [
+            "testrepo",
+            "testrepo/a/b",
+            "testrepo/.git",
+            "testrepo/.git/objects",
+            "bare",
+            "bare/refs",
+            "testrepo-worktree",
+            "plain",
+            "plain/a",
+            "missing",
+            "",
+        ];
+        let ceilings = [
+            None,
+            Some(String::new()),
+            Some(format!("{root}/testrepo")),
+            Some(format!("{root}/testrepo/a")),
+            Some(format!("/nonexistent:{root}/testrepo/a:{root}")),
+            Some("relative".to_owned()),
+        ];
+        for start in starts {
+            for ceiling in &ceilings {
+                for across_fs in [false, true] {
+                    let start_path = if start.is_empty() {
+                        CString::default()
+                    } else {
+                        scratch.c_path(start)
+                    };
+                    let ceiling = ceiling.as_deref().map(|c| CString::new(c).unwrap());
+                    let ceiling_ptr = ceiling.as_deref().map_or(ptr::null(), CStr::as_ptr);
+                    let mut buf = ffi::git_buf::default();
+                    // SAFETY: an empty buffer and NUL-terminated (or NULL ceiling) paths.
+                    let rc = unsafe {
+                        ffi::git_repository_discover(
+                            &mut buf,
+                            start_path.as_ptr(),
+                            across_fs.into(),
+                            ceiling_ptr,
+                        )
+                    };
+                    let c = if rc < 0 {
+                        c_failed(&scratch, rc)
+                    } else {
+                        // SAFETY: the buffer the call filled.
+                        Outcome::Value(unsafe { text(&scratch, buf.ptr) })
+                    };
+                    // SAFETY: disposed once.
+                    unsafe { ffi::git_buf_dispose(&mut buf) };
+                    let rust = match discover(&start_path, across_fs, ceiling.as_deref()) {
+                        Ok(buf) => Outcome::Value(scratch.relative(buf.as_ref().to_str().unwrap())),
+                        Err(error) => rust_failed(&scratch, &error),
+                    };
+                    assert_eq!(
+                        c, rust,
+                        "start {start:?}, ceiling {ceiling:?}, across_fs {across_fs}"
+                    );
+                }
+            }
+        }
+    }
+
+    // --- `FETCH_HEAD` callback ---------------------------------------------------------
+
+    /// An entry as a callback records it.
+    type Entry = (Option<String>, Option<String>, String, bool);
+
+    /// What a recording callback does after recording entry `i`.
+    #[derive(Clone, Copy, Debug)]
+    enum Answer {
+        Continue,
+        StopAt(usize),
+    }
+
+    /// The C callback's payload: its answer, and the entries it saw.
+    struct Recorder {
+        answer: Answer,
+        code: c_int,
+        entries: Vec<Entry>,
+    }
+
+    fn copied(s: *const c_char) -> Option<String> {
+        // SAFETY: libgit2 passes NULL or a string live for the call.
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned())
+    }
+
+    /// A C callback recording each entry, stopping with `code` where told.
+    unsafe extern "C" fn c_recorder(
+        ref_name: *const c_char,
+        remote_url: *const c_char,
+        oid: *const ffi::git_oid,
+        is_merge: c_uint,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: the payload is the test's live recorder, used by nothing else.
+        let recorder = unsafe { &mut *payload.cast::<Recorder>() };
+        // SAFETY: a live id.
+        recorder.entries.push((
+            copied(ref_name),
+            copied(remote_url),
+            unsafe { hex(oid) },
+            is_merge != 0,
+        ));
+        match recorder.answer {
+            Answer::StopAt(i) if recorder.entries.len() == i + 1 => recorder.code,
+            _ => 0,
+        }
+    }
+
+    /// `git_repository_fetchhead_foreach` over `contents` with the C recorder and with
+    /// the Rust callback, each in a repository of its own; the returns, the errors and
+    /// the entries seen must agree.
+    fn compare_fetchhead(contents: Option<&str>, answer: Answer) {
+        static RUNS: AtomicUsize = AtomicUsize::new(0);
+        init();
+        let run = |tag: &str, rust: bool| {
+            let scratch = Scratch::new(&format!("{tag}-{}", RUNS.fetch_add(1, SeqCst)));
+            scratch.sandbox("testrepo.git", "bare");
+            match contents {
+                Some(contents) => fs::write(scratch.0.join("bare/FETCH_HEAD"), contents).unwrap(),
+                // The fixture has one.
+                None => fs::remove_file(scratch.0.join("bare/FETCH_HEAD")).unwrap(),
+            }
+            let repo = Repository::open(&scratch.c_path("bare")).unwrap();
+            let mut entries = Vec::new();
+            let rc = if rust {
+                let mut seen = 0;
+                let mut record = |entry: FetchheadEntry<'_>| {
+                    let text = |s: Option<&CStr>| s.map(|s| s.to_string_lossy().into_owned());
+                    entries.push((
+                        text(entry.ref_name),
+                        text(entry.remote_url),
+                        entry.id.to_hex_string().unwrap(),
+                        entry.is_merge,
+                    ));
+                    seen += 1;
+                    match answer {
+                        Answer::StopAt(i) if seen == i + 1 => ControlFlow::Break(()),
+                        _ => ControlFlow::Continue(()),
+                    }
+                };
+                let mut callback = FetchheadForeachCallback::new(&mut record);
+                let (f, payload) = callback.raw();
+                // SAFETY: a live repository and the callback's own function and payload,
+                // which stays put and unused for the call.
+                let rc =
+                    unsafe { ffi::git_repository_fetchhead_foreach(repo.as_c_ptr(), f, payload) };
+                callback.resume_panic();
+                assert_eq!(callback.stopped(), rc == ffi::GIT_EUSER);
+                rc
+            } else {
+                let mut recorder = Recorder {
+                    answer,
+                    code: ffi::GIT_EUSER,
+                    entries: Vec::new(),
+                };
+                // SAFETY: a live repository and the recorder, live for the call.
+                let rc = unsafe {
+                    ffi::git_repository_fetchhead_foreach(
+                        repo.as_c_ptr(),
+                        Some(c_recorder),
+                        (&raw mut recorder).cast(),
+                    )
+                };
+                entries = recorder.entries;
+                rc
+            };
+            let outcome = if rc < 0 {
+                c_failed(&scratch, rc)
+            } else {
+                Outcome::Value(rc.to_string())
+            };
+            (outcome, entries)
+        };
+        let c = run("fetchhead-c", false);
+        let rust = run("fetchhead-rust", true);
+        assert_eq!(c, rust, "FETCH_HEAD {contents:?}, {answer:?}");
+    }
+
+    const FETCH_HEAD: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'master' of git://example.com/git/testrepo.git\n\
+        258f0e2a959a364e40ed6603d5d44fbb24765b10\tnot-for-merge\tbranch 'haacked' of git://example.com/git/testrepo.git\n\
+        b25fa35b38051e4ae45d4222e795f9df2e43f1d1\tnot-for-merge\ttag 'test' of git://example.com/git/testrepo.git\n\
+        e90810b8df3e80c413d903f631643c716887138d\tnot-for-merge\t'refs/pull/1/head' of git://example.com/git/testrepo.git\n\
+        41bc8c69075bbdb46c5c6f0566cc8cc5b46e8bd9\t\tgit://example.com/git/testrepo.git\n\
+        a4a7dce85cf63874e984719f4fdd239f5145052f\n";
+
+    /// Every entry form, read through; then stopped at each entry.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_callback_sees_what_a_c_callback_sees() {
+        compare_fetchhead(Some(FETCH_HEAD), Answer::Continue);
+        for i in 0..6 {
+            compare_fetchhead(Some(FETCH_HEAD), Answer::StopAt(i));
+        }
+    }
+
+    /// Malformed or missing files fail before or between calls alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_callback_fails_where_c_fails() {
+        compare_fetchhead(None, Answer::Continue);
+        for contents in [
+            "",
+            "\n",
+            "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+            "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'master' of x\nshort\n",
+            "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\tmaybe\tbranch 'master' of x\n",
+            "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'master' from x\n",
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\t\tbranch 'master' of x\n",
+        ] {
+            compare_fetchhead(Some(contents), Answer::Continue);
+        }
+    }
+
+    /// The Rust callback stops the C iteration with `GIT_EUSER` when its closure
+    /// breaks, as a C callback returning that code does, and a closure's panic stops
+    /// it the same way before resuming once C has returned.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_callback_panic_stops_as_euser() {
+        init();
+        let scratch = Scratch::new("fetchhead-panic");
+        scratch.sandbox("testrepo.git", "bare");
+        fs::write(scratch.0.join("bare/FETCH_HEAD"), FETCH_HEAD).unwrap();
+        let repo = Repository::open(&scratch.c_path("bare")).unwrap();
+        let seen = RefCell::new(0);
+        let mut panicking = |_: FetchheadEntry<'_>| -> ControlFlow<()> {
+            *seen.borrow_mut() += 1;
+            panic!("closure panicked");
+        };
+        let mut callback = FetchheadForeachCallback::new(&mut panicking);
+        let (f, payload) = callback.raw();
+        // libgit2 names the callback in the error only when none is set.
+        // SAFETY: the runtime is initialised.
+        unsafe { ffi::git_error_clear() };
+        // SAFETY: a live repository and the callback's own function and payload.
+        let rc = unsafe { ffi::git_repository_fetchhead_foreach(repo.as_c_ptr(), f, payload) };
+        assert_eq!(rc, ffi::GIT_EUSER);
+        assert!(callback.stopped());
+        let (class, message) = c_last();
+        assert_eq!(
+            (class, message.as_str()),
+            (
+                ffi::GIT_ERROR_CALLBACK as c_int,
+                "git_repository_fetchhead_foreach callback returned -7"
+            )
+        );
+        let resumed =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback.resume_panic()));
+        assert_eq!(
+            *resumed.unwrap_err().downcast::<&str>().unwrap(),
+            "closure panicked"
+        );
+        drop(callback);
+        assert_eq!(*seen.borrow(), 1);
+    }
+}
