@@ -1423,3 +1423,133 @@ pub mod annotated_commit {
         LEN.load(SeqCst) == 0
     }
 }
+
+// --- `git2/worktree.h`: `git_worktree_add` -----------------------------------------
+
+/// A repository to add linked worktrees to, through `git_worktree_add`; stands in for
+/// the reference lookup and `Worktree::add` wrappers, which replace it.
+pub mod worktree_add {
+    use std::ffi::{CStr, CString, c_int};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::refs::ReferenceBox;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::repository::worktree::{AddOptions, WorktreeBox};
+    use libgit2::libgit2::util::errors::last;
+
+    /// A fresh non-bare repository at `<base>/repo` whose `HEAD` is `main`, a commit of
+    /// the empty tree (so a checkout loads no filter), with the branches `feature` and
+    /// `alpha` and the lightweight tag `v1` on it; new worktrees go to
+    /// `<base>/wt/<name>`. Freed and removed on drop.
+    pub struct AddRepo {
+        pub base: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl AddRepo {
+        pub fn new(tag: &str) -> Self {
+            super::init();
+            let base = std::env::temp_dir().join(format!(
+                "crustify-worktree-add-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            let path = base.join("repo");
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let repo = Repository::init(&c_path, false).unwrap();
+            let (mut odb, raw) = (ptr::null_mut(), repo.as_c_ptr());
+            // SAFETY: a live slot and the live repository; released below.
+            let rc = unsafe { ffi::git_repository_odb(&mut odb, raw) };
+            assert_eq!(rc, 0);
+            let write = |data: &[u8], kind: ffi::git_object_t| {
+                let mut id = ffi::git_oid::default();
+                let (bytes, len) = (data.as_ptr().cast(), data.len());
+                // SAFETY: a live slot, the live odb and `data` readable for its length at
+                // a non-NULL address.
+                let rc = unsafe { ffi::git_odb_write(&mut id, odb, bytes, len, kind) };
+                assert_eq!(rc, 0);
+                super::annotated_commit::hex(&id)
+            };
+            const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
+            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let commit = format!("tree {tree}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n");
+            let commit = write(commit.as_bytes(), ffi::GIT_OBJECT_COMMIT);
+            // SAFETY: the odb reference taken above, released once.
+            unsafe { ffi::git_odb_free(odb) };
+            // Loose files: `git_reference_create` would take a reflog signature at the
+            // current time, whose timezone lookup TSan reports against other tests'.
+            for name in [
+                "refs/heads/main",
+                "refs/heads/feature",
+                "refs/heads/alpha",
+                "refs/tags/v1",
+            ] {
+                std::fs::write(path.join(".git").join(name), format!("{commit}\n")).unwrap();
+            }
+            std::fs::write(path.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            // `git_worktree_add` creates the worktree's directory, not its parents.
+            std::fs::create_dir(base.join("wt")).unwrap();
+            Self {
+                base,
+                repo: Some(repo),
+            }
+        }
+
+        /// `git_reference_lookup(name)`, adopted.
+        pub fn reference(&self, name: &CStr) -> ReferenceBox<'_> {
+            let mut out = ptr::null_mut();
+            let raw = self.repo.as_ref().unwrap().as_c_ptr();
+            // SAFETY: a live slot, the live repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, raw, name.as_ptr()) };
+            assert_eq!(rc, 0, "{name:?}");
+            // SAFETY: a fresh attached reference the caller owns, released by
+            // `git_reference_free`; it borrows `self`, which frees the repository last.
+            unsafe { ReferenceBox::from_c(out) }.unwrap()
+        }
+
+        /// `git_worktree_add(repo, name, <base>/wt/<name>, opts)`: the new worktree, or
+        /// the error code and message. libgit2 reads the options for the call only.
+        pub fn add(
+            &self,
+            name: &str,
+            opts: Option<&AddOptions<'_>>,
+        ) -> Result<WorktreeBox, (c_int, String)> {
+            let c_name = CString::new(name).unwrap();
+            let dir = self.base.join("wt").join(name);
+            let c_dir = CString::new(dir.as_os_str().as_bytes()).unwrap();
+            let opts: *const ffi::git_worktree_add_options =
+                opts.map_or(ptr::null(), |o| ptr::from_ref(o).cast());
+            let raw = self.repo.as_ref().unwrap().as_c_ptr();
+            let mut out = ptr::null_mut();
+            // SAFETY: a live slot, the live repository, two NUL-terminated strings and
+            // NULL or live options (`AddOptions` is `#[repr(transparent)]` over the C
+            // struct), all read for the call.
+            let rc = unsafe {
+                ffi::git_worktree_add(&mut out, raw, c_name.as_ptr(), c_dir.as_ptr(), opts)
+            };
+            if rc < 0 {
+                assert!(out.is_null());
+                return Err((rc, last().message().to_string_lossy().into_owned()));
+            }
+            // SAFETY: the fresh worktree the call looked up, owned by the caller and
+            // released by `git_worktree_free`.
+            Ok(unsafe { WorktreeBox::from_c(out) }.unwrap())
+        }
+
+        /// The new worktree `name`'s administrative directory.
+        pub fn admin(&self, name: &str) -> PathBuf {
+            self.base.join("repo/.git/worktrees").join(name)
+        }
+    }
+
+    impl Drop for AddRepo {
+        fn drop(&mut self) {
+            // Its references borrowed `self` and are gone; free it before its directory.
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+}

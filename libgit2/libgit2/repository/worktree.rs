@@ -40,16 +40,37 @@
 //! its out slot to NULL before failing, but `git_worktree_open_from_repository` leaves
 //! it untouched on failure (so the slot must start NULL), and dereferences its
 //! repository without the NULL check the others assert.
+//!
+//! # Adding options
+//!
+//! `git_worktree_add` takes a `git_worktree_add_options` ([`AddOptions`]): whether to
+//! lock the new worktree, whether to check out an existing branch named after it, the
+//! branch reference its `HEAD` is to point at, and the options of its first checkout
+//! (a `git_checkout_options`, embedded by value). libgit2 never allocates or frees one:
+//! the caller builds it with `git_worktree_add_options_init`, and `git_worktree_add`
+//! refuses a version of 0 or above [`AddOptions::VERSION`], copies the struct, and
+//! reads it for the call, taking a copy of the reference of its own.
+//!
+//! So nothing it points at is owned. Rust holds the struct by value as an
+//! [`AddOptions<'o>`] (filled by [`AddOptions::new`]), which borrows the reference, and
+//! everything the checkout options point at, for `'o`. The reference is an attached
+//! [`ReferenceRef`]: `git_worktree_add` copies its database link and reaches its
+//! repository through it. The embedded checkout options are reached in place, as a
+//! [`CheckoutOptionsRef`] or [`CheckoutOptionsMut`] over the same `'o`.
 
+use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use core::ops::{BitOr, BitOrAssign};
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBox, define_ctype, impl_cdrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::refs::refs::ReferenceRef;
+use crate::libgit2::workdir::checkout::{CheckoutOptionsMut, CheckoutOptionsRef};
 
 /// One `git_worktree_prune_t` bit: a check `git_worktree_is_prunable` skips, or the
 /// extra removal `git_worktree_prune` makes. Combine them in a [`PruneFlags`].
@@ -656,6 +677,386 @@ impl_cdrop!(WorktreeFree, Worktree, ffi::git_worktree_free);
 /// ```
 pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
 
+/// Options for creating a linked worktree (`git_worktree_add_options`), held by value in
+/// Rust storage.
+///
+/// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: the worktree is
+/// not locked, its `HEAD` is a new branch named after it at the repository's `HEAD`, and
+/// it is checked out with the default
+/// [`CheckoutOptions`](crate::libgit2::workdir::checkout::CheckoutOptions). Read it through
+/// [`as_ref`](Self::as_ref) and change it through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// # if cfg!(miri) { return; }
+/// let mut opts = AddOptions::new();
+/// opts.as_mut().set_lock(true);
+/// opts.as_mut().checkout_options().set_disable_filters(true);
+/// assert_eq!(opts.as_ref().version(), AddOptions::VERSION);
+/// assert!(opts.as_ref().lock() && !opts.as_ref().checkout_existing());
+/// assert!(opts.as_ref().reference().is_none());
+/// assert!(opts.as_ref().checkout_options().disable_filters());
+/// ```
+///
+/// `#[repr(transparent)]` over `git_worktree_add_options`, so a pointer to it is a
+/// pointer to the C struct, which C reads in place. `'o` is the lifetime of what it
+/// points at: the branch reference and everything the embedded checkout options borrow.
+/// The options therefore outlive neither the reference:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::refs::refs::ReferenceBox;
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// fn escape(branch: ReferenceBox<'_>) {
+///     let mut opts = AddOptions::new();
+///     opts.as_mut().set_reference(Some(branch.as_ref()));
+///     drop(branch);
+///     let _ = opts.as_ref().reference();
+/// }
+/// ```
+///
+/// nor the repository the reference was read through:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::refs::refs::ReferenceBox;
+/// use libgit2::libgit2::repository::repository::RepositoryBox;
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// fn escape(repo: RepositoryBox, lookup: fn(&RepositoryBox) -> ReferenceBox<'_>) {
+///     let branch = lookup(&repo);
+///     let mut opts = AddOptions::new();
+///     opts.as_mut().set_reference(Some(branch.as_ref()));
+///     drop(repo);
+///     let _ = opts.as_ref().reference();
+/// }
+/// ```
+///
+/// and no exclusive handle to the reference exists while the options borrow it:
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::refs::refs::ReferenceBox;
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// fn alias(mut branch: ReferenceBox<'_>) {
+///     let mut opts = AddOptions::new();
+///     opts.as_mut().set_reference(Some(branch.as_ref()));
+///     let _exclusive = branch.as_mut();
+///     let _ = opts.as_ref().reference();
+/// }
+/// ```
+///
+/// The exclusive handle is invariant in `'o`, so one cannot be shrunk to accept a
+/// shorter-lived borrow than its options were built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::repository::worktree::AddOptionsMut;
+///
+/// fn shrink<'a, 'o>(m: AddOptionsMut<'a, 'static>) -> AddOptionsMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// Neither `Send` nor `Sync`, as neither its reference (which reaches its repository)
+/// nor its checkout options (whose raw seams carry payloads) are:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// fn send<T: Send>(_: T) {}
+/// send(AddOptions::new());
+/// ```
+///
+/// Not `Clone`, as its checkout options are not: their callbacks' payloads may be
+/// exclusive borrows, which a copy would alias. Build another with [`new`](Self::new).
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::repository::worktree::AddOptions;
+///
+/// fn needs<T: Clone>() {}
+/// needs::<AddOptions<'static>>();
+/// ```
+///
+/// Wraps: git_worktree_add_options
+/// Handwritten
+#[repr(transparent)]
+pub struct AddOptions<'o>(
+    ffi::git_worktree_add_options,
+    PhantomData<(*const (), &'o CStr)>,
+);
+
+/// Shared borrow of an [`AddOptions`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct AddOptionsRef<'a, 'o>(CBorrowedPtr<'a, AddOptions<'o>>);
+
+/// Exclusive borrow of an [`AddOptions`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct AddOptionsMut<'a, 'o>(
+    AddOptionsRef<'a, 'o>,
+    // Invariant in the options, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut AddOptions<'o>>,
+);
+
+// SAFETY: `AddOptions` is `#[repr(transparent)]` over `git_worktree_add_options` with a
+// zero-sized marker; both handles are `#[repr(transparent)]` over
+// `CBorrowedPtr<'a, AddOptions<'o>>` (`AddOptionsMut` through `AddOptionsRef`) with
+// zero-sized markers and no `Drop`, hand out no reference to the options, and
+// `AddOptionsRef` has no write operation. `AddOptionsMut` is invariant in the options
+// through its `PhantomData<&'a mut AddOptions<'o>>`.
+unsafe impl<'o> CCell for AddOptions<'o> {
+    type C = ffi::git_worktree_add_options;
+    type Ref<'a>
+        = AddOptionsRef<'a, 'o>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = AddOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+}
+
+impl<'o> AddOptions<'o> {
+    /// The structure version this crate's header declares
+    /// (`GIT_WORKTREE_ADD_OPTIONS_VERSION`), the only one libgit2 accepts.
+    pub const VERSION: u32 = ffi::GIT_WORKTREE_ADD_OPTIONS_VERSION;
+
+    /// libgit2's default options, as `git_worktree_add_options_init` fills them for
+    /// [`VERSION`](Self::VERSION) and `GIT_WORKTREE_ADD_OPTIONS_INIT` spells them: not
+    /// locked, no existing branch checked out, no reference, and the default checkout
+    /// options.
+    ///
+    /// `git_worktree_add_options_init` only fails for a version it does not know, and
+    /// with its own it reaches no global, no allocator and no thread state, so this needs
+    /// no initialised library.
+    ///
+    /// Wraps: git_worktree_add_options_init
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_worktree_add_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_worktree_add_options`, which
+        // the routine overwrites whole with the template for this version (a memcpy);
+        // nothing else reads it during the call.
+        let rc = unsafe { ffi::git_worktree_add_options_init(raw.as_mut_ptr(), Self::VERSION) };
+        assert_eq!(
+            rc, 0,
+            "git_worktree_add_options_init refused its own version"
+        );
+        // SAFETY: a 0 return means the template was copied in: every field is
+        // initialised, the reference NULL and the checkout options their own template.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Shared handle to the options — the getters, and the pointer for C calls that
+    /// read them.
+    pub fn as_ref(&self) -> AddOptionsRef<'_, 'o> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        AddOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the options — the setters.
+    pub fn as_mut(&mut self) -> AddOptionsMut<'_, 'o> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        AddOptionsMut(AddOptionsRef(ptr), PhantomData)
+    }
+}
+
+impl Default for AddOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for AddOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'o> AddOptionsRef<'a, 'o> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_worktree_add_options *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_worktree_add_options {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The structure's version, `GIT_WORKTREE_ADD_OPTIONS_VERSION`; fixed by
+    /// [`AddOptions::new`].
+    ///
+    /// Field: git_worktree_add_options.version
+    pub fn version(&self) -> u32 {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `u32`.
+        unsafe { addr_of!((*p).version).read() }
+    }
+
+    /// Whether the new worktree is created locked: `git_worktree_add` then leaves an
+    /// empty `locked` file (no reason) in its administrative directory.
+    ///
+    /// Field: git_worktree_add_options.lock
+    pub fn lock(&self) -> bool {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let lock = unsafe { addr_of!((*p).lock).read() };
+        lock != 0
+    }
+
+    /// Whether, when no [`reference`](Self::reference) is set, an existing local branch
+    /// named after the worktree is checked out rather than a new one created (which
+    /// then fails, the branch existing).
+    ///
+    /// Field: git_worktree_add_options.checkout_existing
+    pub fn checkout_existing(&self) -> bool {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let existing = unsafe { addr_of!((*p).checkout_existing).read() };
+        existing != 0
+    }
+
+    /// The branch the new worktree's `HEAD` points at; `None` means one chosen by
+    /// [`checkout_existing`](Self::checkout_existing) or a new branch named after the
+    /// worktree. `git_worktree_add` refuses a reference that is not a local branch
+    /// (`refs/heads/...`) or that another working tree has checked out.
+    ///
+    /// Field: git_worktree_add_options.ref
+    pub fn reference(&self) -> Option<ReferenceRef<'o, 'o>> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let reference = unsafe { addr_of!((*p).ref_).read() };
+        // SAFETY: the field is NULL (as `new` leaves it) or was stored by
+        // `set_reference` from a `ReferenceRef<'o, 'o>`: an attached reference that no
+        // one frees or writes during `'o`, read through a repository that outlives
+        // `'o`, which the options themselves cannot outlive.
+        unsafe { ReferenceRef::from_ptr(reference) }
+    }
+
+    /// The options of the checkout of the new worktree's `HEAD`, which libgit2 copies
+    /// into `git_checkout_head` on the new worktree.
+    ///
+    /// Field: git_worktree_add_options.checkout_options
+    pub fn checkout_options(&self) -> CheckoutOptionsRef<'a, 'o> {
+        let p = self.as_ptr().cast_mut();
+        // SAFETY: the projection stays inside the live options this handle borrows.
+        let checkout = unsafe { addr_of_mut!((*p).checkout_options) };
+        // SAFETY: an embedded, initialised `git_checkout_options` that lives as long as
+        // the options, which the shared handle keeps borrowed (and so unwritten) for
+        // `'a`; every borrow its setters stored outlives `'o`, as
+        // `CheckoutOptionsMut::from_ptr` requires of what reaches them through
+        // `AddOptionsMut::checkout_options`, and `CheckoutOptions::new`'s template
+        // stores none. The pointer is not NULL.
+        unsafe { CheckoutOptionsRef::from_ptr(checkout) }
+            .expect("embedded checkout options are never NULL")
+    }
+}
+
+impl fmt::Debug for AddOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AddOptions")
+            .field("version", &self.version())
+            .field("lock", &self.lock())
+            .field("checkout_existing", &self.checkout_existing())
+            .field("reference", &self.reference())
+            .field("checkout_options", &self.checkout_options())
+            .finish()
+    }
+}
+
+impl<'a, 'o> AddOptionsMut<'a, 'o> {
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_worktree_add_options {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> AddOptionsRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> AddOptionsMut<'_, 'o> {
+        AddOptionsMut(self.0, PhantomData)
+    }
+
+    /// Sets whether the new worktree is created locked.
+    ///
+    /// Field: git_worktree_add_options.lock
+    pub fn set_lock(&mut self, lock: bool) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).lock).write(c_int::from(lock)) }
+    }
+
+    /// Sets whether an existing local branch named after the worktree is checked out
+    /// when no reference is set.
+    ///
+    /// Field: git_worktree_add_options.checkout_existing
+    pub fn set_checkout_existing(&mut self, existing: bool) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).checkout_existing).write(c_int::from(existing)) }
+    }
+
+    /// Sets the branch the new worktree's `HEAD` points at; `None` means none.
+    /// `git_worktree_add` only reads it, copying it for the call.
+    ///
+    /// The reference is borrowed for `'o`, and through it the repository it was read
+    /// from, which then both outlive the options; its owner lends no exclusive handle
+    /// meanwhile. Only an attached [`Reference`](crate::libgit2::refs::refs::Reference)
+    /// is accepted: libgit2 copies the reference's database link and reaches its
+    /// repository, which an
+    /// [`UnattachedReference`](crate::libgit2::refs::refs::UnattachedReference) lacks.
+    /// The reference may belong to another repository than the one the worktree is
+    /// added to; libgit2 then only takes its name.
+    ///
+    /// Field: git_worktree_add_options.ref
+    pub fn set_reference(&mut self, reference: Option<ReferenceRef<'o, 'o>>) {
+        let reference = reference.map_or(ptr::null_mut(), |r| r.as_ptr().cast_mut());
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop. The reference is NULL or
+        // one a `ReferenceRef<'o, 'o>` vouches for, as `reference()` requires; libgit2
+        // never writes through it.
+        unsafe { addr_of_mut!((*p).ref_).write(reference) }
+    }
+
+    /// The exclusive handle to the embedded checkout options, which takes borrows for
+    /// the same `'o` as these options.
+    ///
+    /// Field: git_worktree_add_options.checkout_options
+    pub fn checkout_options(&mut self) -> CheckoutOptionsMut<'_, 'o> {
+        let p = self.as_mut_ptr();
+        // SAFETY: the projection stays inside the live options this handle borrows.
+        let checkout = unsafe { addr_of_mut!((*p).checkout_options) };
+        // SAFETY: an embedded, initialised `git_checkout_options` that lives as long as
+        // the options, reborrowed exclusively from this handle, so nothing else reaches
+        // it while the result lives; the result is invariant in `'o`, so its setters
+        // only store borrows that outlive these options. The pointer is not NULL.
+        unsafe { CheckoutOptionsMut::from_ptr(checkout) }
+            .expect("embedded checkout options are never NULL")
+    }
+}
+
+impl fmt::Debug for AddOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// An `AddOptions` is a `git_worktree_add_options`, so C reads a value Rust holds in place.
+const _: () = assert!(
+    size_of::<AddOptions<'_>>() == size_of::<ffi::git_worktree_add_options>()
+        && align_of::<AddOptions<'_>>() == align_of::<ffi::git_worktree_add_options>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     mod prune_options {
@@ -955,6 +1356,213 @@ mod unit_tests {
             assert_eq!(layout.lookup(c"absent"), Err(ffi::GIT_ENOTFOUND));
             fs::remove_file(layout.base.join("repo/.git/worktrees/wt/HEAD")).unwrap();
             assert_eq!(layout.lookup(c"wt"), Err(-1));
+        }
+    }
+
+    mod add_options {
+        use super::super::*;
+        use crate::libgit2::refs::refs::ReferenceBox;
+        use crate::libgit2::util::sys::errors::runtime_pinned;
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        /// `GIT_WORKTREE_ADD_OPTIONS_INIT`, built in Rust so Miri can run the accessors;
+        /// `new_matches_the_template` ties it to `git_worktree_add_options_init`.
+        fn template<'o>() -> AddOptions<'o> {
+            let raw = ffi::git_worktree_add_options {
+                version: ffi::GIT_WORKTREE_ADD_OPTIONS_VERSION,
+                checkout_options: ffi::git_checkout_options {
+                    version: ffi::GIT_CHECKOUT_OPTIONS_VERSION,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            AddOptions(raw, PhantomData)
+        }
+
+        /// Every field, as the getters read them.
+        fn fields(o: AddOptionsRef<'_, '_>) -> String {
+            format!(
+                "{o:?} {:?} {}",
+                o.reference().map(|r| r.as_ptr()),
+                (o.as_ptr() as usize) % align_of::<ffi::git_worktree_add_options>(),
+            )
+        }
+
+        #[test]
+        fn handles_are_one_pointer_and_the_value_is_the_c_struct() {
+            let one = size_of::<*const ffi::git_worktree_add_options>();
+            assert_eq!(size_of::<AddOptionsRef<'_, '_>>(), one);
+            assert_eq!(size_of::<AddOptionsMut<'_, '_>>(), one);
+            assert_eq!(size_of::<Option<AddOptionsRef<'_, '_>>>(), one);
+            assert_eq!(
+                size_of::<AddOptions<'_>>(),
+                size_of::<ffi::git_worktree_add_options>()
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn new_matches_the_template() {
+            let opts = AddOptions::new();
+            assert_eq!(fields(opts.as_ref()), fields(template().as_ref()));
+            assert_eq!(
+                fields(AddOptions::default().as_ref()),
+                fields(opts.as_ref())
+            );
+            let raw = &opts.0;
+            assert_eq!(raw.version, 1);
+            assert_eq!((raw.lock, raw.checkout_existing), (0, 0));
+            assert!(raw.ref_.is_null());
+            let checkout = &raw.checkout_options;
+            assert_eq!(checkout.version, ffi::GIT_CHECKOUT_OPTIONS_VERSION);
+            assert_eq!((checkout.checkout_strategy, checkout.dir_mode), (0, 0));
+            assert!(checkout.target_directory.is_null() && checkout.paths.strings.is_null());
+        }
+
+        #[test]
+        fn defaults_read_as_documented() {
+            let opts = template();
+            let o = opts.as_ref();
+            assert_eq!(o.version(), AddOptions::VERSION);
+            assert!(!o.lock() && !o.checkout_existing());
+            assert!(o.reference().is_none());
+            assert_eq!(
+                o.checkout_options().version(),
+                ffi::GIT_CHECKOUT_OPTIONS_VERSION
+            );
+            assert_eq!(
+                format!("{opts:?}"),
+                format!(
+                    "AddOptions {{ version: 1, lock: false, checkout_existing: false, \
+                     reference: None, checkout_options: {:?} }}",
+                    o.checkout_options()
+                )
+            );
+        }
+
+        #[test]
+        fn setters_write_the_c_fields() {
+            let mut opts = template();
+            let mut m = opts.as_mut();
+            m.set_lock(true);
+            m.as_mut().set_checkout_existing(true);
+            assert!(m.as_ref().lock() && m.as_ref().checkout_existing());
+            assert_eq!(format!("{m:?}"), format!("{:?}", m.as_ref()));
+            assert_eq!((opts.0.lock, opts.0.checkout_existing), (1, 1));
+            let mut m = opts.as_mut();
+            m.set_lock(false);
+            m.set_checkout_existing(false);
+            assert_eq!((opts.0.lock, opts.0.checkout_existing), (0, 0));
+        }
+
+        #[test]
+        fn any_nonzero_c_boolean_reads_true() {
+            for (value, expected) in [
+                (0, false),
+                (1, true),
+                (2, true),
+                (-1, true),
+                (i32::MIN, true),
+            ] {
+                let mut opts = template();
+                opts.0.lock = value;
+                opts.0.checkout_existing = value;
+                assert_eq!(opts.as_ref().lock(), expected, "{value}");
+                assert_eq!(opts.as_ref().checkout_existing(), expected, "{value}");
+            }
+        }
+
+        #[test]
+        fn checkout_options_project_into_the_embedded_struct() {
+            let label = CString::new("mine").unwrap();
+            let mut opts = template();
+            {
+                let mut m = opts.as_mut();
+                let mut checkout = m.checkout_options();
+                checkout.set_strategy(0x20);
+                checkout.set_our_label(Some(&label));
+                checkout.as_mut().set_dir_mode(0o700);
+                m.set_lock(true);
+            }
+            let raw = &opts.0.checkout_options;
+            assert_eq!((raw.checkout_strategy, raw.dir_mode), (0x20, 0o700));
+            assert_eq!(raw.our_label, label.as_ptr());
+            let o = opts.as_ref();
+            let checkout = o.checkout_options();
+            assert_eq!(checkout.strategy(), 0x20);
+            assert_eq!(checkout.our_label(), Some(label.as_c_str()));
+            assert_eq!(
+                checkout.as_ptr(),
+                addr_of!(opts.0.checkout_options),
+                "the handle addresses the embedded struct, not a copy"
+            );
+            assert!(o.lock());
+        }
+
+        /// A repository holding the loose branch `refs/heads/main`, freed and removed
+        /// on drop; the reference wrappers have no lookup yet.
+        struct Repo {
+            path: std::path::PathBuf,
+            repo: *mut ffi::git_repository,
+        }
+
+        impl Repo {
+            fn new(tag: &str) -> Self {
+                assert!(runtime_pinned());
+                let path = std::env::temp_dir().join(format!(
+                    "crustify-worktree-add-unit-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = std::fs::remove_dir_all(&path);
+                let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                let mut repo = ptr::null_mut();
+                // SAFETY: a live slot and a NUL-terminated path, read for the call.
+                let rc = unsafe { ffi::git_repository_init(&mut repo, c_path.as_ptr(), 1) };
+                assert_eq!(rc, 0);
+                std::fs::write(
+                    path.join("refs/heads/main"),
+                    format!("{}\n", "11".repeat(20)),
+                )
+                .unwrap();
+                Self { path, repo }
+            }
+
+            /// `git_reference_lookup(name)`, adopted.
+            fn lookup(&self, name: &CStr) -> ReferenceBox<'_> {
+                let mut out = ptr::null_mut();
+                // SAFETY: a live slot, the live repository and a NUL-terminated name.
+                let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+                assert_eq!(rc, 0);
+                // SAFETY: a fresh attached reference the caller owns, released by
+                // `git_reference_free`; it borrows `self`, which frees the repository.
+                unsafe { ReferenceBox::from_c(out) }.unwrap()
+            }
+        }
+
+        impl Drop for Repo {
+            fn drop(&mut self) {
+                // SAFETY: the repository this fixture opened, freed once.
+                unsafe { ffi::git_repository_free(self.repo) };
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn reference_is_stored_and_read_back_as_borrowed() {
+            let repo = Repo::new("ref");
+            let main = repo.lookup(c"refs/heads/main");
+            let mut opts = AddOptions::new();
+            opts.as_mut().set_reference(Some(main.as_ref()));
+            assert_eq!(opts.0.ref_.cast_const(), main.as_ref().as_ptr());
+            let read = opts.as_ref().reference().unwrap();
+            assert_eq!(read.as_ptr(), main.as_ref().as_ptr());
+            assert!(format!("{opts:?}").contains("reference: Some(Reference { .. })"));
+            opts.as_mut().set_reference(None);
+            assert!(opts.0.ref_.is_null() && opts.as_ref().reference().is_none());
+            // The options never owned it: the box still frees it once.
+            drop(main);
         }
     }
 }

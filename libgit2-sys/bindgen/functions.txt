@@ -178,6 +178,8 @@ git_treebuilder_get
 git_treebuilder_insert
 git_treebuilder_new
 git_treebuilder_write
+git_worktree_add
+git_worktree_add_options_init
 git_worktree_free
 git_worktree_is_locked
 git_worktree_is_prunable

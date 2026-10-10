@@ -1036,3 +1036,528 @@ mod worktree_box {
         );
     }
 }
+
+/// [`AddOptions`] against `git_worktree_add_options_init` and `git_worktree_add`, the one
+/// routine reading the options.
+///
+/// [`AddOptions::new`] must build what `git_worktree_add_options_init` writes for
+/// [`AddOptions::VERSION`] (the header's `GIT_WORKTREE_ADD_OPTIONS_INIT`), field by
+/// field, the embedded checkout options included; C refuses every other version, and
+/// Rust offers no constructor for one.
+///
+/// The options' observable behaviour is what `git_worktree_add` does with them. A
+/// sequence of adds runs twice, on two independently owned non-bare repositories
+/// written identically (an empty-tree commit on `main`, its `HEAD`, and further
+/// branches and a tag on it): one side builds every step's options through C
+/// (`git_worktree_add_options_init`, raw field writes, a raw `git_reference_lookup`),
+/// the other through the Rust API ([`AddOptions::new`], the setters, a [`ReferenceBox`]
+/// lent with `set_reference`, the checkout options' handle). After each step the two
+/// must agree on the options' fields, the return, the thread's last error, and the
+/// files the step left (the worktrees' administrative directories, working directories
+/// and checkout target, paths relative to each side's root). No step makes libgit2
+/// create a branch: that takes a reflog signature at the current time, whose glibc
+/// timezone lookup ThreadSanitizer reports against concurrent tests.
+mod add_options {
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::refs::ReferenceBox;
+    use libgit2::libgit2::repository::worktree::{AddOptions, AddOptionsRef};
+
+    /// Initialises libgit2, whose error state the consumers write; never released.
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// The calling thread's last error, as C reports it, with `base` replaced by
+    /// `<base>`.
+    fn c_last(base: &Path) -> (c_int, String) {
+        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
+        // its message is NULL or a C string, live until the next libgit2 call on this
+        // thread, after the copy.
+        let (klass, message) = unsafe {
+            let e = ffi::git_error_last();
+            let message = (*e).message;
+            let message = if message.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(message).to_string_lossy().into_owned()
+            };
+            ((*e).klass, message)
+        };
+        (klass, message.replace(base.to_str().unwrap(), "<base>"))
+    }
+
+    /// `git_worktree_add_options_init(version)` over storage filled with `0xa5` bytes:
+    /// its return, and the bytes it left.
+    fn c_init_bytes(version: u32) -> (c_int, Vec<u8>) {
+        let mut raw = MaybeUninit::<ffi::git_worktree_add_options>::uninit();
+        let size = size_of::<ffi::git_worktree_add_options>();
+        // SAFETY: `raw` is writable storage of `size` bytes.
+        unsafe { ptr::write_bytes(raw.as_mut_ptr().cast::<u8>(), 0xa5, size) };
+        // SAFETY: `raw` is writable storage for the struct; a refused version leaves it
+        // untouched.
+        let rc = unsafe { ffi::git_worktree_add_options_init(raw.as_mut_ptr(), version) };
+        // SAFETY: every byte of the storage is initialised (the fill, then possibly the
+        // template), and is read as bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(raw.as_ptr().cast::<u8>(), size) };
+        (rc, bytes.to_vec())
+    }
+
+    /// `git_worktree_add_options_init(GIT_WORKTREE_ADD_OPTIONS_VERSION)`.
+    fn c_init() -> ffi::git_worktree_add_options {
+        let mut raw = ffi::git_worktree_add_options::default();
+        // SAFETY: `raw` is a live struct the call overwrites.
+        let rc = unsafe {
+            ffi::git_worktree_add_options_init(&mut raw, ffi::GIT_WORKTREE_ADD_OPTIONS_VERSION)
+        };
+        assert_eq!(rc, 0);
+        raw
+    }
+
+    /// The fields of the options and of their checkout options that the Rust API reads,
+    /// as C stores them: version, lock, checkout_existing, the reference's name, then
+    /// the checkout options' version, strategy, modes, open flags, notify flags and
+    /// target directory.
+    type Fields = (
+        u32,
+        c_int,
+        c_int,
+        Option<CString>,
+        (u32, u32, u32, u32, c_int, u32, Option<CString>),
+    );
+
+    fn name_of(reference: *const ffi::git_reference) -> Option<CString> {
+        // SAFETY: NULL or a live reference; its name lives as long as it and is copied.
+        (!reference.is_null())
+            .then(|| unsafe { CStr::from_ptr(ffi::git_reference_name(reference)) }.to_owned())
+    }
+
+    fn c_fields(raw: &ffi::git_worktree_add_options) -> Fields {
+        let c = &raw.checkout_options;
+        let target = c.target_directory;
+        (
+            raw.version,
+            raw.lock,
+            raw.checkout_existing,
+            name_of(raw.ref_),
+            (
+                c.version,
+                c.checkout_strategy,
+                c.dir_mode,
+                c.file_mode,
+                c.file_open_flags,
+                c.notify_flags,
+                // SAFETY: NULL or a C string the side keeps alive.
+                (!target.is_null()).then(|| unsafe { CStr::from_ptr(target) }.to_owned()),
+            ),
+        )
+    }
+
+    /// The Rust getters' view; the reference wrappers have no name getter yet, so a set
+    /// reference reads as the name of `lent`, the reference the test lent (whose
+    /// identity with the getter's result the unit tests check).
+    fn rust_fields(o: AddOptionsRef<'_, '_>, lent: Option<&ReferenceBox<'_>>) -> Fields {
+        let c = o.checkout_options();
+        let reference = o.reference().map(|_| lent.unwrap().as_c_ptr().cast_const());
+        (
+            o.version(),
+            c_int::from(o.lock()),
+            c_int::from(o.checkout_existing()),
+            reference.and_then(name_of),
+            (
+                c.version(),
+                c.strategy(),
+                c.dir_mode(),
+                c.file_mode(),
+                c.file_open_flags(),
+                c.notify_flags(),
+                c.target_directory().map(CStr::to_owned),
+            ),
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_git_worktree_add_options_init() {
+        assert_eq!(AddOptions::VERSION, ffi::GIT_WORKTREE_ADD_OPTIONS_VERSION);
+        // Repeated: the routine keeps no state, and overwrites whatever was there.
+        for _ in 0..4 {
+            let c = c_init();
+            let rust = AddOptions::new();
+            assert_eq!(rust_fields(rust.as_ref(), None), c_fields(&c));
+            assert_eq!(
+                rust_fields(AddOptions::default().as_ref(), None),
+                c_fields(&c)
+            );
+            // `GIT_WORKTREE_ADD_OPTIONS_INIT`: `{VERSION, 0, 0, NULL, CHECKOUT_INIT}`.
+            assert_eq!(
+                c_fields(&c),
+                (
+                    1,
+                    0,
+                    0,
+                    None,
+                    (ffi::GIT_CHECKOUT_OPTIONS_VERSION, 0, 0, 0, 0, 0, None)
+                )
+            );
+            assert!(c.checkout_options.paths.strings.is_null());
+            assert!(c.checkout_options.baseline.is_null());
+            assert!(c.checkout_options.notify_cb.is_none());
+            assert_eq!(c_init_bytes(AddOptions::VERSION).0, 0);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn git_worktree_add_options_init_refuses_every_other_version() {
+        // The versions Rust offers no constructor for: C refuses each, leaving the
+        // struct as it was.
+        init();
+        let untouched = vec![0xa5; size_of::<ffi::git_worktree_add_options>()];
+        for version in [0, 2, 3, u32::MAX] {
+            assert_eq!(c_init_bytes(version), (-1, untouched.clone()), "{version}");
+            assert_eq!(
+                c_last(Path::new("/nonexistent")),
+                (
+                    ffi::GIT_ERROR_INVALID as c_int,
+                    format!(
+                        "invalid version {} on git_worktree_add_options",
+                        version as c_int
+                    )
+                ),
+            );
+        }
+    }
+
+    /// The options of one add.
+    #[derive(Clone, Copy, Debug, Default)]
+    struct Spec {
+        lock: bool,
+        checkout_existing: bool,
+        /// The reference to look up and lend.
+        reference: Option<&'static CStr>,
+        /// The checkout's target directory, relative to the side's root.
+        target: Option<&'static str>,
+        /// The checkout strategy bits.
+        strategy: u32,
+    }
+
+    /// `git_worktree_add`'s steps: the worktree's name and the options.
+    const STEPS: [(&str, Spec); 9] = [
+        // An existing branch named after the worktree.
+        (
+            "alpha",
+            Spec {
+                checkout_existing: true,
+                ..SPEC
+            },
+        ),
+        // A borrowed branch, locked.
+        (
+            "beta",
+            Spec {
+                lock: true,
+                reference: Some(c"refs/heads/feature"),
+                ..SPEC
+            },
+        ),
+        // The same branch, now checked out.
+        (
+            "gamma",
+            Spec {
+                reference: Some(c"refs/heads/feature"),
+                ..SPEC
+            },
+        ),
+        // Not a branch.
+        (
+            "delta",
+            Spec {
+                lock: true,
+                reference: Some(c"refs/tags/v1"),
+                ..SPEC
+            },
+        ),
+        // The worktree exists: its existing branch is checked out there.
+        (
+            "alpha",
+            Spec {
+                checkout_existing: true,
+                ..SPEC
+            },
+        ),
+        // A checkout into a target directory, which it creates.
+        (
+            "epsilon",
+            Spec {
+                reference: Some(c"refs/heads/topic"),
+                target: Some("target"),
+                ..SPEC
+            },
+        ),
+        // The repository's own `HEAD`.
+        (
+            "zeta",
+            Spec {
+                reference: Some(c"refs/heads/main"),
+                ..SPEC
+            },
+        ),
+        // The reference wins over `checkout_existing`; a dry-run checkout
+        // (`GIT_CHECKOUT_DRY_RUN`).
+        (
+            "eta",
+            Spec {
+                lock: true,
+                checkout_existing: true,
+                reference: Some(c"refs/heads/spare"),
+                strategy: 1 << 24,
+                ..SPEC
+            },
+        ),
+        // An administrative directory left by an earlier worktree of that name.
+        (
+            "beta",
+            Spec {
+                reference: Some(c"refs/heads/spare2"),
+                ..SPEC
+            },
+        ),
+    ];
+
+    const SPEC: Spec = Spec {
+        lock: false,
+        checkout_existing: false,
+        reference: None,
+        target: None,
+        strategy: 0,
+    };
+
+    /// What one step left: its return, the last error, and the files under the side's
+    /// root but the repository's own `.git` contents outside `worktrees/` (paths and
+    /// contents relative to the root; index and log files, which hold times, skipped).
+    type Outcome = (
+        c_int,
+        Option<(c_int, String)>,
+        Vec<(String, Option<String>)>,
+    );
+
+    /// One side's directory: a non-bare repository at `<base>/repo`, its worktrees at
+    /// `<base>/wt/<name>`.
+    struct Side {
+        base: PathBuf,
+        repo: *mut ffi::git_repository,
+        /// The checkout target directories the C side's options point at.
+        targets: Vec<CString>,
+    }
+
+    impl Side {
+        /// `tag` must have the same length on both sides, so their paths do.
+        fn new(tag: &str) -> Self {
+            init();
+            let base = std::env::temp_dir().join(format!(
+                "crustify-worktree-add-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&base);
+            let path = base.join("repo");
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot and a NUL-terminated path, read for the call.
+            let rc = unsafe { ffi::git_repository_init(&mut repo, c_path.as_ptr(), 0) };
+            assert_eq!(rc, 0);
+            let mut odb = ptr::null_mut();
+            // SAFETY: a live slot and the live repository; released below.
+            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, repo) }, 0);
+            let write = |data: &[u8], kind: ffi::git_object_t| {
+                let mut id = ffi::git_oid::default();
+                let (bytes, len) = (data.as_ptr().cast(), data.len());
+                // SAFETY: a live slot, the live odb and `data` readable for its length at
+                // a non-NULL address.
+                let rc = unsafe { ffi::git_odb_write(&mut id, odb, bytes, len, kind) };
+                assert_eq!(rc, 0);
+                let mut hex = [0 as std::ffi::c_char; 65];
+                // SAFETY: `hex` bounds the write; `id` is live.
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr(), hex.len(), &id) };
+                // SAFETY: `git_oid_tostr` NUL-terminates within `hex`.
+                unsafe { CStr::from_ptr(hex.as_ptr()) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
+            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let commit = format!("tree {tree}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n");
+            let commit = write(commit.as_bytes(), ffi::GIT_OBJECT_COMMIT);
+            // SAFETY: the odb reference taken above, released once.
+            unsafe { ffi::git_odb_free(odb) };
+            for name in [
+                "heads/main",
+                "heads/alpha",
+                "heads/feature",
+                "heads/topic",
+                "heads/spare",
+                "heads/spare2",
+                "tags/v1",
+            ] {
+                fs::write(path.join(".git/refs").join(name), format!("{commit}\n")).unwrap();
+            }
+            fs::write(path.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::create_dir(base.join("wt")).unwrap();
+            Self {
+                base,
+                repo,
+                targets: Vec::new(),
+            }
+        }
+
+        fn c_path(&self, rel: &str) -> CString {
+            CString::new(self.base.join(rel).as_os_str().as_bytes()).unwrap()
+        }
+
+        /// `git_reference_lookup(name)`, raw.
+        fn lookup(&self, name: &CStr) -> *mut ffi::git_reference {
+            let mut out = ptr::null_mut();
+            // SAFETY: a live slot, the live repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+            assert_eq!(rc, 0, "{name:?}");
+            out
+        }
+
+        /// `git_worktree_add(name, <base>/wt/<name>, opts)` and what it left.
+        fn add(&self, name: &str, opts: *const ffi::git_worktree_add_options) -> Outcome {
+            let c_name = CString::new(name).unwrap();
+            let dir = self.c_path(&format!("wt/{name}"));
+            let mut out = ptr::null_mut();
+            // SAFETY: a live slot, the live repository, two NUL-terminated strings and
+            // live options whose reference and strings the caller keeps alive.
+            let rc = unsafe {
+                ffi::git_worktree_add(&mut out, self.repo, c_name.as_ptr(), dir.as_ptr(), opts)
+            };
+            let error = (rc < 0).then(|| c_last(&self.base));
+            assert_eq!(out.is_null(), rc < 0);
+            // SAFETY: NULL or the fresh worktree the caller owns, freed once.
+            unsafe { ffi::git_worktree_free(out) };
+            (rc, error, self.snapshot())
+        }
+
+        fn snapshot(&self) -> Vec<(String, Option<String>)> {
+            fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, Option<String>)>) {
+                let Ok(entries) = fs::read_dir(dir) else {
+                    return;
+                };
+                let mut entries: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
+                entries.sort();
+                for path in entries {
+                    let file = path.file_name().unwrap().to_str().unwrap();
+                    if file == "index" || file == "logs" {
+                        continue;
+                    }
+                    let rel = path
+                        .strip_prefix(base)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    if path.is_dir() {
+                        out.push((rel, None));
+                        walk(base, &path, out);
+                    } else {
+                        let content = fs::read_to_string(&path)
+                            .unwrap()
+                            .replace(base.to_str().unwrap(), "<base>");
+                        out.push((rel, Some(content)));
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            for dir in ["repo/.git/worktrees", "wt", "target"] {
+                walk(&self.base, &self.base.join(dir), &mut out);
+            }
+            out
+        }
+    }
+
+    impl Drop for Side {
+        fn drop(&mut self) {
+            // SAFETY: the repository this side opened, freed once.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn adds_match_c_built_options_step_by_step() {
+        let mut c = Side::new("c-side");
+        let rust = Side::new("r-side");
+        let mut c_log = Vec::new();
+        let mut rust_log = Vec::new();
+        for (step, (name, spec)) in STEPS.iter().enumerate() {
+            // C: the init routine, then raw writes; the reference stays C's until freed.
+            let mut raw = c_init();
+            raw.lock = c_int::from(spec.lock);
+            raw.checkout_existing = c_int::from(spec.checkout_existing);
+            raw.checkout_options.checkout_strategy = spec.strategy;
+            let c_ref = spec.reference.map_or(ptr::null_mut(), |n| c.lookup(n));
+            raw.ref_ = c_ref;
+            if let Some(target) = spec.target {
+                c.targets.push(c.c_path(target));
+                raw.checkout_options.target_directory = c.targets.last().unwrap().as_ptr();
+            }
+            let c_outcome = c.add(name, &raw);
+            let c_seen = c_fields(&raw);
+            // SAFETY: NULL or the reference looked up above, freed once.
+            unsafe { ffi::git_reference_free(c_ref) };
+
+            // Rust: the safe constructor and setters, lending an owned reference.
+            let reference = spec.reference.map(|n| {
+                // SAFETY: a fresh attached reference the test owns, released by
+                // `git_reference_free`; the side's repository outlives it.
+                unsafe { ReferenceBox::from_c(rust.lookup(n)) }.unwrap()
+            });
+            let target = spec.target.map(|t| rust.c_path(t));
+            let mut opts = AddOptions::new();
+            {
+                let mut m = opts.as_mut();
+                m.set_lock(spec.lock);
+                m.set_checkout_existing(spec.checkout_existing);
+                m.set_reference(reference.as_ref().map(|r| r.as_ref()));
+                let mut checkout = m.checkout_options();
+                checkout.set_strategy(spec.strategy);
+                checkout.set_target_directory(target.as_deref());
+            }
+            let rust_outcome = rust.add(name, ptr::from_ref(&opts).cast());
+            let mut rust_seen = rust_fields(opts.as_ref(), reference.as_ref());
+            drop(reference);
+
+            // The target directories differ by the side's root only.
+            let relative = |f: &mut Fields, base: &Path| {
+                if let Some(t) = f.4.6.take() {
+                    let t = t
+                        .to_str()
+                        .unwrap()
+                        .replace(base.to_str().unwrap(), "<base>");
+                    f.4.6 = Some(CString::new(t).unwrap());
+                }
+            };
+            let mut c_seen = c_seen;
+            relative(&mut c_seen, &c.base);
+            relative(&mut rust_seen, &rust.base);
+            assert_eq!(rust_seen, c_seen, "step {step} ({name}): options");
+            assert_eq!(rust_outcome, c_outcome, "step {step} ({name})");
+            c_log.push(c_outcome.0);
+            rust_log.push(rust_outcome.0);
+        }
+        // Both sides took every branch the steps aim at.
+        assert_eq!(c_log, [0, 0, -1, -1, -1, 0, -1, 0, ffi::GIT_EEXISTS]);
+        assert_eq!(rust_log, c_log);
+    }
+}

@@ -441,3 +441,300 @@ mod worktree_box {
         }
     }
 }
+
+/// The worktree creation options: `AddOptions` (`git_worktree_add_options`) with its
+/// handles, the borrowed branch reference and the embedded checkout options.
+///
+/// An `AddOptions<'o>` is a value Rust holds, never allocated or freed by libgit2; its
+/// handles project each field out of a pointer, and the checkout options are reached in
+/// place. These tests exercise every getter and setter on every holder (a local, a heap
+/// slot, an element of a run that moves when it grows), through reborrows, then hand
+/// the options to `git_worktree_add` (through the fixture), which copies them, reads the
+/// borrowed reference and the checkout options' borrowed strings, and keeps no pointer
+/// to any of them. A misaligned projection, a stale reference pointer or a write through
+/// the shared handle would be flagged by Miri and ASan/UBSan; the reference and the
+/// options must be released exactly once, in either order allowed (LSan, ASan). Options
+/// that outlive their reference or its repository, an exclusive handle to a borrowed
+/// reference, a shrunk exclusive handle, `Send` and `Clone` do not compile (the type's
+/// `compile_fail` doctests). The options are neither `Send` nor `Sync`, so each thread
+/// builds its own: `AddOptions::new` (a template copy) runs from many threads at once
+/// and before anything initialised libgit2 (ASan, TSan). libgit2 only reads the options
+/// during a call and writes nothing through them, so Rust reborrows between calls race
+/// no foreign write (BSan). Every test calls libgit2, so none runs under Miri; the
+/// accessors run there in the crate's unit tests, on a template built in Rust.
+mod add_options {
+    use std::ffi::CString;
+    use std::fs;
+    use std::hint::black_box;
+    use std::thread;
+
+    use libgit2::libgit2::repository::worktree::{AddOptions, AddOptionsMut, AddOptionsRef};
+
+    use crate::fixture::isolated;
+    use crate::fixture::worktree::{is_locked, name};
+    use crate::fixture::worktree_add::AddRepo;
+
+    /// The plain fields, as the getters read them.
+    fn read(r: AddOptionsRef<'_, '_>) -> (u32, bool, bool, bool, u32, u32) {
+        let checkout = r.checkout_options();
+        (
+            r.version(),
+            r.lock(),
+            r.checkout_existing(),
+            r.reference().is_some(),
+            checkout.strategy(),
+            checkout.dir_mode(),
+        )
+    }
+
+    fn write(mut m: AddOptionsMut<'_, '_>, lock: bool, existing: bool, strategy: u32) {
+        m.set_lock(lock);
+        m.as_mut().set_checkout_existing(existing);
+        let mut checkout = m.checkout_options();
+        checkout.set_strategy(strategy);
+        checkout.as_mut().set_dir_mode(0o755);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn every_field_round_trips_on_every_holder() {
+        let mut local = AddOptions::new();
+        let mut boxed = Box::new(AddOptions::new());
+        let mut run: Vec<AddOptions<'_>> = Vec::new();
+        for round in 0..64u32 {
+            let (lock, existing, strategy) = (round % 2 == 1, round % 3 == 0, round << 4);
+            write(local.as_mut(), lock, existing, strategy);
+            write(boxed.as_mut().as_mut(), lock, existing, strategy);
+            // The run reallocates as it grows, moving every value already in it.
+            run.push(AddOptions::new());
+            write(run.last_mut().unwrap().as_mut(), lock, existing, strategy);
+            let expected = (AddOptions::VERSION, lock, existing, false, strategy, 0o755);
+            assert_eq!(read(local.as_ref()), expected);
+            assert_eq!(read((*boxed).as_ref()), expected);
+            assert_eq!(read(black_box(&run[round as usize]).as_ref()), expected);
+        }
+        for (i, opts) in run.iter().enumerate() {
+            assert_eq!(read(opts.as_ref()).4, (i as u32) << 4);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reborrows_keep_one_writer() {
+        let mut opts = AddOptions::new();
+        let mut m = opts.as_mut();
+        {
+            let mut inner = m.as_mut();
+            inner.set_lock(true);
+            let mut checkout = inner.checkout_options();
+            let mut deeper = checkout.as_mut();
+            deeper.set_strategy(0x10);
+            assert_eq!(checkout.as_ref().strategy(), 0x10);
+        }
+        let shared = m.as_ref();
+        assert!(shared.lock());
+        let copy = shared;
+        assert_eq!(copy.checkout_options().strategy(), 0x10);
+        m.set_checkout_existing(true);
+        assert!(opts.as_ref().checkout_existing());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn borrowed_reference_is_read_by_c_and_released_once() {
+        let repo = AddRepo::new("ref");
+        let feature = repo.reference(c"refs/heads/feature");
+        {
+            let mut opts = AddOptions::new();
+            opts.as_mut().set_reference(Some(feature.as_ref()));
+            opts.as_mut().set_lock(true);
+            let w = repo.add("beta", Some(&opts)).unwrap();
+            assert_eq!(name(&w), c"beta");
+            assert_eq!(is_locked(&w), 1);
+            // The reference is now checked out there: a second worktree is refused.
+            let (rc, message) = repo.add("gamma", Some(&opts)).err().unwrap();
+            assert_eq!(rc, -1);
+            assert_eq!(
+                message,
+                "reference refs/heads/feature is already checked out"
+            );
+            // The options never owned the reference.
+            assert!(opts.as_ref().reference().is_some());
+        }
+        assert_eq!(
+            fs::read_to_string(repo.admin("beta").join("HEAD")).unwrap(),
+            "ref: refs/heads/feature\n"
+        );
+        // Dropped after the options, before the repository: freed once (ASan, LSan).
+        drop(feature);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_reference_leaves_nothing_behind() {
+        let repo = AddRepo::new("tag");
+        let tag = repo.reference(c"refs/tags/v1");
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(tag.as_ref()));
+        // Not a branch: refused before anything is created or copied.
+        let refused = repo.add("delta", Some(&opts)).err();
+        assert_eq!(refused, Some((-1, "reference is not a branch".to_owned())));
+        assert!(!repo.admin("delta").exists());
+        // The options borrow the reference until their last use, cleared or not.
+        opts.as_mut().set_reference(None);
+        drop(tag);
+        // Without one, an existing branch named after the worktree is checked out.
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_checkout_existing(true);
+        let w = repo.add("alpha", Some(&opts)).unwrap();
+        assert_eq!(is_locked(&w), 0);
+        drop(w);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reference_from_another_repository_is_only_read() {
+        let other = AddRepo::new("other-a");
+        let repo = AddRepo::new("other-b");
+        let feature = other.reference(c"refs/heads/feature");
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        // libgit2 takes the name only; `repo` has its own `feature`.
+        let w = repo.add("wt", Some(&opts)).unwrap();
+        assert_eq!(name(&w), c"wt");
+        // The options are done with the reference; it goes before its repository.
+        drop(w);
+        drop(feature);
+        drop(other);
+        drop(repo);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn checkout_options_borrows_are_read_by_c() {
+        let repo = AddRepo::new("checkout");
+        let target = CString::new(repo.base.join("target").as_os_str().as_encoded_bytes()).unwrap();
+        let label = CString::new("mine").unwrap();
+        let mut opts = AddOptions::new();
+        {
+            let mut m = opts.as_mut();
+            let mut checkout = m.checkout_options();
+            checkout.set_target_directory(Some(&target));
+            checkout.set_our_label(Some(&label));
+        }
+        let main = repo.reference(c"refs/heads/main");
+        opts.as_mut().set_reference(Some(main.as_ref()));
+        // `main` is the repository's own HEAD, so it is checked out already.
+        let (_, message) = repo.add("refused", Some(&opts)).err().unwrap();
+        assert_eq!(message, "reference refs/heads/main is already checked out");
+        let feature = repo.reference(c"refs/heads/feature");
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        let w = repo.add("wt", Some(&opts)).unwrap();
+        // The checkout went to the borrowed target directory, which it created.
+        assert!(repo.base.join("target").is_dir());
+        drop(w);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_reads_between_reborrows() {
+        let repo = AddRepo::new("reborrow");
+        let feature = repo.reference(c"refs/heads/feature");
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        // The branch is free, then checked out by the first worktree; then no reference
+        // and the existing `alpha`. (No round creates a branch, which would take a
+        // reflog signature at the current time; see the fixture.)
+        for (round, name) in ["one", "two", "alpha"].into_iter().enumerate() {
+            {
+                let mut m = opts.as_mut();
+                let mut inner = m.as_mut();
+                inner.set_lock(round % 2 == 0);
+                let _shared = inner.as_ref();
+            }
+            if round == 2 {
+                let mut m = opts.as_mut();
+                m.set_reference(None);
+                m.set_checkout_existing(true);
+            }
+            let added = repo.add(name, Some(&opts));
+            let _ = opts.as_ref().reference();
+            assert_eq!(
+                added.is_ok(),
+                round != 1,
+                "round {round}: {:?}",
+                added.err()
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn many_threads_build_and_use_their_own() {
+        thread::scope(|s| {
+            for t in 0..8 {
+                s.spawn(move || {
+                    let repo = AddRepo::new(&format!("thread-{t}"));
+                    let feature = repo.reference(c"refs/heads/feature");
+                    let mut opts = AddOptions::new();
+                    opts.as_mut().set_reference(Some(feature.as_ref()));
+                    opts.as_mut().set_lock(t % 2 == 0);
+                    let w = repo.add("wt", Some(&opts)).unwrap();
+                    assert_eq!(is_locked(&w), i32::from(t % 2 == 0));
+                    for _ in 0..64 {
+                        assert_eq!(read(AddOptions::new().as_ref()).0, AddOptions::VERSION);
+                    }
+                });
+            }
+        });
+    }
+
+    fn create_branches() {
+        let repo = AddRepo::new("create");
+        let heads = repo.base.join("repo/.git/refs/heads");
+        // No reference, no existing branch: a new one named after the worktree, at
+        // `HEAD`.
+        let w = repo.add("fresh", Some(&AddOptions::new())).unwrap();
+        assert_eq!(name(&w), c"fresh");
+        assert!(heads.join("fresh").is_file());
+        // `checkout_existing` with no such branch falls back to creating it.
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_checkout_existing(true);
+        assert!(repo.add("other", Some(&opts)).is_ok());
+        assert!(heads.join("other").is_file());
+        // Nothing to branch from: `HEAD` is unborn.
+        fs::write(repo.base.join("repo/.git/HEAD"), "ref: refs/heads/unborn\n").unwrap();
+        let (rc, _) = repo.add("orphan", Some(&opts)).err().unwrap();
+        assert_eq!(rc, -9, "GIT_EUNBORNBRANCH");
+        assert!(!repo.admin("orphan").exists());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn default_options_create_a_branch_at_head() {
+        // Creating a branch takes a reflog signature at the current time, whose glibc
+        // timezone lookup TSan reports against concurrent tests: alone in a child.
+        isolated(
+            concat!(module_path!(), "::default_options_create_a_branch_at_head"),
+            create_branches,
+        );
+    }
+
+    fn new_before_init() {
+        // Nothing initialised libgit2 in this child: the template copy needs no runtime.
+        let opts = AddOptions::new();
+        assert_eq!(
+            read(opts.as_ref()),
+            (AddOptions::VERSION, false, false, false, 0, 0)
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_needs_no_initialised_libgit2() {
+        isolated(
+            concat!(module_path!(), "::new_needs_no_initialised_libgit2"),
+            new_before_init,
+        );
+    }
+}
