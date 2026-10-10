@@ -10149,6 +10149,137 @@
    ]
   },
   {
+   "name": "git_treebuilder_get",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL (else NULL with GIT_ERROR_INVALID). Only probes the entry map (read-only lookup, no error on a miss); declared non-const but never written."
+     }
+    },
+    {
+     "name": "filename",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filename"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name, read for the call only (hashed/compared as the map key); asserted non-NULL."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:bld"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "NULL when the builder has no entry of that name (no error set). Otherwise the builder's own heap entry (struct + inline name), owned by its map: valid until the builder removes/replaces (insert updates oid/attr in place)/clears/filters it or is freed. Never freed by the caller. Rust: TreeEntryRef<'a> tied to the shared builder borrow."
+    }
+   }
+  },
+  {
+   "name": "git_treebuilder_insert",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL. Mutated: puts a new heap entry into its map, or overwrites an existing entry's oid and attr in place. Follows bld->repo (unowned) to check the object in the ODB, lazily loading the repository's odb."
+     }
+    },
+    {
+     "name": "entry_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "arg:bld"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry_out"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional out-param (NULL = not wanted); the outer slot is written (mutable is false only because the innermost pointee is const),  only on success with the builder's own entry for filename (new or updated in place). The entry stays the builder's: valid until its next change (remove/replace/clear/filter/free). Rust: insert (out NULL) and insert_entry (TreeEntryRef tied to the exclusive borrow)."
+     }
+    },
+    {
+     "name": "filename",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filename"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name, asserted non-NULL; validated (non-empty, no traversal/.git/slash) and copied into the entry allocation; never retained. C defect: a name longer than UINT16_MAX bytes is accepted (TREE_ENTRY_CHECK_NAMELEN only sets GIT_ERROR_INVALID without failing), filename_len is truncated to uint16_t and git_treebuilder_write then stores a corrupt tree. Rust refuses > 65535 bytes before FFI."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL; zero id refused; looked up in the ODB unless mode is COMMIT or strict object creation is off; copied by value (git_oid_cpy), not retained."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_treebuilder_new",
    "defined_in": "src/libgit2/tree.c",
    "lifetime": {
@@ -10214,6 +10345,139 @@
       "nullable": true,
       "mutable": false,
       "note": "Optional seed tree, only read during the call: each entry's filename and oid are copied into a new entry (alloc_entry), so the builder keeps nothing of it. NULL starts empty."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_remove",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL via treebuilder_get. Removes the map slot and frees the removed entry (git_tree_entry_free), invalidating any pointer to it from get/insert. Does not reach the repository. -1 with GIT_ERROR_TREE when the name is absent."
+     }
+    },
+    {
+     "name": "filename",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filename"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name read for the call (lookup key, and the error message); asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_write",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL. Writes its own write_cache buffer (cleared and refilled); entries only read (sorted into a temporary vector). Follows bld->repo (unowned) to lazily load the odb (git_repository_odb__weakptr) and git_odb_write; backend errors propagate with their codes."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL out id, written by git_odb_write on success (the repository's oid type)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treewalk_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "root: tree_walk's git_str path ptr (GIT_STR_INIT => static empty string at the top), each subtree's name + '/'; never NULL (OOM is checked before recursing); lent for the call only, truncated/regrown afterwards."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "entry: element of the walked (sub)tree's entries array; the subtree is git_tree_free'd after its walk, so valid for the call only. Never NULL."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque caller payload passed through from git_tree_walk unchanged; libgit2 never dereferences it. Rust: points at the WalkCallback handle."
      }
     }
    ]

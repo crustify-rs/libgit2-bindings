@@ -1723,15 +1723,15 @@ pub mod head_and_lookups {
 
 // --- `git2/tree.h`: `git_treebuilder` ----------------------------------------------
 
-/// Fixtures standing in for the tree-builder routines (`git_treebuilder_insert`,
-/// `_entrycount`, `_write`) and the `git_tree` lookup the tests drive a builder with;
-/// replace each once its safe counterpart lands.
+/// Fixtures standing in for the tree-builder routines (`git_treebuilder_entrycount`), the
+/// tree entry getters and the `git_tree` lookup the tests drive a builder with; replace
+/// each once its safe counterpart lands.
 pub mod tree {
-    use std::ffi::{CStr, CString, c_int};
-    use std::ptr;
+    use std::ffi::{CStr, CString};
 
     use libgit2::ffi;
     use libgit2::libgit2::object::tree::{TreeArc, TreeBuilderBox};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
 
     /// `git_tree_entrycount` and each entry's name and raw file mode, of `tree`; stands
     /// in for the `git_tree` getters.
@@ -1753,33 +1753,8 @@ pub mod tree {
     }
 
     /// A SHA1 object id of `byte` repeated, for entries libgit2 does not check.
-    pub fn id(byte: u8) -> ffi::git_oid {
-        let mut id = [0; 32];
-        id[..20].fill(byte);
-        ffi::git_oid {
-            type_: ffi::GIT_OID_SHA1 as u8,
-            id,
-        }
-    }
-
-    /// `git_treebuilder_insert` of `name` naming `id` with `mode`; its return code.
-    pub fn insert(
-        builder: &mut TreeBuilderBox<'_>,
-        name: &CStr,
-        id: &ffi::git_oid,
-        mode: ffi::git_filemode_t,
-    ) -> c_int {
-        // SAFETY: the box's live builder, which the exclusive borrow keeps unaliased;
-        // a NUL-terminated name and a live id, both copied.
-        unsafe {
-            ffi::git_treebuilder_insert(
-                ptr::null_mut(),
-                builder.as_c_ptr(),
-                name.as_ptr(),
-                id,
-                mode,
-            )
-        }
+    pub fn id(byte: u8) -> Oid {
+        Oid::from_raw(&[byte; 20], OidType::Sha1).unwrap()
     }
 
     /// `git_treebuilder_entrycount`.
@@ -1788,34 +1763,12 @@ pub mod tree {
         unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) }
     }
 
-    /// `git_treebuilder_get`'s file mode for `name`, if the builder holds it.
+    /// The file mode of the builder's entry `name`, if it holds one: looked up through
+    /// `get`, read raw from a copy; stands in for the entry's file-mode getter.
     pub fn mode_of(builder: &TreeBuilderBox<'_>, name: &CStr) -> Option<ffi::git_filemode_t> {
-        // SAFETY: the box's live builder, only read; the entry it returns lives until
-        // the builder next changes, after the read.
-        unsafe {
-            let entry = ffi::git_treebuilder_get(builder.as_c_ptr(), name.as_ptr());
-            (!entry.is_null()).then(|| ffi::git_tree_entry_filemode_raw(entry))
-        }
-    }
-
-    /// `git_treebuilder_write`: the hex id of the tree written into the builder's
-    /// repository, or the return code.
-    pub fn write(builder: &mut TreeBuilderBox<'_>) -> Result<String, c_int> {
-        let mut out = ffi::git_oid::default();
-        // SAFETY: a writable id and the box's live builder, unaliased; its repository
-        // outlives it, as the box's borrow does.
-        let rc = unsafe { ffi::git_treebuilder_write(&mut out, builder.as_c_ptr()) };
-        if rc < 0 {
-            return Err(rc);
-        }
-        let mut hex = [0u8; 65];
-        // SAFETY: 65 writable bytes, NUL included, bound the write; `out` is live.
-        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
-        Ok(CStr::from_bytes_until_nul(&hex)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned())
+        let entry = builder.as_ref().get(name)?.to_tree_entry().unwrap();
+        // SAFETY: the copy's live entry, only read.
+        Some(unsafe { ffi::git_tree_entry_filemode_raw(entry.as_c_ptr()) })
     }
 }
 
@@ -1825,12 +1778,11 @@ pub mod tree {
 /// pointer `as_c_ptr` hands out, standing in for the object and entry getters.
 pub mod object_and_tree_entry {
     use std::ffi::{CStr, CString};
-    use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::core::types::{FileMode, ObjectType};
     use libgit2::libgit2::object::object::{Object, ObjectArc};
-    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::object::tree::{TreeBuilder, TreeEntryBox};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
 
@@ -1918,37 +1870,23 @@ pub mod object_and_tree_entry {
     /// through a tree builder; the tree's id.
     pub fn write_tree(repo: &TempRepo, data: &[u8], names: &[CString]) -> Oid {
         let mut blob = ffi::git_oid::default();
-        let mut builder = ptr::null_mut();
-        let mut tree = ffi::git_oid::default();
-        // SAFETY: the live repository; `data` is read for the call; each name is
-        // NUL-terminated and copied by the builder, which is freed once, after the
-        // write.
-        unsafe {
-            let rc = ffi::git_blob_create_from_buffer(
+        // SAFETY: a writable id, the live repository, and `data`, read for the call.
+        let rc = unsafe {
+            ffi::git_blob_create_from_buffer(
                 &mut blob,
                 repo.raw(),
                 data.as_ptr().cast(),
                 data.len(),
-            );
-            assert_eq!(rc, 0);
-            assert_eq!(
-                ffi::git_treebuilder_new(&mut builder, repo.raw(), ptr::null()),
-                0
-            );
-            for name in names {
-                let rc = ffi::git_treebuilder_insert(
-                    ptr::null_mut(),
-                    builder,
-                    name.as_ptr(),
-                    &blob,
-                    ffi::GIT_FILEMODE_BLOB,
-                );
-                assert_eq!(rc, 0, "{name:?}");
-            }
-            assert_eq!(ffi::git_treebuilder_write(&mut tree, builder), 0);
-            ffi::git_treebuilder_free(builder);
+            )
+        };
+        assert_eq!(rc, 0);
+        let blob = Oid::from_raw(&blob.id[..20], OidType::Sha1).unwrap();
+        let mut builder = TreeBuilder::new(repository(repo)).unwrap();
+        for name in names {
+            let inserted = builder.as_mut().insert(name, blob.as_ref(), FileMode::Blob);
+            assert!(inserted.is_ok(), "{name:?}: {inserted:?}");
         }
-        Oid::from_raw(&tree.id[..20], OidType::Sha1).unwrap()
+        builder.as_mut().write().unwrap()
     }
 
     /// `git_odb_write` of `data` as an object of type `kind`, which the object

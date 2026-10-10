@@ -1,0 +1,29 @@
+error[E0505]: cannot move out of `builder` because it is borrowed
+ --> tests/ub_safe/compile_fail/tree_builder_lent_entry_outlives_builder.rs:6:10
+  |
+4 | fn lent(builder: TreeBuilderBox<'_>) -> TreeEntryRef<'static> {
+  |         ------- binding `builder` declared here
+5 |     let entry = builder.as_ref().get(c"a").unwrap();
+  |                 ------- borrow of `builder` occurs here
+6 |     drop(builder);
+  |          ^^^^^^^ move out of `builder` occurs here
+7 |     entry
+  |     ----- returning this value requires that `builder` is borrowed for `'static`
+
+error: lifetime may not live long enough
+ --> tests/ub_safe/compile_fail/tree_builder_lent_entry_outlives_builder.rs:7:5
+  |
+4 | fn lent(builder: TreeBuilderBox<'_>) -> TreeEntryRef<'static> {
+  |         ------- has type `ffibox::refs::CBox<TreeBuilder<'1>, TreeBuilderFree>`
+...
+7 |     entry
+  |     ^^^^^ returning this value requires that `'1` must outlive `'static`
+
+error[E0515]: cannot return value referencing function parameter `builder`
+ --> tests/ub_safe/compile_fail/tree_builder_lent_entry_outlives_builder.rs:7:5
+  |
+5 |     let entry = builder.as_ref().get(c"a").unwrap();
+  |                 ------- `builder` is borrowed here
+6 |     drop(builder);
+7 |     entry
+  |     ^^^^^ returns a value referencing data owned by the current function

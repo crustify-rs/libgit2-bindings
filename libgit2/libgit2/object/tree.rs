@@ -3,7 +3,9 @@
 //! `git_tree_walk` takes its traversal order (`git_treewalk_mode`) by value and refuses
 //! any value the header does not name with a `GIT_ERROR_INVALID` error before reading
 //! the tree, so a raw value is converted fallibly ([`WalkMode::from_raw`]) and never
-//! transmuted.
+//! transmuted. Its callback (`git_treewalk_cb`) is a [`WalkCallback`] over a Rust
+//! closure, lent each entry and the path of the tree holding it for the call only, and
+//! answering with a [`WalkAction`].
 //!
 //! # Tree updates
 //!
@@ -58,6 +60,14 @@
 //! drop. `git_treebuilder_clear` frees the entries and keeps the builder, which stays
 //! usable.
 //!
+//! Each entry is the builder's own allocation, keyed by its name. A shared handle looks
+//! one up ([`get`](TreeBuilderRef::get)) and lends it for as long as the handle's borrow;
+//! the exclusive handle inserts ([`insert`](TreeBuilderMut::insert), which replaces the
+//! id and mode of an entry of the same name in place), removes and clears entries, and
+//! writes them out ([`write`](TreeBuilderMut::write), which refills the builder's own
+//! write buffer). No entry handle outlives the borrow that lent it, so none sees an entry
+//! changed or freed.
+//!
 //! The builder keeps an unowned pointer to the repository it was built for, which
 //! inserting (to check that an entry's object exists) and writing (into the
 //! repository's object database, which libgit2 may load then) follow; freeing never
@@ -94,22 +104,25 @@
 //! entries in place only through an exclusive borrow of the builder. An entry is
 //! `Send` and `Sync`.
 
-use core::ffi::{CStr, c_int};
+use core::any::Any;
+use core::ffi::{CStr, c_char, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::panic::AssertUnwindSafe;
 
 use ffibox::{
-    CArc, CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CRefClone, define_ctype, impl_cdrop,
+    CArc, CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CRefClone, CZeroable, define_ctype,
+    impl_cdrop,
 };
 
 use crate::ffi;
 use crate::libgit2::core::types::FileMode;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
-use crate::libgit2::oid::oid::{OidMut, OidRef};
+use crate::libgit2::oid::oid::{Oid, OidMut, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
-use crate::libgit2::util::errors::{ErrorBuf, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 /// The order in which `git_tree_walk` calls back for a tree's entries and those of the
 /// subtrees it loads on the way: either way, once per entry it reaches, each tree's entries in
@@ -186,6 +199,245 @@ impl fmt::Display for UnnamedWalkMode {
 }
 
 impl std::error::Error for UnnamedWalkMode {}
+
+/// What a [`WalkCallback`] answers for one entry of a tree walk.
+///
+/// libgit2 reads the C callback's result as a sign: 0 goes on, a positive value skips,
+/// a negative one stops the walk, which then returns it. A closure answers with a
+/// variant, which the trampoline returns as 0, 1 and `GIT_EUSER`.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WalkAction {
+    /// Go on with the walk: in pre-order, into the subtree the entry names, if it names
+    /// one.
+    Continue,
+    /// In pre-order, do not walk the subtree the entry names, and go on with the entry
+    /// after it; libgit2 does not even load that subtree. A post-order walk has already
+    /// walked the subtree when it calls back, and goes on as for `Continue`.
+    Skip,
+    /// Stop the walk at once: the walk returns `GIT_EUSER`. libgit2 sets a
+    /// `GIT_ERROR_CALLBACK` error "git_tree_walk callback returned -7" only when the
+    /// thread has no libgit2 error yet: one the closure set, or one an earlier call left,
+    /// stays the thread's.
+    Stop,
+}
+
+impl WalkAction {
+    /// The value the trampoline returns to libgit2 for this answer.
+    const fn raw(self) -> c_int {
+        match self {
+            Self::Continue => 0,
+            Self::Skip => 1,
+            Self::Stop => ErrorCode::User.raw(),
+        }
+    }
+
+    /// How libgit2 reads a callback's result `rc`.
+    const fn from_raw(rc: c_int) -> Self {
+        match rc {
+            0 => Self::Continue,
+            1.. => Self::Skip,
+            _ => Self::Stop,
+        }
+    }
+}
+
+/// The closure a [`WalkCallback`] calls: the path of the tree holding the entry, and the
+/// entry, both lent for the call.
+type WalkFn<'f> = dyn FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f;
+
+/// A tree walk callback (`git_treewalk_cb`): a Rust closure `git_tree_walk` calls with
+/// each entry it reaches, through a C function and a payload pointing at this handle,
+/// on the calling thread.
+///
+/// Built over a closure with [`new`](Self::new). Its `extern "C"` trampoline lends the
+/// closure, for the call only:
+///
+/// - `root`, the path from the walked tree to the tree holding the entry, each subtree's
+///   name followed by `/`: empty for the walked tree's own entries, `dir/sub/` for the
+///   entries of `dir/sub`. Names are bytes, as git stores them, not necessarily UTF-8.
+/// - the entry, a [`TreeEntryRef`]: libgit2 frees a subtree, with its entries, once it
+///   has walked it. [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies one to keep.
+///
+/// and returns the closure's [`WalkAction`]. A panic in the closure does not cross into
+/// C: the trampoline stops the walk with `GIT_EUSER`, and the panic resumes once control
+/// is back in Rust, from [`call`](Self::call) or from the wrapper that ran the walk.
+///
+/// ```
+/// use core::ffi::CStr;
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::object::tree::{TreeBuilder, TreeEntryRef, WalkAction, WalkCallback};
+/// use libgit2::libgit2::oid::oid::{Oid, OidType};
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+/// // A builder's entry stands in for one of a walked tree.
+/// let repo = Repository::new().unwrap();
+/// let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+/// let id = Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap();
+/// builder.as_mut().insert(c"sub", id.as_ref(), FileMode::Commit).unwrap();
+///
+/// let mut seen = Vec::new();
+/// let mut collect = |root: &CStr, _: TreeEntryRef<'_>| {
+///     seen.push(root.to_owned());
+///     WalkAction::Skip
+/// };
+/// let mut callback = WalkCallback::new(&mut collect);
+/// let entry = builder.as_ref().get(c"sub").unwrap();
+/// assert_eq!(callback.call(c"dir/", entry), WalkAction::Skip);
+/// drop(callback);
+/// assert_eq!(seen, [c"dir/"]);
+/// ```
+///
+/// Neither the root nor the entry outlives the call:
+///
+/// ```compile_fail,E0521
+/// use core::ffi::CStr;
+/// use libgit2::libgit2::object::tree::{TreeEntryRef, WalkAction, WalkCallback};
+///
+/// fn keep<'k>(kept: &mut Option<TreeEntryRef<'k>>) {
+///     let mut f = |_: &CStr, entry: TreeEntryRef<'_>| {
+///         *kept = Some(entry);
+///         WalkAction::Continue
+///     };
+///     let _ = WalkCallback::new(&mut f);
+/// }
+/// ```
+///
+/// ```compile_fail,E0521
+/// use core::ffi::CStr;
+/// use libgit2::libgit2::object::tree::{TreeEntryRef, WalkAction, WalkCallback};
+///
+/// fn keep<'k>(kept: &mut Option<&'k CStr>) {
+///     let mut f = |root: &CStr, _: TreeEntryRef<'_>| {
+///         *kept = Some(root);
+///         WalkAction::Continue
+///     };
+///     let _ = WalkCallback::new(&mut f);
+/// }
+/// ```
+///
+/// It borrows its closure exclusively and stays on its thread: libgit2 calls it
+/// synchronously, and the closure need not be `Send`.
+///
+/// ```compile_fail,E0277
+/// use core::ffi::CStr;
+/// use libgit2::libgit2::object::tree::{TreeEntryRef, WalkAction, WalkCallback};
+///
+/// fn send<T: Send>(_: T) {}
+/// let mut f = |_: &CStr, _: TreeEntryRef<'_>| WalkAction::Continue;
+/// send(WalkCallback::new(&mut f));
+/// ```
+///
+/// Wraps: git_treewalk_cb
+/// Handwritten
+pub struct WalkCallback<'f> {
+    f: &'f mut WalkFn<'f>,
+    /// Whether the last call stopped the walk: the closure answered `Stop`, or panicked.
+    stopped: bool,
+    /// A panic the closure raised inside a C walk, resumed once the walk returns.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> WalkCallback<'f> {
+    /// The callback that calls `f` with each entry, until it answers `Stop`.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f,
+    {
+        Self {
+            f,
+            stopped: false,
+            panic: None,
+        }
+    }
+
+    /// Calls the callback with `root` and `entry`, through the trampoline libgit2 calls,
+    /// and returns the answer libgit2 would read from it. A panic of the closure resumes
+    /// here.
+    pub fn call(&mut self, root: &CStr, entry: TreeEntryRef<'_>) -> WalkAction {
+        let rc = self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is never NULL");
+            // SAFETY: `payload` is this callback, which nothing else uses during the
+            // walk; `root` is NUL-terminated and `entry` a live entry nothing writes,
+            // both lent for the call: the trampoline's contract.
+            unsafe { callback(root.as_ptr(), entry.as_ptr(), payload) }
+        });
+        WalkAction::from_raw(rc)
+    }
+
+    /// Whether the last call stopped the walk: the closure answered
+    /// [`Stop`](WalkAction::Stop), or panicked. Tells the callback's `GIT_EUSER` from
+    /// libgit2's own errors.
+    pub fn stopped(&self) -> bool {
+        self.stopped
+    }
+
+    /// Runs `walk` with the C callback and its payload, as the wrapper of a routine that
+    /// calls the callback (`git_tree_walk`) hands them to it, then resumes a panic the
+    /// closure raised meanwhile. The payload is this callback, which nothing else
+    /// touches until `walk` returns, and only for calls from this thread.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_treewalk_cb, *mut c_void) -> R,
+    ) -> R {
+        self.stopped = false;
+        let result = walk(Some(walk_with), ptr::from_mut(self).cast());
+        if let Some(panic) = self.panic.take() {
+            std::panic::resume_unwind(panic);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for WalkCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalkCallback")
+            .field("stopped", &self.stopped)
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_treewalk_cb` over a [`WalkCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`WalkCallback`] that nothing else uses during the
+/// call; `root` be NULL or NUL-terminated, and `entry` NULL or a live entry nothing
+/// writes, both live for the call.
+unsafe extern "C" fn walk_with(
+    root: *const c_char,
+    entry: *const ffi::git_tree_entry,
+    payload: *mut c_void,
+) -> c_int {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for
+    // the call alone.
+    let callback = unsafe { &mut *payload.cast::<WalkCallback<'_>>() };
+    if callback.panic.is_some() {
+        callback.stopped = true;
+        return WalkAction::Stop.raw();
+    }
+    // SAFETY: per this function's contract, a non-NULL `entry` is live and unchanged for
+    // the call; the handle given to the closure is valid for its call only.
+    let entry = unsafe { TreeEntryRef::from_ptr(entry.cast_mut()) };
+    let (false, Some(entry)) = (root.is_null(), entry) else {
+        // libgit2 always passes both; stop the walk rather than invent them.
+        callback.stopped = true;
+        return WalkAction::Stop.raw();
+    };
+    // SAFETY: `root` is non-NULL, so NUL-terminated and live for the call per this
+    // function's contract; the closure borrows it for its call only.
+    let root = unsafe { CStr::from_ptr(root) };
+    let answer = std::panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(root, entry)));
+    let action = answer.unwrap_or_else(|panic| {
+        callback.panic = Some(panic);
+        WalkAction::Stop
+    });
+    callback.stopped = action == WalkAction::Stop;
+    action.raw()
+}
 
 /// What one `git_tree_update` ([`TreeUpdate`]) asks `git_tree_create_updated` to do at
 /// its path: insert or replace the entry there, or remove it.
@@ -1278,6 +1530,183 @@ fn constructed(
     builder.ok_or_else(last)
 }
 
+/// The longest entry name a tree stores: its entries record a name's length in 16 bits.
+const NAME_MAX: usize = u16::MAX as usize;
+
+impl<'a, 'r> TreeBuilderRef<'a, 'r> {
+    /// The builder's entry named `name`, the very bytes it was inserted or seeded under;
+    /// `None` when the builder holds none.
+    ///
+    /// The entry is the builder's own: it lives as long as this borrow of the builder,
+    /// which keeps it from being removed, replaced or cleared meanwhile;
+    /// [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies it to keep.
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::object::tree::TreeBuilderBox;
+    ///
+    /// fn stale(mut builder: TreeBuilderBox<'_>) {
+    ///     let entry = builder.as_ref().get(c"README");
+    ///     builder.as_mut().clear();
+    ///     let _ = entry;
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_treebuilder_get
+    pub fn get(&self, name: &CStr) -> Option<TreeEntryRef<'a>> {
+        // SAFETY: the shared handle's pointer addresses a live builder that nothing
+        // writes during `'a`; `name` is NUL-terminated and read for the call only.
+        // `git_treebuilder_get` only probes the builder's map, setting no error on a
+        // miss, and returns NULL or the entry the map holds, which stays live and
+        // unchanged until the builder next removes, replaces or clears its entries,
+        // all of which need an exclusive borrow, excluded during `'a`.
+        unsafe {
+            let entry = ffi::git_treebuilder_get(self.as_ptr().cast_mut(), name.as_ptr());
+            TreeEntryRef::from_ptr(entry.cast_mut())
+        }
+    }
+}
+
+impl<'a, 'r> TreeBuilderMut<'a, 'r> {
+    /// Inserts an entry named `name` for the object `id` of file mode `mode`, or, when
+    /// the builder already holds an entry of that name, gives it `id` and `mode` in its
+    /// place.
+    ///
+    /// libgit2 checks the entry first, refusing it with a `GIT_ERROR_TREE` error naming
+    /// `name`:
+    ///
+    /// - a `mode` that is not one a tree stores: [`FileMode::Unreadable`];
+    /// - a `name` that cannot name an entry: empty, `.`, `..`, holding a `/`, or a
+    ///   `.git` (and, as the repository's `core.protectNTFS` / `core.protectHFS` ask, the
+    ///   names those file systems read as `.git`);
+    /// - the zero id;
+    /// - an object the repository's object database lacks, or holds with another type
+    ///   than `mode` names (a tree for [`FileMode::Tree`], a blob for the others); the
+    ///   database is loaded on first use. A [`FileMode::Commit`] entry names a
+    ///   submodule's commit, never looked up; the library option
+    ///   `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`, when turned off, skips the lookup for
+    ///   every mode.
+    ///
+    /// The id is stored as it is, so an id of another type than the repository's makes
+    /// the builder write a malformed tree, as libgit2 does.
+    ///
+    /// Fails, with a `GIT_ERROR_INVALID` error "tree entry path too long", for a `name`
+    /// of more than 65535 bytes, which a tree cannot store. libgit2 accepts one, sets
+    /// that error and returns success, then writes a corrupt tree object with the name's
+    /// length truncated: Rust refuses it before calling libgit2. Fails with libgit2's
+    /// error when it runs out of memory.
+    ///
+    /// Wraps: git_treebuilder_insert
+    pub fn insert(&mut self, name: &CStr, id: OidRef<'_>, mode: FileMode) -> Result<(), ErrorBuf> {
+        self.insert_entry(name, id, mode).map(|_| ())
+    }
+
+    /// As [`insert`](Self::insert), and lends the entry inserted or updated. The entry is
+    /// the builder's own: it lives as long as this borrow of the handle, which keeps the
+    /// builder from changing meanwhile; [`to_tree_entry`](TreeEntryRef::to_tree_entry)
+    /// copies it to keep.
+    ///
+    /// ```compile_fail,E0499
+    /// use libgit2::libgit2::core::types::FileMode;
+    /// use libgit2::libgit2::object::tree::TreeBuilderMut;
+    /// use libgit2::libgit2::oid::oid::OidRef;
+    ///
+    /// fn stale(mut builder: TreeBuilderMut<'_, '_>, id: OidRef<'_>) {
+    ///     let entry = builder.insert_entry(c"a", id, FileMode::Commit).unwrap();
+    ///     builder.remove(c"a").unwrap();
+    ///     let _ = entry;
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_treebuilder_insert
+    pub fn insert_entry(
+        &mut self,
+        name: &CStr,
+        id: OidRef<'_>,
+        mode: FileMode,
+    ) -> Result<TreeEntryRef<'_>, ErrorBuf> {
+        if name.count_bytes() > NAME_MAX {
+            set(ErrorClass::Invalid, c"tree entry path too long");
+            return Err(last());
+        }
+        let mut out = ptr::null();
+        // SAFETY: `out` is a writable slot, set only on success; the exclusive handle's
+        // pointer addresses a live builder that nothing else reaches meanwhile, whose
+        // repository is live for `'r` and used on this thread only, as `RepositoryRef`
+        // allows, where libgit2 looks the object up; `name` is NUL-terminated and `id` a
+        // live id, both copied; `mode` is a named file mode. A name of at most 65535
+        // bytes is stored whole.
+        let rc = unsafe {
+            ffi::git_treebuilder_insert(
+                &mut out,
+                self.as_mut_ptr(),
+                name.as_ptr(),
+                id.as_ptr(),
+                mode.raw(),
+            )
+        };
+        if rc < 0 {
+            return Err(last());
+        }
+        // SAFETY: on success `out` is the builder's entry for `name`, live and unchanged
+        // until the builder next removes, replaces or clears its entries, which the
+        // borrow of this handle excludes for the result's lifetime.
+        let entry = unsafe { TreeEntryRef::from_ptr(out.cast_mut()) };
+        Ok(entry.expect("an insertion succeeded without an entry"))
+    }
+
+    /// Removes the entry named `name`, freeing it.
+    ///
+    /// Fails, with a `GIT_ERROR_TREE` error "failed to remove entry: file isn't in the
+    /// tree - `name`", when the builder holds no entry of that name.
+    ///
+    /// Wraps: git_treebuilder_remove
+    pub fn remove(&mut self, name: &CStr) -> Result<(), ErrorBuf> {
+        // SAFETY: the exclusive handle's pointer addresses a live builder that nothing
+        // else reaches meanwhile, and no handle to its entries outlives that borrow;
+        // `name` is NUL-terminated and read for the call only. libgit2 frees the entry
+        // it removes, without reaching the repository.
+        let rc = unsafe { ffi::git_treebuilder_remove(self.as_mut_ptr(), name.as_ptr()) };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+
+    /// Writes the builder's entries, sorted as git sorts a tree's, as a tree object into
+    /// its repository's object database, and returns the tree's id, of the repository's
+    /// type. The builder keeps its entries, and stays usable; writing it again writes
+    /// the same tree.
+    ///
+    /// The database is loaded on first use. The entries are not checked again: an entry
+    /// inserted without the lookup, or seeded from a tree, may name an object the
+    /// database lacks.
+    ///
+    /// Fails with the code and error of libgit2, or of the database's backends: when
+    /// the database cannot be loaded (always for a repository without a git directory,
+    /// [`Repository::new`](crate::libgit2::repository::repository::Repository::new),
+    /// unless one was set), the object cannot be written, or memory runs out.
+    ///
+    /// When memory runs out while the builder's write buffer grows, libgit2 marks that
+    /// buffer as out of memory for good: neither a later write nor
+    /// [`clear`](Self::clear) resets it, so every later write of this builder fails with
+    /// `-1` and whatever error the thread holds then. The builder's entries stay usable;
+    /// a new builder writes them. This is libgit2's defect, which the wrapper cannot
+    /// reach into the builder to undo.
+    ///
+    /// Wraps: git_treebuilder_write
+    pub fn write(&mut self) -> Result<Oid, RepositoryError> {
+        let mut id = Oid::zeroed();
+        let out = id.as_mut().as_mut_ptr();
+        // SAFETY: `out` addresses `id`, written only on success; the exclusive handle's
+        // pointer addresses a live builder that nothing else reaches meanwhile, whose
+        // write buffer libgit2 refills; its repository is live for `'r` and used on this
+        // thread only, as `RepositoryRef` allows, where libgit2 loads and writes the
+        // object database.
+        let rc = unsafe { ffi::git_treebuilder_write(out, self.as_mut_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        Ok(id)
+    }
+}
+
 define_ctype!(
     /// One entry of a tree (`git_tree_entry`): a name, and the id and file mode of the
     /// object it names.
@@ -2365,6 +2794,439 @@ mod unit_tests {
                     assert_eq!(e.message(), c"library has not been initialized");
                 },
             );
+        }
+    }
+
+    /// The builder's entry routines and the walk callback's trampoline.
+    mod builder_routines {
+        use crate::libgit2::core::types::FileMode;
+        use crate::libgit2::object::object::Object;
+        use crate::libgit2::object::tree::*;
+        use crate::libgit2::oid::oid::{Oid, OidType};
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use crate::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+        use crate::libgit2::util::sys::errors::runtime_pinned;
+        use core::ffi::{CStr, c_char, c_int, c_void};
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::panic::{self, AssertUnwindSafe};
+        use std::path::PathBuf;
+        use std::ptr;
+
+        /// A fresh bare repository in a temporary directory, removed on drop after the
+        /// repository it holds.
+        struct TempRepo {
+            path: PathBuf,
+            repo: Option<RepositoryBox>,
+        }
+
+        impl TempRepo {
+            fn new(tag: &str) -> Self {
+                assert!(runtime_pinned());
+                let path = std::env::temp_dir()
+                    .join(format!("crustify-tree-unit-{}-{tag}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&path);
+                let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                let repo = Repository::init(&c_path, true).unwrap();
+                Self {
+                    path,
+                    repo: Some(repo),
+                }
+            }
+
+            fn repo(&self) -> &RepositoryBox {
+                self.repo.as_ref().unwrap()
+            }
+        }
+
+        impl Drop for TempRepo {
+            fn drop(&mut self) {
+                drop(self.repo.take());
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+
+        /// A SHA1 id of `byte` repeated, for submodule entries libgit2 does not check.
+        fn id(byte: u8) -> Oid {
+            Oid::from_raw(&[byte; 20], OidType::Sha1).unwrap()
+        }
+
+        fn count(builder: &TreeBuilderBox<'_>) -> usize {
+            // SAFETY: the box's live builder, only read.
+            unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) }
+        }
+
+        /// C's name of a live entry.
+        fn name_of(entry: TreeEntryRef<'_>) -> CString {
+            // SAFETY: a live entry the handle borrows; its name lives with it and is
+            // copied at once.
+            unsafe { CStr::from_ptr(ffi::git_tree_entry_name(entry.as_ptr())) }.to_owned()
+        }
+
+        fn lookup<'r>(repo: &'r RepositoryBox, id: &Oid) -> TreeArc<'r> {
+            Tree::lookup(repo.as_ref(), id.as_ref()).unwrap()
+        }
+
+        /// The walked tree: submodule leaves `a`, `z`, `dir/b`, `dir/sub/c`, and the
+        /// subtrees `dir`, `dir/sub` and `nest/leaf` (holding `e`).
+        fn nested_tree(repo: &RepositoryBox) -> Oid {
+            let subtree = |entries: &[(&CStr, Oid, FileMode)]| {
+                let mut b = TreeBuilder::new(repo.as_ref()).unwrap();
+                for (name, id, mode) in entries {
+                    b.as_mut().insert(name, id.as_ref(), *mode).unwrap();
+                }
+                b.as_mut().write().unwrap()
+            };
+            let sub = subtree(&[(c"c", id(3), FileMode::Commit)]);
+            let dir = subtree(&[
+                (c"b", id(2), FileMode::Commit),
+                (c"sub", sub, FileMode::Tree),
+            ]);
+            let leaf = subtree(&[(c"e", id(5), FileMode::Commit)]);
+            let nest = subtree(&[(c"leaf", leaf, FileMode::Tree)]);
+            subtree(&[
+                (c"a", id(1), FileMode::Commit),
+                (c"dir", dir, FileMode::Tree),
+                (c"nest", nest, FileMode::Tree),
+                (c"z", id(26), FileMode::Commit),
+            ])
+        }
+
+        /// A walk's return, its visits as `root` + name, and the thread's error then.
+        type Walked = (c_int, Vec<String>, (c_int, String));
+
+        fn error_now() -> (c_int, String) {
+            let e = last();
+            (e.raw_class(), e.message().to_string_lossy().into_owned())
+        }
+
+        /// The answer to the entry `name` under `root`, as a C callback gives it.
+        type Rule = fn(&str, &str) -> c_int;
+
+        const RULES: [Rule; 6] = [
+            |_, _| 0,
+            |_, name| c_int::from(name == "dir"),
+            |root, _| c_int::from(!root.is_empty()) * 9,
+            |_, name| if name == "sub" { -1 } else { 0 },
+            |_, name| if name == "e" { -42 } else { 0 },
+            |_, name| {
+                if name == "a" {
+                    ErrorCode::User.raw()
+                } else {
+                    0
+                }
+            },
+        ];
+
+        /// The C side: `git_tree_walk` with a plain C callback applying `rule`.
+        fn c_walk(tree: &TreeArc<'_>, mode: WalkMode, rule: Rule) -> Walked {
+            struct State {
+                rule: Rule,
+                visits: Vec<String>,
+            }
+            unsafe extern "C" fn cb(
+                root: *const c_char,
+                entry: *const ffi::git_tree_entry,
+                payload: *mut c_void,
+            ) -> c_int {
+                // SAFETY: `payload` is the walk's `State`, `root` and `entry` live for the
+                // call.
+                unsafe {
+                    let state = &mut *payload.cast::<State>();
+                    let root = CStr::from_ptr(root).to_str().unwrap();
+                    let name = CStr::from_ptr(ffi::git_tree_entry_name(entry));
+                    let name = name.to_str().unwrap();
+                    state.visits.push(format!("{root}{name}"));
+                    (state.rule)(root, name)
+                }
+            }
+            let mut state = State {
+                rule,
+                visits: Vec::new(),
+            };
+            crate::libgit2::util::sys::errors::clear();
+            // SAFETY: a live tree, the callback and its payload, live for the walk.
+            let rc = unsafe {
+                ffi::git_tree_walk(
+                    tree.as_c_ptr(),
+                    mode.raw(),
+                    Some(cb),
+                    ptr::from_mut(&mut state).cast(),
+                )
+            };
+            (rc, state.visits, error_now())
+        }
+
+        /// The Rust side: the same walk, through a [`WalkCallback`] whose closure answers
+        /// as `rule` does, read back through [`WalkAction`].
+        fn rust_walk(tree: &TreeArc<'_>, mode: WalkMode, rule: Rule) -> (Walked, bool) {
+            let mut visits = Vec::new();
+            let mut f = |root: &CStr, entry: TreeEntryRef<'_>| {
+                let (root, name) = (root.to_str().unwrap(), name_of(entry));
+                let name = name.to_str().unwrap();
+                visits.push(format!("{root}{name}"));
+                match rule(root, name) {
+                    0 => WalkAction::Continue,
+                    1.. => WalkAction::Skip,
+                    _ => WalkAction::Stop,
+                }
+            };
+            let mut callback = WalkCallback::new(&mut f);
+            crate::libgit2::util::sys::errors::clear();
+            let rc = callback.walk_with(|cb, payload| {
+                // SAFETY: a live tree, and the trampoline with its payload, live and
+                // unused otherwise for the walk.
+                unsafe { ffi::git_tree_walk(tree.as_c_ptr(), mode.raw(), cb, payload) }
+            });
+            let stopped = callback.stopped();
+            drop(callback);
+            ((rc, visits, error_now()), stopped)
+        }
+
+        /// Answers map to the values libgit2 reads, and back as libgit2 reads a value.
+        #[test]
+        fn walk_actions_round_trip() {
+            for action in [WalkAction::Continue, WalkAction::Skip, WalkAction::Stop] {
+                assert_eq!(WalkAction::from_raw(action.raw()), action);
+            }
+            assert_eq!(WalkAction::Continue.raw(), 0);
+            assert_eq!(WalkAction::Skip.raw(), 1);
+            assert_eq!(WalkAction::Stop.raw(), ffi::GIT_EUSER);
+            for (rc, action) in [
+                (2, WalkAction::Skip),
+                (c_int::MAX, WalkAction::Skip),
+                (-1, WalkAction::Stop),
+                (c_int::MIN, WalkAction::Stop),
+            ] {
+                assert_eq!(WalkAction::from_raw(rc), action);
+            }
+        }
+
+        /// A walk through the trampoline calls back for the same entries, under the same
+        /// roots, as one through a C callback answering alike, in both orders, and returns
+        /// and leaves the same: skipping, stopping at every depth, `GIT_EUSER` included.
+        /// A C callback's own stop code, other than `GIT_EUSER`, is the one difference:
+        /// the closure stops with `GIT_EUSER` alone.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn walks_match_a_c_callback() {
+            let temp = TempRepo::new("walk");
+            let tree_id = nested_tree(temp.repo());
+            let tree = lookup(temp.repo(), &tree_id);
+            for mode in [WalkMode::PreOrder, WalkMode::PostOrder] {
+                for (i, rule) in RULES.into_iter().enumerate() {
+                    let c = c_walk(&tree, mode, rule);
+                    let (rust, stopped) = rust_walk(&tree, mode, rule);
+                    assert_eq!(stopped, c.0 < 0, "{mode:?} rule {i}");
+                    if c.0 == 0 || c.0 == ffi::GIT_EUSER {
+                        assert_eq!(rust, c, "{mode:?} rule {i}");
+                    } else {
+                        // The closure stops with `GIT_EUSER`, and libgit2 reports that.
+                        assert_eq!(rust.1, c.1, "{mode:?} rule {i}");
+                        assert_eq!(rust.0, ffi::GIT_EUSER);
+                        assert_eq!(
+                            rust.2,
+                            (
+                                ffi::GIT_ERROR_CALLBACK as c_int,
+                                "git_tree_walk callback returned -7".into()
+                            )
+                        );
+                    }
+                }
+            }
+            let (all, _) = rust_walk(&tree, WalkMode::PreOrder, RULES[0]);
+            assert_eq!(
+                all.1,
+                [
+                    "a",
+                    "dir",
+                    "dir/b",
+                    "dir/sub",
+                    "dir/sub/c",
+                    "nest",
+                    "nest/leaf",
+                    "nest/leaf/e",
+                    "z"
+                ]
+            );
+            let (skipped, _) = rust_walk(&tree, WalkMode::PreOrder, RULES[1]);
+            assert_eq!(
+                skipped.1,
+                ["a", "dir", "nest", "nest/leaf", "nest/leaf/e", "z"]
+            );
+        }
+
+        /// A panic in the closure stops the walk with `GIT_EUSER` and resumes once the walk
+        /// has returned, from the wrapper running it, without unwinding through C; a call
+        /// coming after it stops at once, without reaching the closure.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn panics_resume_after_the_walk() {
+            let temp = TempRepo::new("panic");
+            let tree_id = nested_tree(temp.repo());
+            let tree = lookup(temp.repo(), &tree_id);
+            let mut calls = 0;
+            let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
+                calls += 1;
+                if calls == 2 {
+                    panic!("closure panicked");
+                }
+                WalkAction::Continue
+            };
+            let mut callback = WalkCallback::new(&mut f);
+            let mut rc = 0;
+            let mut again = 0;
+            let resumed = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: a live tree, and the trampoline with its payload.
+                    rc = unsafe {
+                        ffi::git_tree_walk(tree.as_c_ptr(), WalkMode::PreOrder.raw(), cb, payload)
+                    };
+                    // SAFETY: as libgit2 calls it: the payload, a root and a live entry.
+                    let entry = unsafe { ffi::git_tree_entry_byindex(tree.as_c_ptr(), 0) };
+                    // SAFETY: as above.
+                    again = unsafe { cb.unwrap()(c"".as_ptr(), entry, payload) };
+                })
+            }));
+            let payload = resumed.unwrap_err();
+            assert_eq!(payload.downcast_ref::<&str>(), Some(&"closure panicked"));
+            assert_eq!(rc, ffi::GIT_EUSER);
+            assert_eq!(again, ffi::GIT_EUSER);
+            assert!(callback.stopped());
+            assert_eq!(
+                format!("{callback:?}"),
+                "WalkCallback { stopped: true, panicked: false, .. }"
+            );
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+
+        /// The trampoline stops, without calling the closure, when libgit2 would pass a
+        /// NULL root or entry (it never does). Nothing reaches libgit2, so Miri runs it.
+        #[test]
+        fn trampoline_refuses_null_arguments() {
+            #[repr(C)]
+            struct RawEntry {
+                attr: u16,
+                filename_len: u16,
+                oid: ffi::git_oid,
+                filename: *const c_char,
+            }
+            let mut raw = RawEntry {
+                attr: ffi::GIT_FILEMODE_BLOB as u16,
+                filename_len: 1,
+                oid: ffi::git_oid::default(),
+                filename: c"a".as_ptr(),
+            };
+            let entry: *const ffi::git_tree_entry = ptr::from_mut(&mut raw).cast();
+            let mut calls = 0;
+            let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
+                calls += 1;
+                WalkAction::Continue
+            };
+            let mut callback = WalkCallback::new(&mut f);
+            assert!(!callback.stopped());
+            let rcs = callback.walk_with(|cb, payload| {
+                let cb = cb.unwrap();
+                // SAFETY: the payload with NULL for a root or entry, which the trampoline
+                // checks before reading; `entry` is a live local nothing writes.
+                unsafe {
+                    [
+                        cb(ptr::null(), entry, payload),
+                        cb(c"".as_ptr(), ptr::null(), payload),
+                        cb(ptr::null(), ptr::null(), payload),
+                    ]
+                }
+            });
+            assert_eq!(rcs, [ffi::GIT_EUSER; 3]);
+            assert!(callback.stopped());
+            let rc = callback.walk_with(|cb, payload| {
+                // SAFETY: the payload, a root and a live local entry, unread by the
+                // closure.
+                unsafe { cb.unwrap()(c"x/".as_ptr(), entry, payload) }
+            });
+            assert_eq!(rc, 0);
+            assert!(!callback.stopped());
+            drop(callback);
+            assert_eq!(calls, 1);
+        }
+
+        /// The corrected divergence: libgit2 inserts a name of more than 65535 bytes,
+        /// leaving its own "tree entry path too long" error unreported, and writes a tree
+        /// that cannot be read back; `insert` refuses one with that error before calling
+        /// libgit2, leaving the builder as it was, and stores the longest name a tree can
+        /// whole.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn overlong_names_are_refused() {
+            let temp = TempRepo::new("long-names");
+            let repo = temp.repo();
+            let long = |n: usize| CString::new(vec![b'n'; n]).unwrap();
+
+            // C: accepted, then written as a corrupt tree.
+            let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+            let name = long(65536);
+            let raw_id = id(7);
+            // SAFETY: the box's live builder, unaliased; a NUL-terminated name and a live
+            // id, both copied; no entry wanted back.
+            let rc = unsafe {
+                ffi::git_treebuilder_insert(
+                    ptr::null_mut(),
+                    builder.as_c_ptr(),
+                    name.as_ptr(),
+                    raw_id.as_ref().as_ptr(),
+                    ffi::GIT_FILEMODE_COMMIT,
+                )
+            };
+            assert_eq!(rc, 0);
+            assert_eq!(last().message(), c"tree entry path too long");
+            let corrupt = builder.as_mut().write().unwrap();
+            let e = Object::lookup(repo.as_ref(), corrupt.as_ref(), None).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Tree));
+            assert_eq!(e.message(), c"failed to parse tree: object is corrupted");
+            drop(builder);
+
+            // Rust: refused, at every length past the limit.
+            let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+            builder
+                .as_mut()
+                .insert(c"keep", id(1).as_ref(), FileMode::Commit)
+                .unwrap();
+            for n in [65536, 65537, 70000, 131072] {
+                let name = long(n);
+                for e in [
+                    builder
+                        .as_mut()
+                        .insert(&name, id(2).as_ref(), FileMode::Commit),
+                    builder
+                        .as_mut()
+                        .insert_entry(&name, id(2).as_ref(), FileMode::Commit)
+                        .map(|_| ()),
+                ] {
+                    let e = e.unwrap_err();
+                    assert_eq!(e.class(), Some(ErrorClass::Invalid), "{n}");
+                    assert_eq!(e.message(), c"tree entry path too long");
+                }
+                assert!(builder.as_ref().get(&name).is_none());
+            }
+            assert_eq!(count(&builder), 1);
+
+            // The longest name a tree stores is kept whole, and read back.
+            let longest = long(65535);
+            let mut m = builder.as_mut();
+            let entry = m
+                .insert_entry(&longest, id(3).as_ref(), FileMode::Commit)
+                .unwrap();
+            assert_eq!(name_of(entry), longest);
+            let written = builder.as_mut().write().unwrap();
+            let tree = lookup(repo, &written);
+            // SAFETY: a live tree, only read; the entry lives with it.
+            let stored = unsafe {
+                let entry = ffi::git_tree_entry_byname(tree.as_c_ptr(), longest.as_ptr());
+                assert!(!entry.is_null());
+                CStr::from_ptr(ffi::git_tree_entry_name(entry)).count_bytes()
+            };
+            assert_eq!(stored, 65535);
         }
     }
 }

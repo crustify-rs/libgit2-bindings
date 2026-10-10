@@ -7,8 +7,9 @@
 //! owns and points at nothing and none of these tests calls libgit2, so they also run
 //! under Miri; the sweep strides under BSan and Miri.
 //!
-//! The tree object's tests are in [`tree_object`], the tree builder's in [`builder`],
-//! the tree entry's in [`tree_entry`], the tree update's in [`tree_update`].
+//! The tree object's tests are in [`tree_object`], the tree builder's in [`builder`], its
+//! routines' and the walk callback's in [`routines`], the tree entry's in [`tree_entry`],
+//! the tree update's in [`tree_update`].
 
 use std::collections::HashSet;
 use std::hint::black_box;
@@ -107,13 +108,14 @@ mod builder {
     //! builder outliving its repository or a handle its owner, aliased exclusive handles,
     //! a `clone`.
 
-    use std::ffi::CString;
+    use std::ffi::{CString, c_int};
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
     use std::sync::Barrier;
     use std::thread;
 
     use libgit2::ffi;
+    use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::object::object::Object;
     use libgit2::libgit2::object::tree::{
         Tree, TreeArc, TreeBuilder, TreeBuilderBox, TreeBuilderMut, TreeRef,
@@ -122,7 +124,7 @@ mod builder {
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     use crate::fixture::init;
-    use crate::fixture::tree::{count, entries, id, insert, mode_of, write};
+    use crate::fixture::tree::{count, entries, id, mode_of};
 
     const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -167,10 +169,19 @@ mod builder {
     fn fill(builder: &mut TreeBuilderBox<'_>, n: u8) {
         for i in 0..n {
             let name = CString::new(format!("e{i}")).unwrap();
-            assert_eq!(
-                insert(builder, &name, &id(i + 1), ffi::GIT_FILEMODE_COMMIT),
-                0
-            );
+            let id = id(i + 1);
+            builder
+                .as_mut()
+                .insert(&name, id.as_ref(), FileMode::Commit)
+                .unwrap();
+        }
+    }
+
+    /// The hex id of the tree the builder writes, or the code of its failure.
+    fn write(builder: &mut TreeBuilderBox<'_>) -> Result<String, c_int> {
+        match builder.as_mut().write() {
+            Ok(id) => Ok(id.as_ref().to_hex_string().unwrap()),
+            Err(e) => Err(e.raw_code()),
         }
     }
 
@@ -460,6 +471,517 @@ mod builder {
         assert_eq!(count(&builder), 4);
         let tree = Tree::from_object(tree).unwrap();
         assert_eq!(count(&seeded(target.repo(), tree)), 4);
+    }
+}
+
+mod routines {
+    //! UB tests for `git2/tree.h`'s tree-builder routines over the safe API: `get`,
+    //! `insert` / `insert_entry`, `remove` and `write`, and the walk callback
+    //! (`WalkCallback`, `git_treewalk_cb`).
+    //!
+    //! Each entry is the builder's own allocation, its name inline past the struct: an
+    //! entry replaced in place, removed, cleared or dropped with the builder must be freed
+    //! exactly once, and an entry lent by `get` or `insert_entry` must be the live one
+    //! (ASan: use after free, double free, a name read out of bounds; LSan: a leak). The
+    //! tests insert names of every length up to the longest a tree stores, and refused
+    //! inserts of every kind, which must leave the builder as it was. Inserting looks the
+    //! object up through the repository pointer the builder kept, across Rust reborrows of
+    //! that repository (BSan: a retained foreign pointer). An entry is `Sync`: an entry the
+    //! builder lends is copied from several threads at once while the builder stays
+    //! shared (TSan). The walk callback lends each entry and root for its call only, and
+    //! catches a panic of its closure; one closure may run a callback of its own (a
+    //! re-entered callback). Lent entries outliving their borrow, or held across a change
+    //! of the builder, do not compile (`compile_fail/` and doctests). Every test calls
+    //! libgit2, so Miri skips them all.
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::panic::{self, AssertUnwindSafe};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::object::object::ObjectArc;
+    use libgit2::libgit2::object::tree::{
+        Tree, TreeBuilder, TreeBuilderBox, TreeEntry, TreeEntryBox, TreeEntryRef, WalkAction,
+        WalkCallback,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::util::errors::{ErrorBuf, ErrorClass};
+
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use libgit2::libgit2::repository::repository::RepositoryBox;
+
+    use crate::fixture::init;
+    use crate::fixture::object_and_tree_entry::{entry_view, object_view, write_blob};
+    use crate::fixture::tree::{count, id, mode_of};
+
+    /// A fresh bare repository in a temporary directory, removed on drop after the
+    /// repository it holds.
+    struct TempRepo {
+        path: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl TempRepo {
+        fn new(tag: &str) -> Self {
+            init();
+            let path =
+                std::env::temp_dir().join(format!("crustify-tree-ub-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let repo = Repository::init(&Self::c_path_of(&path), true).unwrap();
+            Self {
+                path,
+                repo: Some(repo),
+            }
+        }
+
+        fn c_path_of(path: &std::path::Path) -> CString {
+            CString::new(path.as_os_str().as_bytes()).unwrap()
+        }
+
+        fn c_path(&self) -> CString {
+            Self::c_path_of(&self.path)
+        }
+
+        fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// The id of an object an owner holds.
+    fn id_of(object: &ObjectArc<'_>) -> Oid {
+        let (hex, _) = object_view(object);
+        Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap()
+    }
+
+    /// C's name, hex id and mode of a lent entry, read from a copy.
+    fn view(entry: TreeEntryRef<'_>) -> (CString, String, u32) {
+        entry_view(&entry.to_tree_entry().unwrap())
+    }
+
+    fn hex(id: &Oid) -> String {
+        id.as_ref().to_hex_string().unwrap()
+    }
+
+    /// A blob and the empty tree of `temp`, written through it.
+    fn objects(temp: &TempRepo) -> (Oid, Oid) {
+        let blob = id_of(&write_blob(temp.repo(), b"content\n"));
+        let tree = TreeBuilder::new(temp.repo().as_ref())
+            .unwrap()
+            .as_mut()
+            .write()
+            .unwrap();
+        (blob, tree)
+    }
+
+    /// Entries are inserted, looked up, replaced in place, removed and cleared, over
+    /// names of every length a tree stores; each step frees what it drops exactly once,
+    /// and every lent entry is the live one.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_are_inserted_replaced_and_removed() {
+        let temp = TempRepo::new("tree-routines");
+        let (blob, empty) = objects(&temp);
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        let lengths: Vec<usize> = if cfg!(bsan) {
+            vec![1, 2, 255, 256, 65535]
+        } else {
+            (1..=300).chain([4095, 4096, 65534, 65535]).collect()
+        };
+        let names: Vec<CString> = lengths
+            .iter()
+            .map(|&n| CString::new(vec![b'f'; n]).unwrap())
+            .collect();
+        for name in &names {
+            let entry = builder
+                .as_mut()
+                .insert_entry(name, blob.as_ref(), FileMode::Blob)
+                .map(view)
+                .unwrap();
+            assert_eq!(entry, (name.clone(), hex(&blob), ffi_mode(FileMode::Blob)));
+        }
+        assert_eq!(count(&builder), names.len());
+        // Every name again, as a tree and then an executable: replaced in place.
+        for name in &names {
+            builder
+                .as_mut()
+                .insert(name, empty.as_ref(), FileMode::Tree)
+                .unwrap();
+            let mut m = builder.as_mut();
+            let entry = m
+                .insert_entry(name, blob.as_ref(), FileMode::BlobExecutable)
+                .unwrap();
+            assert_eq!(view(entry).2, ffi_mode(FileMode::BlobExecutable));
+        }
+        assert_eq!(count(&builder), names.len());
+        let shared = builder.as_ref();
+        let lent: Vec<_> = names.iter().map(|n| shared.get(n).unwrap()).collect();
+        for (entry, name) in lent.iter().zip(&names) {
+            assert_eq!(view(*entry).0, *name);
+        }
+        assert!(shared.get(c"absent").is_none());
+        let written = builder.as_mut().write().unwrap();
+
+        // Every other entry removed; removing it again fails, naming it.
+        for name in names.iter().step_by(2) {
+            builder.as_mut().remove(name).unwrap();
+            let e = builder.as_mut().remove(name).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Tree));
+            assert!(
+                e.message()
+                    .to_bytes()
+                    .starts_with(b"failed to remove entry: file isn't in the tree - f")
+            );
+            assert!(builder.as_ref().get(name).is_none());
+        }
+        assert_eq!(count(&builder), names.len() / 2);
+        assert_ne!(builder.as_mut().write().unwrap(), written);
+        // Put back, the same tree is written.
+        for name in names.iter().step_by(2) {
+            builder
+                .as_mut()
+                .insert(name, blob.as_ref(), FileMode::BlobExecutable)
+                .unwrap();
+        }
+        assert_eq!(builder.as_mut().write().unwrap(), written);
+        builder.as_mut().clear();
+        assert!(builder.as_mut().remove(&names[0]).is_err());
+        builder
+            .as_mut()
+            .insert(&names[0], blob.as_ref(), FileMode::Link)
+            .unwrap();
+        assert_eq!(mode_of(&builder, &names[0]), Some(ffi_mode(FileMode::Link)));
+        // Dropped with an entry held.
+    }
+
+    fn ffi_mode(mode: FileMode) -> u32 {
+        mode.raw()
+    }
+
+    /// Every insert libgit2 refuses, and the over-long names Rust refuses, fail with
+    /// their error and leave the builder as it was: no entry added or changed, nothing
+    /// leaked.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_inserts_leave_the_builder_unchanged() {
+        let temp = TempRepo::new("tree-refused");
+        let (blob, empty) = objects(&temp);
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        builder
+            .as_mut()
+            .insert(c"kept", blob.as_ref(), FileMode::Blob)
+            .unwrap();
+        let missing = id(0x42);
+        let zero = Oid::zero(OidType::Sha1);
+        let long = CString::new(vec![b'l'; 65536]).unwrap();
+        let cases: [(&CStr, &Oid, FileMode, ErrorClass); 12] = [
+            (c"", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c".", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c"..", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c".git", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c"a/b", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c"/", &blob, FileMode::Blob, ErrorClass::Tree),
+            (c"x", &blob, FileMode::Unreadable, ErrorClass::Tree),
+            (c"x", &zero, FileMode::Commit, ErrorClass::Tree),
+            (c"x", &missing, FileMode::Blob, ErrorClass::Tree),
+            (c"x", &blob, FileMode::Tree, ErrorClass::Tree),
+            (c"kept", &empty, FileMode::Blob, ErrorClass::Tree),
+            (&long, &blob, FileMode::Blob, ErrorClass::Invalid),
+        ];
+        for (name, id, mode, class) in cases {
+            for e in [
+                builder.as_mut().insert(name, id.as_ref(), mode),
+                builder
+                    .as_mut()
+                    .insert_entry(name, id.as_ref(), mode)
+                    .map(|_| ()),
+            ] {
+                let e: ErrorBuf = e.unwrap_err();
+                assert_eq!(e.class(), Some(class), "{name:?} {mode:?}: {e:?}");
+            }
+            assert_eq!(count(&builder), 1);
+            assert_eq!(mode_of(&builder, c"kept"), Some(ffi_mode(FileMode::Blob)));
+        }
+        assert!(builder.as_ref().get(c"x").is_none());
+    }
+
+    /// Entries lent by `get` and `insert_entry` copy out into entries of their own, which
+    /// outlive the builder and its repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lent_entries_copy_out() {
+        let temp = TempRepo::new("tree-copies");
+        let (blob, _) = objects(&temp);
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        let from_insert: TreeEntryBox = {
+            let mut m = builder.as_mut();
+            let entry = m.insert_entry(c"a", blob.as_ref(), FileMode::Blob).unwrap();
+            entry.to_tree_entry().unwrap()
+        };
+        let from_get = builder.as_ref().get(c"a").unwrap().to_tree_entry().unwrap();
+        builder.as_mut().remove(c"a").unwrap();
+        drop(builder);
+        drop(temp);
+        let expected = (c"a".to_owned(), hex(&blob), ffi_mode(FileMode::Blob));
+        assert_eq!(entry_view(&from_insert), expected);
+        assert_eq!(entry_view(&from_get.clone()), expected);
+    }
+
+    /// Copies of the entries a builder lends cross to other threads, which read and drop
+    /// them while this thread replaces, removes and clears the builder's entries: a copy
+    /// shares nothing with the builder's storage.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lent_entry_copies_cross_threads() {
+        let temp = TempRepo::new("tree-threads");
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        let names: Vec<CString> = (0..4)
+            .map(|i| CString::new(format!("s{i}")).unwrap())
+            .collect();
+        for (i, name) in (1u8..).zip(&names) {
+            builder
+                .as_mut()
+                .insert(name, id(i).as_ref(), FileMode::Commit)
+                .unwrap();
+        }
+        let copies: Vec<TreeEntryBox> = names
+            .iter()
+            .map(|n| builder.as_ref().get(n).unwrap().to_tree_entry().unwrap())
+            .collect();
+        let expected: Vec<_> = copies.iter().map(entry_view).collect();
+        let views: Vec<_> = thread::scope(|s| {
+            let readers: Vec<_> = copies
+                .into_iter()
+                .map(|copy| {
+                    s.spawn(move || {
+                        let view = entry_view(&copy);
+                        let again = copy.clone();
+                        drop(copy);
+                        (view, entry_view(&again))
+                    })
+                })
+                .collect();
+            for (i, name) in (10u8..).zip(&names) {
+                builder
+                    .as_mut()
+                    .insert(name, id(i).as_ref(), FileMode::Commit)
+                    .unwrap();
+                builder.as_mut().remove(name).unwrap();
+            }
+            builder.as_mut().clear();
+            readers.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for ((view, again), expected) in views.iter().zip(&expected) {
+            assert_eq!(view, expected);
+            assert_eq!(again, expected);
+        }
+        assert_eq!(expected[2].0, c"s2".to_owned());
+    }
+
+    /// Inserting looks each object up through the repository pointer the builder kept,
+    /// loading the object database on first use, while Rust reborrows the repository in
+    /// between: a shared handle reads its paths and takes its odb, then the builder
+    /// inserts, writes and inserts again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn inserts_reach_the_repository_across_reborrows() {
+        let temp = TempRepo::new("tree-reborrow");
+        let repo = temp.repo();
+        let blob = id_of(&write_blob(repo, b"x"));
+        let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+        assert!(repo.as_ref().path().is_some());
+        builder
+            .as_mut()
+            .insert(c"a", blob.as_ref(), FileMode::Blob)
+            .unwrap();
+        let odb = repo.as_ref().odb().unwrap();
+        let first = builder.as_mut().write().unwrap();
+        drop(odb);
+        assert!(repo.as_ref().path().is_some());
+        builder
+            .as_mut()
+            .insert(c"b", first.as_ref(), FileMode::Tree)
+            .unwrap();
+        assert!(
+            builder
+                .as_mut()
+                .insert(c"c", first.as_ref(), FileMode::Blob)
+                .is_err()
+        );
+        let second = builder.as_mut().write().unwrap();
+        assert_ne!(first, second);
+    }
+
+    /// A repository without a git directory has no object database to load: `write`
+    /// fails, as does inserting anything libgit2 looks up, and the builder stays usable.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writes_without_an_object_database_fail() {
+        init();
+        let repo = Repository::new().unwrap();
+        let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+        builder
+            .as_mut()
+            .insert(c"sub", id(1).as_ref(), FileMode::Commit)
+            .unwrap();
+        for _ in 0..2 {
+            let e = builder.as_mut().write().unwrap_err();
+            assert!(e.raw_code() < 0);
+            assert!(!e.message().is_empty());
+        }
+        let e = builder
+            .as_mut()
+            .insert(c"blob", id(2).as_ref(), FileMode::Blob)
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Tree));
+        assert_eq!(count(&builder), 1);
+        builder.as_mut().remove(c"sub").unwrap();
+    }
+
+    /// The walk callback lends entries borrowed from a builder or owned, and roots, for the
+    /// call only; the closure copies what it keeps. Each answer comes back as given, and
+    /// `stopped` tells a stop.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walk_callbacks_lend_entries_for_the_call() {
+        let temp = TempRepo::new("tree-walk-callback");
+        let (blob, _) = objects(&temp);
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        builder
+            .as_mut()
+            .insert(c"file", blob.as_ref(), FileMode::Blob)
+            .unwrap();
+        let tree_id = builder.as_mut().write().unwrap();
+        let tree = Tree::lookup(temp.repo().as_ref(), tree_id.as_ref()).unwrap();
+        let owned = TreeEntry::bypath(tree.as_ref(), c"file").unwrap();
+
+        let mut kept: Vec<(CString, TreeEntryBox)> = Vec::new();
+        let answers = [WalkAction::Continue, WalkAction::Skip, WalkAction::Stop];
+        let mut next = answers.iter().copied().cycle();
+        let mut f = |root: &CStr, entry: TreeEntryRef<'_>| {
+            kept.push((root.to_owned(), entry.to_tree_entry().unwrap()));
+            next.next().unwrap()
+        };
+        let mut callback = WalkCallback::new(&mut f);
+        let lent = builder.as_ref().get(c"file").unwrap();
+        for (i, (root, entry)) in [
+            (c"", lent),
+            (c"dir/", owned.as_ref()),
+            (c"dir/\xff/", lent),
+            (c"", owned.as_ref()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let answer = callback.call(root, entry);
+            assert_eq!(answer, answers[i % 3]);
+            assert_eq!(callback.stopped(), answer == WalkAction::Stop);
+        }
+        assert!(format!("{callback:?}").starts_with("WalkCallback { stopped: false"));
+        drop(callback);
+        drop(builder);
+        drop(owned);
+        drop(tree);
+        assert_eq!(kept.len(), 4);
+        for (root, entry) in &kept {
+            assert!(root.to_bytes().is_empty() || root.to_bytes().ends_with(b"/"));
+            assert_eq!(entry_view(entry).0, c"file".to_owned());
+        }
+    }
+
+    /// A panic of the closure stays out of C and resumes from `call`; the callback is
+    /// usable afterwards. A closure may run a walk callback of its own, with the entry it
+    /// was lent.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walk_callbacks_resume_panics_and_nest() {
+        let temp = TempRepo::new("tree-walk-panic");
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        builder
+            .as_mut()
+            .insert(c"sub", id(9).as_ref(), FileMode::Commit)
+            .unwrap();
+        let entry = builder.as_ref().get(c"sub").unwrap();
+
+        let mut calls = 0;
+        let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
+            calls += 1;
+            if calls == 1 {
+                panic!("first call panics");
+            }
+            WalkAction::Skip
+        };
+        let mut callback = WalkCallback::new(&mut f);
+        let panicked = panic::catch_unwind(AssertUnwindSafe(|| callback.call(c"", entry)));
+        assert_eq!(
+            panicked.unwrap_err().downcast_ref::<&str>(),
+            Some(&"first call panics")
+        );
+        assert!(callback.stopped());
+        assert_eq!(callback.call(c"", entry), WalkAction::Skip);
+        assert!(!callback.stopped());
+        drop(callback);
+        assert_eq!(calls, 2);
+
+        let mut depth: c_int = 0;
+        let mut outer = |root: &CStr, entry: TreeEntryRef<'_>| {
+            depth += 1;
+            let mut inner = |r: &CStr, e: TreeEntryRef<'_>| {
+                assert_eq!(view(e).0, c"sub".to_owned());
+                assert_eq!(r, c"inner/");
+                WalkAction::Stop
+            };
+            let mut nested = WalkCallback::new(&mut inner);
+            assert_eq!(nested.call(c"inner/", entry), WalkAction::Stop);
+            assert_eq!(root, c"outer/");
+            WalkAction::Continue
+        };
+        let mut callback = WalkCallback::new(&mut outer);
+        assert_eq!(callback.call(c"outer/", entry), WalkAction::Continue);
+        drop(callback);
+        assert_eq!(depth, 1);
+    }
+
+    /// Builders on threads, each over its own repository, insert, look up, remove and
+    /// write at once.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn routines_on_threads() {
+        let temp = TempRepo::new("tree-routine-threads");
+        let path = temp.c_path();
+        let written: Vec<Oid> = thread::scope(|s| {
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = &path;
+                    s.spawn(move || {
+                        let repo = Repository::open(path).unwrap();
+                        let mut builder: TreeBuilderBox<'_> =
+                            TreeBuilder::new(repo.as_ref()).unwrap();
+                        for i in 0..8u8 {
+                            let name = CString::new(format!("t{i}")).unwrap();
+                            builder
+                                .as_mut()
+                                .insert(&name, id(i + 1).as_ref(), FileMode::Commit)
+                                .unwrap();
+                            assert!(builder.as_ref().get(&name).is_some());
+                        }
+                        builder.as_mut().remove(c"t0").unwrap();
+                        builder.as_mut().write().unwrap()
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert!(written.windows(2).all(|w| w[0] == w[1]));
     }
 }
 
