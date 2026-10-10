@@ -22,6 +22,7 @@ git_pathspec_flag_t
 git_reference_format_t
 git_reference_t
 git_repository_init_flag_t
+git_repository_init_mode_t
 git_repository_init_options
 git_repository_open_flag_t
 git_strarray
