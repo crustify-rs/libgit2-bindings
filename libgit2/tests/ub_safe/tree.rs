@@ -185,6 +185,26 @@ mod builder {
         }
     }
 
+    /// The length follows every insertion, replacement and clear, through the owner and
+    /// every handle form, and agrees with C's count.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lengths_follow_the_entries() {
+        let repo = TempRepo::new("lengths");
+        let mut builder = TreeBuilder::new(repo.repo().as_ref()).unwrap();
+        assert!(builder.as_ref().is_empty());
+        for n in [1u8, 7, 64, 200] {
+            fill(&mut builder, n);
+            assert_eq!(builder.as_ref().len(), usize::from(n));
+            assert_eq!(builder.as_mut().as_ref().len(), count(&builder));
+            fill(&mut builder, n);
+            assert_eq!(builder.as_ref().len(), usize::from(n));
+            let mut handle: TreeBuilderMut<'_, '_> = builder.as_mut();
+            handle.as_mut().clear();
+            assert!(handle.as_ref().is_empty());
+        }
+    }
+
     /// Empty builders are built, cleared through every handle form and released, many
     /// over one repository, in any order.
     #[test]
@@ -1002,16 +1022,28 @@ mod tree_entry {
     //! and move copies to other threads to drop them (TSan). A handle outliving its owner
     //! and aliased exclusive handles do not compile (`compile_fail/` and doctests).
     //!
+    //! The getters lend the entry's name and id, which live inside its block: they are
+    //! read in full for names of every length (ASan: a read past the block), outlive the
+    //! tree and repository the entry came from, and are read from many threads at once
+    //! with the ordering between entries (TSan). An entry's object outlives the entry,
+    //! and a name or object outliving what keeps it alive does not compile
+    //! (`compile_fail/`). A `TreeBuilderFilter` lends each entry for its call only
+    //! (doctests), and a panicking closure resumes after the call.
+    //!
     //! Every test calls libgit2, so Miri skips them all.
 
+    use std::cmp::Ordering;
     use std::ffi::{CStr, CString};
     use std::sync::Barrier;
     use std::thread;
 
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::core::types::{FileMode, ObjectType};
     use libgit2::libgit2::object::object::Object;
-    use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeEntry, TreeEntryBox, TreeRef};
+    use libgit2::libgit2::object::tree::{
+        Tree, TreeArc, TreeBuilder, TreeBuilderFilter, TreeEntry, TreeEntryBox, TreeEntryRef,
+        TreeRef,
+    };
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::RepositoryRef;
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
@@ -1313,6 +1345,157 @@ mod tree_entry {
         let a = TreeEntry::bypath(root.as_ref(), c"ab/c/3.txt").unwrap();
         let b = TreeEntry::bypath(peeled.as_ref(), c"ab/c/3.txt").unwrap();
         assert_eq!(entry_view(&a), entry_view(&b));
+    }
+
+    /// Names of every length a tree allows, lent by the getter, read whole and kept past
+    /// the tree and the repository, with the id, mode and type beside them.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_lend_from_the_entry() {
+        let repo = TempRepo::new("tree-entry-getters");
+        let lens = [1usize, 2, 7, 8, 9, 16, 17, 255, 256, 4096, 65535];
+        let names: Vec<CString> = lens
+            .iter()
+            .map(|&n| CString::new(vec![b'g'; n]).unwrap())
+            .collect();
+        let id = write_tree(&repo, b"payload\n", &names);
+        let root = Tree::lookup(repository(&repo), id.as_ref()).unwrap();
+        let entries: Vec<TreeEntryBox> = names
+            .iter()
+            .map(|n| TreeEntry::bypath(root.as_ref(), n).unwrap())
+            .collect();
+        let blob = entries[0].as_ref().to_object(repository(&repo)).unwrap();
+        assert_eq!(blob.as_ref().kind(), ObjectType::Blob);
+        drop(blob);
+        drop(root);
+        drop(repo);
+        let views: Vec<_> = entries.iter().map(entry_view).collect();
+        for (entry, (name, hex, raw)) in entries.iter().zip(&views) {
+            let handle = entry.as_ref();
+            assert_eq!(handle.name(), name.as_c_str());
+            assert_eq!(&handle.id().to_hex_string().unwrap(), hex);
+            assert_eq!(handle.filemode_raw(), *raw);
+            assert_eq!(handle.filemode(), FileMode::Blob);
+            assert_eq!(handle.kind(), ObjectType::Blob);
+        }
+        for pair in entries.windows(2) {
+            assert_eq!(
+                pair[0].as_ref().cmp_in_tree(pair[1].as_ref()),
+                Ordering::Less
+            );
+        }
+    }
+
+    /// Many threads read every getter of shared entries at once, and order them (TSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_cross_threads() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let entries: Vec<TreeEntryBox> = PATHS
+            .iter()
+            .map(|p| TreeEntry::bypath(root.as_ref(), p).unwrap())
+            .collect();
+        drop(root);
+        drop(repo);
+        let expected: Vec<_> = entries.iter().map(entry_view).collect();
+        const THREADS: usize = 8;
+        let barrier = Barrier::new(THREADS);
+        thread::scope(|s| {
+            for _ in 0..THREADS {
+                let (entries, expected, barrier) = (&entries, &expected, &barrier);
+                s.spawn(move || {
+                    barrier.wait();
+                    for _ in 0..32 {
+                        for (entry, (name, hex, raw)) in entries.iter().zip(expected) {
+                            let handle = entry.as_ref();
+                            assert_eq!(handle.name(), name.as_c_str());
+                            assert_eq!(&handle.id().to_hex_string().unwrap(), hex);
+                            assert_eq!(handle.filemode_raw(), *raw);
+                            let _ = (handle.filemode(), handle.kind());
+                            for other in entries {
+                                let _ = handle.cmp_in_tree(other.as_ref());
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// An entry's object outlives the entry and the tree it came from, looked up in its
+    /// own repository or in another holding it; a repository lacking it fails cleanly.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn objects_outlive_their_entries() {
+        let repo = open_testrepo();
+        let other = open_testrepo();
+        let empty = TempRepo::new("tree-entry-objects");
+        let root = tree(repo.as_ref());
+        let mut objects = Vec::new();
+        for path in PATHS {
+            let entry = TreeEntry::bypath(root.as_ref(), path).unwrap();
+            objects.push(entry.as_ref().to_object(repo.as_ref()).unwrap());
+            objects.push(entry.as_ref().to_object(other.as_ref()).unwrap());
+            let e = entry.as_ref().to_object(repository(&empty)).unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::NotFound));
+        }
+        drop(root);
+        let views: Vec<_> = objects.iter().map(object_view).collect();
+        for pair in views.chunks(2) {
+            assert_eq!(pair[0], pair[1]);
+        }
+    }
+
+    /// A filter called directly on entries of every kind; a closure that panics on one
+    /// call resumes the panic and leaves the filter usable for the next.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filters_lend_entries_for_the_call() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let entries: Vec<TreeEntryBox> = PATHS
+            .iter()
+            .map(|p| TreeEntry::bypath(root.as_ref(), p).unwrap())
+            .collect();
+        let mut seen = Vec::new();
+        let mut calls = 0;
+        let mut pick = |entry: TreeEntryRef<'_>| {
+            calls += 1;
+            if calls == 3 {
+                panic!("third call");
+            }
+            seen.push(entry.name().to_owned());
+            entry.kind() == ObjectType::Tree
+        };
+        let mut filter = TreeBuilderFilter::new(&mut pick);
+        let mut verdicts = Vec::new();
+        for entry in &entries {
+            let call = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                filter.call(entry.as_ref())
+            }));
+            verdicts.push(call.ok());
+        }
+        assert_eq!(
+            format!("{filter:?}"),
+            "TreeBuilderFilter { panicked: false, .. }"
+        );
+        drop(filter);
+        assert_eq!(
+            verdicts,
+            [
+                Some(false),
+                Some(true),
+                None,
+                Some(false),
+                Some(true),
+                Some(false)
+            ]
+        );
+        assert_eq!(seen.len(), PATHS.len() - 1);
+        // A builder seeded from the tree is untouched by the filter's calls.
+        let builder = TreeBuilder::from_tree(repo.as_ref(), root.as_ref()).unwrap();
+        assert_eq!(builder.as_ref().len(), 4);
     }
 }
 

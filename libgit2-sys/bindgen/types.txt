@@ -60,10 +60,12 @@ git_strarray
 git_submodule_ignore_t
 git_submodule_recurse_t
 git_submodule_update_t
+git_tag_foreach_cb
 git_time
 git_trace_level_t
 git_tree_update_t
 git_treebuilder
+git_treebuilder_filter_cb
 git_treewalk_mode
 git_worktree
 git_worktree_add_options

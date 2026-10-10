@@ -1723,9 +1723,9 @@ pub mod head_and_lookups {
 
 // --- `git2/tree.h`: `git_treebuilder` ----------------------------------------------
 
-/// Fixtures standing in for the tree-builder routines (`git_treebuilder_entrycount`), the
-/// tree entry getters and the `git_tree` lookup the tests drive a builder with; replace
-/// each once its safe counterpart lands.
+/// Fixtures over the tree builders the tests drive: the safe builder and entry getters,
+/// and raw stand-ins for the `git_tree` entry routines; replace each stand-in once its
+/// safe counterpart lands.
 pub mod tree {
     use std::ffi::{CStr, CString};
 
@@ -1757,18 +1757,14 @@ pub mod tree {
         Oid::from_raw(&[byte; 20], OidType::Sha1).unwrap()
     }
 
-    /// `git_treebuilder_entrycount`.
+    /// The builder's entry count, through the safe `len`.
     pub fn count(builder: &TreeBuilderBox<'_>) -> usize {
-        // SAFETY: the box's live builder, only read.
-        unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) }
+        builder.as_ref().len()
     }
 
-    /// The file mode of the builder's entry `name`, if it holds one: looked up through
-    /// `get`, read raw from a copy; stands in for the entry's file-mode getter.
+    /// The raw file mode of the builder's entry `name`, if it holds one.
     pub fn mode_of(builder: &TreeBuilderBox<'_>, name: &CStr) -> Option<ffi::git_filemode_t> {
-        let entry = builder.as_ref().get(name)?.to_tree_entry().unwrap();
-        // SAFETY: the copy's live entry, only read.
-        Some(unsafe { ffi::git_tree_entry_filemode_raw(entry.as_c_ptr()) })
+        Some(builder.as_ref().get(name)?.filemode_raw())
     }
 }
 
@@ -1842,28 +1838,15 @@ pub mod object_and_tree_entry {
         Object::lookup(repo.as_ref(), id.as_ref(), Some(ObjectType::Blob)).unwrap()
     }
 
-    /// C's name, hex id and raw file mode of the entry an owner holds.
+    /// The name, hex id and raw file mode of the entry an owner holds, through the
+    /// safe getters.
     pub fn entry_view(entry: &TreeEntryBox) -> (CString, String, u32) {
-        let p = entry.as_c_ptr();
-        let mut out = [0u8; 65];
-        // SAFETY: `p` is the live entry the owner holds; its name and id live as long
-        // as it does and are copied at once; `out` has 65 writable bytes.
-        unsafe {
-            ffi::git_oid_tostr(
-                out.as_mut_ptr().cast(),
-                out.len(),
-                ffi::git_tree_entry_id(p),
-            );
-            (
-                CStr::from_ptr(ffi::git_tree_entry_name(p)).to_owned(),
-                CStr::from_bytes_until_nul(&out)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-                ffi::git_tree_entry_filemode_raw(p),
-            )
-        }
+        let entry = entry.as_ref();
+        (
+            entry.name().to_owned(),
+            entry.id().to_hex_string().unwrap(),
+            entry.filemode_raw(),
+        )
     }
 
     /// Writes a blob holding `data` and a tree naming it once under each of `names`,

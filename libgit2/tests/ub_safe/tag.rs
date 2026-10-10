@@ -1,5 +1,6 @@
-//! UB tests for `git2/tag.h`: `name_is_valid` (`git_tag_name_is_valid`), and the tag
-//! object's owner and handles in [`tag_object`].
+//! UB tests for `git2/tag.h`: `name_is_valid` (`git_tag_name_is_valid`), the tag
+//! object's owner and handles in [`tag_object`], and the routines over a repository's
+//! tags and the foreach callback in [`repository_tags`].
 //!
 //! libgit2 reads the name up to its NUL, copies it into a reference name in its
 //! allocator, and writes the verdict into a Rust local. Each name sits in an
@@ -503,5 +504,306 @@ mod tag_object {
         let object = a.as_object().to_object();
         assert_eq!(object_view(&object).0, TAGS[2]);
         assert_eq!(format!("{b:?}"), "Tag { .. }");
+    }
+}
+
+mod repository_tags {
+    //! UB tests for `create_lightweight`, `create_from_buffer`, `delete`, `list`,
+    //! `list_match` (`git_tag_create_lightweight`, `_create_from_buffer`, `_delete`,
+    //! `_list`, `_list_match`) and `ForeachCallback` (`git_tag_foreach_cb`).
+    //!
+    //! Names, patterns and buffers sit in exact-length allocations (ASan: a read past
+    //! their NUL) and are rewritten after each call (BSan: libgit2 keeps no pointer into
+    //! them). A listing is an array and strings of libgit2's allocator that the returned
+    //! owner releases once (ASan, LSan), and that outlives the repository. A buffer
+    //! naming the zero id as its target, which libgit2 would answer by freeing an
+    //! uninitialised pointer, and buffers libgit2 would leak part of (a malformed
+    //! tagger, no message, an invalid reference name), never reach libgit2 (ASan,
+    //! LSan). A failed listing leaks in libgit2 itself, so that test runs
+    //! with LeakSanitizer off in its child. Each thread lists tags of a repository of
+    //! its own, the first calls of a fresh process racing to initialise libgit2 (TSan);
+    //! tests that write references run in a child, on one thread, since glibc's
+    //! `tzset` (the reflog's time) is reported by TSan against any concurrent caller.
+    //!
+    //! A callback's name and id cannot outlive the call, nor the callback cross threads
+    //! (doctests); a panicking closure resumes after the call.
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+    use std::path::{Path, PathBuf};
+    use std::thread;
+
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::object::tag::{
+        ForeachCallback, create_from_buffer, create_lightweight, delete, list, list_match,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::index::isolated_tolerating_leaks;
+    use crate::fixture::{init, isolated};
+
+    const COMMIT: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A private copy of `testrepo.git`, opened; removed on drop after the repository.
+    struct Sandbox {
+        path: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Sandbox {
+        fn new(tag: &str) -> Self {
+            init();
+            let path =
+                std::env::temp_dir().join(format!("crustify-tag-ub-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let source = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../tests/resources/testrepo.git"
+            );
+            copy_dir(Path::new(source), &path);
+            let repo = Repository::open(&CString::new(path.to_str().unwrap()).unwrap()).unwrap();
+            Self {
+                path,
+                repo: Some(repo),
+            }
+        }
+
+        fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn commit(repo: &RepositoryBox) -> ObjectArc<'_> {
+        let id = Oid::from_string(&CString::new(COMMIT).unwrap(), OidType::Sha1).unwrap();
+        Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap()
+    }
+
+    /// Overwrites a string's bytes in place, keeping its length.
+    fn scribble(s: CString) {
+        let mut bytes = s.into_bytes();
+        bytes.fill(b'#');
+        drop(bytes);
+    }
+
+    /// Tags of names of many lengths are created, listed, matched and deleted; the
+    /// listings outlive the repository, and every argument is rewritten after its call.
+    /// In a child: writing a reference reads the time through glibc's `tzset`, which
+    /// TSan reports against any concurrent caller.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn tags_are_created_listed_and_deleted() {
+        isolated(
+            concat!(module_path!(), "::tags_are_created_listed_and_deleted"),
+            || {
+                let sandbox = Sandbox::new("lifecycle");
+                let repo = sandbox.repo();
+                let target = commit(repo);
+                let names: Vec<String> = [1usize, 2, 15, 16, 17, 100, 200]
+                    .iter()
+                    .map(|&n| "t".repeat(n))
+                    .collect();
+                for name in &names {
+                    let c_name = CString::new(name.as_str()).unwrap();
+                    let id =
+                        create_lightweight(repo.as_ref(), &c_name, target.as_ref(), false).unwrap();
+                    assert_eq!(id.as_ref().to_hex_string().unwrap(), COMMIT);
+                    scribble(c_name);
+                    let buffer = CString::new(format!(
+                        "object {COMMIT}\ntype commit\ntag a{name}\ntagger T <t@x> 0 +0000\n\nm\n"
+                    ))
+                    .unwrap();
+                    let id = create_from_buffer(repo.as_ref(), &buffer, false).unwrap();
+                    assert!(!id.as_ref().is_zero());
+                    scribble(buffer);
+                }
+                drop(target);
+                let pattern = CString::new("t*").unwrap();
+                let matched = list_match(repo.as_ref(), &pattern).unwrap();
+                scribble(pattern);
+                let all = list(repo.as_ref()).unwrap();
+                assert_eq!(matched.as_ref().len(), names.len() + 2);
+                assert_eq!(all.as_ref().len(), 7 + 2 * names.len());
+                for name in &names {
+                    let c_name = CString::new(name.as_str()).unwrap();
+                    delete(repo.as_ref(), &c_name).unwrap();
+                    let e = delete(repo.as_ref(), &c_name).unwrap_err();
+                    assert_eq!(e.code(), Some(ErrorCode::NotFound));
+                    scribble(c_name);
+                }
+                drop(sandbox);
+                let listed: Vec<&CStr> = all.as_ref().iter().collect();
+                assert!(listed.contains(&c"test"));
+                assert!(
+                    matched
+                        .as_ref()
+                        .iter()
+                        .all(|n| n.to_bytes().starts_with(b"t"))
+                );
+            },
+        );
+    }
+
+    /// Buffers naming the zero id, and buffers malformed after the tag's name, are
+    /// refused before libgit2 frees an uninitialised pointer or leaks what it parsed.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_buffers_never_reach_libgit2() {
+        let sandbox = Sandbox::new("refused");
+        let repo = sandbox.repo();
+        let zero = "0".repeat(40);
+        let buffers = [
+            format!("object {zero}\ntype commit\ntag z\ntagger T <t@x> 0 +0000\n\nm\n"),
+            format!("object {zero}\ntype tree\ntag z\n"),
+            format!("object {COMMIT}\ntype commit\ntag v\ntagger nobody\n\nm\n"),
+            format!("object {COMMIT}\ntype commit\ntag v\ntagger T <t@x> 0 +0000\nno blank line"),
+            format!("object {COMMIT}\ntype commit\ntag v\ntagger T <t@x> notatime +0000\n\nm\n"),
+            format!("object {COMMIT}\ntype commit\ntag bad..name\n\nm\n"),
+        ];
+        let classes = [
+            ErrorClass::Odb,
+            ErrorClass::Odb,
+            ErrorClass::Invalid,
+            ErrorClass::Tag,
+            ErrorClass::Invalid,
+            ErrorClass::Reference,
+        ];
+        for (buffer, class) in buffers.into_iter().zip(classes) {
+            let buffer = CString::new(buffer).unwrap();
+            for force in [false, true] {
+                let e = create_from_buffer(repo.as_ref(), &buffer, force).unwrap_err();
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(class)), "{e:?}");
+            }
+            scribble(buffer);
+        }
+        assert_eq!(list(repo.as_ref()).unwrap().as_ref().len(), 7);
+    }
+
+    /// A dangling symbolic tag fails the listing with libgit2's error, and the next
+    /// listing, once it is gone, succeeds; libgit2 leaks the names it collected.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failed_listings_report_errors() {
+        isolated_tolerating_leaks(
+            concat!(module_path!(), "::failed_listings_report_errors"),
+            || {
+                let sandbox = Sandbox::new("dangling");
+                let dangling = sandbox.path.join("refs/tags/dangling");
+                std::fs::write(&dangling, "ref: refs/heads/gone\n").unwrap();
+                let repo = sandbox.repo();
+                let e = list(repo.as_ref()).unwrap_err();
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Reference)));
+                let e = list_match(repo.as_ref(), c"d*").unwrap_err();
+                assert_eq!(e.raw_code(), -1);
+                std::fs::remove_file(&dangling).unwrap();
+                assert_eq!(list(repo.as_ref()).unwrap().as_ref().len(), 7);
+            },
+        );
+    }
+
+    /// The callback called directly with names of many lengths, each in an exact-length
+    /// allocation rewritten after the call; a break and a panic each come back.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn callbacks_lend_names_and_ids_for_the_call() {
+        init();
+        let id = Oid::from_string(&CString::new(COMMIT).unwrap(), OidType::Sha1).unwrap();
+        let mut seen = Vec::new();
+        let mut collect = |name: &CStr, id: OidRef<'_>| {
+            seen.push((name.to_bytes().len(), id.to_oid()));
+            if name.to_bytes().ends_with(b"stop") {
+                return ControlFlow::Break(NonZero::new(-7).unwrap());
+            }
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut collect);
+        for len in [0usize, 1, 10, 255, 4096] {
+            let name = CString::new(format!("refs/tags/{}", "n".repeat(len))).unwrap();
+            assert_eq!(callback.call(&name, id.as_ref()), ControlFlow::Continue(()));
+            scribble(name);
+        }
+        let stop = callback.call(c"refs/tags/stop", id.as_ref());
+        assert_eq!(stop, ControlFlow::Break(NonZero::new(-7).unwrap()));
+        drop(callback);
+        assert_eq!(seen.len(), 6);
+        assert!(seen.iter().all(|(_, seen_id)| *seen_id == id));
+
+        let mut boom = |_: &CStr, _: OidRef<'_>| -> ControlFlow<NonZero<c_int>> { panic!("boom") };
+        let mut callback = ForeachCallback::new(&mut boom);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            callback.call(c"refs/tags/x", id.as_ref())
+        }));
+        assert!(caught.is_err());
+        assert_eq!(
+            format!("{callback:?}"),
+            "ForeachCallback { panicked: false, .. }"
+        );
+    }
+
+    /// Threads of a fresh process list and match tags at once, each in a repository of its
+    /// own, racing libgit2's initialisation and allocator (TSan); the tags are created
+    /// and deleted on the main thread, before and after, since writing a reference reads
+    /// the time through glibc's `tzset`, which TSan reports against any concurrent caller.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn tags_on_threads() {
+        isolated(concat!(module_path!(), "::tags_on_threads"), || {
+            let sandboxes: Vec<Sandbox> = (0..4)
+                .map(|i| Sandbox::new(&format!("thread-{i}")))
+                .collect();
+            for (i, sandbox) in sandboxes.iter().enumerate() {
+                let repo = sandbox.repo();
+                let target = commit(repo);
+                for j in 0..8 {
+                    let name = CString::new(format!("t{i}-{j}")).unwrap();
+                    create_lightweight(repo.as_ref(), &name, target.as_ref(), false).unwrap();
+                }
+            }
+            let paths: Vec<CString> = sandboxes
+                .iter()
+                .map(|s| CString::new(s.path.to_str().unwrap()).unwrap())
+                .collect();
+            thread::scope(|s| {
+                for (i, path) in paths.iter().enumerate() {
+                    s.spawn(move || {
+                        let repo = Repository::open(path).unwrap();
+                        for j in 0..8 {
+                            let name = CString::new(format!("t{i}-{j}")).unwrap();
+                            assert_eq!(list_match(repo.as_ref(), &name).unwrap().as_ref().len(), 1);
+                        }
+                        assert_eq!(list(repo.as_ref()).unwrap().as_ref().len(), 15);
+                    });
+                }
+            });
+            for (i, sandbox) in sandboxes.iter().enumerate() {
+                for j in 0..8 {
+                    let name = CString::new(format!("t{i}-{j}")).unwrap();
+                    delete(sandbox.repo().as_ref(), &name).unwrap();
+                }
+                assert_eq!(list(sandbox.repo().as_ref()).unwrap().as_ref().len(), 7);
+            }
+        });
     }
 }

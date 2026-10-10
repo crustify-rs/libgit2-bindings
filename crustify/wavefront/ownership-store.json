@@ -5074,6 +5074,148 @@
    ]
   },
   {
+   "name": "git_object_rawcontent_is_valid",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "buf",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:buf"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "`len` bytes of raw object content (no header), NOT NUL-terminated; hashed and parsed for the call only. The parsed object (git__calloc'd by git_object__from_raw; tree entries point into buf) is freed before return; leaked only if the id hashing fails after the calloc (unnamed oid type / hash failure). NULL fails GIT_ASSERT_ARG even with len 0."
+     }
+    },
+    {
+     "name": "valid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:valid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: written 1 (blob, or parse succeeded) or 0 (parse returned GIT_EINVALID, error left set); untouched when another error is returned. NULL fails GIT_ASSERT_ARG."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_short_id",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: its id; reaches obj->repo (uncounted) to read core.abbrev through the config cache and to load the odb (git_repository_odb, a counted ref dropped before return): the repository must be live and used by this thread only."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_buf filled through GIT_BUF_WRAP_PRIVATE with a fresh libgit2-allocated NUL-terminated hex prefix; caller releases with git_buf_dispose. A populated buffer is overwritten (sanitized), not freed."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_string2type",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "str",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:str"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NUL-terminated name read for the call; NULL or empty gives GIT_OBJECT_INVALID. Matched as a prefix (git__prefixncmp): 'commits' is a commit."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_type",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Reads obj->cached.type, set at parse and never changed; NULL returns GIT_OBJECT_INVALID via GIT_ASSERT_ARG_WITH_RETVAL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_type2string",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "static"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "Pointer into the static git_objects_table: 'commit', 'tree', 'blob', 'tag', or '' for any other value (including GIT_OBJECT_ANY/INVALID/0). Never freed."
+    }
+   }
+  },
+  {
    "name": "git_odb_backend_data_alloc",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {
@@ -9418,6 +9560,171 @@
    ]
   },
   {
+   "name": "git_tag_create_from_buffer",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "buffer",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:buffer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated raw tag content parsed with strlen. DEFECTS: a parse failure after the name/tagger allocations leaks them (tag_parse does not clean up); a zero target id makes git_odb_read return without writing target_obj, which on_error then frees uninitialised (heap-use-after-free under ASan with a stale stack slot)."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out id of the written tag object; also written with an existing reference's id before EEXISTS."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository whose odb (weakptr) and refdb are loaded and written; not asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_create_lightweight",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out id: the target's id on success; also written with the EXISTING tag reference's id before an EEXISTS failure (retrieve_tag_reference_oid). Not asserted non-NULL (written unconditionally)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository whose refdb is loaded (cache fill) and written; compared by pointer with target's owner."
+     }
+    },
+    {
+     "name": "tag_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name read for the call; refused if it starts with '-' or is 'HEAD', then refs/tags/<name> validated by git_reference_create."
+     }
+    },
+    {
+     "name": "target",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:target"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: owner pointer compared with repo (mismatch -> GIT_ERROR_INVALID, nothing else read), then its id copied. Not retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_delete",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository whose refdb is loaded and written (reference and reflog removed). Not asserted non-NULL."
+     }
+    },
+    {
+     "name": "tag_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name, joined under refs/tags/ for the call; not asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tag_dup",
    "defined_in": "src/libgit2/object_api.c",
    "lifetime": {
@@ -9471,6 +9778,61 @@
    ]
   },
   {
+   "name": "git_tag_foreach_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Full reference name (refs/tags/...) from the refdb name iterator, lent for the call."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Id resolved into a stack git_oid of tags_cb, lent for the call; writes are discarded (non-const in the typedef only)."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg2"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Caller's payload passed through unchanged (git_tag_list_match's tag_filter_data internally)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tag_free",
    "defined_in": "src/libgit2/object_api.c",
    "lifetime": {
@@ -9494,6 +9856,101 @@
       "nullable": true,
       "mutable": true,
       "note": "git_object_free behind a cast: gives up one counted reference (git_cached_obj_decref); at zero git_tag__free runs, which never reads object.repo. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_list",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository whose refdb is iterated; each tag ref resolved to an id."
+     }
+    },
+    {
+     "name": "tag_names",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_names"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Filled (overwritten, not disposed) with a detached git_vector of git__strdup'd names; caller owns it and releases with git_strarray_dispose. DEFECT: on failure the partial list is dropped with git_vector_dispose (names leaked) and strings=NULL, count=0 with return 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_list_match",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "pattern",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:pattern"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated wildmatch pattern read during the walk only; empty matches everything."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository whose refdb is iterated."
+     }
+    },
+    {
+     "name": "tag_names",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_names"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As git_tag_list: caller-owned array of libgit2-allocated strings, git_strarray_dispose; on internal failure NULL/0 with return 0 and leaked names."
      }
     }
    ]
@@ -9842,6 +10299,46 @@
    ]
   },
   {
+   "name": "git_tree_entry_cmp",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "e1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:e1"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: filename, filename_len, attr. Not asserted non-NULL."
+     }
+    },
+    {
+     "name": "e2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:e2"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As e1."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tree_entry_dup",
    "defined_in": "src/libgit2/tree.c",
    "lifetime": {
@@ -9895,6 +10392,52 @@
    ]
   },
   {
+   "name": "git_tree_entry_filemode",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads entry->attr and normalises it; not asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_filemode_raw",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads entry->attr as stored; not asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tree_entry_free",
    "defined_in": "src/libgit2/tree.c",
    "lifetime": {
@@ -9918,6 +10461,175 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free of the entry's single block (struct + inline name); only valid for entries from git_tree_entry_dup / git_tree_entry_bypath, never for ones borrowed from a tree or treebuilder. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_id",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL returns NULL via GIT_ASSERT_ARG_WITH_RETVAL."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:entry"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "&entry->oid: lives inside the entry (owned block, tree's entries array, or builder entry); NULL only for a NULL entry."
+    }
+   }
+  },
+  {
+   "name": "git_tree_entry_name",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL returns NULL via GIT_ASSERT_ARG_WITH_RETVAL."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:entry"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "entry->filename: NUL-terminated, inline after an owned entry, or pointing into the tree's odb data / builder entry; lives as long as the entry's owner."
+    }
+   }
+  },
+  {
+   "name": "git_tree_entry_to_object",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "object_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only its id is read; not retained."
+     }
+    },
+    {
+     "name": "object_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_object_lookup(entry->oid, ANY): one counted reference (cache or fresh parse) the caller releases with git_object_free."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository the object is looked up in (odb load, cache fill); not asserted non-NULL here (git_object_lookup asserts). The entry's id is formatted with the repo's oid length by the loose backend: an id of another type overflows/underfills."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_type",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Reads attr: gitlink -> COMMIT, dir -> TREE, else BLOB; NULL -> GIT_OBJECT_INVALID."
      }
     }
    ]
@@ -10116,6 +10828,69 @@
       "nullable": false,
       "mutable": true,
       "note": "Asserted non-NULL (the only failure, -1). Frees every owned entry and empties the map; the builder, its map storage and write_cache stay, so it remains usable. Returns 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_entrycount",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Non-const in the signature but only reads the map size; NULL returns 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_filter_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "The builder's own entry, lent for the call: git_treebuilder_filter removes and frees it right after a non-zero return."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Caller's payload passed through unchanged."
      }
     }
    ]
