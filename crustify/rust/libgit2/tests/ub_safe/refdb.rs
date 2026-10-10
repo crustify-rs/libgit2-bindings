@@ -11,6 +11,8 @@
 //! Refdbs are neither `Send` nor `Sync`, so nothing here crosses threads with one;
 //! several threads each opening and dropping refdbs of their own repository exercise
 //! libgit2's shared state (its allocator, the repositories' caches) under TSan.
+//!
+//! Then the enum `RefdbType` (`git_refdb_t`), in `refdb_type`.
 
 use std::thread;
 
@@ -98,4 +100,74 @@ fn threads_open_and_drop_their_own_refdbs() {
             });
         }
     });
+}
+
+mod refdb_type {
+    //! UB tests for `git2/refdb.h`: the enum `RefdbType` (`git_refdb_t`, unsigned).
+    //!
+    //! The only safe way in from a raw value is `from_raw` / `try_from`, which must reject
+    //! every value without a variant rather than produce an invalid discriminant (which
+    //! Miri and UBSan would flag on the next read); an `as` cast to it does not compile
+    //! (`compile_fail/`). It owns and points at nothing and none of these tests calls
+    //! libgit2, so they also run under Miri; the sweep strides under BSan.
+
+    use std::hint::black_box;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::refdb::{RefdbType, UnnamedRefdbType};
+
+    /// Every small value, a stride across the rest of `git_refdb_t`, and its ends.
+    fn probes() -> impl Iterator<Item = ffi::git_refdb_t> {
+        let stride = if cfg!(bsan) || cfg!(miri) { 97 } else { 1 };
+        (0..=4096)
+            .step_by(stride)
+            .chain([1, 2])
+            .chain((0..=ffi::git_refdb_t::MAX).step_by(1 << 24))
+            .chain([ffi::git_refdb_t::MAX - 1, ffi::git_refdb_t::MAX])
+    }
+
+    #[test]
+    fn from_raw_yields_only_valid_types() {
+        for raw in probes() {
+            match RefdbType::from_raw(black_box(raw)) {
+                Some(kind) => {
+                    // Matching on the value reads its discriminant.
+                    let back = match black_box(kind) {
+                        RefdbType::Files => ffi::GIT_REFDB_FILES,
+                        RefdbType::Reftable => ffi::GIT_REFDB_REFTABLE,
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(back, raw);
+                    assert_eq!(RefdbType::try_from(raw), Ok(kind));
+                }
+                None => assert_eq!(
+                    RefdbType::try_from(raw).map_err(UnnamedRefdbType::raw),
+                    Err(raw)
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn option_niche_holds() {
+        for raw in probes() {
+            let kind = black_box(RefdbType::from_raw(raw));
+            assert_eq!(kind.map(RefdbType::raw).unwrap_or(raw), raw);
+        }
+    }
+
+    #[test]
+    fn conversions_agree_across_threads() {
+        thread::scope(|s| {
+            let handles: Vec<_> = [RefdbType::Files, RefdbType::Reftable, RefdbType::default()]
+                .into_iter()
+                .map(|kind| s.spawn(move || (kind, RefdbType::from_raw(kind.raw()))))
+                .collect();
+            for h in handles {
+                let (kind, back) = h.join().unwrap();
+                assert_eq!(back, Some(kind));
+            }
+        });
+    }
 }

@@ -347,6 +347,47 @@
    ]
   },
   {
+   "name": "git_refdb_t",
+   "defined_in": "include/git2/refdb.h",
+   "_comment_agent": "C enum passed by value (git_repository_init_options.refdb_type, git_repository.refdb_type). 0 in init options means the default (files); git_refdb_type_fromstr returns 0 for an unknown extensions.refstorage value, which git_repository_open then rejects. No pointer fields, no lifecycle. Wrapped as RefdbType in refs/refdb.rs (fallible from_raw / TryFrom).",
+   "fields": []
+  },
+  {
+   "name": "git_reference",
+   "defined_in": "src/libgit2/refs.h",
+   "_comment_agent": "Opaque in the public API (forward-declared in git2/types.h; body in src/libgit2/refs.h), so no field is published and the wrapper exposes none. Sole-owner heap object: git__calloc'd with the name as a flexible array (alloc_ref), released by git_reference_free (frees target.symbolic for a symbolic ref, down-refs db, frees the struct; NULL is a no-op); deep-copied by git_reference_dup (re-allocates through git_reference__alloc(_symbolic) and up-refs the SAME db; *dest NULL and -1 on OOM). Not refcounted itself. Two statically distinct kinds: ATTACHED references (every reference the non-sys public API hands out: lookup, create, dwim, resolve, rename, set_target, iterators, foreach, git_repository_head, dup) carry a counted db; DETACHED references (git_reference__alloc / git_reference__alloc_symbolic from git2/sys/refs.h, for refdb backends) have db NULL until git_refdb lookup/iterator/write attaches them, and git_reference_dup (GIT_REFCOUNT_INC(NULL)) and git_reference_owner (db->repo) crash on them. A reference keeps its refdb alive past the repository (set_refdb OWN(NULL)+DEC on repo free), but db->repo and the fs backend's repo then dangle, so owner/resolve/rename/delete/set_target/peel are use-after-free once the repository is freed: the Rust wrapper is Reference<'r>, tied to the repository borrow, and DetachedReference for the sys allocators. Wrapped in refs/refs.rs (repository wave 0 batch 6).",
+   "fields": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "A counted reference on the refdb: git_refdb_lookup / resolve / iterator_next / write / rename, git_reference_lookup_resolved (pseudorefs) and git_reference_dup GIT_REFCOUNT_INC it when storing; git_reference_free GIT_REFCOUNT_DECs it (freeing the refdb once the count drops and the repository no longer owns it). NULL for a reference fresh from git_reference__alloc(_symbolic) (sys/refs.h) until a refdb attaches it; git_reference_free accepts NULL, git_reference_dup and every db->repo reader (owner, delete, rename, set_target, symbolic_set_target, resolve, peel) do not. Written through only by the refcount operations. The refdb's `repo` back-pointer is not counted, so it dangles once the repository is freed while the reference lives."
+     }
+    },
+    {
+     "name": "target.symbolic",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Union member, live only while type == GIT_REFERENCE_SYMBOLIC (otherwise the union holds target.oid). git__strdup'd by git_reference__alloc_symbolic (which fails and frees the struct when the copy fails, so a symbolic ref never holds NULL); freed by git_reference_free only for symbolic refs. Read-only after construction (git_reference_symbolic_target, dup, resolve)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_reference_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Fieldless C enum (GIT_REFERENCE_INVALID = 0, DIRECT = 1, SYMBOLIC = 2, ALL = DIRECT|SYMBOLIC = 3; bindgen types it c_uint). No storage, no pointers, no lifecycle. Its only public flow is the return of git_reference_type (refs.c:339), which answers ref->type: DIRECT or SYMBOLIC for every git_reference libgit2 builds (git_reference__alloc / __alloc_symbolic, refs.c:60/85); with NULL it GIT_ASSERT_ARGs, returning -1 (u32::MAX through the unsigned enum) in a release build and aborting in the Debug/coverage build. INVALID is internal only (transaction.c node with no target set); ALL is a list-filter mask that no non-deprecated API takes (only deprecated GIT_REF_LISTALL). No public routine takes a git_reference_t argument. Rust side (core/types.rs): ReferenceType {Direct, Symbolic}, #[repr(u32)], non_exhaustive; from_raw/TryFrom<git_reference_t> -> NotAReferenceType for INVALID, ALL and every unnamed value; never transmute.",
@@ -2698,6 +2739,226 @@
       "nullable": false,
       "mutable": true,
       "note": "Retained without a reference by the refdb (db->repo) and its backend: must outlive the refdb. GIT_ASSERT_ARG non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_reference__alloc",
+   "defined_in": "src/libgit2/refs.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into the struct's flexible name array (strlen + memcpy); not validated. NULL is asserted on."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into target.oid; its type also types a cleared peel. NULL is asserted on."
+     }
+    },
+    {
+     "name": "peel",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:peel"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied into peel when non-NULL; NULL leaves peel zeroed with the target's oid type."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "A fresh direct reference, DETACHED (db NULL) until a refdb attaches it; released by git_reference_free. NULL on allocation failure (error set) or a NULL argument."
+    }
+   }
+  },
+  {
+   "name": "git_reference__alloc_symbolic",
+   "defined_in": "src/libgit2/refs.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into the struct's flexible name array; not validated. NULL is asserted on."
+     }
+    },
+    {
+     "name": "target",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:target"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git__strdup'd into target.symbolic. NULL is asserted on."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "A fresh symbolic reference, DETACHED (db NULL) until a refdb attaches it; released by git_reference_free. NULL on allocation failure (the struct is freed when the target copy fails) or a NULL argument."
+    }
+   }
+  },
+  {
+   "name": "git_reference_dup",
+   "defined_in": "src/libgit2/refs.c",
+   "lifetime": {
+    "for": "source",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "dest",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:dest"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, always written: a fresh copy (git_reference__alloc / __alloc_symbolic of the source's name and target, peel copied) owned by the caller and released by git_reference_free, or NULL with -1 and an out-of-memory error. The copy shares the source's refdb through its own counted reference."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Read for the call (name, type, target, peel); its db's refcount is incremented through it (GIT_REFCOUNT_INC(source->db)), so a detached reference (db NULL, from git_reference__alloc*) crashes it. NULL source is dereferenced (no check)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_reference_free",
+   "defined_in": "src/libgit2/refs.c",
+   "lifetime": {
+    "for": "reference",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "reference",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Releases the reference: git__free(target.symbolic) for a symbolic one, GIT_REFCOUNT_DEC(db) when attached (db may be NULL for a sys/refs.h allocation), then git__free of the struct. NULL is a no-op. Needs no repository: the refdb outlives it through the counted db."
      }
     }
    ]
