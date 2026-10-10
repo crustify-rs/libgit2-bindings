@@ -22,6 +22,7 @@ mod sys_alloc;
 mod sys_errors;
 mod sys_odb_backend;
 mod sys_path;
+mod sys_repository;
 mod trace;
 mod types;
 mod worktree;

@@ -14,6 +14,22 @@
 //! tests the bits it names and ignores the others, so a set keeps any bit it is given
 //! ([`OpenFlags::from_bits_retain`]) and passes it through unchanged.
 //!
+//! # Initialisation options
+//!
+//! An [`InitOptions`] is a `git_repository_init_options`: the [`InitFlags`],
+//! [`InitMode`], strings, object id type and reference storage that
+//! `git_repository_init_ext` creates a repository with. libgit2 never allocates or
+//! releases one: the caller fills it with `git_repository_init_options_init`
+//! ([`InitOptions::new`]) and keeps it, and libgit2 only reads its strings during the
+//! call, never keeping or freeing them. So Rust holds the options by value and borrows
+//! the strings for `'o`, the getters on [`InitOptionsRef`] and the setters on
+//! [`InitOptionsMut`], which is invariant in `'o`. The object id type and reference
+//! storage are typed, `None` for the zero default: libgit2 does not check them, and
+//! creates a repository it cannot open from a value it does not name.
+//!
+//! `git_repository_init_ext` writes to its options, ORing internal bits into their
+//! flags, so it takes them exclusively ([`InitOptionsMut`]).
+//!
 //! # Repository state
 //!
 //! A [`RepositoryState`] is a `git_repository_state_t`: the multi-step operation a
@@ -30,13 +46,17 @@
 
 use core::ffi::{CStr, c_int, c_uint};
 use core::fmt;
+use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use core::ops::{BitOr, BitOrAssign};
-use core::ptr::{self, NonNull};
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBox, CNew, define_ctype, impl_cdrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::oid::oid::OidType;
+use crate::libgit2::refs::refdb::RefdbType;
+use crate::libgit2::repository::sys::repository::NewOptions;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::runtime_pinned;
 
@@ -444,6 +464,514 @@ impl CustomMode {
         self.0
     }
 }
+
+/// Options for `git_repository_init_ext` (`git_repository_init_options`), held by value
+/// in Rust storage.
+///
+/// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: no
+/// [`InitFlags`], the [`InitMode::SharedUmask`] mode, no strings, and the default
+/// object id type and reference storage. Read it through [`as_ref`](Self::as_ref) and
+/// change it through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::repository::repository::{InitFlag, InitMode, InitOptions};
+///
+/// # if cfg!(miri) { return; }
+/// let head = c"main";
+/// let mut opts = InitOptions::new();
+/// let mut m = opts.as_mut();
+/// m.set_flags(InitFlag::Bare | InitFlag::Mkpath);
+/// m.set_mode(InitMode::SharedGroup);
+/// m.set_initial_head(Some(head));
+/// assert_eq!(opts.as_ref().initial_head(), Some(c"main"));
+/// assert!(opts.as_ref().flags().contains(InitFlag::Bare));
+/// ```
+///
+/// `#[repr(transparent)]` over `git_repository_init_options`, so a pointer to it is a
+/// pointer to the C struct, which C reads in place. `'o` is the lifetime of the strings
+/// it points at, which its setters borrow, so the options cannot outlive them:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::repository::repository::InitOptions;
+/// use std::ffi::CString;
+///
+/// let mut opts = InitOptions::new();
+/// {
+///     let url = CString::new("https://example.com/repo.git").unwrap();
+///     opts.as_mut().set_origin_url(Some(&url));
+/// }
+/// let _ = opts.as_ref().origin_url();
+/// ```
+///
+/// The exclusive handle is invariant in `'o`, so one cannot be shrunk to accept a
+/// shorter-lived borrow than its options were built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::repository::repository::InitOptionsMut;
+///
+/// fn shrink<'a, 'o>(m: InitOptionsMut<'a, 'static>) -> InitOptionsMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// The shared handle only reads:
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::repository::repository::{InitFlags, InitOptions};
+///
+/// let opts = InitOptions::new();
+/// opts.as_ref().set_flags(InitFlags::empty());
+/// ```
+///
+/// `Copy`, `Send` and `Sync`, as a struct of integers and `&'o CStr`s is: libgit2
+/// never writes through the strings, and only the exclusive handle writes the fields.
+///
+/// `git_repository_init_ext` writes to the options it is given: it ORs internal bits
+/// into the flags (see [`InitFlags`]), which a later call with the same options reads.
+///
+/// Wraps: git_repository_init_options
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct InitOptions<'o>(ffi::git_repository_init_options, PhantomData<&'o CStr>);
+
+/// Shared borrow of an [`InitOptions`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct InitOptionsRef<'a, 'o>(CBorrowedPtr<'a, InitOptions<'o>>);
+
+/// Exclusive borrow of an [`InitOptions`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct InitOptionsMut<'a, 'o>(
+    InitOptionsRef<'a, 'o>,
+    // Invariant in the options, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut InitOptions<'o>>,
+);
+
+// SAFETY: `InitOptions` is `#[repr(transparent)]` over `git_repository_init_options`
+// with a zero-sized marker; both handles are `#[repr(transparent)]` over
+// `CBorrowedPtr<'a, InitOptions<'o>>` (`InitOptionsMut` through `InitOptionsRef`) with
+// zero-sized markers and no `Drop`, hand out no reference to the options, and
+// `InitOptionsRef` has no write operation. `InitOptionsMut` is invariant in the options
+// through its `PhantomData<&'a mut InitOptions<'o>>`.
+unsafe impl<'o> CCell for InitOptions<'o> {
+    type C = ffi::git_repository_init_options;
+    type Ref<'a>
+        = InitOptionsRef<'a, 'o>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = InitOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+}
+
+// SAFETY: the options are integers and five string pointers that only the setters
+// write, each NULL or a `&'o CStr`'s pointer: shared, immutable borrows of `CStr`,
+// which is `Sync`, so they may be read from any thread. Nothing in the struct has
+// thread affinity or interior mutability, and nothing is released on drop.
+unsafe impl Send for InitOptions<'_> {}
+// SAFETY: as above; `InitOptionsMut` is an exclusive borrow of such a value, as
+// `&mut InitOptions`.
+unsafe impl Send for InitOptionsMut<'_, '_> {}
+
+// SAFETY: as above, and shared access only reads the fields (every write goes through
+// `InitOptionsMut`, which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for InitOptions<'_> {}
+// SAFETY: as above; `InitOptionsRef` is a shared borrow, as `&InitOptions`.
+unsafe impl Send for InitOptionsRef<'_, '_> {}
+// SAFETY: as above.
+unsafe impl Sync for InitOptionsRef<'_, '_> {}
+// SAFETY: `&InitOptionsMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for InitOptionsMut<'_, '_> {}
+
+impl<'o> InitOptions<'o> {
+    /// The structure version this crate's header declares
+    /// (`GIT_REPOSITORY_INIT_OPTIONS_VERSION`), the only one libgit2 accepts.
+    pub const VERSION: u32 = ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION;
+
+    /// libgit2's default options, as `git_repository_init_options_init` fills them for
+    /// [`VERSION`](Self::VERSION) and `GIT_REPOSITORY_INIT_OPTIONS_INIT` spells them:
+    /// the current version, every other field zero or NULL.
+    ///
+    /// With its own version, `git_repository_init_options_init` only copies the
+    /// template: it reaches no global, no allocator and no thread state, so this needs
+    /// no initialised library.
+    ///
+    /// Wraps: git_repository_init_options_init
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_repository_init_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_repository_init_options`, which
+        // `git_repository_init_options_init` overwrites whole with the template for
+        // this version; nothing else reads it during the call.
+        let rc = unsafe { ffi::git_repository_init_options_init(raw.as_mut_ptr(), Self::VERSION) };
+        assert_eq!(
+            rc, 0,
+            "git_repository_init_options_init refused its own version"
+        );
+        // SAFETY: a 0 return means the template was copied in: every field is
+        // initialised, every pointer NULL.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Shared handle to the options — the getters, and the pointer for C calls that
+    /// read them.
+    pub fn as_ref(&self) -> InitOptionsRef<'_, 'o> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        InitOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the options — the setters, and the pointer for C calls that
+    /// write them (`git_repository_init_ext`).
+    pub fn as_mut(&mut self) -> InitOptionsMut<'_, 'o> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        InitOptionsMut(InitOptionsRef(ptr), PhantomData)
+    }
+}
+
+impl Default for InitOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for InitOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'o> InitOptionsRef<'a, 'o> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_repository_init_options *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_repository_init_options {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The structure version. [`InitOptions::new`] sets [`InitOptions::VERSION`];
+    /// libgit2 refuses the options with `GIT_ERROR_INVALID` if it is 0 or above that.
+    ///
+    /// Field: git_repository_init_options.version
+    pub fn version(&self) -> u32 {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        unsafe { addr_of!((*p).version).read() }
+    }
+
+    /// The init flags, every stored bit kept: after a `git_repository_init_ext` call,
+    /// the internal bits it ORed in too (see [`InitFlags`]). Empty by default.
+    ///
+    /// Field: git_repository_init_options.flags
+    pub fn flags(&self) -> InitFlags {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let bits = unsafe { addr_of!((*p).flags).read() };
+        InitFlags::from_bits_retain(bits)
+    }
+
+    /// The permissions of the directories the repository is created with;
+    /// [`InitMode::SharedUmask`] by default.
+    ///
+    /// Field: git_repository_init_options.mode
+    pub fn mode(&self) -> InitMode {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let raw = unsafe { addr_of!((*p).mode).read() };
+        InitMode::from_raw(raw)
+    }
+
+    /// The working directory; `None`, the default, means the repository directory's
+    /// parent, for a repository path ending in `.git` (one is appended to a path that
+    /// does not). Borrowed for `'o`, as it was set.
+    ///
+    /// Field: git_repository_init_options.workdir_path
+    pub fn workdir_path(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).workdir_path).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The content of the new repository's `description` file; `None`, the default,
+    /// keeps the template's. Borrowed for `'o`, as it was set.
+    ///
+    /// Field: git_repository_init_options.description
+    pub fn description(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).description).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The template directory; `None`, the default, means the `init.templatedir`
+    /// setting or the system's template directory, when an external template is used
+    /// at all. Borrowed for `'o`, as it was set.
+    ///
+    /// Field: git_repository_init_options.template_path
+    pub fn template_path(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).template_path).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The branch, or reference, `HEAD` points at; `None`, the default, means the
+    /// `init.defaultbranch` setting, or `master`. Borrowed for `'o`, as it was set.
+    ///
+    /// Field: git_repository_init_options.initial_head
+    pub fn initial_head(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).initial_head).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The URL of an `origin` remote to add; `None`, the default, adds none. Borrowed
+    /// for `'o`, as it was set.
+    ///
+    /// Field: git_repository_init_options.origin_url
+    pub fn origin_url(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).origin_url).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The type of the new repository's object ids; `None`, the default, means
+    /// [`OidType::default`]. Every setter stores `0` or a named type, so `None` is
+    /// always the zero default.
+    ///
+    /// Field: git_repository_init_options.oid_type
+    pub fn oid_type(&self) -> Option<OidType> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; the
+        // field is a plain `u32`, any value valid.
+        let raw = unsafe { addr_of!((*p).oid_type).read() };
+        OidType::from_raw(raw)
+    }
+
+    /// The storage format of the new repository's references; `None`, the default,
+    /// means [`RefdbType::default`]. Every setter stores `0` or a named format, so
+    /// `None` is always the zero default.
+    ///
+    /// Field: git_repository_init_options.refdb_type
+    pub fn refdb_type(&self) -> Option<RefdbType> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; the
+        // field is a plain `u32`, any value valid.
+        let raw = unsafe { addr_of!((*p).refdb_type).read() };
+        RefdbType::from_raw(raw)
+    }
+
+    /// A copy of the options, as a value of its own, borrowing the same strings.
+    pub fn to_options(&self) -> InitOptions<'o> {
+        // SAFETY: a read of the whole live struct through the shared handle's pointer;
+        // it is `Copy` plain data, whose string pointers keep their `'o` guarantee in
+        // the copy, which is typed with the same `'o`.
+        InitOptions(unsafe { self.as_ptr().read() }, PhantomData)
+    }
+}
+
+impl fmt::Debug for InitOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InitOptions")
+            .field("version", &self.version())
+            .field("flags", &self.flags())
+            .field("mode", &self.mode())
+            .field("workdir_path", &self.workdir_path())
+            .field("description", &self.description())
+            .field("template_path", &self.template_path())
+            .field("initial_head", &self.initial_head())
+            .field("origin_url", &self.origin_url())
+            .field("oid_type", &self.oid_type())
+            .field("refdb_type", &self.refdb_type())
+            .finish()
+    }
+}
+
+impl<'o> InitOptionsMut<'_, 'o> {
+    /// Writable pointer to the C struct, for the setters and for C calls that write
+    /// the options (`git_repository_init_ext`).
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_repository_init_options {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> InitOptionsRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> InitOptionsMut<'_, 'o> {
+        InitOptionsMut(self.0, PhantomData)
+    }
+
+    /// Replaces the structure version. Any value is accepted; libgit2 refuses options
+    /// whose version is 0 or above [`InitOptions::VERSION`].
+    ///
+    /// Field: git_repository_init_options.version
+    pub fn set_version(&mut self, version: u32) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).version).write(version) }
+    }
+
+    /// Replaces the init flags, every bit as given: libgit2 tests the bits
+    /// [`InitFlag`] names and its own internal ones (see [`InitFlags`]), and ignores
+    /// the rest.
+    ///
+    /// Field: git_repository_init_options.flags
+    pub fn set_flags(&mut self, flags: InitFlags) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).flags).write(flags.bits()) }
+    }
+
+    /// Replaces the permissions of the directories the repository is created with.
+    ///
+    /// Field: git_repository_init_options.mode
+    pub fn set_mode(&mut self, mode: InitMode) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).mode).write(mode.raw()) }
+    }
+
+    /// Sets the working directory; `None` means the repository directory's parent.
+    /// libgit2 resolves a relative path against the repository directory and, unless
+    /// it is that parent, writes a `.git` file there linking to the repository and
+    /// records it as `core.worktree`. Ignored for a bare repository; a non-bare
+    /// repository whose path does not end in `.git` needs one. Read during each call,
+    /// never kept.
+    ///
+    /// Field: git_repository_init_options.workdir_path
+    pub fn set_workdir_path(&mut self, path: Option<&'o CStr>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data. The value is NULL or a `&'o CStr`'s pointer, as the
+        // getter requires.
+        unsafe { addr_of_mut!((*p).workdir_path).write(path.map_or(ptr::null(), CStr::as_ptr)) }
+    }
+
+    /// Sets the content of the new repository's `description` file; `None` keeps the
+    /// template's. libgit2 writes it only into a repository it creates from its
+    /// built-in template: a reinitialisation and an external template ignore it. Read
+    /// during each call, never kept.
+    ///
+    /// Field: git_repository_init_options.description
+    pub fn set_description(&mut self, description: Option<&'o CStr>) {
+        let s = description.map_or(ptr::null(), CStr::as_ptr);
+        let p = self.as_mut_ptr();
+        // SAFETY: as `set_workdir_path`, for this field.
+        unsafe { addr_of_mut!((*p).description).write(s) }
+    }
+
+    /// Sets the template directory a new repository is copied from; `None` means the
+    /// `init.templatedir` setting or the system's template directory, and only with
+    /// [`InitFlag::ExternalTemplate`]. A path makes libgit2 use an external template
+    /// whatever the flags; an empty one copies nothing, and a missing directory falls
+    /// back to the built-in template. Read during each call, never kept.
+    ///
+    /// Field: git_repository_init_options.template_path
+    pub fn set_template_path(&mut self, path: Option<&'o CStr>) {
+        let s = path.map_or(ptr::null(), CStr::as_ptr);
+        let p = self.as_mut_ptr();
+        // SAFETY: as `set_workdir_path`, for this field.
+        unsafe { addr_of_mut!((*p).template_path).write(s) }
+    }
+
+    /// Sets the branch `HEAD` points at: a name below `refs/heads/`, or a full
+    /// reference name starting with `refs/`. `None` means the `init.defaultbranch`
+    /// setting, or `master`, and leaves a reinitialised repository's `HEAD` alone.
+    /// Read during each call, never kept.
+    ///
+    /// Field: git_repository_init_options.initial_head
+    pub fn set_initial_head(&mut self, head: Option<&'o CStr>) {
+        let s = head.map_or(ptr::null(), CStr::as_ptr);
+        let p = self.as_mut_ptr();
+        // SAFETY: as `set_workdir_path`, for this field.
+        unsafe { addr_of_mut!((*p).initial_head).write(s) }
+    }
+
+    /// Sets the URL of an `origin` remote libgit2 adds once the repository is
+    /// initialised; `None` adds none. Read during each call, never kept.
+    ///
+    /// Field: git_repository_init_options.origin_url
+    pub fn set_origin_url(&mut self, url: Option<&'o CStr>) {
+        let s = url.map_or(ptr::null(), CStr::as_ptr);
+        let p = self.as_mut_ptr();
+        // SAFETY: as `set_workdir_path`, for this field.
+        unsafe { addr_of_mut!((*p).origin_url).write(s) }
+    }
+
+    /// Sets the type of the new repository's object ids; `None` stores `0`, which
+    /// libgit2 reads as [`OidType::default`]. A type other than the default is
+    /// recorded as `extensions.objectformat`.
+    ///
+    /// Field: git_repository_init_options.oid_type
+    pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
+        let raw = oid_type.map_or(0, OidType::raw);
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, and `raw` is 0 or a type libgit2 names.
+        unsafe { addr_of_mut!((*p).oid_type).write(raw) }
+    }
+
+    /// Sets the storage format of the new repository's references; `None` stores `0`,
+    /// which libgit2 reads as [`RefdbType::default`]. A format other than the default
+    /// is recorded as `extensions.refstorage`.
+    ///
+    /// Field: git_repository_init_options.refdb_type
+    pub fn set_refdb_type(&mut self, refdb_type: Option<RefdbType>) {
+        let raw = refdb_type.map_or(0, RefdbType::raw);
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, and `raw` is 0 or a format libgit2 names.
+        unsafe { addr_of_mut!((*p).refdb_type).write(raw) }
+    }
+}
+
+impl fmt::Debug for InitOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// An `InitOptions` is a `git_repository_init_options`, so C reads a value Rust holds in
+// place.
+const _: () = assert!(
+    size_of::<InitOptions<'static>>() == size_of::<ffi::git_repository_init_options>()
+        && align_of::<InitOptions<'static>>() == align_of::<ffi::git_repository_init_options>()
+);
 
 /// One file or directory of a repository's layout, as `git_repository_item_path`
 /// resolves it: against the git directory ([`GitDir`](Self::GitDir), the `.git`
@@ -1234,14 +1762,14 @@ impl Repository {
         if !runtime_pinned() {
             return Err(unpinned());
         }
-        let mut opts = ffi::git_repository_new_options {
-            version: ffi::GIT_REPOSITORY_NEW_OPTIONS_VERSION,
-            oid_type: oid_type.raw(),
-        };
+        let mut opts = NewOptions::new();
+        let mut m = opts.as_mut();
+        m.set_oid_type(Some(oid_type));
+        let opts = m.as_mut_ptr();
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `opts` live options of the current
         // version naming a valid type, read for the call only. The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_new_ext(&mut out, &mut opts) };
+        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts) };
         // SAFETY: `git_repository_new_ext` leaves `out` NULL on failure, or writes a
         // fresh repository the caller owns alone.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -2020,6 +2548,193 @@ mod unit_tests {
             assert_eq!(error.code(), Some(ErrorCode::Generic));
             assert_eq!(error.class(), Some(ErrorClass::Filesystem));
             assert_eq!(error.message().to_str(), Ok(&*expected(&rust_side)));
+        }
+    }
+
+    mod init_options {
+        use super::super::*;
+        use std::ffi::CString;
+
+        /// `GIT_REPOSITORY_INIT_OPTIONS_INIT`, built in Rust so Miri can run the
+        /// accessors; `new_matches_the_template` ties it to
+        /// `git_repository_init_options_init`.
+        fn template<'o>() -> InitOptions<'o> {
+            let raw = ffi::git_repository_init_options {
+                version: ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                flags: 0,
+                mode: 0,
+                workdir_path: ptr::null(),
+                description: ptr::null(),
+                template_path: ptr::null(),
+                initial_head: ptr::null(),
+                origin_url: ptr::null(),
+                oid_type: 0,
+                refdb_type: 0,
+            };
+            InitOptions(raw, PhantomData)
+        }
+
+        /// The raw struct's fields, strings as their addresses.
+        fn raw_fields(o: &InitOptions<'_>) -> [usize; 10] {
+            let r = &o.0;
+            [
+                r.version as usize,
+                r.flags as usize,
+                r.mode as usize,
+                r.workdir_path as usize,
+                r.description as usize,
+                r.template_path as usize,
+                r.initial_head as usize,
+                r.origin_url as usize,
+                r.oid_type as usize,
+                r.refdb_type as usize,
+            ]
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn new_matches_the_template() {
+            let options = InitOptions::new();
+            assert_eq!(raw_fields(&options), raw_fields(&template()));
+            assert_eq!(raw_fields(&InitOptions::default()), raw_fields(&options));
+            assert_eq!(options.as_ref().version(), InitOptions::VERSION);
+        }
+
+        #[test]
+        fn defaults_read_as_documented() {
+            let options = template();
+            let o = options.as_ref();
+            assert_eq!(o.version(), 1);
+            assert_eq!(o.flags(), InitFlags::empty());
+            assert_eq!(o.mode(), InitMode::SharedUmask);
+            assert_eq!(o.workdir_path(), None);
+            assert_eq!(o.description(), None);
+            assert_eq!(o.template_path(), None);
+            assert_eq!(o.initial_head(), None);
+            assert_eq!(o.origin_url(), None);
+            assert_eq!((o.oid_type(), o.refdb_type()), (None, None));
+            assert_eq!(
+                format!("{options:?}"),
+                "InitOptions { version: 1, flags: InitFlags {}, mode: SharedUmask, \
+                 workdir_path: None, description: None, template_path: None, \
+                 initial_head: None, origin_url: None, oid_type: None, refdb_type: None }"
+            );
+            assert_eq!(
+                o.as_ptr() as usize % align_of::<ffi::git_repository_init_options>(),
+                0
+            );
+        }
+
+        #[test]
+        fn each_setter_writes_its_field_only() {
+            let s: Vec<CString> = ["work", "desc", "tpl", "trunk", "url"]
+                .iter()
+                .map(|s| CString::new(*s).unwrap())
+                .collect();
+            let mut options = template();
+            let mut before = raw_fields(&options);
+            // Index of the field each step must change, and the step.
+            type Step<'s> = (usize, Box<dyn Fn(&mut InitOptionsMut<'_, 's>) + 's>);
+            let steps: Vec<Step<'_>> = vec![
+                (0, Box::new(|m| m.set_version(7))),
+                (
+                    1,
+                    Box::new(|m| m.set_flags(InitFlag::Bare | InitFlag::Mkpath)),
+                ),
+                (2, Box::new(|m| m.set_mode(InitMode::SharedAll))),
+                (3, Box::new(|m| m.set_workdir_path(Some(&s[0])))),
+                (4, Box::new(|m| m.set_description(Some(&s[1])))),
+                (5, Box::new(|m| m.set_template_path(Some(&s[2])))),
+                (6, Box::new(|m| m.set_initial_head(Some(&s[3])))),
+                (7, Box::new(|m| m.set_origin_url(Some(&s[4])))),
+                (8, Box::new(|m| m.set_oid_type(Some(OidType::Sha256)))),
+                (9, Box::new(|m| m.set_refdb_type(Some(RefdbType::Reftable)))),
+            ];
+            for (field, step) in &steps {
+                step(&mut options.as_mut());
+                let after = raw_fields(&options);
+                for i in 0..10 {
+                    assert_eq!(
+                        after[i] != before[i],
+                        i == *field,
+                        "field {i}, step {field}"
+                    );
+                }
+                before = after;
+            }
+            let raw = options.0;
+            assert_eq!((raw.version, raw.flags, raw.mode), (7, 0x11, 0o2777));
+            assert_eq!(raw.workdir_path, s[0].as_ptr());
+            assert_eq!(raw.origin_url, s[4].as_ptr());
+            assert_eq!(
+                (raw.oid_type, raw.refdb_type),
+                (ffi::GIT_OID_SHA256, ffi::GIT_REFDB_REFTABLE)
+            );
+            let o = options.as_ref();
+            assert_eq!(
+                o.to_options().0.initial_head,
+                s[3].as_ptr(),
+                "a copy keeps the borrowed pointers"
+            );
+            // Clearing stores NULL and 0 again.
+            let mut m = options.as_mut();
+            m.set_workdir_path(None);
+            m.set_description(None);
+            m.set_template_path(None);
+            m.set_initial_head(None);
+            m.set_origin_url(None);
+            m.set_oid_type(None);
+            m.set_refdb_type(None);
+            let raw = options.0;
+            assert!(raw.workdir_path.is_null() && raw.description.is_null());
+            assert!(raw.template_path.is_null() && raw.initial_head.is_null());
+            assert!(raw.origin_url.is_null());
+            assert_eq!((raw.oid_type, raw.refdb_type), (0, 0));
+        }
+
+        #[test]
+        fn getters_read_what_c_may_store() {
+            // Values a C caller may leave in the struct: unnamed flag bits and modes
+            // round-trip; unnamed types read as `None`, the default's reading.
+            let mut options = template();
+            options.0.flags = u32::MAX;
+            options.0.mode = 0o755;
+            options.0.oid_type = 3;
+            options.0.refdb_type = 3;
+            let o = options.as_ref();
+            assert_eq!(o.flags().bits(), u32::MAX);
+            assert_eq!(o.mode(), InitMode::from_raw(0o755));
+            assert_eq!(o.mode().raw(), 0o755);
+            assert_eq!((o.oid_type(), o.refdb_type()), (None, None));
+            options.0.oid_type = ffi::GIT_OID_SHA1;
+            options.0.refdb_type = ffi::GIT_REFDB_FILES;
+            let o = options.as_ref();
+            assert_eq!(
+                (o.oid_type(), o.refdb_type()),
+                (Some(OidType::Sha1), Some(RefdbType::Files))
+            );
+        }
+
+        #[test]
+        fn reborrows_and_debug_share_the_options() {
+            let mut options = template();
+            let mut m = options.as_mut();
+            m.as_mut().set_initial_head(Some(c"main"));
+            assert_eq!(format!("{m:?}"), format!("{:?}", m.as_ref()));
+            let r = m.as_ref();
+            assert_eq!(r.initial_head(), Some(c"main"));
+            assert!(format!("{options:?}").contains(r#"initial_head: Some("main")"#));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn with_oid_type_goes_through_new_options() {
+            for kind in [OidType::Sha1, OidType::Sha256] {
+                let repo = Repository::with_oid_type(kind).unwrap();
+                // SAFETY: a live repository, only read.
+                let raw = unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) };
+                assert_eq!(raw, kind.raw());
+            }
         }
     }
 }

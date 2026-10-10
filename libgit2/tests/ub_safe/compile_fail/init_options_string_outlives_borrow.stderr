@@ -1,0 +1,11 @@
+error[E0597]: `url` does not live long enough
+  --> tests/ub_safe/compile_fail/init_options_string_outlives_borrow.rs:10:46
+   |
+ 9 |         let url = CString::new("https://example.com/r.git").unwrap();
+   |             --- binding `url` declared here
+10 |         options.as_mut().set_origin_url(Some(&url));
+   |                                              ^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `url` dropped here while still borrowed
+12 |     let _ = options.as_ref().origin_url();
+   |             ------- borrow later used here
