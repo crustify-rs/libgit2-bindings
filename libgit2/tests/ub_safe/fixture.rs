@@ -741,3 +741,77 @@ impl TempRepo {
         unsafe { Refdb::open(NonNull::new(self.repo).unwrap()) }.unwrap()
     }
 }
+
+// --- `git2/odb.h`: `git_odb` -------------------------------------------------------
+
+pub mod odb {
+    //! Stand-ins for the odb readers and writers and the `git_repository` wrapper,
+    //! which replace them; each reaches the odb through its owner's raw seam.
+
+    use libgit2::ffi;
+    use libgit2::libgit2::odb::odb::OdbArc;
+
+    /// `git_odb_write` of a blob; the id, or the error code.
+    pub fn write_blob(odb: &OdbArc, data: &[u8]) -> Result<ffi::git_oid, i32> {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: the odb is live while `odb` is borrowed; `id` is writable and `data`
+        // live for its length, read for the call only.
+        let rc = unsafe {
+            ffi::git_odb_write(
+                &mut id,
+                odb.as_c_ptr(),
+                data.as_ptr().cast(),
+                data.len(),
+                ffi::GIT_OBJECT_BLOB,
+            )
+        };
+        if rc == 0 { Ok(id) } else { Err(rc) }
+    }
+
+    /// `git_odb_read_header`: the object's length and type, or the error code.
+    pub fn read_header(odb: &OdbArc, id: &ffi::git_oid) -> Result<(usize, ffi::git_object_t), i32> {
+        let (mut len, mut kind) = (0, 0);
+        // SAFETY: the odb is live while `odb` is borrowed; the out slots are writable
+        // and `id` live, read for the call only.
+        let rc = unsafe { ffi::git_odb_read_header(&mut len, &mut kind, odb.as_c_ptr(), id) };
+        if rc == 0 { Ok((len, kind)) } else { Err(rc) }
+    }
+
+    /// `git_odb_num_backends`.
+    pub fn backends(odb: &OdbArc) -> usize {
+        // SAFETY: the odb is live while `odb` is borrowed; the routine reads the count
+        // under the odb's lock.
+        unsafe { ffi::git_odb_num_backends(odb.as_c_ptr()) }
+    }
+
+    /// A repository over an odb (`git_repository_wrap_odb`), which holds a reference of
+    /// its own; freed on drop.
+    pub struct Repo(*mut ffi::git_repository);
+
+    impl Repo {
+        pub fn wrap(odb: &OdbArc) -> Self {
+            let mut repo = core::ptr::null_mut();
+            // SAFETY: `repo` is a writable slot; the odb is live, and the repository
+            // takes a reference to it.
+            let rc = unsafe { ffi::git_repository_wrap_odb(&mut repo, odb.as_c_ptr()) };
+            assert_eq!(rc, 0);
+            Self(repo)
+        }
+
+        /// A new reference to the repository's odb (`git_repository_odb`).
+        pub fn odb(&self) -> OdbArc {
+            let mut odb = core::ptr::null_mut();
+            // SAFETY: `self.0` is live; the result is a new reference to its odb.
+            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, self.0) }, 0);
+            // SAFETY: `odb` is the one reference just returned, adopted once.
+            unsafe { OdbArc::from_c(odb) }.unwrap()
+        }
+    }
+
+    impl Drop for Repo {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` is the live repository `wrap` made, freed once.
+            unsafe { ffi::git_repository_free(self.0) };
+        }
+    }
+}

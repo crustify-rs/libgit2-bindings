@@ -44,7 +44,13 @@ git_object_type2string
 git_object_type_is_valid
 git_odb_backend_data_alloc
 git_odb_backend_data_free
+git_odb_exists
 git_odb_free
+git_odb_new
+git_odb_new_ext
+git_odb_num_backends
+git_odb_open
+git_odb_open_ext
 git_odb_read_header
 git_odb_write
 git_oid_cmp
@@ -100,6 +106,7 @@ git_repository_open_ext
 git_repository_path
 git_repository_refdb
 git_repository_workdir
+git_repository_wrap_odb
 git_signature_dup
 git_signature_free
 git_signature_from_buffer

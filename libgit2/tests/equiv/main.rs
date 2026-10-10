@@ -8,6 +8,7 @@ mod common;
 mod config;
 mod errors;
 mod global;
+mod odb;
 mod oid;
 mod oidarray;
 mod refdb;

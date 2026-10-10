@@ -5,6 +5,8 @@
 //! predicts from [`GitFile::from_raw`] alone whether C refuses the value ("invalid
 //! gitfile for path validation"), and which of the three names, in its plain form
 //! and its NTFS short forms, C matches for each variant.
+//!
+//! [`Filesystem`] is compared in `mod filesystem`.
 
 mod git_file {
     use std::ffi::{CStr, c_int};
@@ -101,6 +103,124 @@ mod git_file {
             }
             // Not a git file at all.
             assert_eq!(is_gitfile(c"README", file.raw()), (0, None));
+        }
+    }
+}
+
+mod filesystem {
+    //! [`Filesystem`] (`git_path_fs`) against `git_path_is_gitfile`, its one reader.
+    //!
+    //! [`Filesystem::from_raw`] must accept exactly the values the routine accepts: every
+    //! other value fails with `GIT_ERROR_OS`, "invalid filesystem for path validation: "
+    //! (and `errno`'s text, cleared here), for every git file. Each variant must apply the rules its documentation names, on
+    //! names that tell them apart: [`Filesystem::Ntfs`] matches 8.3 short names and
+    //! trailing dots and spaces, [`Filesystem::Hfs`] skips ignorable code points, both
+    //! fold ASCII case, and [`Filesystem::Generic`] matches what either one matches. The
+    //! git file is a [`GitFile`].
+
+    use std::ffi::{CStr, CString, c_int};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::sys::path::{Filesystem, GitFile, UnnamedFilesystem};
+
+    /// Takes a `git_libgit2_init` reference that is never released.
+    fn init() {
+        core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
+    }
+
+    /// `git_path_is_gitfile(name, gitfile, fs)`, with the thread's error on failure.
+    ///
+    /// `errno` is cleared first: a `GIT_ERROR_OS` message ends with `strerror(errno)`
+    /// whenever `errno` is set, whatever set it.
+    fn is_gitfile(
+        name: &str,
+        gitfile: GitFile,
+        fs: ffi::git_path_fs,
+    ) -> Result<c_int, (c_int, String)> {
+        let name = CString::new(name).unwrap();
+        let len = name.as_bytes().len();
+        // SAFETY: the calling thread's `errno`, valid for writes.
+        unsafe { libc::__errno_location().write(0) };
+        // SAFETY: `name` is NUL-terminated and `len` long, read for the call only (the
+        // NTFS check reads past `len` up to the NUL, which the `CString` supplies).
+        let rc = unsafe { ffi::git_path_is_gitfile(name.as_ptr(), len, gitfile.raw(), fs) };
+        if rc >= 0 {
+            return Ok(rc);
+        }
+        // SAFETY: libgit2 is initialised; the result is live until the next libgit2 call
+        // on this thread, and is copied before one.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above, with a NUL-terminated message.
+        Err(unsafe {
+            (
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        })
+    }
+
+    /// `.gitmodules` spellings and whether NTFS's and HFS+'s rules match each one.
+    const GITMODULES: &[(&str, bool, bool)] = &[
+        (".gitmodules", true, true),
+        (".GitModules", true, true),
+        ("GITMOD~1", true, false),
+        ("gitmod~4", true, false),
+        ("gi7eba~9", true, false),
+        (".gitmodules.", true, false),
+        (".gitmodules . ", true, false),
+        (".gitmodules:$DATA", true, false),
+        (".git\u{200c}modules", false, true),
+        (".gitmodules\u{feff}", false, true),
+        ("\u{200e}.GITMODULES", false, true),
+        (".gitmodule", false, false),
+        (".gitmodulesx", false, false),
+        ("gitmodules", false, false),
+        ("", false, false),
+    ];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn variants_match_as_their_rules_say() {
+        init();
+        for &(name, ntfs, hfs) in GITMODULES {
+            let seen =
+                |fs: Filesystem| is_gitfile(name, GitFile::Gitmodules, fs.raw()).unwrap() > 0;
+            assert_eq!(seen(Filesystem::Ntfs), ntfs, "{name:?} on NTFS");
+            assert_eq!(seen(Filesystem::Hfs), hfs, "{name:?} on HFS+");
+            assert_eq!(seen(Filesystem::Generic), ntfs || hfs, "{name:?} on both");
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn from_raw_accepts_what_git_path_is_gitfile_accepts() {
+        init();
+        let invalid = (
+            ffi::GIT_ERROR_OS as c_int,
+            "invalid filesystem for path validation: ".to_owned(),
+        );
+        let probes = (0..=16).chain([0x7fff_ffff, 0x8000_0000, u32::MAX - 1, u32::MAX]);
+        for raw in probes {
+            for gitfile in [
+                GitFile::Gitignore,
+                GitFile::Gitmodules,
+                GitFile::Gitattributes,
+            ] {
+                for name in [".gitignore", ".gitmodules", ".gitattributes", "other"] {
+                    let c = is_gitfile(name, gitfile, raw);
+                    match Filesystem::from_raw(raw) {
+                        Some(fs) => {
+                            assert_eq!(fs.raw(), raw);
+                            assert!(matches!(c, Ok(0 | 1)), "{raw} {gitfile:?} {name}: {c:?}");
+                        }
+                        None => assert_eq!(c, Err(invalid.clone()), "{raw} {gitfile:?} {name}"),
+                    }
+                }
+            }
+            assert_eq!(
+                Filesystem::try_from(raw).map_err(UnnamedFilesystem::raw),
+                Filesystem::from_raw(raw).ok_or(raw)
+            );
         }
     }
 }

@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `odb` because it is borrowed
+ --> tests/ub_safe/compile_fail/odb_handle_outlives_owner.rs:7:10
+  |
+5 |     let odb = Odb::new().unwrap();
+  |         --- binding `odb` declared here
+6 |     let handle = odb.as_ref();
+  |                  --- borrow of `odb` occurs here
+7 |     drop(odb);
+  |          ^^^ move out of `odb` occurs here
+8 |     let _ = format!("{handle:?}");
+  |                       ------ borrow later used here
