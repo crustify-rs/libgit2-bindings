@@ -4706,6 +4706,109 @@
    ]
   },
   {
+   "name": "git_repository_mergehead_foreach_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "The one id parsed from a MERGE_HEAD line into a stack git_oid of git_repository_mergehead_foreach; lent for the call only, never retained or freed by the callback."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Caller's opaque payload, passed through unchanged by git_repository_mergehead_foreach (and commit_parents' insert_mergehead, a struct mergehead_data); never freed by libgit2."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_message",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_buf out filled through GIT_BUF_WRAP_PRIVATE (sanitize, then git_buf_fromstr): a reserved>0 buffer is reused/reallocated, the result owned by the caller's struct (released with git_buf_dispose)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads repo->gitdir only. A repository without one (git_repository_new / wrap_odb) joins NULL+\"MERGE_MSG\" and reads ./MERGE_MSG relative to the cwd (probed)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_message_remove",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads repo->gitdir and unlinks <gitdir>/MERGE_MSG; the struct is not written. p_unlink failure returns -1 with no libgit2 error set; a pathless repository unlinks ./MERGE_MSG in the cwd (probed)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_new",
    "defined_in": "src/libgit2/repository.c",
    "lifetime": {
@@ -4823,6 +4926,72 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller storage (usually a stack local) overwritten whole with GIT_REPOSITORY_NEW_OPTIONS_INIT (memcpy) after GIT_ASSERT_ARG(opts) and the version check. Version != 1 returns -1 with GIT_ERROR_INVALID and leaves the storage untouched. No allocation, no global state."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_odb",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: one new counted reference (GIT_REFCOUNT_INC) to the repository's odb, lazily created and owned (rc.owner = repo) by it; released with git_odb_free. Left untouched on failure (-1). The odb reads the owner's object cache through rc.owner, so the reference must not outlive the repository."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Lazily creates and atomically installs repo->_odb (a cache fill through a shared pointer)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_oid_type",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Reads repo->oid_type; NULL returns 0 (no type)."
      }
     }
    ]
@@ -4991,6 +5160,605 @@
       "nullable": true,
       "mutable": false,
       "note": "Start path read for the call; NULL only valid with GIT_REPOSITORY_OPEN_FROM_ENV."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_open_from_worktree",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot NULLed first, written with a fresh repository (git_repository_open of the gitlink path less '.git') the caller owns and frees with git_repository_free."
+     }
+    },
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:wt"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only wt->gitlink_path is read; the opened repository keeps no pointer into the worktree. A gitlink path not ending in '.git' (case-insensitive) returns -1 without setting an error."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_path",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads repo->gitdir; GIT_ASSERT_ARG_WITH_RETVAL(repo, NULL)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:repo"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "repo->gitdir, owned by the repository and freed with it; assigned only by the open routines, never replaced afterwards. NULL for a repository without a git directory (git_repository_new, wrap_odb)."
+    }
+   }
+  },
+  {
+   "name": "git_repository_refdb",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: one new counted reference to the repository's refdb (lazily opened, rc.owner = repo); released with git_refdb_free. The refdb and its backend keep an uncounted pointer to the repository (db->repo), so the reference must not outlive it. Untouched on failure (-1)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Lazily opens and installs repo->_refdb (cache fill)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_reinit_filesystem",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Rewrites the repository's config file (core.* fs probes) at <gitdir>/config, clears the configmap cache, and with recurse reinitialises submodules (errors ignored). A pathless repository writes ./config in the cwd (probed)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_bare",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes core.bare/core.worktree through the repo config, frees repo->workdir and sets is_bare; a no-op returning 0 when already bare."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_config",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained: GIT_REFCOUNT_INC + rc.owner = repo; the caller keeps its own reference. GIT_ASSERT_ARG non-NULL. A sole caller reference stops being sole."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Swaps repo->_config: the old one is disowned (OWN NULL) and released."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_head",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "refname",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:refname"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reference name read for the call (GIT_ASSERT_ARG non-NULL); copied into the new HEAD."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Reads/writes HEAD and the reflog through the repository's refdb (lazily opened); the struct itself only gets cache fills."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_head_detached",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "committish",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committish"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Id read for the call (GIT_ASSERT_ARG non-NULL). Looked up with git_object_lookup: an id of another type than the repository's overflows the loose path buffer (SHA256 id in SHA1 repo)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As set_head; also looks the id up through the object db (cache fill)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_head_detached_from_annotated",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "committish",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committish"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: its id and description (the reflog's target name). GIT_ASSERT_ARG non-NULL. Same id-type hazard as set_head_detached when the commit comes from a repository of another type."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As set_head_detached."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_ident",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "email",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:email"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied with git__strdup; NULL clears."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied with git__strdup; NULL clears. On an email strdup failure the name copy leaks."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Atomically swaps ident_name/ident_email and frees the previous strings (which git_repository_ident lent)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_index",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Retained when non-NULL: GIT_REFCOUNT_INC + rc.owner = repo (caller keeps its reference). NULL removes the repository's index."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Swaps repo->_index: the old one is disowned and released."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_namespace",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "namespace",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:namespace"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied with git__strdup; NULL clears the namespace."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Frees repo->namespace (which git_repository_get_namespace lent) and stores a copy; no NULL check on repo. On strdup failure namespace is left NULL and -1 returned."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_odb",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:odb"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained: GIT_REFCOUNT_INC + rc.owner = repo, overwriting any previous owner silently (the first owner's lookups then use the new owner's cache). GIT_ASSERT_ARG non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Swaps repo->_odb: the old one is disowned and released."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_refdb",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "refdb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:refdb"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained: GIT_REFCOUNT_INC + rc.owner = repo. db->repo (the repository it was opened for) is NOT updated: the installing repository then dereferences that repository on every ref operation, so it must outlive them. GIT_ASSERT_ARG non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Swaps repo->_refdb: the old one is disowned and released."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_set_workdir",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Frees and replaces repo->workdir, clears is_bare; with update_gitlink writes <workdir>/.git and core.worktree/core.bare through the config. A pathless repository with update_gitlink dereferences NULL (git__suffixcmp(NULL), probed SIGSEGV)."
+     }
+    },
+    {
+     "name": "workdir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:workdir"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Path read for the call (prettified copy stored); GIT_ASSERT_ARG non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_state",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Probes marker files under repo->gitdir and looks REVERT_HEAD/CHERRY_PICK_HEAD up through the refdb (cache fill). A pathless repository hits GIT_ASSERT_ARG(string) in git_str_puts: -1 in release, abort in Debug."
      }
     }
    ]

@@ -775,16 +775,10 @@ pub mod odb {
             Self(Repository::wrap_odb(odb).unwrap())
         }
 
-        /// A new reference to the repository's odb (`git_repository_odb`), borrowing
+        /// A new reference to the repository's odb (`RepositoryRef::odb`), borrowing
         /// the repository that owns it.
         pub fn odb(&self) -> OdbArc<'_> {
-            let mut odb = core::ptr::null_mut();
-            // SAFETY: the box's live repository; the result is a new reference to its odb.
-            let rc = unsafe { ffi::git_repository_odb(&mut odb, self.0.as_c_ptr()) };
-            assert_eq!(rc, 0);
-            // SAFETY: `odb` is the one reference just returned, adopted once; its
-            // owner is this repository, which the result borrows.
-            unsafe { OdbArc::from_c(odb) }.unwrap()
+            self.0.as_ref().odb().unwrap()
         }
     }
 }
@@ -998,13 +992,10 @@ pub mod index {
         unsafe { IndexArc::from_c(out) }.unwrap()
     }
 
-    /// `git_repository_set_index`, which keeps a reference for the repository: it takes
-    /// an `IndexArc`, as its wrapper must. Stands in for that wrapper.
-    pub fn set_repository_index(repo: &TempRepo, index: &IndexArc) {
-        // SAFETY: the fixture's live repository and a live index; libgit2 counts the
-        // reference it keeps, so the arc's own stays the arc's.
-        let rc = unsafe { ffi::git_repository_set_index(repo.raw(), index.as_c_ptr()) };
-        assert_eq!(rc, 0);
+    /// `RepositoryMut::set_index` on the fixture's repository, which keeps a
+    /// reference of its own: it takes an `IndexArc`.
+    pub fn set_repository_index(repo: &mut TempRepo, index: &IndexArc) {
+        repo.repo.as_mut().unwrap().as_mut().set_index(Some(index));
     }
 
     /// `git_index_entrycount`.

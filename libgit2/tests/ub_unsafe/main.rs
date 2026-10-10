@@ -9,6 +9,7 @@ mod checkout;
 mod commit;
 mod common;
 mod refdb;
+mod repository;
 mod sys_alloc;
 mod sys_odb_backend;
 mod trace;
