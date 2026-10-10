@@ -1755,6 +1755,54 @@
    "fields": []
   },
   {
+   "name": "git_tag",
+   "defined_in": "src/libgit2/tag.h",
+   "_comment_agent": "git_tag is a git_object of type tag (first member `object`; casts both ways in object_api.c). It is opaque in the public API and refcounted through the embedded git_cached_obj (git_tag_free/git_tag_dup are git_object_free/git_object_dup). Every field is written by tag_parse before git_object_lookup publishes the object and never written afterwards, so shared handles read immutable state; the object keeps its repository uncounted (object.repo). Wrapped as Tag<'r> / TagArc<'r> in object/tag.rs (batch object wave-1 batch-3).",
+   "fields": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocated by tag_parse (the text after the blank line, NUL-terminated) and freed by git_tag__free; NULL for a tag without a message body. Read-only after the parse (git_tag_message lends it for the tag's lifetime)."
+     }
+    },
+    {
+     "name": "tag_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocated (git__malloc, NUL-terminated copy of the 'tag ' header line) by tag_parse and freed by git_tag__free with the tag; NULL only while the zeroed object is being parsed or after a parse that failed before it. Read-only once the cache publishes the tag (git_tag_name lends it for the tag's lifetime)."
+     }
+    },
+    {
+     "name": "tagger",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "One git_signature allocated by tag_parse when a 'tagger ' line is present, parsed in place by git_signature__parse, and freed (with its name and email) by git_signature_free in git_tag__free; NULL for a tag without a tagger. On a failed signature parse it stays set and git_object's error path frees it. Read-only after the parse (git_tag_tagger lends it). git_tag_create_from_buffer parses into a stack git_tag and frees these three fields itself."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_time",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Plain resource-free value (int64 seconds, int offset in minutes, char sign); no pointer field, no lifecycle routine: held by value (embedded in git_signature.when, copied field-wise by git_signature_dup/__pdup) and never released. git_signature_new sets sign = offset < 0 ? '-' : '+'. git_signature__parse leaves a calloc'd 0 sign/offset without a timezone, stores tz_start[0] verbatim as sign (any byte, not only '+'/'-') with offset 0 for a malformed timezone, and keeps the zeroes when hours > 14 or mins > 59. git_signature__writebuf (the one writer: commit, tag and reflog creation) prints '-' when offset < 0 or sign == '-' (the '-0000' case), '+' otherwise, hours/minutes from |offset| with %02d%02d, and the SECONDS THROUGH `(unsigned)sig->when.time` (%u): a time before the epoch or past 2106 is written wrapped modulo 2^32; it negates a negative offset as an int, so offset == INT_MIN overflows (C UB; the UBSan build aborts) - wrappers of the writing routines must refuse or document such a Time (core review wave 0, 2026-10-09; tests/equiv/types.rs::signature_zones_are_written_from_offset_and_sign). git_signature__equal compares the three fields. All-zero is a valid value. Wrapped as Time/TimeRef/TimeMut in core/types.rs (CZeroable, Copy, Send/Sync).",
@@ -1781,6 +1829,43 @@
    "defined_in": "include/git2/trace.h",
    "_comment_agent": "C enum, values 0..6 (NONE..TRACE), passed by value. Consumers: git_trace_set stores any value in git_trace__data.level (GIT_ASSERT_ARG level == 0 || callback != NULL, an abort in Debug builds); git_trace() emits when git_trace__data.level >= level, so the integer order is the verbosity order; internal emitters only pass named levels (INFO/DEBUG/TRACE) to git_trace_cb. Wrapped as the fieldless TraceLevel enum (repr u32, Ord over the C values) with a fallible from_raw in core/trace.rs.",
    "fields": []
+  },
+  {
+   "name": "git_tree",
+   "defined_in": "src/libgit2/tree.h",
+   "_comment_agent": "git_tree is a git_object of type tree (first member `object`; casts both ways in object_api.c). It is opaque in the public API and refcounted through the embedded git_cached_obj (git_tree_free/git_tree_dup are git_object_free/git_object_dup). Its entries and odb_obj are filled by the parse before the cache publishes the tree and never written afterwards (tree iterators and treebuilder seeding only read them). It keeps its repository uncounted (object.repo), which git_tree_entry_bypath/git_tree_walk follow to load subtrees. Wrapped as Tree<'r> / TreeArc<'r> in object/tree.rs (batch object wave-1 batch-3).",
+   "fields": [
+    {
+     "name": "entries.ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_array_t(git_tree_entry) owned by the tree: grown by git_array_alloc in git_tree__parse_raw (DEFAULT_TREE_SIZE initially) and freed by git_array_clear in git_tree__free; size entries are initialised. Each entry is by value and its filename borrows odb_obj's data (or the raw parse buffer). Read-only after the parse: git_tree_entry_byindex/_byname/_byid lend entries for the tree's lifetime."
+     }
+    },
+    {
+     "name": "odb_obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "One counted reference to the raw odb object (git_odb_object_dup in git_tree__parse), released by git_odb_object_free in git_tree__free; the entries' filenames point into its data. NULL for a tree parsed from a caller's buffer (git_tree__parse_raw via git_object__from_raw, git_object_rawcontent_is_valid), whose filenames then borrow that buffer for the call."
+     }
+    }
+   ]
   },
   {
    "name": "git_tree_entry",
@@ -9333,6 +9418,227 @@
    ]
   },
   {
+   "name": "git_tag_dup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_object_dup behind a cast; not NULL-checked: the atomic refcount is incremented in place, so obj must be live; the same pointer is handed back through out."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives obj itself, one more reference counted on it; always 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_free",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git_object_free behind a cast: gives up one counted reference (git_cached_obj_decref); at zero git_tag__free runs, which never reads object.repo. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_lookup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call, never retained; its oid type is not checked against the repository's (an id of another type overflows or underfills the loose backend's path, see git_object_lookup)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed tag (shared with the cache and every other lookup of the id, as git_tag or git_object), or a freshly parsed one; git_object_lookup* behind a cast with type GIT_OBJECT_TAG, so an object of another type is GIT_ENOTFOUND. It keeps repo uncounted in object.repo, so it must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_lookup_prefix",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call, never retained; its oid type is not checked against the repository's (an id of another type overflows or underfills the loose backend's path, see git_object_lookup). At most (len + 1) / 2 bytes are copied, with the id's type byte, into the search key."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed tag (shared with the cache and every other lookup of the id, as git_tag or git_object), or a freshly parsed one; git_object_lookup* behind a cast with type GIT_OBJECT_TAG, so an object of another type is GIT_ENOTFOUND. It keeps repo uncounted in object.repo, so it must not be used past repo. Untouched on failure. The prefix must name exactly one object of the database, whatever its type, which must then be a tag."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tag_name_is_valid",
    "defined_in": "src/libgit2/tag.c",
    "ptr_args": [
@@ -9410,6 +9716,59 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_dup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_object_dup behind a cast; not NULL-checked: the atomic refcount is incremented in place, so obj must be live; the same pointer is handed back through out."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives obj itself, one more reference counted on it; always 0."
      }
     }
    ]
@@ -9559,6 +9918,174 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free of the entry's single block (struct + inline name); only valid for entries from git_tree_entry_dup / git_tree_entry_bypath, never for ones borrowed from a tree or treebuilder. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_free",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git_object_free behind a cast: gives up one counted reference (git_cached_obj_decref); at zero git_tree__free runs, which never reads object.repo. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_lookup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call, never retained; its oid type is not checked against the repository's (an id of another type overflows or underfills the loose backend's path, see git_object_lookup)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed tree (shared with the cache and every other lookup of the id, as git_tree or git_object), or a freshly parsed one; git_object_lookup* behind a cast with type GIT_OBJECT_TREE, so an object of another type is GIT_ENOTFOUND. It keeps repo uncounted in object.repo, so it must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_lookup_prefix",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call, never retained; its oid type is not checked against the repository's (an id of another type overflows or underfills the loose backend's path, see git_object_lookup). At most (len + 1) / 2 bytes are copied, with the id's type byte, into the search key."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed tree (shared with the cache and every other lookup of the id, as git_tree or git_object), or a freshly parsed one; git_object_lookup* behind a cast with type GIT_OBJECT_TREE, so an object of another type is GIT_ENOTFOUND. It keeps repo uncounted in object.repo, so it must not be used past repo. Untouched on failure. The prefix must name exactly one object of the database, whatever its type, which must then be a tree."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
      }
     }
    ]

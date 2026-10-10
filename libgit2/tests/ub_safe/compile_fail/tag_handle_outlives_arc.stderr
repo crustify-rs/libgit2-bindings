@@ -1,0 +1,17 @@
+error[E0515]: cannot return value referencing function parameter `tag`
+ --> tests/ub_safe/compile_fail/tag_handle_outlives_arc.rs:7:5
+  |
+7 |     tag.as_ref()
+  |     ---^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `tag` is borrowed here
+
+error[E0515]: cannot return value referencing function parameter `tag`
+  --> tests/ub_safe/compile_fail/tag_handle_outlives_arc.rs:11:5
+   |
+11 |     tag.as_ref().as_object()
+   |     ---^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     returns a value referencing data owned by the current function
+   |     `tag` is borrowed here

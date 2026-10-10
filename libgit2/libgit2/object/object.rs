@@ -520,7 +520,9 @@ impl<'r> Object<'r> {
 }
 
 /// `Ok` when `id` is of `repo`'s object id type, the refusal otherwise; see the
-/// [module docs](self#looking-objects-up).
+/// [module docs](self#looking-objects-up). The typed lookups (`git_tree_lookup`,
+/// `git_tag_lookup`, `git_blob_lookup`, ...) forward to the same routines, and refuse the
+/// same ids.
 pub(crate) fn id_fits(repo: RepositoryRef<'_>, id: OidRef<'_>) -> Result<(), RepositoryError> {
     if u32::from(id.raw_kind()) == repo.oid_type().raw() {
         return Ok(());

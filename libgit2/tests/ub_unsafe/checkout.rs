@@ -4,12 +4,13 @@
 //!
 //! The contracts keep what a seam stores live until the options are dropped or the
 //! field is replaced, and the callbacks sound for whatever libgit2 passes them. So a
-//! checkout must read only what is live (ASan): a payload or tree freed right
+//! checkout must read only what is live (ASan): a payload freed right
 //! after it was replaced must never be reached again, the arguments a callback gets
 //! must be readable in full, and dropping the options must release nothing. Callbacks
 //! reenter libgit2 and the Rust API, and checkouts on several threads, each with its
-//! own options, repository and callbacks, must race nothing (TSan). The baseline index
-//! is no seam: its safe setter borrows an `IndexRef`, tested in `ub_safe`.
+//! own options, repository and callbacks, must race nothing (TSan). The baseline tree
+//! and index are no seams: their safe setters borrow a `TreeRef` and an `IndexRef`,
+//! tested in `ub_safe`.
 //!
 //! The checkout routines are not wrapped yet, so the options reach
 //! `git_checkout_tree` through their documented `#[repr(transparent)]` layout, which
@@ -119,16 +120,6 @@ impl Repo {
         // SAFETY: the repository and tree are live, and the options' contracts hold:
         // whatever their seams store is live and their callbacks sound.
         unsafe { ffi::git_checkout_tree(self.repo, tree.cast(), c_ptr(options)) }
-    }
-
-    /// A new reference to one of the trees, which the caller frees.
-    fn tree_ref(&self, tree: *mut ffi::git_tree) -> *mut ffi::git_tree {
-        let mut copy = ptr::null_mut();
-        // SAFETY: `tree` is live; the result is a fresh lookup of the same object.
-        let id = unsafe { ffi::git_tree_id(tree) };
-        // SAFETY: as above, with a live slot.
-        assert_eq!(unsafe { ffi::git_tree_lookup(&mut copy, self.repo, id) }, 0);
-        copy
     }
 }
 
@@ -456,69 +447,5 @@ mod set_perfdata_callback {
         let calls = log.borrow().calls.len();
         assert_ne!(repo.checkout(repo.new, &options), 0);
         assert_eq!(log.borrow().calls.len(), calls);
-    }
-}
-
-mod set_baseline {
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn a_replaced_tree_may_be_freed() {
-        let repo = Repo::new("baseline-replaced");
-        let first = repo.tree_ref(repo.old);
-        let mut options = CheckoutOptions::new();
-        // SAFETY: `first` stays live until the baseline is replaced below.
-        unsafe { options.as_mut().set_baseline(first) };
-        assert_eq!(options.as_ref().baseline(), first);
-        // A safe update: the working directory matches the baseline.
-        assert_eq!(repo.checkout(repo.new, &options), 0);
-        assert_eq!(fs::read(repo.root.join("work/a.txt")).unwrap(), b"new\n");
-        // SAFETY: the repository's own tree outlives the options.
-        unsafe { options.as_mut().set_baseline(repo.new) };
-        // SAFETY: the options no longer point at `first`, freed once.
-        unsafe { ffi::git_tree_free(first) };
-        assert_eq!(repo.checkout(repo.old, &options), 0);
-        assert_eq!(fs::read(repo.root.join("work/a.txt")).unwrap(), b"old\n");
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn a_stale_baseline_conflicts_and_null_means_head() {
-        let repo = Repo::new("baseline-stale");
-        let mut options = CheckoutOptions::new();
-        // SAFETY: the repository's tree outlives the options.
-        unsafe { options.as_mut().set_baseline(repo.new) };
-        // The target matches the baseline, so the working directory's `old` files read
-        // as local changes, and are kept.
-        assert_eq!(repo.checkout(repo.new, &options), 0);
-        assert_eq!(fs::read(repo.root.join("work/a.txt")).unwrap(), b"old\n");
-        // SAFETY: NULL stores no tree.
-        unsafe { options.as_mut().set_baseline(ptr::null_mut()) };
-        assert!(options.as_ref().baseline().is_null());
-        // `HEAD` is unborn, so the baseline is empty and every dirty file conflicts.
-        assert_eq!(repo.checkout(repo.new, &options), ffi::GIT_ECONFLICT);
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn options_dropped_before_the_tree() {
-        let repo = Repo::new("baseline-dropped");
-        let tree = repo.tree_ref(repo.old);
-        {
-            let mut a = CheckoutOptions::new();
-            let mut b = CheckoutOptions::new();
-            // SAFETY: `tree` is freed only after both options are dropped.
-            unsafe {
-                a.as_mut().set_baseline(tree);
-                b.as_mut().set_baseline(tree);
-            }
-            b.as_mut().set_strategy(GIT_CHECKOUT_FORCE);
-            b.as_mut().set_target_directory(Some(&repo.target));
-            assert_eq!(repo.checkout(repo.new, &b), 0);
-            assert_eq!(repo.checkout(repo.new, &a), 0);
-        }
-        // SAFETY: freed once, after its last user.
-        unsafe { ffi::git_tree_free(tree) };
     }
 }
