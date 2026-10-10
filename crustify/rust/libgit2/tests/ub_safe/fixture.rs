@@ -173,6 +173,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use libgit2::libgit2::core::types::{RustWriteStream, StreamError, StreamWriter, WriteStreamBox};
+use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 use libgit2::libgit2::util::errors::{ErrorCode, last};
 
 /// Takes a `git_libgit2_init` reference that is never released.
@@ -180,11 +181,10 @@ pub fn init() {
     core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
 }
 
-/// A fresh bare repository in a temporary directory, freed and removed on drop; stands
-/// in for the `git_repository` wrapper.
+/// A fresh bare repository in a temporary directory, freed and removed on drop.
 pub struct TempRepo {
     pub path: PathBuf,
-    repo: *mut ffi::git_repository,
+    repo: Option<RepositoryBox>,
 }
 
 impl TempRepo {
@@ -196,21 +196,16 @@ impl TempRepo {
         ));
         let _ = std::fs::remove_dir_all(&path);
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-        let mut repo = core::ptr::null_mut();
-        // SAFETY: a live slot, a NUL-terminated path and live options, read for the call.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0);
-        Self { path, repo }
+        let repo = Repository::init(&c_path, true).unwrap();
+        Self {
+            path,
+            repo: Some(repo),
+        }
+    }
+
+    /// The repository, for the raw calls of the fixtures below.
+    fn raw(&self) -> *mut ffi::git_repository {
+        self.repo.as_ref().unwrap().as_c_ptr()
     }
 
     /// Files under `objects/` whose name starts with `streamed`: a blob stream's
@@ -231,9 +226,9 @@ impl TempRepo {
 
 impl Drop for TempRepo {
     fn drop(&mut self) {
-        // SAFETY: the repository this fixture opened, freed once; every stream the
-        // tests opened on it is gone by now (they borrow the fixture).
-        unsafe { ffi::git_repository_free(self.repo) };
+        // Every stream the tests opened on the repository is gone by now (they borrow
+        // the fixture); free it before its directory goes.
+        drop(self.repo.take());
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
@@ -249,7 +244,7 @@ pub fn blob_stream(repo: &TempRepo, hint: Option<&CStr>) -> WriteStreamBox {
     let rc = unsafe {
         ffi::git_blob_create_from_stream(
             &mut out,
-            repo.repo,
+            repo.raw(),
             hint.map_or(core::ptr::null(), CStr::as_ptr),
         )
     };
@@ -590,7 +585,7 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
     // SAFETY: an empty buffer, the fixture's live repository, and a value the safe
     // `Item` produced, which is the only contract this fixture adds: every `Item` is
     // below `GIT_REPOSITORY_ITEM__LAST`, the bound of the table libgit2 indexes.
-    let rc = unsafe { ffi::git_repository_item_path(&raw mut raw, repo.repo, item.raw()) };
+    let rc = unsafe { ffi::git_repository_item_path(&raw mut raw, repo.raw(), item.raw()) };
     // SAFETY: `raw` is as libgit2 left it: empty, or owning a NUL-terminated allocation
     // of its allocator.
     let buf = unsafe { Buf::from_raw(raw) };
@@ -602,10 +597,10 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
 
 // --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
 
-/// Fixtures standing in for the `git_repository` wrapper and the routines that hand
-/// out commit arrays and repository configs (`git_repository_commit_parents`,
-/// `git_repository_config`), and for the `git_commit` and config-routine wrappers the
-/// tests read through; replace each once its safe counterpart lands.
+/// Fixtures standing in for the routines that hand out commit arrays and repository
+/// configs (`git_repository_commit_parents`, `git_repository_config`), and for the
+/// `git_commit` and config-routine wrappers the tests read through; replace each once
+/// its safe counterpart lands.
 pub mod commit_and_config {
     use std::ffi::{CStr, c_int};
     use std::ptr;
@@ -613,9 +608,10 @@ pub mod commit_and_config {
     use libgit2::ffi;
     use libgit2::libgit2::config::config::ConfigArc;
     use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// A fixture repository opened read-only, freed on drop.
-    pub struct OpenRepo(*mut ffi::git_repository);
+    pub struct OpenRepo(RepositoryBox);
 
     /// `testrepo.git` (`HEAD` at `a65fedf`), `mergedrepo` (merging `e280915` into
     /// `3a34580`) and `empty_bare.git` (an unborn `HEAD`).
@@ -631,26 +627,7 @@ pub mod commit_and_config {
                 env!("CARGO_MANIFEST_DIR")
             ))
             .unwrap();
-            let mut repo = ptr::null_mut();
-            // SAFETY: a live slot and a NUL-terminated path; no ceiling directories.
-            let rc = unsafe {
-                ffi::git_repository_open_ext(
-                    &mut repo,
-                    path.as_ptr(),
-                    ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
-                    ptr::null(),
-                )
-            };
-            assert_eq!(rc, 0);
-            Self(repo)
-        }
-    }
-
-    impl Drop for OpenRepo {
-        fn drop(&mut self) {
-            // SAFETY: the repository this fixture opened, freed once; arrays and
-            // configs taken from it outlive it.
-            unsafe { ffi::git_repository_free(self.0) };
+            Self(Repository::open(&path).unwrap())
         }
     }
 
@@ -658,7 +635,7 @@ pub mod commit_and_config {
     pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal {
         let mut raw = ffi::git_commitarray::default();
         // SAFETY: a zeroed array and an open repository.
-        let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.0) };
+        let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.0.as_c_ptr()) };
         assert_eq!(rc, 0);
         // SAFETY: what libgit2 left: `{NULL, 0}`, or a buffer of commit references from
         // its allocator, given up here.
@@ -688,7 +665,8 @@ pub mod commit_and_config {
     pub fn config(repo: &OpenRepo) -> ConfigArc {
         let mut out = ptr::null_mut();
         // SAFETY: a live slot and an open repository.
-        assert_eq!(unsafe { ffi::git_repository_config(&mut out, repo.0) }, 0);
+        let rc = unsafe { ffi::git_repository_config(&mut out, repo.0.as_c_ptr()) };
+        assert_eq!(rc, 0);
         // SAFETY: one up-ref'd reference to the repository's config, released by
         // `git_config_free`; the repository holds another.
         unsafe { ConfigArc::from_c(out) }.unwrap()
@@ -731,14 +709,10 @@ pub mod commit_and_config {
 use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox};
 
 impl TempRepo {
-    /// A refdb of this repository, through the unsafe [`Refdb::open`]: the one fixture
-    /// adopting a refdb, standing in for the repository wrapper, which replaces it with
-    /// a safe borrow. The borrow of the fixture is the refdb's `'r`, so the repository
-    /// outlives it.
+    /// A refdb of this repository, through [`Refdb::open`]. The borrow of the fixture is
+    /// the refdb's `'r`, so the repository outlives it.
     pub fn refdb(&self) -> RefdbBox<'_> {
-        // SAFETY: the live repository, freed only when the fixture drops, after the
-        // borrow `'r` ends; the tests use each refdb on the thread that opened it.
-        unsafe { Refdb::open(NonNull::new(self.repo).unwrap()) }.unwrap()
+        Refdb::open(self.repo.as_ref().unwrap().as_ref()).unwrap()
     }
 }
 
@@ -750,6 +724,7 @@ pub mod odb {
 
     use libgit2::ffi;
     use libgit2::libgit2::odb::odb::OdbArc;
+    use libgit2::libgit2::repository::repository::RepositoryBox;
 
     /// `git_odb_write` of a blob; the id, or the error code.
     pub fn write_blob(odb: &OdbArc, data: &[u8]) -> Result<ffi::git_oid, i32> {
@@ -785,8 +760,8 @@ pub mod odb {
     }
 
     /// A repository over an odb (`git_repository_wrap_odb`), which holds a reference of
-    /// its own; freed on drop.
-    pub struct Repo(*mut ffi::git_repository);
+    /// its own; freed on drop. Stands in for the `git_repository_wrap_odb` wrapper.
+    pub struct Repo(RepositoryBox);
 
     impl Repo {
         pub fn wrap(odb: &OdbArc) -> Self {
@@ -795,23 +770,18 @@ pub mod odb {
             // takes a reference to it.
             let rc = unsafe { ffi::git_repository_wrap_odb(&mut repo, odb.as_c_ptr()) };
             assert_eq!(rc, 0);
-            Self(repo)
+            // SAFETY: the fresh repository the call wrote, owned here alone.
+            Self(unsafe { RepositoryBox::from_c(repo) }.unwrap())
         }
 
         /// A new reference to the repository's odb (`git_repository_odb`).
         pub fn odb(&self) -> OdbArc {
             let mut odb = core::ptr::null_mut();
-            // SAFETY: `self.0` is live; the result is a new reference to its odb.
-            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, self.0) }, 0);
+            // SAFETY: the box's live repository; the result is a new reference to its odb.
+            let rc = unsafe { ffi::git_repository_odb(&mut odb, self.0.as_c_ptr()) };
+            assert_eq!(rc, 0);
             // SAFETY: `odb` is the one reference just returned, adopted once.
             unsafe { OdbArc::from_c(odb) }.unwrap()
-        }
-    }
-
-    impl Drop for Repo {
-        fn drop(&mut self) {
-            // SAFETY: `self.0` is the live repository `wrap` made, freed once.
-            unsafe { ffi::git_repository_free(self.0) };
         }
     }
 }
@@ -828,13 +798,14 @@ pub mod refs {
 
     use libgit2::ffi;
     use libgit2::libgit2::refs::refs::{ReferenceBox, UnattachedReferenceBox};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// A fresh bare repository in a temporary directory, freed and removed on drop.
     ///
-    /// Its references borrow it, as the repository wrapper's will.
+    /// Its references borrow it.
     pub struct Repo {
         path: PathBuf,
-        repo: *mut ffi::git_repository,
+        repo: Option<RepositoryBox>,
     }
 
     impl Repo {
@@ -844,22 +815,7 @@ pub mod refs {
                 std::env::temp_dir().join(format!("crustify-refs-ub-{}-{tag}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            let mut opts = ffi::git_repository_init_options::default();
-            // SAFETY: `opts` is a live options struct, filled with the version's
-            // defaults.
-            let rc = unsafe {
-                ffi::git_repository_init_options_init(
-                    &mut opts,
-                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-                )
-            };
-            assert_eq!(rc, 0);
-            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-            let mut repo = ptr::null_mut();
-            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
-            // call.
-            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-            assert_eq!(rc, 0);
+            let repo = Repository::init(&c_path, true).unwrap();
             // A packed tag with a peeled id, which no loose file overrides.
             std::fs::write(
                 path.join("packed-refs"),
@@ -870,7 +826,10 @@ pub mod refs {
                 ),
             )
             .unwrap();
-            Self { path, repo }
+            Self {
+                path,
+                repo: Some(repo),
+            }
         }
 
         /// `git_reference_lookup(name)`, adopted: the one fixture adopting an attached
@@ -879,7 +838,7 @@ pub mod refs {
             let mut out = ptr::null_mut();
             // SAFETY: a live slot, the live repository and a NUL-terminated name, read
             // for the call.
-            let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, self.raw(), name.as_ptr()) };
             assert_eq!(rc, 0, "lookup {name:?}");
             // SAFETY: a fresh attached reference the caller owns, released by
             // `git_reference_free`; it borrows `self`, which frees the repository last.
@@ -888,15 +847,14 @@ pub mod refs {
 
         /// The repository, as `git_reference_owner` reports it.
         pub fn raw(&self) -> *mut ffi::git_repository {
-            self.repo
+            self.repo.as_ref().unwrap().as_c_ptr()
         }
     }
 
     impl Drop for Repo {
         fn drop(&mut self) {
-            // SAFETY: the repository `new` opened, freed once; its references borrowed
-            // `self` and are gone.
-            unsafe { ffi::git_repository_free(self.repo) };
+            // Its references borrowed `self` and are gone; free it before its directory.
+            drop(self.repo.take());
             let _ = std::fs::remove_dir_all(&self.path);
         }
     }
@@ -1029,7 +987,7 @@ pub mod index {
     pub fn repository_index(repo: &TempRepo) -> IndexArc {
         let mut out = core::ptr::null_mut();
         // SAFETY: a live slot and the fixture's live repository.
-        let rc = unsafe { ffi::git_repository_index(&mut out, repo.repo) };
+        let rc = unsafe { ffi::git_repository_index(&mut out, repo.raw()) };
         assert_eq!(rc, 0);
         // SAFETY: `git_repository_index` hands out one more counted reference to the
         // index the repository keeps, released by `git_index_free`; it stays valid after
@@ -1042,7 +1000,7 @@ pub mod index {
     pub fn set_repository_index(repo: &TempRepo, index: &IndexArc) {
         // SAFETY: the fixture's live repository and a live index; libgit2 counts the
         // reference it keeps, so the arc's own stays the arc's.
-        let rc = unsafe { ffi::git_repository_set_index(repo.repo, index.as_c_ptr()) };
+        let rc = unsafe { ffi::git_repository_set_index(repo.raw(), index.as_c_ptr()) };
         assert_eq!(rc, 0);
     }
 
@@ -1109,8 +1067,8 @@ pub mod index {
 
 pub mod worktree {
     //! Worktrees adopted from `git_worktree_lookup`, and the accessors read through
-    //! their boxes; they stand in for the `Repository` wrapper, `Worktree::lookup` and
-    //! the worktree getters and lock routines, which replace them.
+    //! their boxes; they stand in for `Worktree::lookup` and the worktree getters and
+    //! lock routines, which replace them.
 
     use std::ffi::{CStr, CString};
     use std::fs;
@@ -1118,6 +1076,7 @@ pub mod worktree {
     use std::path::PathBuf;
 
     use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
     use libgit2::libgit2::repository::worktree::WorktreeBox;
 
     /// A non-bare repository in a temporary directory, to which [`add`](Self::add) lays
@@ -1125,7 +1084,7 @@ pub mod worktree {
     /// drop.
     pub struct WorktreeRepo {
         pub base: PathBuf,
-        repo: *mut ffi::git_repository,
+        repo: Option<RepositoryBox>,
     }
 
     impl WorktreeRepo {
@@ -1135,24 +1094,11 @@ pub mod worktree {
                 .join(format!("crustify-worktree-ub-{}-{tag}", std::process::id()));
             let _ = fs::remove_dir_all(&base);
             let c_path = CString::new(base.join("repo").as_os_str().as_bytes()).unwrap();
-            let mut opts = ffi::git_repository_init_options::default();
-            // SAFETY: `opts` is a live options struct, filled with the version's
-            // defaults.
-            let rc = unsafe {
-                ffi::git_repository_init_options_init(
-                    &mut opts,
-                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-                )
-            };
-            assert_eq!(rc, 0);
-            opts.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
-            let mut repo = core::ptr::null_mut();
-            let path = c_path.as_ptr();
-            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
-            // call.
-            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, path, &mut opts) };
-            assert_eq!(rc, 0);
-            Self { base, repo }
+            let repo = Repository::init(&c_path, false).unwrap();
+            Self {
+                base,
+                repo: Some(repo),
+            }
         }
 
         /// Lays out the worktree `name`: its administrative directory under
@@ -1172,9 +1118,10 @@ pub mod worktree {
         /// The worktree `name`, adopted from `git_worktree_lookup`.
         pub fn lookup(&self, name: &CStr) -> WorktreeBox {
             let mut out = core::ptr::null_mut();
+            let repo = self.repo.as_ref().unwrap().as_c_ptr();
             // SAFETY: a live slot, the live repository and a NUL-terminated name, only
             // read.
-            let rc = unsafe { ffi::git_worktree_lookup(&mut out, self.repo, name.as_ptr()) };
+            let rc = unsafe { ffi::git_worktree_lookup(&mut out, repo, name.as_ptr()) };
             assert_eq!(rc, 0);
             // SAFETY: a fresh worktree the caller owns, released by `git_worktree_free`.
             unsafe { WorktreeBox::from_c(out) }.unwrap()
@@ -1187,9 +1134,8 @@ pub mod worktree {
 
     impl Drop for WorktreeRepo {
         fn drop(&mut self) {
-            // SAFETY: the repository this fixture opened, freed once; the worktrees do
-            // not borrow it.
-            unsafe { ffi::git_repository_free(self.repo) };
+            // The worktrees do not borrow the repository; free it before its directory.
+            drop(self.repo.take());
             let _ = fs::remove_dir_all(&self.base);
         }
     }

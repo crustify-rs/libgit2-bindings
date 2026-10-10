@@ -29,6 +29,7 @@ mod owner {
 
     use libgit2::ffi;
     use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox};
+    use libgit2::libgit2::repository::repository::RepositoryBox;
     use libgit2::libgit2::util::errors::ErrorBuf;
 
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
@@ -94,7 +95,7 @@ mod owner {
     /// removed on drop.
     struct Repo {
         path: PathBuf,
-        repo: NonNull<ffi::git_repository>,
+        repo: RepositoryBox,
         blob: ffi::git_oid,
     }
 
@@ -140,7 +141,8 @@ mod owner {
             }
             Self {
                 path,
-                repo: NonNull::new(repo).unwrap(),
+                // SAFETY: the fresh repository the call wrote, owned here alone.
+                repo: unsafe { RepositoryBox::from_c(repo) }.unwrap(),
                 blob,
             }
         }
@@ -153,7 +155,7 @@ mod owner {
             unsafe {
                 let rc = ffi::git_reference_create(
                     &mut out,
-                    self.repo.as_ptr(),
+                    self.repo.as_c_ptr(),
                     name.as_ptr(),
                     &self.blob,
                     1,
@@ -174,8 +176,11 @@ mod owner {
                     // SAFETY: a live slot, the live repository and a NUL-terminated name;
                     // the reference is read, then freed.
                     unsafe {
-                        let rc =
-                            ffi::git_reference_lookup(&mut out, self.repo.as_ptr(), name.as_ptr());
+                        let rc = ffi::git_reference_lookup(
+                            &mut out,
+                            self.repo.as_c_ptr(),
+                            name.as_ptr(),
+                        );
                         let id = (rc == 0).then(|| {
                             let target = ffi::git_reference_target(out);
                             (*target).id
@@ -191,9 +196,8 @@ mod owner {
 
     impl Drop for Repo {
         fn drop(&mut self) {
-            // SAFETY: the repository this fixture opened, freed once, after every refdb
-            // of it.
-            unsafe { ffi::git_repository_free(self.repo.as_ptr()) };
+            // The repository is freed after (refdbs of it are gone); freeing touches no
+            // file.
             let _ = fs::remove_dir_all(&self.path);
         }
     }
@@ -275,9 +279,8 @@ mod owner {
             let rust_repo = Repo::new(&format!("open-rust-{tag}"), format);
             let mut c_db = ptr::null_mut();
             // SAFETY: a writable slot and the live repository.
-            let c_rc = unsafe { ffi::git_refdb_open(&mut c_db, c_repo.repo.as_ptr()) };
-            // SAFETY: the live repository, freed after the refdb (dropped below).
-            let rust_db = unsafe { Refdb::open(rust_repo.repo) };
+            let c_rc = unsafe { ffi::git_refdb_open(&mut c_db, c_repo.repo.as_c_ptr()) };
+            let rust_db = Refdb::open(rust_repo.repo.as_ref());
             assert_eq!(c_reported(c_rc), rust_reported(&rust_db));
             let rust_db = rust_db.unwrap();
             same_sequence((&c_repo, c_db), (&rust_repo, &rust_db));
@@ -292,7 +295,7 @@ mod owner {
     fn fs_backend(repo: &Repo) -> NonNull<ffi::git_refdb_backend> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and the live repository.
-        let rc = unsafe { ffi::git_refdb_backend_fs(&mut out, repo.repo.as_ptr()) };
+        let rc = unsafe { ffi::git_refdb_backend_fs(&mut out, repo.repo.as_c_ptr()) };
         assert_eq!(rc, 0);
         NonNull::new(out).unwrap()
     }
@@ -305,7 +308,7 @@ mod owner {
     ) -> Result<*mut ffi::git_refdb, (c_int, CString)> {
         let mut db = ptr::null_mut();
         // SAFETY: a writable slot and the live repository.
-        c_reported(unsafe { ffi::git_refdb_new(&mut db, repo.repo.as_ptr()) })?;
+        c_reported(unsafe { ffi::git_refdb_new(&mut db, repo.repo.as_c_ptr()) })?;
         // SAFETY: the fresh refdb, without a backend, and a live backend, taken only on
         // success.
         let rc = unsafe { ffi::git_refdb_set_backend(db, backend.as_ptr()) };
@@ -335,7 +338,7 @@ mod owner {
         let c_db = c_new(&c_repo, fs_backend(&c_repo));
         // SAFETY: the live repository, freed after the refdb, and a fresh backend of it,
         // given to the refdb.
-        let rust_db = unsafe { Refdb::new(rust_repo.repo, fs_backend(&rust_repo)) };
+        let rust_db = unsafe { Refdb::new(rust_repo.repo.as_ref(), fs_backend(&rust_repo)) };
         assert_eq!(c_db.clone().map(|_| ()), rust_reported(&rust_db));
         let (c_db, rust_db) = (c_db.unwrap(), rust_db.unwrap());
         same_sequence((&c_repo, c_db), (&rust_repo, &rust_db));
@@ -358,7 +361,8 @@ mod owner {
             let c = c_new(&c_repo, NonNull::from(&mut c_backend)).map(|_| ());
             // SAFETY: the live repository and a live backend, refused (every member is
             // unset), so it stays the caller's.
-            let rust = unsafe { Refdb::new(rust_repo.repo, NonNull::from(&mut rust_backend)) };
+            let rust =
+                unsafe { Refdb::new(rust_repo.repo.as_ref(), NonNull::from(&mut rust_backend)) };
             assert!(c.is_err());
             assert_eq!(c, rust_reported(&rust), "version {version}");
         }
@@ -373,7 +377,7 @@ mod owner {
         };
         let c = c_new(&c_repo, c_backend).map(|_| ());
         // SAFETY: the live repository and a live backend, refused, so it stays ours.
-        let rust = unsafe { Refdb::new(rust_repo.repo, rust_backend) };
+        let rust = unsafe { Refdb::new(rust_repo.repo.as_ref(), rust_backend) };
         assert!(c.is_err());
         assert_eq!(c, rust_reported(&rust), "lock without unlock");
         for (backend, unlock) in [(c_backend, unlocks.0), (rust_backend, unlocks.1)] {

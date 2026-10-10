@@ -1599,3 +1599,402 @@ mod state {
         run("bare", true);
     }
 }
+
+/// The `Repository` constructors against `git_repository_new`, `_new_ext`, `_open`,
+/// `_open_bare` and `_init`.
+///
+/// Each side runs the same sequence of steps on a thread of its own, in a scratch
+/// directory of its own, over the same fixtures (libgit2's `testrepo.git`, opened
+/// read-only, and files each side writes alike). After every step it records the
+/// constructor's outcome: for a repository, its state as libgit2 reports it
+/// (`git_repository_path`, `_workdir`, `_commondir`, `_is_bare`, `_oid_type`), and for
+/// a failure, the returned code and the thread's last error; after an `init`, every
+/// file under the new repository and its contents. Paths under a side's scratch
+/// directory are recorded relative to it. A successful constructor leaves whatever
+/// error libgit2 set and recovered from on the thread, so only a failure's error is
+/// compared.
+///
+/// Documented divergences, outside these comparisons:
+///
+/// - `git_repository_init` returns 1, and the repository it opened, when a reftable
+///   repository's `reftable` directory cannot be made; `Repository::init` reports
+///   that failure with `GIT_ERROR` and frees the repository (`unit_tests`).
+/// - `git_repository_init` leaves a repository in its out slot on any failure after
+///   its inner open; the wrapper frees it (`unit_tests`, `ub_safe`).
+mod repository_owner {
+    use std::ffi::{CStr, CString, c_char, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::ptr;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    /// libgit2's bare test repository, only ever opened read-only.
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+
+    /// One constructor call; paths are relative to the side's scratch directory,
+    /// except [`Step::OpenTestrepo`]'s.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        New,
+        WithOidType(OidType),
+        OpenTestrepo { bare: bool },
+        Open(&'static str),
+        OpenBare(&'static str),
+        Init(&'static str, bool),
+    }
+
+    /// A repository's state as libgit2 reports it, its paths relative to the scratch
+    /// directory where they are under it.
+    #[derive(Debug, PartialEq, Eq)]
+    struct State {
+        path: Option<String>,
+        workdir: Option<String>,
+        commondir: Option<String>,
+        is_bare: c_int,
+        oid_type: ffi::git_oid_t,
+    }
+
+    /// One step's outcome.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Outcome {
+        Repo(State),
+        Failed {
+            code: c_int,
+            class: c_int,
+            message: String,
+        },
+    }
+
+    /// One step's record: its outcome, and after an `init` the files it left.
+    type Record = (Outcome, Option<Vec<(String, Vec<u8>)>>);
+
+    /// A side's scratch directory, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn c_path(&self, rel: &str) -> CString {
+            let path = if rel.is_empty() {
+                // The empty path itself, not the scratch directory.
+                return CString::default();
+            } else {
+                self.0.join(rel)
+            };
+            CString::new(path.as_os_str().as_bytes()).unwrap()
+        }
+
+        /// `s` with the scratch directory replaced by `<root>`.
+        fn relative(&self, s: &str) -> String {
+            s.replace(&*self.0.to_string_lossy(), "<root>")
+        }
+
+        /// Every file under `rel`, with its contents, sorted by path.
+        fn tree(&self, rel: &str) -> Vec<(String, Vec<u8>)> {
+            fn walk(dir: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+                for entry in fs::read_dir(dir).unwrap() {
+                    let path = entry.unwrap().path();
+                    let name = path
+                        .strip_prefix(base)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned();
+                    if path.is_dir() {
+                        out.push((format!("{name}/"), Vec::new()));
+                        walk(&path, base, out);
+                    } else {
+                        out.push((name, fs::read(&path).unwrap()));
+                    }
+                }
+            }
+            let base = self.0.join(rel);
+            let mut out = Vec::new();
+            if base.is_dir() {
+                walk(&base, &base, &mut out);
+            }
+            out.sort();
+            out
+        }
+
+        /// The fixtures both sides open: a file to `init` under, a repository whose
+        /// format version libgit2 refuses, one whose `core.bare` is no boolean, and a
+        /// working directory whose `.git` file links to `work`'s repository.
+        fn with_fixtures(tag: &str) -> Self {
+            let this = Self::new(tag);
+            fs::write(this.0.join("file"), "").unwrap();
+            let badbare = this.0.join("badbare");
+            fs::create_dir_all(badbare.join("objects")).unwrap();
+            fs::create_dir_all(badbare.join("refs")).unwrap();
+            fs::write(badbare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::write(badbare.join("config"), "[core]\n\tbare = maybe\n").unwrap();
+            fs::create_dir_all(this.0.join("linked")).unwrap();
+            fs::write(this.0.join("linked/.git"), "gitdir: ../work/.git\n").unwrap();
+            let format = this.0.join("format");
+            fs::create_dir_all(format.join("objects")).unwrap();
+            fs::create_dir_all(format.join("refs")).unwrap();
+            fs::write(format.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::write(
+                format.join("config"),
+                "[core]\n\trepositoryformatversion = 9\n",
+            )
+            .unwrap();
+            this
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A NULL or NUL-terminated string libgit2 returned, copied.
+    ///
+    /// # Safety
+    ///
+    /// `s` must be NULL or a live C string.
+    unsafe fn copied(scratch: &Scratch, s: *const c_char) -> Option<String> {
+        // SAFETY: per this function's contract.
+        (!s.is_null()).then(|| scratch.relative(&unsafe { CStr::from_ptr(s) }.to_string_lossy()))
+    }
+
+    /// The state of the live repository `repo`.
+    fn state(scratch: &Scratch, repo: *mut ffi::git_repository) -> State {
+        // SAFETY: `repo` is live; each getter only reads it, and the strings they
+        // return live as long as it does, past the copies.
+        unsafe {
+            State {
+                path: copied(scratch, ffi::git_repository_path(repo)),
+                workdir: copied(scratch, ffi::git_repository_workdir(repo)),
+                commondir: copied(scratch, ffi::git_repository_commondir(repo)),
+                is_bare: ffi::git_repository_is_bare(repo),
+                oid_type: ffi::git_repository_oid_type(repo),
+            }
+        }
+    }
+
+    /// The step's paths: the one passed, and the one an `init` fills.
+    fn paths(scratch: &Scratch, step: Step) -> (CString, Option<&'static str>) {
+        match step {
+            Step::New | Step::WithOidType(_) => (CString::default(), None),
+            Step::OpenTestrepo { .. } => (CString::new(TESTREPO).unwrap(), None),
+            Step::Open(rel) | Step::OpenBare(rel) => (scratch.c_path(rel), None),
+            Step::Init(rel, _) => (scratch.c_path(rel), Some(rel)),
+        }
+    }
+
+    /// One step through libgit2's C API.
+    fn c_step(scratch: &Scratch, step: Step) -> Record {
+        let (path, filled) = paths(scratch, step);
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, `path` NUL-terminated and `opts` live
+        // options, each read for the call only; the runtime is initialised.
+        let rc = unsafe {
+            match step {
+                Step::New => ffi::git_repository_new(&mut out),
+                Step::WithOidType(kind) => {
+                    let mut opts = ffi::git_repository_new_options {
+                        version: ffi::GIT_REPOSITORY_NEW_OPTIONS_VERSION,
+                        oid_type: kind.raw(),
+                    };
+                    ffi::git_repository_new_ext(&mut out, &mut opts)
+                }
+                Step::OpenTestrepo { bare: false } | Step::Open(_) => {
+                    ffi::git_repository_open(&mut out, path.as_ptr())
+                }
+                Step::OpenTestrepo { bare: true } | Step::OpenBare(_) => {
+                    ffi::git_repository_open_bare(&mut out, path.as_ptr())
+                }
+                Step::Init(_, bare) => {
+                    ffi::git_repository_init(&mut out, path.as_ptr(), bare.into())
+                }
+            }
+        };
+        let outcome = if rc == 0 {
+            Outcome::Repo(state(scratch, out))
+        } else {
+            let (class, message) = c_last();
+            Outcome::Failed {
+                code: rc,
+                class,
+                message: scratch.relative(&message),
+            }
+        };
+        // SAFETY: `out` is NULL or the repository the call produced, freed once.
+        unsafe { ffi::git_repository_free(out) };
+        (outcome, filled.map(|rel| scratch.tree(rel)))
+    }
+
+    /// One step through the Rust API.
+    fn rust_step(scratch: &Scratch, step: Step) -> Record {
+        let (path, filled) = paths(scratch, step);
+        let result: Result<RepositoryBox, RepositoryError> = match step {
+            Step::New => Repository::new(),
+            Step::WithOidType(kind) => Repository::with_oid_type(kind),
+            Step::OpenTestrepo { bare: false } | Step::Open(_) => Repository::open(&path),
+            Step::OpenTestrepo { bare: true } | Step::OpenBare(_) => Repository::open_bare(&path),
+            Step::Init(_, bare) => Repository::init(&path, bare),
+        };
+        let outcome = match &result {
+            Ok(repo) => Outcome::Repo(state(scratch, repo.as_c_ptr())),
+            Err(error) => Outcome::Failed {
+                code: error.raw_code(),
+                class: error.raw_class(),
+                message: scratch.relative(&error.message().to_string_lossy()),
+            },
+        };
+        drop(result);
+        (outcome, filled.map(|rel| scratch.tree(rel)))
+    }
+
+    /// The calling thread's last error, as C reads it.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: the runtime is initialised; the result is a static error or this
+        // thread's, live until the next libgit2 call on this thread, after the copy.
+        unsafe {
+            let e = ffi::git_error_last();
+            let message = (*e).message;
+            let message = if message.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(message).to_string_lossy().into_owned()
+            };
+            ((*e).klass, message)
+        }
+    }
+
+    /// Initialises libgit2 for the C side; never released.
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// Runs `steps` on each side, each on a thread and in a scratch directory of its
+    /// own, and compares the records step by step.
+    fn compare(tag: &str, steps: &'static [Step]) {
+        init();
+        let side = |name: &'static str, step: fn(&Scratch, Step) -> Record| {
+            let tag = format!("{tag}-{name}");
+            thread::spawn(move || {
+                let scratch = Scratch::with_fixtures(&tag);
+                steps.iter().map(|&s| step(&scratch, s)).collect::<Vec<_>>()
+            })
+        };
+        let c = side("c", c_step).join().unwrap();
+        let rust = side("rust", rust_step).join().unwrap();
+        for (i, ((c, rust), step)) in c.iter().zip(&rust).zip(steps).enumerate() {
+            assert_eq!(c, rust, "step {i}: {step:?}");
+        }
+        assert_eq!(c.len(), rust.len());
+    }
+
+    /// The constructors without paths, then libgit2's test repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_and_open_build_what_c_builds() {
+        compare(
+            "open",
+            &[
+                Step::New,
+                Step::WithOidType(OidType::Sha1),
+                Step::WithOidType(OidType::Sha256),
+                Step::New,
+                Step::OpenTestrepo { bare: false },
+                Step::OpenTestrepo { bare: true },
+                Step::OpenTestrepo { bare: false },
+                Step::Open(""),
+                Step::Open("missing"),
+                Step::Open("."),
+                Step::Open("file"),
+                Step::Open("format"),
+                Step::Open("badbare"),
+                Step::Open("linked"),
+                Step::OpenBare(""),
+                Step::OpenBare("missing"),
+                Step::OpenBare("."),
+                Step::OpenTestrepo { bare: true },
+            ],
+        );
+    }
+
+    /// Repositories created, reinitialised and reopened, each in the sequence C
+    /// takes them through; the files `init` writes are compared whole.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_creates_and_reopens_what_c_does() {
+        compare(
+            "init",
+            &[
+                Step::Init("bare", true),
+                Step::Init("work", false),
+                Step::Init("nested/deeper/work", false),
+                Step::Open("bare"),
+                Step::Open("work"),
+                Step::Open("work/.git"),
+                Step::Open("nested/deeper/work"),
+                Step::Open("linked"),
+                Step::OpenBare("bare"),
+                Step::OpenBare("work"),
+                Step::OpenBare("work/.git"),
+                // Reinitialised: as bare and not, over each kind.
+                Step::Init("bare", true),
+                Step::Init("work", false),
+                Step::Init("bare", false),
+                Step::Init("work", true),
+                Step::Open("bare"),
+                Step::Open("work"),
+                // Refused.
+                Step::Init("", true),
+                Step::Init("file", true),
+                Step::Init("file/repo", false),
+                Step::Init("format", true),
+                Step::Open("bare"),
+            ],
+        );
+    }
+
+    /// `git_repository_open_bare` leaks the repository it built when it refuses the
+    /// format, as `Repository::open_bare` then does, so the step runs in a child
+    /// process with leak detection off; both sides must refuse it alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn open_bare_refuses_a_format_as_c_does() {
+        const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+        let path = concat!(module_path!(), "::open_bare_refuses_a_format_as_c_does");
+        let name = path.split_once("::").map_or(path, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            compare("open-bare-format", &[Step::OpenBare("format"), Step::New]);
+            return;
+        }
+        let asan = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .env("ASAN_OPTIONS", format!("{asan}:detect_leaks=0"))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

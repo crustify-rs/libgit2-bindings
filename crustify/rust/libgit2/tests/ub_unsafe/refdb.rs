@@ -1,10 +1,9 @@
-//! UB tests for the unsafe API of `git2/refdb.h`: the `git_refdb` constructors
-//! `Refdb::open` and `Refdb::new`, whose repository (and, for `new`, backend) are raw
-//! seams until those types are wrapped.
+//! UB tests for the unsafe API of `git2/refdb.h`: the `git_refdb` constructor
+//! `Refdb::new`, whose backend is a raw seam until that type is wrapped, beside the
+//! safe `Refdb::open` it is compared with.
 //!
-//! Each is called within its contract: a live repository that outlives the refdb (the
-//! fixture's borrow supplies `'r`), used on one thread, and for `new` a live backend of
-//! that repository. Both reference storage formats are covered. Every refdb built is
+//! `new` is called within its contract: a live backend of the repository, which the
+//! refdb borrows (the fixture's borrow supplies `'r`) on one thread. Both reference storage formats are covered. Every refdb built is
 //! freed once with its backend (ASan, LSan), and the backend reaches the repository
 //! only while it is live (a compaction through each refdb runs the backend's
 //! repository reads). A refused backend stays the caller's, untouched, and is freed
@@ -22,12 +21,13 @@ use std::sync::Mutex;
 
 use libgit2::ffi;
 use libgit2::libgit2::refs::refdb::{Refdb, RefdbArc, RefdbBox};
+use libgit2::libgit2::repository::repository::RepositoryBox;
 use libgit2::libgit2::util::errors::ErrorClass;
 
 /// A fresh bare repository with reference storage `format`, freed and removed on drop.
 struct Repo {
     path: std::path::PathBuf,
-    repo: NonNull<ffi::git_repository>,
+    repo: RepositoryBox,
 }
 
 impl Repo {
@@ -57,22 +57,21 @@ impl Repo {
         assert_eq!(rc, 0);
         Self {
             path,
-            repo: NonNull::new(repo).unwrap(),
+            // SAFETY: the fresh repository the call wrote, owned here alone.
+            repo: unsafe { RepositoryBox::from_c(repo) }.unwrap(),
         }
     }
 
     /// `Refdb::open` on this repository, which the borrow keeps alive.
     fn open(&self) -> RefdbBox<'_> {
-        // SAFETY: the live repository, freed only after the borrow ends, used on this
-        // thread alone.
-        unsafe { Refdb::open(self.repo) }.unwrap()
+        Refdb::open(self.repo.as_ref()).unwrap()
     }
 
     /// A fresh files backend of this repository.
     fn fs_backend(&self) -> NonNull<ffi::git_refdb_backend> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and the live repository.
-        let rc = unsafe { ffi::git_refdb_backend_fs(&mut out, self.repo.as_ptr()) };
+        let rc = unsafe { ffi::git_refdb_backend_fs(&mut out, self.repo.as_c_ptr()) };
         assert_eq!(rc, 0);
         NonNull::new(out).unwrap()
     }
@@ -86,17 +85,15 @@ impl Repo {
         &self,
         backend: NonNull<ffi::git_refdb_backend>,
     ) -> Result<RefdbBox<'_>, libgit2::libgit2::util::errors::ErrorBuf> {
-        // SAFETY: the live repository, freed only after the borrow ends, and a backend
-        // of it per this function's contract.
-        unsafe { Refdb::new(self.repo, backend) }
+        // SAFETY: a backend of this repository per this function's contract.
+        unsafe { Refdb::new(self.repo.as_ref(), backend) }
     }
 }
 
 impl Drop for Repo {
     fn drop(&mut self) {
-        // SAFETY: the repository this fixture opened, freed once, after every refdb of
-        // it.
-        unsafe { ffi::git_repository_free(self.repo.as_ptr()) };
+        // The repository is freed after (refdbs borrowing it are gone); freeing touches
+        // no file.
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }

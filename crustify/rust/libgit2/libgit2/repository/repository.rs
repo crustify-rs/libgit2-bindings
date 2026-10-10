@@ -21,12 +21,24 @@
 //! files git leaves in the git directory. Its one producer returns it as an `int`, and
 //! `-1` when it cannot build the path it probes, so a raw value is converted fallibly
 //! ([`RepositoryState::from_raw`] and `TryFrom`) and never transmuted.
+//!
+//! # The repository
+//!
+//! A [`Repository`] is the opaque `git_repository`, which libgit2 allocates and frees
+//! with no count: one [`RepositoryBox`] owns it, built by the constructors on
+//! [`Repository`], which report a failure as a [`RepositoryError`].
 
-use core::ffi::c_uint;
+use core::ffi::{CStr, c_int, c_uint};
 use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
+use core::ptr::{self, NonNull};
+
+use ffibox::{CBox, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::oid::oid::OidType;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::runtime_pinned;
 
 /// One option of `git_repository_init_ext`, a single bit of an [`InitFlags`] set
 /// (`git_repository_init_flag_t`). Each is off by default.
@@ -992,6 +1004,325 @@ impl fmt::Display for UnnamedRepositoryState {
 
 impl std::error::Error for UnnamedRepositoryState {}
 
+define_ctype!(
+    /// A repository (`git_repository`): an opaque C object holding a repository's
+    /// paths, its lazily loaded object database, reference database, config and
+    /// index, and the caches libgit2 keeps over them.
+    ///
+    /// libgit2 allocates every repository and releases it with `git_repository_free`;
+    /// it keeps no count, so a repository has one owner, a [`RepositoryBox`], built by
+    /// [`new`](Self::new), [`with_oid_type`](Self::with_oid_type), [`open`](Self::open),
+    /// [`open_bare`](Self::open_bare) or [`init`](Self::init), and read and written
+    /// through the box's [`as_ref`](CBox::as_ref) / [`as_mut`](CBox::as_mut) handles.
+    /// There is no copy: libgit2 has none, so the box is not `Clone`.
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let repo = Repository::new().unwrap();
+    /// let _copy = repo.clone();
+    /// ```
+    ///
+    /// The objects a repository spawns (objects, references, iterators...) keep a bare
+    /// pointer to it and read through it until they are freed, so their wrappers
+    /// borrow its handles; a handle cannot outlive the box:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let repo = Repository::new().unwrap();
+    /// let handle = repo.as_ref();
+    /// drop(repo);
+    /// let _ = handle;
+    /// ```
+    ///
+    /// The odb, refdb, config and index a repository loads are counted objects it
+    /// shares with whoever asks for them (`git_repository_odb`...), on any thread, and
+    /// many of its routines fill or replace them, and its other caches, through a
+    /// shared pointer. So neither a repository nor its handles are `Send` or `Sync`:
+    /// every handle stays on the thread that owns the box, and a routine that updates
+    /// those caches is sound through the shared [`RepositoryRef`], as a `Cell` is.
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// fn send<T: Send>(_: T) {}
+    /// send(Repository::new().unwrap());
+    /// ```
+    ///
+    /// Wraps: git_repository
+    Repository, RepositoryRef, RepositoryMut, ffi::git_repository
+);
+
+/// Releases a repository through `git_repository_free`: the counted references it
+/// holds to its odb, refdb, config and index, its caches and paths, then the struct.
+/// Also builds one through `git_repository_new`, so [`CBox::new`] makes the
+/// repository [`Repository::new`] makes, reporting a failure as `None`.
+///
+/// No repository reaches C before libgit2 is initialised: each constructor pins the
+/// runtime first, so the free is ordered after the initialisation that settled the
+/// allocator it frees into.
+///
+/// Wraps: git_repository_free
+/// Wraps: git_repository_new
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RepositoryFree;
+
+impl_cdrop!(RepositoryFree, Repository, ffi::git_repository_free);
+
+// SAFETY: `git_repository_new` writes a fresh, fully initialised repository that the
+// caller owns alone and `git_repository_free` releases, or leaves the slot NULL when
+// it fails (`git_repository_new_ext` stores `repository_alloc`'s result before
+// checking it). The runtime is pinned before the call.
+unsafe impl CNew<Repository> for RepositoryFree {
+    fn c_new(&self) -> Option<NonNull<Repository>> {
+        if !runtime_pinned() {
+            return None;
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
+        // reported on live thread-local state.
+        let rc = unsafe { ffi::git_repository_new(&mut out) };
+        if rc != 0 {
+            return None;
+        }
+        NonNull::new(out.cast())
+    }
+}
+
+/// An owned [`Repository`], freed by `git_repository_free` on drop.
+pub type RepositoryBox = CBox<Repository, RepositoryFree>;
+
+/// A repository constructor's failure: the code it returned, and the error it left as
+/// the thread's last libgit2 error, copied out.
+///
+/// The code tells the failures apart: [`ErrorCode::NotFound`] when there is no
+/// repository at the path, [`ErrorCode::Owner`] when it belongs to another user and
+/// is not a `safe.directory`, [`ErrorCode::Exists`] when a directory cannot be made
+/// over a file, [`ErrorCode::Generic`] for the rest.
+///
+/// Handwritten
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct RepositoryError {
+    code: c_int,
+    error: ErrorBuf,
+}
+
+impl RepositoryError {
+    /// The failure a constructor reported by returning `rc`, with the thread's last
+    /// error. A positive `rc` is a failure too (see [`Repository::init`]), reported as
+    /// `GIT_ERROR`.
+    fn from_libgit2(rc: c_int) -> Self {
+        Self {
+            code: if rc < 0 { rc } else { ErrorCode::Generic.raw() },
+            error: last(),
+        }
+    }
+
+    /// The returned code; `None` for one the header does not name
+    /// ([`raw_code`](Self::raw_code) has it).
+    pub fn code(&self) -> Option<ErrorCode> {
+        ErrorCode::from_raw(self.code)
+    }
+
+    /// The returned code, always negative.
+    pub fn raw_code(&self) -> c_int {
+        self.code
+    }
+
+    /// The error's class; `None` for a class the header does not name
+    /// ([`raw_class`](Self::raw_class) has it).
+    pub fn class(&self) -> Option<ErrorClass> {
+        self.error.class()
+    }
+
+    /// The error's class as libgit2 stored it.
+    pub fn raw_class(&self) -> c_int {
+        self.error.raw_class()
+    }
+
+    /// The error message.
+    pub fn message(&self) -> &CStr {
+        self.error.message()
+    }
+
+    /// The error, without the code.
+    pub fn error(&self) -> &ErrorBuf {
+        &self.error
+    }
+}
+
+/// The error, without the code.
+impl From<RepositoryError> for ErrorBuf {
+    fn from(error: RepositoryError) -> Self {
+        error.error
+    }
+}
+
+impl fmt::Debug for RepositoryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("RepositoryError");
+        match self.code() {
+            Some(code) => s.field("code", &code),
+            None => s.field("code", &self.code),
+        };
+        s.field("error", &self.error).finish()
+    }
+}
+
+impl fmt::Display for RepositoryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for RepositoryError {}
+
+/// The repository a constructor returned `rc` for, adopted from its out slot.
+///
+/// `git_repository_init` can fail after it opened the repository, leaving it in the
+/// slot (and then may return a positive code, see [`Repository::init`]); it is
+/// released here, after the error is copied out. A slot left NULL on success would be
+/// a libgit2 bug, reported as the thread's error.
+fn constructed(rc: c_int, repo: Option<RepositoryBox>) -> Result<RepositoryBox, RepositoryError> {
+    match repo {
+        Some(repo) if rc == 0 => Ok(repo),
+        repo => {
+            let error = RepositoryError::from_libgit2(rc);
+            drop(repo);
+            Err(error)
+        }
+    }
+}
+
+/// The failure reported when libgit2 cannot be initialised, without calling it.
+fn unpinned() -> RepositoryError {
+    RepositoryError {
+        code: ErrorCode::Generic.raw(),
+        error: last(),
+    }
+}
+
+impl Repository {
+    /// A repository with no paths, backends or config (`is_bare`), for wiring custom
+    /// backends into; its objects are SHA-1 ids. Fails only when libgit2 runs out of
+    /// memory, or cannot be initialised.
+    ///
+    /// Wraps: git_repository_new
+    pub fn new() -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
+        // reported on live thread-local state.
+        let rc = unsafe { ffi::git_repository_new(&mut out) };
+        // SAFETY: `git_repository_new` leaves `out` NULL on failure, or writes a fresh
+        // repository the caller owns alone.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// As [`new`](Self::new), for objects of type `oid_type`.
+    ///
+    /// libgit2 asserts the type is one it names, which [`OidType`] guarantees.
+    ///
+    /// Wraps: git_repository_new_ext
+    pub fn with_oid_type(oid_type: OidType) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut opts = ffi::git_repository_new_options {
+            version: ffi::GIT_REPOSITORY_NEW_OPTIONS_VERSION,
+            oid_type: oid_type.raw(),
+        };
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `opts` live options of the current
+        // version naming a valid type, read for the call only. The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_new_ext(&mut out, &mut opts) };
+        // SAFETY: `git_repository_new_ext` leaves `out` NULL on failure, or writes a
+        // fresh repository the caller owns alone.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// Opens the repository at `path`: a repository directory (`.git`, or a bare
+    /// one), or a working directory with one in `.git`. Parent directories are not
+    /// searched.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when `path` does not resolve or holds no
+    /// repository, with [`ErrorCode::Owner`] when the repository belongs to another
+    /// user and is not a `safe.directory`, and otherwise with libgit2's error (an
+    /// unsupported format version or extension, say).
+    ///
+    /// Wraps: git_repository_open
+    pub fn open(path: &CStr) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `path` a NUL-terminated string, read for
+        // the call only. The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_open(&mut out, path.as_ptr()) };
+        // SAFETY: `git_repository_open` NULLs `out` first and writes a fresh repository
+        // the caller owns alone only on success, freeing its own on failure.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// Opens the repository directory `path` as a bare repository, without reading
+    /// its config for a working directory, its grafts or the environment, and without
+    /// checking who owns it: a fast open for hosting.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when `path` does not resolve or is not a
+    /// repository directory (a working directory is not), and otherwise with
+    /// libgit2's error.
+    ///
+    /// libgit2 leaks the half-built repository when it fails after finding one (an
+    /// unsupported format version or extension, an allocation failure).
+    ///
+    /// Wraps: git_repository_open_bare
+    pub fn open_bare(path: &CStr) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `path` a NUL-terminated string, read for
+        // the call only. The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_open_bare(&mut out, path.as_ptr()) };
+        // SAFETY: `git_repository_open_bare` writes a fresh repository the caller owns
+        // alone only on success, and leaves the NULL slot alone otherwise.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// Creates a repository at `path`, its missing parent directories included, and
+    /// opens it: `path` is the repository directory when `bare`, otherwise the working
+    /// directory, the repository going in `path/.git`. An existing repository is
+    /// reinitialised, its config refreshed and its references kept.
+    ///
+    /// Fails with libgit2's error; with [`ErrorCode::Exists`] when a directory on the
+    /// way is a file.
+    ///
+    /// libgit2 can fail after opening the repository (when its reference database
+    /// cannot be set up), leaving it in the out slot, which is released here. One such
+    /// failure, a reftable repository's `reftable` directory that cannot be made,
+    /// returns 1 rather than a negative code: it is reported as an error all the same,
+    /// with `GIT_ERROR`, where C callers that test for a negative code take it for
+    /// success.
+    ///
+    /// Wraps: git_repository_init
+    pub fn init(path: &CStr, bare: bool) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, NULL so a failure before the inner open
+        // leaves it NULL, and `path` a NUL-terminated string, read for the call only.
+        // The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_init(&mut out, path.as_ptr(), bare.into()) };
+        // SAFETY: `git_repository_init` leaves `out` NULL, or writes the fresh
+        // repository it opened, owned by the caller alone, whatever it returns.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     mod init_flags_and_modes {
@@ -1350,6 +1681,342 @@ mod unit_tests {
                 format!("{:?}", UnnamedRepositoryState(12)),
                 "UnnamedRepositoryState(12)"
             );
+        }
+    }
+
+    mod repository_owner {
+        use super::super::*;
+
+        use std::process::Command;
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+
+        use std::ffi::CString;
+        use std::fs;
+        use std::os::unix::ffi::OsStrExt;
+        use std::path::PathBuf;
+
+        /// A scratch directory of its own under the temp dir, removed when dropped.
+        struct Scratch {
+            path: PathBuf,
+            c_path: CString,
+        }
+
+        impl Scratch {
+            fn new(tag: &str) -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "crustify-repository-unit-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = fs::remove_dir_all(&path);
+                let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                Self { path, c_path }
+            }
+
+            /// A bare repository whose references live in a reftable, with a file where
+            /// its `reftable` directory goes: `git_refdb_init` cannot make the directory,
+            /// after `git_repository_init` opened the repository.
+            fn unmakeable_reftable(tag: &str) -> Self {
+                let this = Self::new(tag);
+                fs::create_dir_all(this.path.join("objects")).unwrap();
+                fs::create_dir_all(this.path.join("refs")).unwrap();
+                fs::write(this.path.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+                fs::write(
+                    this.path.join("config"),
+                    "[core]\n\trepositoryformatversion = 1\n\tbare = true\n\
+                     [extensions]\n\trefstorage = reftable\n",
+                )
+                .unwrap();
+                fs::write(this.path.join("reftable"), "not a directory\n").unwrap();
+                this
+            }
+        }
+
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.path);
+            }
+        }
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        static REFUSING: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut core::ffi::c_void;
+            fn realloc(p: *mut core::ffi::c_void, n: usize) -> *mut core::ffi::c_void;
+            fn free(p: *mut core::ffi::c_void);
+        }
+
+        /// libc's allocator, refusing everything while `REFUSING` is set.
+        struct Refusing;
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Refusing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+        fn install_refusing() {
+            let allocator = Allocator::new::<Refusing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
+            // every member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+
+        /// When libgit2 cannot be initialised, every constructor fails without calling
+        /// it, with the error `last` synthesises, and the policy builds nothing.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructors_refuse_without_a_runtime() {
+            isolated(
+                concat!(module_path!(), "::constructors_refuse_without_a_runtime"),
+                || {
+                    install_refusing();
+                    REFUSING.store(true, SeqCst);
+                    let new = Repository::new().unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert!(!runtime_pinned(), "libgit2 could not initialise");
+                    assert!(RepositoryBox::new().is_none());
+                    let results = [
+                        new,
+                        Repository::with_oid_type(OidType::Sha256).unwrap_err(),
+                        Repository::open(c".").unwrap_err(),
+                        Repository::open_bare(c".").unwrap_err(),
+                        Repository::init(c".", true).unwrap_err(),
+                    ];
+                    for error in results {
+                        assert_eq!(error.code(), Some(ErrorCode::Generic));
+                        assert_eq!(error.class(), Some(ErrorClass::Invalid));
+                        assert_eq!(error.message(), c"library has not been initialized");
+                    }
+                },
+            );
+        }
+
+        /// An allocation failure fails `git_repository_new` and `_new_ext` with the
+        /// out-of-memory error, and the policy's `CNew` with `None`.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructors_report_running_out_of_memory() {
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::constructors_report_running_out_of_memory"
+                ),
+                || {
+                    install_refusing();
+                    // A failure first, so the thread's error state exists before
+                    // allocation stops (else the error read is the thread-state one).
+                    assert!(Repository::open(c"").is_err());
+                    REFUSING.store(true, SeqCst);
+                    let none = RepositoryBox::new().is_none();
+                    let new = Repository::new().unwrap_err();
+                    let with = Repository::with_oid_type(OidType::Sha1).unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert!(none);
+                    for error in [new, with] {
+                        assert_eq!(error.code(), Some(ErrorCode::Generic));
+                        assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                    }
+                    // Allocation works again.
+                    drop(Repository::new().unwrap());
+                },
+            );
+        }
+
+        /// `git_repository_is_bare` and `git_repository_oid_type` of a live repository.
+        fn bare_and_type(repo: &RepositoryBox) -> (c_int, ffi::git_oid_t) {
+            let raw = repo.as_ref().as_ptr();
+            // SAFETY: `raw` addresses the box's live repository, only read by both calls.
+            unsafe {
+                (
+                    ffi::git_repository_is_bare(raw),
+                    ffi::git_repository_oid_type(raw.cast_mut()),
+                )
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn new_builds_a_bare_sha1_repository_without_paths() {
+            let repo = Repository::new().unwrap();
+            assert_eq!(bare_and_type(&repo), (1, ffi::GIT_OID_SHA1));
+            // SAFETY: the box's live repository, only read.
+            let path = unsafe { ffi::git_repository_path(repo.as_ref().as_ptr()) };
+            assert!(path.is_null());
+        }
+
+        /// The policy's `CNew` builds the repository `Repository::new` builds.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn the_policy_constructs_what_new_does() {
+            let repo = RepositoryBox::new().unwrap();
+            assert_eq!(bare_and_type(&repo), (1, ffi::GIT_OID_SHA1));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn with_oid_type_records_the_type() {
+            for kind in [OidType::Sha1, OidType::Sha256] {
+                let repo = Repository::with_oid_type(kind).unwrap();
+                assert_eq!(bare_and_type(&repo), (1, kind.raw()));
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn an_error_keeps_negative_codes_and_reports_positive_ones_as_generic() {
+            assert!(runtime_pinned());
+            let not_found = RepositoryError::from_libgit2(ffi::GIT_ENOTFOUND);
+            assert_eq!(not_found.code(), Some(ErrorCode::NotFound));
+            assert_eq!(not_found.raw_code(), ffi::GIT_ENOTFOUND);
+            let unnamed = RepositoryError::from_libgit2(-1000);
+            assert_eq!(unnamed.code(), None);
+            assert_eq!(unnamed.raw_code(), -1000);
+            let positive = RepositoryError::from_libgit2(1);
+            assert_eq!(positive.code(), Some(ErrorCode::Generic));
+            assert_eq!(positive.raw_code(), -1);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn an_error_formats_its_code_and_message() {
+            let error = Repository::open(c"").unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+            assert_eq!(error.class(), Some(ErrorClass::Os));
+            assert_eq!(error.raw_class(), ErrorClass::Os.raw());
+            let message = "failed to resolve path '': No such file or directory";
+            assert_eq!(error.message().to_str(), Ok(message));
+            assert_eq!(error.to_string(), message);
+            let debug = format!("{error:?}");
+            assert!(
+                debug.starts_with("RepositoryError { code: NotFound, error: "),
+                "{debug}"
+            );
+            let unnamed = RepositoryError {
+                code: -1000,
+                error: error.error().clone(),
+            };
+            assert!(format!("{unnamed:?}").starts_with("RepositoryError { code: -1000,"));
+            let buf: ErrorBuf = error.clone().into();
+            assert_eq!(&buf, error.error());
+        }
+
+        /// The adoption plumbing releases a repository C left in the slot of a failed
+        /// call, after the error is copied (LSan flags a leak, ASan a double free).
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructed_releases_a_repository_left_by_a_failure() {
+            assert!(runtime_pinned());
+            let mut out = ptr::null_mut();
+            // SAFETY: `out` is a writable slot; the runtime is pinned.
+            assert_eq!(unsafe { ffi::git_repository_new(&mut out) }, 0);
+            assert!(!out.is_null());
+            // SAFETY: `out` is the fresh repository just made, owned here alone.
+            let repo = unsafe { RepositoryBox::from_c(out) };
+            let error = constructed(ffi::GIT_EEXISTS, repo).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Exists));
+            let mut out = ptr::null_mut();
+            // SAFETY: `out` is a writable slot; the runtime is pinned.
+            assert_eq!(unsafe { ffi::git_repository_new(&mut out) }, 0);
+            // SAFETY: as above.
+            let repo = unsafe { RepositoryBox::from_c(out) };
+            let error = constructed(1, repo).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+        }
+
+        /// An empty slot is a failure even where the code says success.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructed_refuses_a_null_slot() {
+            assert!(runtime_pinned());
+            let error = constructed(0, None).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+        }
+
+        /// Corrected C behaviour: `git_repository_init` returns 1 and the repository it
+        /// opened when the reftable backend cannot make its directory
+        /// (`refdb_reftable_init` assigns `mkdir(..) < 0` to its error); the wrapper reports
+        /// the failure, with libgit2's error, and releases that repository.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn init_reports_the_reftable_directory_failure() {
+            let expected = |scratch: &Scratch| {
+                format!(
+                    "failed to make directory '{}': directory exists",
+                    scratch.path.join("reftable").display()
+                )
+            };
+
+            let c_side = Scratch::unmakeable_reftable("reftable-c");
+            assert!(runtime_pinned());
+            let mut out = ptr::null_mut();
+            // SAFETY: `out` is a writable slot and the path NUL-terminated; the runtime is
+            // pinned.
+            let rc = unsafe { ffi::git_repository_init(&mut out, c_side.c_path.as_ptr(), 1) };
+            let c_error = last();
+            // SAFETY: C leaves the repository it opened in `out`, owned here; freed once.
+            unsafe { ffi::git_repository_free(out) };
+            assert_eq!(rc, 1);
+            assert!(!out.is_null());
+            assert_eq!(c_error.message().to_str(), Ok(&*expected(&c_side)));
+
+            let rust_side = Scratch::unmakeable_reftable("reftable-rust");
+            let error = Repository::init(&rust_side.c_path, true).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+            assert_eq!(error.class(), Some(ErrorClass::Filesystem));
+            assert_eq!(error.message().to_str(), Ok(&*expected(&rust_side)));
         }
     }
 }
