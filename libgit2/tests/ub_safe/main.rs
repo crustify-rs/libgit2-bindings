@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 mod annotated_commit;
+mod blob;
 mod buffer;
 mod checkout;
 mod commit;
@@ -31,6 +32,7 @@ mod sys_errors;
 mod sys_odb_backend;
 mod sys_path;
 mod sys_repository;
+mod tag;
 mod trace;
 mod tree;
 mod types;
