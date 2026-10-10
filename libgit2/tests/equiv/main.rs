@@ -15,3 +15,4 @@ mod sys_errors;
 mod sys_odb_backend;
 mod trace;
 mod types;
+mod worktree;

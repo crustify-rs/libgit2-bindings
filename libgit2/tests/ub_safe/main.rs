@@ -23,6 +23,7 @@ mod sys_errors;
 mod sys_odb_backend;
 mod trace;
 mod types;
+mod worktree;
 
 /// Illegal safe paths that must fail to compile, one file each under `compile_fail/`.
 #[test]

@@ -338,6 +338,29 @@
    "fields": []
   },
   {
+   "name": "git_worktree_prune_options",
+   "defined_in": "include/git2/worktree.h",
+   "_comment_agent": "Resource-free POD of two 32-bit scalars (8 bytes, no padding, no pointer). No dropper, disposer or cloner: callers hold it by value (stack) and C copies it by value. Its one lifecycle primitive is the in-place init constructor git_worktree_prune_options_init(opts, version), which memcpys GIT_WORKTREE_PRUNE_OPTIONS_INIT = {1, 0} and fails (git_error_set GIT_ERROR_INVALID, opts untouched) only for version 0 or > GIT_WORKTREE_PRUNE_OPTIONS_VERSION. All-zero is NOT the default: consumers (git_worktree_is_prunable, git_worktree_prune) reject version 0 with -1 'invalid version 0 on git_worktree_prune_options'. Consumers take it nullable and read-only (version check, then memcpy into a local); flags bits outside git_worktree_prune_t are ignored. Not shared with threads by C; no lock.",
+   "fields": [
+    {
+     "name": "flags",
+     "refcount": false,
+     "locked_by": null
+    },
+    {
+     "name": "version",
+     "refcount": false,
+     "locked_by": null
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_prune_t",
+   "defined_in": "include/git2/worktree.h",
+   "_comment_agent": "Flag enum: VALID=1<<0, LOCKED=1<<1, WORKING_TREE=1<<2, OR-ed into git_worktree_prune_options.flags (uint32_t). C tests each bit with & and ignores the others, so any u32 is a valid flags value; the enum names single bits only.",
+   "fields": []
+  },
+  {
    "name": "git_writestream",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "git_writestream is a vtable header embedded as the first member of a concrete stream (blob_writestream, buffered_stream, buf_stream, checkout_stream, user filter streams); its three members take the header pointer and cast it back to the container, so a header is never valid detached from its container (never copied or held by value). Ownership: git_blob_create_from_stream returns an owned stream (released by its own `free`, or consumed by git_blob_create_from_stream_commit); git_filter_list_stream_{buffer,file,blob} borrow a caller target for the call and write/close (never free) it; a user filter's git_filter_stream_fn returns an owned stream to libgit2, which frees it with its `free` member after closing the chain, and gets `next` borrowed for the chain's life. Rust wrapper: WriteStream/WriteStreamRef/WriteStreamMut (core/types.rs), WriteStreamBox = CBox<WriteStream, WriteStreamFree> (free through the object's own member), RustWriteStream<W: StreamWriter> for Rust implementations.",
@@ -2607,6 +2630,85 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_is_prunable",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only despite the non-const type: GIT_ERROR_CHECK_VERSION reads version (NULL passes), then memcpy copies it into a local; NULL means the {VERSION, 0} defaults. Not retained past the call. Flag bits outside git_worktree_prune_t are ignored."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_prune",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only despite the non-const type: GIT_ERROR_CHECK_VERSION reads version (NULL passes), then memcpy copies it into a local; NULL means the {VERSION, 0} defaults. Not retained past the call. Flag bits outside git_worktree_prune_t are ignored. HAZARD for the safe wrapper: prune tests `!git_worktree_is_prunable(wt, &popts)`, so an is_prunable ERROR (<0, e.g. GIT_ENOTFOUND 'requested file is a directory' when the `locked` entry cannot be read, checked only without GIT_WORKTREE_PRUNE_LOCKED) counts as prunable and prune deletes the gitdir anyway; git_futils_rmdir_r then clears the error state (pinned in tests/equiv/worktree.rs::prune_options::prune_reads_the_options_alike)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_prune_options_init",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-provided storage, written in full by memcpy of the {VERSION, 0} template when version is in 1..=GIT_WORKTREE_PRUNE_OPTIONS_VERSION; left untouched (error set) otherwise. GIT_INIT_STRUCTURE_FROM_TEMPLATE has no NULL check: a NULL opts with a valid version is a NULL write."
      }
     }
    ]

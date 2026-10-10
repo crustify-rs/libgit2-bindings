@@ -102,3 +102,8 @@ git_treebuilder_get
 git_treebuilder_insert
 git_treebuilder_new
 git_treebuilder_write
+git_worktree_free
+git_worktree_is_prunable
+git_worktree_lookup
+git_worktree_prune
+git_worktree_prune_options_init
