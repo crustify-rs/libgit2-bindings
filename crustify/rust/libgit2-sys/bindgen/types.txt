@@ -50,6 +50,7 @@ git_submodule_recurse_t
 git_submodule_update_t
 git_time
 git_trace_level_t
+git_treewalk_mode
 git_worktree
 git_worktree_add_options
 git_worktree_prune_options

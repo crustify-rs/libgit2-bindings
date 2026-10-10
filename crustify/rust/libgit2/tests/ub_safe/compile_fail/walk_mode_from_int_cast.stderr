@@ -1,0 +1,11 @@
+error[E0605]: non-primitive cast: `u32` as `WalkMode`
+ --> tests/ub_safe/compile_fail/walk_mode_from_int_cast.rs:7:13
+  |
+7 |     let _ = raw as WalkMode;
+  |             ^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `i32` as `WalkMode`
+ --> tests/ub_safe/compile_fail/walk_mode_from_int_cast.rs:8:13
+  |
+8 |     let _ = 0 as WalkMode;
+  |             ^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

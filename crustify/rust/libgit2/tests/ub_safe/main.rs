@@ -32,6 +32,7 @@ mod sys_odb_backend;
 mod sys_path;
 mod sys_repository;
 mod trace;
+mod tree;
 mod types;
 mod worktree;
 
