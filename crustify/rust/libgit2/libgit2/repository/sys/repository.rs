@@ -15,6 +15,7 @@
 //! [`NewOptions::new`] fills one through `git_repository_new_options_init`, as
 //! `GIT_REPOSITORY_NEW_OPTIONS_INIT` does: the current version and the default type.
 //! All-zero is not that default (libgit2 refuses version 0), so there is no `zeroed`.
+//! [`Repository::new_ext`] builds a repository from them.
 //!
 //! # The submodule cache
 //!
@@ -65,8 +66,6 @@
 //! [`RepositoryMut::cleanup`] releases what a [`Repository`] has loaded, as freeing it
 //! does first. Like the submodule cache's routines, it takes the exclusive handle.
 //!
-//! [`Repository`]: crate::libgit2::repository::repository::Repository
-//! [`Repository::new`]: crate::libgit2::repository::repository::Repository::new
 //! [`RepositoryFree`]: crate::libgit2::repository::repository::RepositoryFree
 //! [`ConfigBox`]: crate::libgit2::config::config::ConfigBox
 //! [`IndexBox`]: crate::libgit2::index::index::IndexBox
@@ -85,10 +84,11 @@ use crate::libgit2::odb::odb::OdbArc;
 use crate::libgit2::oid::oid::{OidType, UnnamedOidType};
 use crate::libgit2::refs::refdb::RefdbArc;
 use crate::libgit2::repository::repository::{
-    RepositoryBox, RepositoryError, RepositoryMut, RepositoryRef, pathless, status,
+    Repository, RepositoryBox, RepositoryError, RepositoryMut, RepositoryRef, constructed,
+    pathless, status, unpinned,
 };
 use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
-use crate::libgit2::util::sys::errors::set;
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 define_ctype!(
     /// Options for a repository without backends (`git_repository_new_options`): the
     /// structure version, and the type of the object ids the repository holds.
@@ -329,6 +329,50 @@ const _: () = assert!(
     size_of::<NewOptions>() == size_of::<ffi::git_repository_new_options>()
         && align_of::<NewOptions>() == align_of::<ffi::git_repository_new_options>()
 );
+
+impl Repository {
+    /// A repository with no paths, backends or config, as [`Repository::new`] builds
+    /// one, of the object id type `opts` names ([`OidType::default`] for `None`): a
+    /// base for wiring custom backends into.
+    ///
+    /// Fails with `GIT_ERROR_INVALID` "invalid version N on git_repository_new_options"
+    /// when the options' [version](NewOptionsMut::set_version) is 0 or above
+    /// [`NewOptions::VERSION`], and otherwise only when libgit2 runs out of memory or
+    /// cannot be initialised. libgit2 asserts that a non-zero object id type is one it
+    /// names, which every [`NewOptions`] holds.
+    ///
+    /// ```
+    /// use libgit2::libgit2::oid::oid::OidType;
+    /// use libgit2::libgit2::repository::repository::Repository;
+    /// use libgit2::libgit2::repository::sys::repository::NewOptions;
+    ///
+    /// # if cfg!(miri) { return; }
+    /// let mut opts = NewOptions::new();
+    /// opts.as_mut().set_oid_type(Some(OidType::Sha256));
+    /// let repo = Repository::new_ext(opts.as_ref()).unwrap();
+    /// assert_eq!(repo.as_ref().oid_type(), OidType::Sha256);
+    /// assert!(repo.as_ref().is_bare() && repo.as_ref().path().is_none());
+    /// ```
+    ///
+    /// Wraps: git_repository_new_ext
+    pub fn new_ext(opts: NewOptionsRef<'_>) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let opts = opts.as_ptr().cast_mut();
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; `opts` live options, which
+        // `git_repository_new_ext` takes as `*mut` but only reads (version, then
+        // `oid_type`), for the call only, and whose `oid_type` is 0 or a type libgit2
+        // names, so its assertion holds. The runtime is pinned, so a failure is reported
+        // on live thread-local state.
+        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts) };
+        // SAFETY: `git_repository_new_ext` leaves `out` NULL when it refuses the
+        // options, stores `repository_alloc`'s result (NULL on failure) otherwise, and
+        // on success that is a fresh repository the caller owns alone.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+}
 
 impl RepositoryMut<'_> {
     /// Loads every submodule of the repository into its submodule cache: those that

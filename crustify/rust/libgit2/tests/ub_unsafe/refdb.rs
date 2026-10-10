@@ -20,8 +20,8 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use libgit2::ffi;
-use libgit2::libgit2::refs::refdb::{Refdb, RefdbArc, RefdbBox};
-use libgit2::libgit2::repository::repository::RepositoryBox;
+use libgit2::libgit2::refs::refdb::{Refdb, RefdbArc, RefdbBox, RefdbType};
+use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository, RepositoryBox};
 use libgit2::libgit2::util::errors::ErrorClass;
 
 /// A fresh bare repository with reference storage `format`, freed and removed on drop.
@@ -40,26 +40,12 @@ impl Repo {
         ));
         let _ = std::fs::remove_dir_all(&path);
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-        opts.refdb_type = format;
-        let mut repo = ptr::null_mut();
-        // SAFETY: a live slot, a NUL-terminated path and live options, read for the call.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0);
-        Self {
-            path,
-            // SAFETY: the fresh repository the call wrote, owned here alone.
-            repo: unsafe { RepositoryBox::from_c(repo) }.unwrap(),
-        }
+        let mut opts = InitOptions::new();
+        let mut m = opts.as_mut();
+        m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+        m.set_refdb_type(Some(RefdbType::from_raw(format).unwrap()));
+        let repo = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
+        Self { path, repo }
     }
 
     /// `Refdb::open` on this repository, which the borrow keeps alive.

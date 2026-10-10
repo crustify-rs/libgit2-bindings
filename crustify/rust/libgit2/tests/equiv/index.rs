@@ -10,6 +10,7 @@ use std::ptr;
 
 use libgit2::ffi;
 use libgit2::libgit2::index::index::{Index, IndexArc, IndexBox};
+use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
 
 fn init() {
     core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
@@ -559,20 +560,10 @@ impl Repo {
     fn new(tag: &str) -> Self {
         let dir = Scratch::new(tag);
         let path = c_path(&dir.0);
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE;
-        let mut repo = ptr::null_mut();
-        // SAFETY: a live slot, a NUL-terminated path and live options, read for the call.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, path.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0);
+        let mut opts = InitOptions::new();
+        opts.as_mut().set_flags(InitFlag::Bare.into());
+        // The raw repository both sides' calls use; `Drop` frees it.
+        let repo = Repository::init_ext(&path, opts.as_mut()).unwrap().into_c();
         Self { _dir: dir, repo }
     }
 

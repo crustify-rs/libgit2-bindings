@@ -45,10 +45,12 @@ use std::ptr;
 
 use ffibox::CZeroable;
 use libgit2::ffi;
-use libgit2::libgit2::oid::oid::Oid;
+use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::refs::annotated_commit::{AnnotatedCommit, AnnotatedCommitBox};
 use libgit2::libgit2::refs::refs::ReferenceBox;
-use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryRef};
+use libgit2::libgit2::repository::repository::{
+    InitFlag, InitOptions, Repository, RepositoryBox, RepositoryRef,
+};
 use libgit2::libgit2::util::errors::ErrorBuf;
 
 /// Initialises libgit2; never released.
@@ -114,28 +116,16 @@ impl Repo {
         ));
         let _ = fs::remove_dir_all(&path);
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-        opts.initial_head = c"main".as_ptr();
-        opts.oid_type = kind;
-        let mut repo = ptr::null_mut();
-        // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
-        // options struct whose `initial_head` is a static string, all read for the call
-        // only; the result is NULL or a fresh repository, which `Drop` releases.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0, "{:?}", c_last());
-        let mut odb = ptr::null_mut();
-        // SAFETY: `odb` is a live slot and `repo` a live repository; the odb is a counted
+        let mut opts = InitOptions::new();
+        let mut m = opts.as_mut();
+        m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+        m.set_initial_head(Some(c"main"));
+        m.set_oid_type(Some(OidType::from_raw(kind).unwrap()));
+        let repo = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
+        let (mut odb, raw) = (ptr::null_mut(), repo.as_c_ptr());
+        // SAFETY: `odb` is a live slot and `raw` a live repository; the odb is a counted
         // reference, released below.
-        assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, repo) }, 0);
+        assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, raw) }, 0);
         let write = |data: &[u8], kind: ffi::git_object_t| {
             let mut id = ffi::git_oid::default();
             let rc =
@@ -177,10 +167,7 @@ impl Repo {
         unsafe { ffi::git_odb_free(odb) };
         let this = Self {
             path,
-            // SAFETY: the fresh repository `git_repository_init_ext` wrote, which this
-            // fixture owns alone, released by `git_repository_free` as `RepositoryFree`
-            // does.
-            repo: Some(unsafe { RepositoryBox::from_c(repo) }.unwrap()),
+            repo: Some(repo),
             ids: Ids {
                 tree,
                 blob,

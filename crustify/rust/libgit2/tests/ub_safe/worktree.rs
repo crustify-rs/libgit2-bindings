@@ -449,7 +449,7 @@ mod worktree_box {
 /// handles project each field out of a pointer, and the checkout options are reached in
 /// place. These tests exercise every getter and setter on every holder (a local, a heap
 /// slot, an element of a run that moves when it grows), through reborrows, then hand
-/// the options to `git_worktree_add` (through the fixture), which copies them, reads the
+/// the options to `git_worktree_add` (through `Worktree::add`), which copies them, reads the
 /// borrowed reference and the checkout options' borrowed strings, and keeps no pointer
 /// to any of them. A misaligned projection, a stale reference pointer or a write through
 /// the shared handle would be flagged by Miri and ASan/UBSan; the reference and the
@@ -976,5 +976,182 @@ mod routines {
         assert!(w.as_ref().validate().is_err());
         assert!(w.as_ref().prune(opts.as_ref()).is_err());
         assert_eq!(w.as_ref().is_locked(), Ok(false));
+    }
+}
+
+/// `Worktree::add`: the safe wrapper of `git_worktree_add`, which builds the worktree's
+/// directories and files, checks it out, and hands back a `WorktreeBox` it looked up.
+///
+/// The box copies every string it holds, so it outlives the repository it was added to
+/// and the options and reference the add read (ASan: no use after free). Every failing
+/// add releases what libgit2 allocated for it, and the repository the inner checkout
+/// opened, and returns no worktree (LSan, ASan): a missing parent directory, an existing
+/// working or administrative directory, a reference that is not a branch or that is
+/// checked out, a failed checkout. A repository without paths, whose NULL common
+/// directory libgit2 would join and then assert on, is refused before the call
+/// (UBSan/ASan would flag the NULL read; the unit tests check the working directory
+/// is untouched). Repositories are not `Send`, so each thread adds to its own (TSan).
+/// Adds that create a branch take the time through glibc's `tzset`, which TSan reports
+/// against other threads: those run alone in a child. Every test calls libgit2, so
+/// none runs under Miri.
+mod adding {
+    use std::ffi::CString;
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::thread;
+
+    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::repository::worktree::{AddOptions, Worktree};
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    use crate::fixture::isolated;
+    use crate::fixture::worktree_add::AddRepo;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn added_worktree_outlives_its_repository_and_options() {
+        let repo = AddRepo::new("outlives");
+        let feature = repo.reference(c"refs/heads/feature");
+        let name = CString::new("wt").unwrap();
+        let path = CString::new(repo.base.join("wt/wt").as_os_str().as_bytes()).unwrap();
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        opts.as_mut().set_lock(true);
+        let w = Worktree::add(repo.repo().as_ref(), &name, &path, Some(opts.as_ref())).unwrap();
+        // The strings passed in and the reference go first (the options' last use is
+        // above).
+        drop((name, path));
+        drop(feature);
+        let (base, admin) = (repo.base.clone(), repo.admin("wt"));
+        assert_eq!(w.as_ref().name(), c"wt");
+        let wt_path = w.as_ref().path().to_str().unwrap().to_owned();
+        assert_eq!(wt_path, base.join("wt/wt").to_str().unwrap());
+        assert_eq!(w.as_ref().is_locked(), Ok(true));
+        // Then the repository, and its directories with the fixture; the box still
+        // reads its copies.
+        drop(repo);
+        assert!(!admin.exists());
+        assert_eq!(w.as_ref().name(), c"wt");
+        assert!(w.as_ref().validate().is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failing_adds_release_everything() {
+        let repo = AddRepo::new("failing");
+        fs::write(repo.base.join("blocked"), "a file\n").unwrap();
+        let feature = repo.reference(c"refs/heads/feature");
+        let tag = repo.reference(c"refs/tags/v1");
+        let alpha = repo.reference(c"refs/heads/alpha");
+        let at = |rel: &str| CString::new(repo.base.join(rel).as_os_str().as_bytes()).unwrap();
+        let add = |name: &std::ffi::CStr, rel: &str, opts: &AddOptions<'_>| {
+            Worktree::add(repo.repo().as_ref(), name, &at(rel), Some(opts.as_ref()))
+        };
+        let mut opts = AddOptions::new();
+        // A tag is not a branch.
+        opts.as_mut().set_reference(Some(tag.as_ref()));
+        let error = add(c"e", "wt/e", &opts).unwrap_err();
+        assert_eq!(error.message(), c"reference is not a branch");
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        // The checkout fails (its target is a file), after the worktree is on disk.
+        let target = at("blocked");
+        opts.as_mut()
+            .checkout_options()
+            .set_target_directory(Some(&target));
+        assert!(add(c"c", "wt/c", &opts).is_err());
+        opts.as_mut().checkout_options().set_target_directory(None);
+        // What it left holds the branch checked out. (libgit2's check gives up once a
+        // directory under `worktrees/` is not a worktree's, as the failures below
+        // leave: so this comes first.)
+        let error = add(c"d", "wt/d", &opts).unwrap_err();
+        assert_eq!(
+            error.message(),
+            c"reference refs/heads/feature is already checked out"
+        );
+        opts.as_mut().set_reference(None);
+        opts.as_mut().set_checkout_existing(true);
+        // The working directory's parent is missing: the administrative directory stays.
+        let error = add(c"alpha", "missing/alpha", &opts).unwrap_err();
+        assert_eq!(
+            error.class(),
+            Some(libgit2::libgit2::util::errors::ErrorClass::Os)
+        );
+        assert!(repo.admin("alpha").is_dir());
+        // That administrative directory exists now.
+        let error = add(c"alpha", "wt/alpha", &opts).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Exists));
+        // The working directory exists.
+        fs::create_dir(repo.base.join("wt/b")).unwrap();
+        opts.as_mut().set_reference(Some(alpha.as_ref()));
+        let error = add(c"b", "wt/b", &opts).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Exists));
+        assert!(repo.admin("b").is_dir());
+        drop((feature, tag, alpha));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn a_repository_without_paths_is_refused() {
+        let alpha = AddRepo::new("pathless");
+        let reference = alpha.reference(c"refs/heads/alpha");
+        let pathless = Repository::new().unwrap();
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(reference.as_ref()));
+        let path = CString::new(alpha.base.join("wt/never").as_os_str().as_bytes()).unwrap();
+        for opts in [None, Some(opts.as_ref())] {
+            let error = Worktree::add(pathless.as_ref(), c"never", &path, opts).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+        }
+        assert!(!alpha.base.join("wt/never").exists());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_add_to_their_own_repositories() {
+        thread::scope(|s| {
+            for t in 0..6 {
+                s.spawn(move || {
+                    let repo = AddRepo::new(&format!("adding-thread-{t}"));
+                    let alpha = repo.reference(c"refs/heads/alpha");
+                    let mut opts = AddOptions::new();
+                    opts.as_mut().set_reference(Some(alpha.as_ref()));
+                    let path = repo.base.join("wt/wt");
+                    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+                    let w = Worktree::add(repo.repo().as_ref(), c"wt", &path, Some(opts.as_ref()));
+                    let w = w.unwrap();
+                    drop(alpha);
+                    // The worktree moves to the thread that drops it last.
+                    thread::spawn(move || assert_eq!(w.as_ref().name(), c"wt"))
+                        .join()
+                        .unwrap();
+                });
+            }
+        });
+    }
+
+    /// Without options, or with `checkout_existing`: the branch is created (or reused),
+    /// and created branches stay when the add fails later.
+    fn default_adds() {
+        let repo = AddRepo::new("adding-default");
+        let path = |rel: &str| CString::new(repo.base.join(rel).as_os_str().as_bytes()).unwrap();
+        let w = Worktree::add(repo.repo().as_ref(), c"fresh", &path("wt/fresh"), None).unwrap();
+        assert_eq!(w.as_ref().name(), c"fresh");
+        let error = Worktree::add(repo.repo().as_ref(), c"fresh", &path("wt/x"), None).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Exists));
+        let error = Worktree::add(repo.repo().as_ref(), c"bad..name", &path("wt/y"), None);
+        assert_eq!(error.unwrap_err().code(), Some(ErrorCode::InvalidSpec));
+        let error = Worktree::add(repo.repo().as_ref(), c"lost", &path("none/lost"), None);
+        assert!(error.is_err());
+        assert!(repo.base.join("repo/.git/refs/heads/lost").is_file());
+        drop(w);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn adds_without_options_create_their_branch() {
+        isolated(
+            concat!(module_path!(), "::adds_without_options_create_their_branch"),
+            default_adds,
+        );
     }
 }

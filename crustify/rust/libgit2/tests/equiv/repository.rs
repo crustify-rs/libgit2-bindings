@@ -2007,10 +2007,15 @@ mod repository_owner {
 /// written field by field, as C code writes one, and once on an [`InitOptions`] through
 /// its setters, each persisting across the steps. After every step the getters must
 /// read what the C struct holds (strings by content, each root masked), and
-/// `git_repository_init_ext` must behave the same with either: its return, the error
-/// of a failure, the flags it leaves in the options, and every file and directory it
-/// creates (kinds, permission bits, contents). The init routine is not wrapped yet, so
-/// the Rust options reach it through their documented `#[repr(transparent)]` layout.
+/// [`Repository::init_ext`] with the Rust options must behave as
+/// `git_repository_init_ext` with the C struct: the return, the error of a failure, the
+/// flags left in the options, and every file and directory created (kinds, permission
+/// bits, contents). The sequence reuses options across calls only where each step
+/// rewrites the flags or keeps the path, so the internal bits the wrapper clears
+/// before a call (a deliberate divergence, see the unit tests) are the ones C would
+/// recompute.
+///
+/// [`Repository::init_ext`]: libgit2::libgit2::repository::repository::Repository::init_ext
 ///
 /// [`InitOptions`]: libgit2::libgit2::repository::repository::InitOptions
 /// [`InitOptions::new`]: libgit2::libgit2::repository::repository::InitOptions::new
@@ -2028,7 +2033,7 @@ mod init_options {
     use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::refs::refdb::RefdbType;
     use libgit2::libgit2::repository::repository::{
-        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsRef,
+        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsMut, InitOptionsRef, Repository,
     };
 
     fn init() {
@@ -2219,6 +2224,28 @@ mod init_options {
         });
         // SAFETY: `opts` is live; the flags are plain data the call may have written.
         (rc, error, unsafe { (*opts).flags })
+    }
+
+    /// The bits `git_repository_init_ext` ORs into the options' flags for itself, and
+    /// which `Repository::init_ext` clears before each call.
+    const INTERNAL: u32 = 1 << 16 | 1 << 17 | 1 << 18;
+
+    /// `Repository::init_ext(root/path, opts)`, as [`init_ext`] records it.
+    fn rust_init_ext(root: &Path, path: &str, mut opts: InitOptionsMut<'_, '_>) -> Call {
+        let c_path = CString::new(root.join(path).as_os_str().as_bytes()).unwrap();
+        let error = Repository::init_ext(&c_path, opts.as_mut()).err().map(|e| {
+            let message = e.message().to_string_lossy();
+            let error = (
+                e.raw_class(),
+                message.replace(root.to_str().unwrap(), "<root>"),
+            );
+            (e.raw_code(), error)
+        });
+        let flags = opts.as_ref().flags().bits();
+        match error {
+            None => (0, None, flags),
+            Some((rc, error)) => (rc, Some(error), flags),
+        }
     }
 
     /// The strings one side owns, allocated independently of the other side's.
@@ -2513,22 +2540,35 @@ mod init_options {
         let mut c = c_options(ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION).1;
         let mut rust = InitOptions::new();
         let mut calls = Vec::new();
+        // The fields, with the internal flag bits (see `rust_init_ext`) masked.
+        let public = |mut fields: Fields| {
+            fields.0[1] &= !INTERNAL;
+            fields
+        };
         for step in steps() {
             (step.change.c)(&mut c, &strings[0]);
             (step.change.rust)(&mut rust, &strings[1]);
             assert_eq!(
-                rust_fields(rust.as_ref(), &roots[1].0),
-                c_fields(&c, &roots[0].0),
+                public(rust_fields(rust.as_ref(), &roots[1].0)),
+                public(c_fields(&c, &roots[0].0)),
                 "{}: fields",
                 step.tag
             );
             let c_call = init_ext(&roots[0].0, step.path, &mut c);
-            let rust_ptr = ptr::from_mut(&mut rust).cast::<ffi::git_repository_init_options>();
-            let rust_call = init_ext(&roots[1].0, step.path, rust_ptr);
-            assert_eq!(rust_call, c_call, "{}", step.tag);
+            let rust_call = rust_init_ext(&roots[1].0, step.path, rust.as_mut());
+            if step.tag.starts_with("version ") {
+                // libgit2 refuses the version before it reads or writes the flags, so
+                // C's keep the internal bits of the call before; the wrapper cleared
+                // them for this call.
+                assert_eq!((&rust_call.0, &rust_call.1), (&c_call.0, &c_call.1));
+                assert_eq!(rust_call.2, c_call.2 & !INTERNAL, "{}", step.tag);
+                assert_eq!(c_call.2 & INTERNAL, 1 << 16 | 1 << 17, "{}", step.tag);
+            } else {
+                assert_eq!(rust_call, c_call, "{}", step.tag);
+            }
             assert_eq!(
-                rust_fields(rust.as_ref(), &roots[1].0),
-                c_fields(&c, &roots[0].0),
+                public(rust_fields(rust.as_ref(), &roots[1].0)),
+                public(c_fields(&c, &roots[0].0)),
                 "{}: fields after the call",
                 step.tag
             );
@@ -2659,8 +2699,7 @@ mod init_options {
                     "{tag}"
                 );
                 let c_call = init_ext(&roots[0], path, &mut c);
-                let rust_ptr = ptr::from_mut(&mut rust).cast::<ffi::git_repository_init_options>();
-                let rust_call = init_ext(&roots[1], path, rust_ptr);
+                let rust_call = rust_init_ext(&roots[1], path, rust.as_mut());
                 assert_eq!(rust_call, c_call, "{tag}");
                 assert_eq!(snapshot(&roots[1]), snapshot(&roots[0]), "{tag}");
                 calls.push(c_call.0);
@@ -2714,6 +2753,68 @@ mod init_options {
             "child `{name}` failed:\n{stdout}\n{}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    /// Steps past the version check, each on fresh options and both sides alike: a
+    /// reinitialisation of a repository whose format libgit2 does not support, an
+    /// initial branch that is not a valid reference name on a fresh init and on a
+    /// reinitialisation (libgit2 writes it to `HEAD` unchecked), and a template whose
+    /// `refs` is a file. The returns, errors, flags and what is left on disk must
+    /// agree.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_ext_failures_match_c() {
+        init();
+        let roots = [Root::new("fail-c"), Root::new("fail-rust")];
+        for root in &roots {
+            for name in ["fmt9", "reinit"] {
+                let path = root.0.join(name);
+                fs::create_dir_all(path.join("objects")).unwrap();
+                fs::create_dir_all(path.join("refs/heads")).unwrap();
+                fs::write(path.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+                let version = if name == "fmt9" { 9 } else { 0 };
+                let config =
+                    format!("[core]\n\trepositoryformatversion = {version}\n\tbare = true\n");
+                fs::write(path.join("config"), config).unwrap();
+            }
+            fs::create_dir_all(root.0.join("bad-tpl")).unwrap();
+            fs::write(root.0.join("bad-tpl/refs"), "not a directory\n").unwrap();
+        }
+        let bad_tpl = [roots[0].c("bad-tpl"), roots[1].c("bad-tpl")];
+        type Step = (&'static str, Option<&'static CStr>, bool);
+        let steps: [Step; 4] = [
+            ("fmt9", None, false),
+            ("fresh-bad-head", Some(c"bad..name"), false),
+            ("reinit", Some(c"bad..name"), false),
+            ("bad-template", None, true),
+        ];
+        let mut codes = Vec::new();
+        for (path, head, template) in steps {
+            let mut c = c_options(ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION).1;
+            c.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+            c.initial_head = head.map_or(ptr::null(), CStr::as_ptr);
+            c.template_path = if template {
+                bad_tpl[0].as_ptr()
+            } else {
+                ptr::null()
+            };
+            let mut rust = InitOptions::new();
+            let mut m = rust.as_mut();
+            m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+            m.set_initial_head(head);
+            m.set_template_path(template.then_some(bad_tpl[1].as_c_str()));
+            let c_call = init_ext(&roots[0].0, path, &mut c);
+            let rust_call = rust_init_ext(&roots[1].0, path, rust.as_mut());
+            assert_eq!(rust_call, c_call, "{path}");
+            assert_eq!(snapshot(&roots[1].0), snapshot(&roots[0].0), "{path}");
+            codes.push((c_call.0, c_call.1.map(|(_, m)| m)));
+        }
+        let rc: Vec<_> = codes.iter().map(|(rc, _)| *rc).collect();
+        assert_eq!(rc, [-1, 0, 0, ffi::GIT_EEXISTS], "{codes:#?}");
+        for path in ["fresh-bad-head/HEAD", "reinit/HEAD"] {
+            let head = fs::read_to_string(roots[0].0.join(path)).unwrap();
+            assert_eq!(head, "ref: refs/heads/bad..name\n", "{path}");
+        }
     }
 }
 
@@ -5670,9 +5771,10 @@ mod head_and_lookups {
         }
     }
 
-    /// `git_repository_fetchhead_foreach` over `contents` with the C recorder and with
-    /// the Rust callback, each in a repository of its own; the returns, the errors and
-    /// the entries seen must agree.
+    /// `git_repository_fetchhead_foreach` over `contents` with the C recorder, and
+    /// `RepositoryRef::for_each_fetchhead` with the Rust callback, each in a repository
+    /// of its own; the returns (a `Break` reads as C's `GIT_EUSER`), the errors (the
+    /// thread's, after a stop) and the entries seen must agree.
     fn compare_fetchhead(contents: Option<&str>, answer: Answer) {
         static RUNS: AtomicUsize = AtomicUsize::new(0);
         init();
@@ -5685,8 +5787,12 @@ mod head_and_lookups {
                 None => fs::remove_file(scratch.0.join("bare/FETCH_HEAD")).unwrap(),
             }
             let repo = Repository::open(&scratch.c_path("bare")).unwrap();
+            // The open leaves a stale error, and libgit2 names a stop in the error only
+            // when none is set.
+            // SAFETY: the runtime is initialised.
+            unsafe { ffi::git_error_clear() };
             let mut entries = Vec::new();
-            let rc = if rust {
+            let outcome = if rust {
                 let mut seen = 0;
                 let mut record = |entry: FetchheadEntry<'_>| {
                     let text = |s: Option<&CStr>| s.map(|s| s.to_string_lossy().into_owned());
@@ -5703,14 +5809,14 @@ mod head_and_lookups {
                     }
                 };
                 let mut callback = FetchheadForeachCallback::new(&mut record);
-                let (f, payload) = callback.raw();
-                let raw = repo.as_c_ptr();
-                // SAFETY: a live repository and the callback's own function and payload,
-                // which stays put and unused for the call.
-                let rc = unsafe { ffi::git_repository_fetchhead_foreach(raw, f, payload) };
-                callback.resume_panic();
-                assert_eq!(callback.stopped(), rc == ffi::GIT_EUSER);
-                rc
+                let walked = repo.as_ref().for_each_fetchhead(&mut callback);
+                assert_eq!(callback.stopped(), walked == Ok(ControlFlow::Break(())));
+                match walked {
+                    Ok(ControlFlow::Continue(())) => Outcome::Value(0.to_string()),
+                    // libgit2 left the callback's error as the thread's.
+                    Ok(ControlFlow::Break(())) => c_failed(&scratch, ffi::GIT_EUSER),
+                    Err(error) => rust_failed(&scratch, &error),
+                }
             } else {
                 let mut recorder = Recorder {
                     answer,
@@ -5726,12 +5832,11 @@ mod head_and_lookups {
                     )
                 };
                 entries = recorder.entries;
-                rc
-            };
-            let outcome = if rc < 0 {
-                c_failed(&scratch, rc)
-            } else {
-                Outcome::Value(rc.to_string())
+                if rc < 0 {
+                    c_failed(&scratch, rc)
+                } else {
+                    Outcome::Value(rc.to_string())
+                }
             };
             (outcome, entries)
         };
@@ -5775,9 +5880,110 @@ mod head_and_lookups {
         }
     }
 
+    /// One repository per side, walked again after each change to its `FETCH_HEAD`
+    /// (rewritten, removed, malformed, restored), the Rust side through one callback
+    /// reused across the walks: after every walk the outcome, the thread's error and the
+    /// entries seen must agree with a fresh C walk's.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_walks_in_sequence_match_c() {
+        init();
+        let one = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'master' of x\n";
+        let steps: [(Option<&str>, Answer); 8] = [
+            (Some(FETCH_HEAD), Answer::Continue),
+            (Some(FETCH_HEAD), Answer::StopAt(2)),
+            (Some(one), Answer::Continue),
+            (None, Answer::Continue),
+            (
+                Some("a65fedf39aefe402d3bb6e24df4d4f5fe4547750\tx\n"),
+                Answer::Continue,
+            ),
+            (Some(FETCH_HEAD), Answer::StopAt(0)),
+            (Some(""), Answer::Continue),
+            (Some(FETCH_HEAD), Answer::StopAt(5)),
+        ];
+        let sides = [
+            Scratch::new("fetchhead-seq-c"),
+            Scratch::new("fetchhead-seq-r"),
+        ];
+        for side in &sides {
+            side.sandbox("testrepo.git", "bare");
+        }
+        let c_repo = Repository::open(&sides[0].c_path("bare")).unwrap();
+        let rust_repo = Repository::open(&sides[1].c_path("bare")).unwrap();
+        let seen = RefCell::new(Vec::new());
+        let answer = std::cell::Cell::new(Answer::Continue);
+        let mut record = |entry: FetchheadEntry<'_>| {
+            let text = |s: Option<&CStr>| s.map(|s| s.to_string_lossy().into_owned());
+            let mut seen = seen.borrow_mut();
+            seen.push((
+                text(entry.ref_name),
+                text(entry.remote_url),
+                entry.id.to_hex_string().unwrap(),
+                entry.is_merge,
+            ));
+            match answer.get() {
+                Answer::StopAt(i) if seen.len() == i + 1 => ControlFlow::Break(()),
+                _ => ControlFlow::Continue(()),
+            }
+        };
+        let mut callback = FetchheadForeachCallback::new(&mut record);
+        for (step, (contents, step_answer)) in steps.into_iter().enumerate() {
+            for side in &sides {
+                let path = side.0.join("bare/FETCH_HEAD");
+                match contents {
+                    Some(contents) => fs::write(path, contents).unwrap(),
+                    None => fs::remove_file(path).unwrap(),
+                }
+            }
+            let mut recorder = Recorder {
+                answer: step_answer,
+                code: ffi::GIT_EUSER,
+                entries: Vec::new(),
+            };
+            // Each walk starts without an error, which libgit2 names the stop in only
+            // when none is set.
+            // SAFETY: the runtime is initialised.
+            unsafe { ffi::git_error_clear() };
+            // SAFETY: a live repository and the recorder, live for the call.
+            let rc = unsafe {
+                ffi::git_repository_fetchhead_foreach(
+                    c_repo.as_c_ptr(),
+                    Some(c_recorder),
+                    (&raw mut recorder).cast(),
+                )
+            };
+            let c = if rc < 0 {
+                c_failed(&sides[0], rc)
+            } else {
+                Outcome::Value(rc.to_string())
+            };
+            answer.set(step_answer);
+            seen.borrow_mut().clear();
+            // SAFETY: the runtime is initialised.
+            unsafe { ffi::git_error_clear() };
+            let rust = match rust_repo.as_ref().for_each_fetchhead(&mut callback) {
+                Ok(ControlFlow::Continue(())) => Outcome::Value(0.to_string()),
+                Ok(ControlFlow::Break(())) => c_failed(&sides[1], ffi::GIT_EUSER),
+                Err(error) => rust_failed(&sides[1], &error),
+            };
+            assert_eq!(
+                (rust, seen.borrow().clone()),
+                (c, recorder.entries),
+                "step {step}"
+            );
+            assert_eq!(
+                callback.stopped(),
+                matches!(step_answer, Answer::StopAt(_)),
+                "step {step}"
+            );
+        }
+    }
+
     /// The Rust callback stops the C iteration with `GIT_EUSER` when its closure
     /// breaks, as a C callback returning that code does, and a closure's panic stops
-    /// it the same way before resuming once C has returned.
+    /// it the same way (leaving the error a C callback's `GIT_EUSER` leaves) before
+    /// `for_each_fetchhead` resumes it once C has returned.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn fetchhead_callback_panic_stops_as_euser() {
@@ -5792,13 +5998,16 @@ mod head_and_lookups {
             panic!("closure panicked");
         };
         let mut callback = FetchheadForeachCallback::new(&mut panicking);
-        let (f, payload) = callback.raw();
         // libgit2 names the callback in the error only when none is set.
         // SAFETY: the runtime is initialised.
         unsafe { ffi::git_error_clear() };
-        // SAFETY: a live repository and the callback's own function and payload.
-        let rc = unsafe { ffi::git_repository_fetchhead_foreach(repo.as_c_ptr(), f, payload) };
-        assert_eq!(rc, ffi::GIT_EUSER);
+        let resumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            repo.as_ref().for_each_fetchhead(&mut callback)
+        }));
+        assert_eq!(
+            *resumed.unwrap_err().downcast::<&str>().unwrap(),
+            "closure panicked"
+        );
         assert!(callback.stopped());
         let (class, message) = c_last();
         assert_eq!(
@@ -5807,12 +6016,6 @@ mod head_and_lookups {
                 ffi::GIT_ERROR_CALLBACK as c_int,
                 "git_repository_fetchhead_foreach callback returned -7"
             )
-        );
-        let resumed =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback.resume_panic()));
-        assert_eq!(
-            *resumed.unwrap_err().downcast::<&str>().unwrap(),
-            "closure panicked"
         );
         drop(callback);
         assert_eq!(*seen.borrow(), 1);

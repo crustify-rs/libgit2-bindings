@@ -30,7 +30,6 @@ mod new_options {
     use libgit2::libgit2::repository::repository::Repository;
     use libgit2::libgit2::repository::sys::repository::{NewOptions, NewOptionsMut, NewOptionsRef};
 
-    use crate::fixture::repository_options::{new_ext, oid_type};
     use crate::fixture::{init, isolated};
 
     const OIDS: [Option<OidType>; 3] = [None, Some(OidType::Sha1), Some(OidType::Sha256)];
@@ -267,18 +266,16 @@ mod new_options {
                 s.spawn(move || {
                     let mut opts = NewOptions::new();
                     opts.as_mut().set_oid_type(kind);
-                    let (rc, repo) = new_ext(&opts);
-                    assert_eq!(rc, 0);
-                    assert_eq!(oid_type(&repo.unwrap()), kind.unwrap_or_default().raw());
+                    let repo = Repository::new_ext(opts.as_ref()).unwrap();
+                    assert_eq!(repo.as_ref().oid_type(), kind.unwrap_or_default());
                     // The options are untouched and reusable once the call is done.
                     assert_eq!(read(opts.as_ref()), (NewOptions::VERSION, kind));
-                    let (rc, repo) = new_ext(&opts);
-                    assert_eq!(rc, 0);
-                    drop(repo);
+                    let again = Repository::new_ext(opts.as_ref()).unwrap();
+                    drop((repo, again));
                     for version in [0, 2, u32::MAX] {
                         opts.as_mut().set_version(version);
-                        let (rc, repo) = new_ext(&opts);
-                        assert_eq!((rc, repo.is_none()), (-1, true), "version {version}");
+                        let error = Repository::new_ext(opts.as_ref()).unwrap_err();
+                        assert_eq!(error.raw_code(), -1, "version {version}");
                     }
                 });
             }
@@ -291,7 +288,7 @@ mod new_options {
         init();
         for kind in [OidType::Sha1, OidType::Sha256] {
             let repo = Repository::with_oid_type(kind).unwrap();
-            assert_eq!(oid_type(&repo), kind.raw());
+            assert_eq!(repo.as_ref().oid_type(), kind);
         }
     }
 }

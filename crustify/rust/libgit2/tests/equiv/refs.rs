@@ -32,6 +32,7 @@ use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::refs::refs::{ReferenceBox, UnattachedReference};
+use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
 
 /// Initialises libgit2; never released.
 fn init() {
@@ -67,21 +68,12 @@ impl Repo {
             std::env::temp_dir().join(format!("crustify-refs-equiv-{}-{tag}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-        let mut repo = ptr::null_mut();
-        // SAFETY: a live slot, a NUL-terminated path and live options, read for the
-        // call; the result is a fresh repository on success.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0, "{:?}", c_last());
+        let mut opts = InitOptions::new();
+        opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
+        // The raw repository both sides' calls use; `Drop` frees it.
+        let repo = Repository::init_ext(&c_path, opts.as_mut())
+            .unwrap()
+            .into_c();
         fs::write(
             path.join("packed-refs"),
             format!(
