@@ -20,7 +20,10 @@ git_oid
 git_oid_shorten
 git_oid_t
 git_oidarray
+git_path_gitfile
 git_pathspec_flag_t
+git_refdb
+git_refdb_backend
 git_reference_format_t
 git_reference_t
 git_repository_init_flag_t
