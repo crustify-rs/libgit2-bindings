@@ -94,6 +94,42 @@
    "fields": []
   },
   {
+   "name": "git_commitarray",
+   "defined_in": "include/git2/commit.h",
+   "_comment_agent": "By-value C struct {commits, count}, never allocated by libgit2 itself (header: 'the library will never allocate that object directly'): callers own it inline. Producer: git_repository_commit_parents, which overwrites both fields (out->count = 0; out->commits = NULL) without releasing what they held, then git_vector_detach's a vector of git_commit_lookup references (exact size, git__reallocarray storage) on success; {NULL, 0} for an unborn HEAD and on every failure. Internal consumer create_from_tree (commit.c) passes parents.commits as const git_commit *[] and disposes. git_commitarray_dispose: NULL-tolerant, git_commit_free on each of the first count commits, git__free(commits), memset 0. All-zero is the empty array; dispose accepts it, but git__free(NULL) reads git__allocator unsynchronised against the first git_libgit2_init (see git_oidarray), so the Rust CommitArrayDispose skips C when commits is NULL (which also tolerates a NULL commits with count > 0, which C would dereference). Not address-sensitive. No refcount, no lock. Elements are git_commit references from the repository's object cache (git_object_free = git_cached_obj_decref); they outlive the repository (git_commit__free never touches repo). Wrapped (repository wave 0 batch 2) as CommitArray / CommitArrayVal = CVal<CommitArray, CommitArrayDispose> in object/commit.rs: new() (empty), unsafe from_raw(git_commitarray) adoption, into_raw, len/is_empty, commit_ptrs() -> CSlice<*mut git_commit> (raw seam until git_commit is wrapped), clear(). Not Send/Sync pending the git_commit run. C DEFECT (for the git_repository_commit_parents symbol run): on a failure after the first parent is collected (malformed MERGE_HEAD line, or a MERGE_HEAD id that is not a commit), the done: path frees the collected commits with git__free instead of git_commit_free while the repository's object cache still holds them: a later lookup of that commit (or the repository's cache teardown) is a heap-use-after-free (ASan-confirmed: git_repository_commit_parents repository.c:4135 frees, git_object_lookup_prefix -> cache_get reads).",
+   "fields": [
+    {
+     "name": "commits",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Buffer of count git_commit pointers in libgit2's allocator (git_vector_detach of a git__reallocarray'd vector), owned by the struct and freed by git_commitarray_dispose with git__free after releasing each element. NULL with count 0 for an empty result (unborn HEAD, every failure). The pointer slots are never written after detach (git_commit *const *). Each element is one git_commit reference (git_commit_lookup / git_object_lookup), owned by the array and released by git_commitarray_dispose with git_commit_free (a cache decref); read-only through the array (create_from_tree passes them as const git_commit *[])."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config",
+   "defined_in": "src/libgit2/config.h",
+   "_comment_agent": "Opaque (body in src/libgit2/config.h), heap-allocated, reference-counted: git_config_new git__calloc's it with readers/writers vectors and refcount 1; GIT_REFCOUNT_DEC in git_config_free frees it (config_free: down-refs each backend_instance, disposes vectors, git__free) only when the count reaches 0 AND rc.owner is NULL. No public up-ref. Producers of a sole reference: git_config_new, git_config_open_ondisk / open_default / open_level / open_global, git_config_snapshot, git_repository_config_snapshot. Shared reference: git_repository_config (GIT_REFCOUNT_INC on repo->_config, owner = repo; the repository writes through it, e.g. git_repository_set_workdir/set_bare via __weakptr). git_repository_set_config up-refs the caller's config and sets owner = repo, so a caller's sole reference stops being sole (its wrapper must take the shared owner). git_repository_free -> set_config(NULL) sets owner NULL before its down-ref, so the config outlives the repository. git_config_set_string reads GIT_REFCOUNT_OWNER(config) and clears the owner's configmap cache: a release of the owning repository on another thread races it (UAF), and nothing synchronises the backend vectors: neither Send nor Sync (docs/threading.md: only snapshots are shareable). git_config_lock's transaction and config iterators borrow the config (no ref). Wrapped (repository wave 0 batch 2) in config/config.rs as Config with ConfigFree (impl_cdrop git_config_free + CNew git_config_new, pinning the runtime first), ConfigBox = CBox (sole), ConfigArc = CArc (shared, no Clone), Config::new() -> Result<ConfigBox, ErrorBuf>.",
+   "fields": [
+    {
+     "name": "rc",
+     "refcount": true
+    }
+   ]
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
@@ -952,6 +988,100 @@
       "nullable": true,
       "mutable": true,
       "note": "The caller's git_buf, held by value (stack or embedded); NULL is a no-op. Frees buf->ptr with git__free unless it is the static git_str__initstr (NULL included), then resets the struct to {git_str__initstr, 0, 0}: reusable, never freed itself."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commitarray_dispose",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "array",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "array",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:array"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The caller's git_commitarray, borrowed for the call: NULL is a no-op; otherwise git_commit_free on each of the first count commits, git__free(commits), then memset to {NULL, 0}, so a second dispose is harmless. The struct itself is not freed (held inline). Accepts {NULL, 0} (git__free(NULL), which reads git__allocator: the Rust policy skips it); a NULL commits with count > 0 dereferences NULL. Wrapped as CommitArrayDispose (object/commit.rs)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_free",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "config",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Releases one reference (NULL is a no-op): GIT_REFCOUNT_DEC frees the config (config_free: down-ref each backend instance, which frees its backend at 0; dispose both vectors; git__free) once the atomic count reaches 0 and no repository owns it (rc.owner NULL); a repository-owned config at 0 is freed by the repository's set_config(NULL). Wrapped as the drop of ConfigFree (config/config.rs), behind ConfigBox and ConfigArc."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_new",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written only on success with a fresh git__calloc'd config (empty readers/writers vectors, refcount 1, no owner): the caller's only reference, released by git_config_free. Untouched on failure (OOM, returns -1). Pre-init the calloc goes through failalloc and git_error_set_oom writes through an invalid TLS key, so the wrapper pins the runtime first. Wrapped as ConfigFree's CNew and Config::new (config/config.rs)."
      }
     }
    ]
@@ -2095,6 +2225,109 @@
       "nullable": false,
       "mutable": true,
       "note": "The caller's git_oidarray, borrowed for the call: its ids buffer is released with git__free, the struct itself is not (the caller holds it inline). Dereferenced unconditionally, so NULL crashes. The fields are left as they were: ids dangles afterwards, so the struct must not be read or disposed again without reinitialising it. Accepts {NULL, 0} and any ids from libgit2's allocator."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_commit_parents",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG (aborts in the Debug/coverage build). Overwritten without releasing what it held (count = 0, commits = NULL first), so a wrapper must clear a reused CommitArray first (CommitArrayMut::clear). On success: the HEAD commit then each MERGE_HEAD commit, as git_commit_lookup references in a git_vector_detach'd libgit2 buffer the caller owns (git_commitarray_dispose). {NULL, 0} for an unborn HEAD (returns 0) and on failure. C DEFECT: on a failure after the first parent is collected (malformed MERGE_HEAD line: 'unable to parse OID - invalid length'; or a MERGE_HEAD id that is not a commit, which insert_mergehead turns into -1), done: frees the collected commits with git__free instead of git_commit_free while the repository's object cache still holds them: the next lookup of that commit, or the cache teardown in git_repository_free, is a heap-use-after-free (ASan-confirmed, repository wave 0 batch 2). The safe wrapper must not reach it (e.g. pre-validate MERGE_HEAD, or rebuild the routine over revparse + mergehead_foreach in Rust)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Read (revparse HEAD, MERGE_HEAD) and its object cache updated by the lookups; not retained by the result: the commits outlive the repository."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_config",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives an up-ref'd (GIT_REFCOUNT_INC) reference to the repository's lazily loaded config (repo->_config, owner = repo), released by git_config_free: a SHARED reference (ConfigArc), since the repository holds and writes through another. On a load failure __weakptr still writes *out = repo->_config, i.e. NULL, and -1 is returned before the up-ref. The config outlives the repository (git_repository_free disowns it before its own down-ref)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Not asserted (dereferenced unconditionally). Its config slot is set with a compare-and-swap on first load."
      }
     }
    ]

@@ -9,6 +9,15 @@ git_branch_lookup
 git_branch_next
 git_buf_dispose
 git_commit_create_buffer
+git_commit_free
+git_commit_id
+git_commit_lookup
+git_commitarray_dispose
+git_config_add_file_ondisk
+git_config_free
+git_config_get_int32
+git_config_new
+git_config_set_int32
 git_error_clear
 git_error_last
 git_error_set
@@ -69,6 +78,8 @@ git_reference_type
 git_remote_connect
 git_remote_create_detached
 git_remote_free
+git_repository_commit_parents
+git_repository_config
 git_repository_free
 git_repository_init_ext
 git_repository_init_options_init

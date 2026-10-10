@@ -10,7 +10,9 @@
 #![deny(unsafe_code)]
 
 mod buffer;
+mod commit;
 mod common;
+mod config;
 mod errors;
 mod fixture;
 mod global;

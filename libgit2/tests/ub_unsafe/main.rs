@@ -5,6 +5,7 @@
 //! there; the Rust-only paths still run.
 
 mod buffer;
+mod commit;
 mod common;
 mod sys_alloc;
 mod sys_odb_backend;

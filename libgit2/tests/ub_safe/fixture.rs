@@ -599,3 +599,129 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
     }
     Ok(buf.as_ref().to_str().unwrap().to_owned())
 }
+
+// --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
+
+/// Fixtures standing in for the `git_repository` wrapper and the routines that hand
+/// out commit arrays and repository configs (`git_repository_commit_parents`,
+/// `git_repository_config`), and for the `git_commit` and config-routine wrappers the
+/// tests read through; replace each once its safe counterpart lands.
+pub mod commit_and_config {
+    use std::ffi::{CStr, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::config::config::ConfigArc;
+    use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
+
+    /// A fixture repository opened read-only, freed on drop.
+    pub struct OpenRepo(*mut ffi::git_repository);
+
+    /// `testrepo.git` (`HEAD` at `a65fedf`), `mergedrepo` (merging `e280915` into
+    /// `3a34580`) and `empty_bare.git` (an unborn `HEAD`).
+    pub const TESTREPO: &str = "testrepo.git";
+    pub const MERGEDREPO: &str = "mergedrepo/.gitted";
+    pub const EMPTY: &str = "empty_bare.git";
+
+    impl OpenRepo {
+        pub fn open(name: &str) -> Self {
+            super::init();
+            let path = std::ffi::CString::new(format!(
+                "{}/../../../tests/resources/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot and a NUL-terminated path; no ceiling directories.
+            let rc = unsafe {
+                ffi::git_repository_open_ext(
+                    &mut repo,
+                    path.as_ptr(),
+                    ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                    ptr::null(),
+                )
+            };
+            assert_eq!(rc, 0);
+            Self(repo)
+        }
+    }
+
+    impl Drop for OpenRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository this fixture opened, freed once; arrays and
+            // configs taken from it outlive it.
+            unsafe { ffi::git_repository_free(self.0) };
+        }
+    }
+
+    /// `git_repository_commit_parents`, adopted.
+    pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal {
+        let mut raw = ffi::git_commitarray::default();
+        // SAFETY: a zeroed array and an open repository.
+        let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.0) };
+        assert_eq!(rc, 0);
+        // SAFETY: what libgit2 left: `{NULL, 0}`, or a buffer of commit references from
+        // its allocator, given up here.
+        unsafe { CommitArray::from_raw(raw) }
+    }
+
+    /// The hex id of a commit an array holds; stands in for the `git_commit` handle.
+    pub fn commit_id(commit: *mut ffi::git_commit) -> String {
+        let mut out = [0u8; 41];
+        // SAFETY: the tests pass pointers read from a live array, which keeps the
+        // commit alive; 41 writable bytes, NUL included.
+        unsafe {
+            ffi::git_oid_tostr(
+                out.as_mut_ptr().cast(),
+                out.len(),
+                ffi::git_commit_id(commit),
+            )
+        };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// `git_repository_config`, adopted as a shared reference.
+    pub fn config(repo: &OpenRepo) -> ConfigArc {
+        let mut out = ptr::null_mut();
+        // SAFETY: a live slot and an open repository.
+        assert_eq!(unsafe { ffi::git_repository_config(&mut out, repo.0) }, 0);
+        // SAFETY: one up-ref'd reference to the repository's config, released by
+        // `git_config_free`; the repository holds another.
+        unsafe { ConfigArc::from_c(out) }.unwrap()
+    }
+
+    /// `git_config_get_int32` on the config an owner's `as_c_ptr` gives; the value or
+    /// the return code.
+    pub fn get_int32(config: *mut ffi::git_config, name: &CStr) -> Result<i32, c_int> {
+        let mut value = 0;
+        // SAFETY: the tests pass a live owner's pointer; the call only reads it.
+        let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
+        if rc < 0 { Err(rc) } else { Ok(value) }
+    }
+
+    /// `git_config_add_file_ondisk` then `git_config_set_int32`; the status of each.
+    pub fn write_through_file(
+        config: *mut ffi::git_config,
+        file: &CStr,
+        name: &CStr,
+        value: i32,
+    ) -> (c_int, c_int) {
+        // SAFETY: the tests pass a live owner's pointer; the path is copied.
+        let added = unsafe {
+            ffi::git_config_add_file_ondisk(
+                config,
+                file.as_ptr(),
+                ffi::GIT_CONFIG_LEVEL_LOCAL,
+                ptr::null(),
+                0,
+            )
+        };
+        // SAFETY: as above; the name is NUL-terminated.
+        let set = unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) };
+        (added, set)
+    }
+}
