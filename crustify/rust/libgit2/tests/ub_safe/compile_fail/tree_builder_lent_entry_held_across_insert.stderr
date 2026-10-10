@@ -1,0 +1,21 @@
+error[E0502]: cannot borrow `builder` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_builder_lent_entry_held_across_insert.rs:9:5
+   |
+ 8 |     let entry = builder.as_ref().get(c"a").unwrap();
+   |                 ------- immutable borrow occurs here
+ 9 |     builder.as_mut().insert(c"a", id, FileMode::Commit).unwrap();
+   |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     builder.as_mut().remove(c"a").unwrap();
+11 |     let _ = entry.to_tree_entry();
+   |             ----- immutable borrow later used here
+
+error[E0502]: cannot borrow `builder` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_builder_lent_entry_held_across_insert.rs:10:5
+   |
+ 8 |     let entry = builder.as_ref().get(c"a").unwrap();
+   |                 ------- immutable borrow occurs here
+ 9 |     builder.as_mut().insert(c"a", id, FileMode::Commit).unwrap();
+10 |     builder.as_mut().remove(c"a").unwrap();
+   |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+11 |     let _ = entry.to_tree_entry();
+   |             ----- immutable borrow later used here

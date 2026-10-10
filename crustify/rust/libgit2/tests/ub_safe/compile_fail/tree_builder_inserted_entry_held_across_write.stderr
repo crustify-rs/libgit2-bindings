@@ -1,0 +1,33 @@
+error[E0499]: cannot borrow `builder` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/tree_builder_inserted_entry_held_across_write.rs:9:5
+   |
+ 8 |     let entry = builder.insert_entry(c"a", id, FileMode::Commit).unwrap();
+   |                 ------- first mutable borrow occurs here
+ 9 |     builder.clear();
+   |     ^^^^^^^ second mutable borrow occurs here
+...
+12 |     let _ = entry.to_tree_entry();
+   |             ----- first borrow later used here
+
+error[E0499]: cannot borrow `builder` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/tree_builder_inserted_entry_held_across_write.rs:10:13
+   |
+ 8 |     let entry = builder.insert_entry(c"a", id, FileMode::Commit).unwrap();
+   |                 ------- first mutable borrow occurs here
+ 9 |     builder.clear();
+10 |     let _ = builder.write();
+   |             ^^^^^^^ second mutable borrow occurs here
+11 |     let _ = builder.as_ref().get(c"a");
+12 |     let _ = entry.to_tree_entry();
+   |             ----- first borrow later used here
+
+error[E0502]: cannot borrow `builder` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/tree_builder_inserted_entry_held_across_write.rs:11:13
+   |
+ 8 |     let entry = builder.insert_entry(c"a", id, FileMode::Commit).unwrap();
+   |                 ------- mutable borrow occurs here
+...
+11 |     let _ = builder.as_ref().get(c"a");
+   |             ^^^^^^^ immutable borrow occurs here
+12 |     let _ = entry.to_tree_entry();
+   |             ----- mutable borrow later used here
