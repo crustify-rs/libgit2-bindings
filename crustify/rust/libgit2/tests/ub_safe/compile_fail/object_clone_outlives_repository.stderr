@@ -1,0 +1,7 @@
+error[E0515]: cannot return value referencing function parameter `repo`
+  --> tests/ub_safe/compile_fail/object_clone_outlives_repository.rs:10:5
+   |
+ 9 |     let object = Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap();
+   |                                 ---- `repo` is borrowed here
+10 |     (object.clone(), object.as_ref().to_object())
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returns a value referencing data owned by the current function

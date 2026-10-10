@@ -1709,3 +1709,168 @@ pub mod tree {
             .to_owned())
     }
 }
+
+// --- `git2/object.h`: `git_object`; `git2/tree.h`: `git_tree_entry` -----------------
+
+/// Fixtures over `git_object` and `git_tree_entry`: C's view of an owner, through the
+/// pointer `as_c_ptr` hands out, standing in for the object and entry getters; and the
+/// one adoption of an owned entry, standing in for the `git_tree` wrapper's
+/// `git_tree_entry_bypath`, which replaces it.
+pub mod object_and_tree_entry {
+    use std::ffi::{CStr, CString, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::object::ObjectArc;
+    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
+
+    use super::TempRepo;
+
+    /// `testrepo.git`, opened read-only: lookups only fill its object cache.
+    pub fn open_testrepo() -> RepositoryBox {
+        super::init();
+        let path = CString::new(format!(
+            "{}/../../../tests/resources/testrepo.git",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        Repository::open(&path).unwrap()
+    }
+
+    /// A temporary repository's handle.
+    pub fn repository(repo: &TempRepo) -> RepositoryRef<'_> {
+        repo.repo.as_ref().unwrap().as_ref()
+    }
+
+    /// C's hex id and type of the object an owner holds.
+    pub fn object_view(object: &ObjectArc<'_>) -> (String, ffi::git_object_t) {
+        let p = object.as_c_ptr();
+        let mut out = [0u8; 65];
+        // SAFETY: `p` is the live object the owner holds; its id lives as long as it
+        // and is formatted into `out`, 65 writable bytes, NUL included.
+        unsafe {
+            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
+            let id = CStr::from_bytes_until_nul(&out).unwrap();
+            (id.to_str().unwrap().to_owned(), ffi::git_object_type(p))
+        }
+    }
+
+    /// `git_object_owner`: the repository an object reaches.
+    pub fn object_owner(object: &ObjectArc<'_>) -> *mut ffi::git_repository {
+        // SAFETY: a live object, whose repository outlives its borrow.
+        unsafe { ffi::git_object_owner(object.as_c_ptr()) }
+    }
+
+    /// `git_tree_entry_bypath(tree, path)`, adopted, or its return code; `tree` must
+    /// be a tree.
+    pub fn entry_bypath(tree: &ObjectArc<'_>, path: &CStr) -> Result<TreeEntryBox, c_int> {
+        assert_eq!(object_view(tree).1, ffi::GIT_OBJECT_TREE);
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot; a live object of type tree, so a `git_tree`, which
+        // the owner keeps alive, and whose repository outlives it; a NUL-terminated
+        // path read for the call.
+        let rc =
+            unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_c_ptr().cast(), path.as_ptr()) };
+        if rc < 0 {
+            return Err(rc);
+        }
+        // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
+        Ok(unsafe { TreeEntryBox::from_c(out) }.unwrap())
+    }
+
+    /// C's name, hex id and raw file mode of the entry an owner holds.
+    pub fn entry_view(entry: &TreeEntryBox) -> (CString, String, u32) {
+        let p = entry.as_c_ptr();
+        let mut out = [0u8; 65];
+        // SAFETY: `p` is the live entry the owner holds; its name and id live as long
+        // as it does and are copied at once; `out` has 65 writable bytes.
+        unsafe {
+            ffi::git_oid_tostr(
+                out.as_mut_ptr().cast(),
+                out.len(),
+                ffi::git_tree_entry_id(p),
+            );
+            (
+                CStr::from_ptr(ffi::git_tree_entry_name(p)).to_owned(),
+                CStr::from_bytes_until_nul(&out)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                ffi::git_tree_entry_filemode_raw(p),
+            )
+        }
+    }
+
+    /// Writes a blob holding `data` and a tree naming it once under each of `names`,
+    /// through a tree builder; the tree's id.
+    pub fn write_tree(repo: &TempRepo, data: &[u8], names: &[CString]) -> Oid {
+        let mut blob = ffi::git_oid::default();
+        let mut builder = ptr::null_mut();
+        let mut tree = ffi::git_oid::default();
+        // SAFETY: the live repository; `data` is read for the call; each name is
+        // NUL-terminated and copied by the builder, which is freed once, after the
+        // write.
+        unsafe {
+            let rc = ffi::git_blob_create_from_buffer(
+                &mut blob,
+                repo.raw(),
+                data.as_ptr().cast(),
+                data.len(),
+            );
+            assert_eq!(rc, 0);
+            assert_eq!(
+                ffi::git_treebuilder_new(&mut builder, repo.raw(), ptr::null()),
+                0
+            );
+            for name in names {
+                let rc = ffi::git_treebuilder_insert(
+                    ptr::null_mut(),
+                    builder,
+                    name.as_ptr(),
+                    &blob,
+                    ffi::GIT_FILEMODE_BLOB,
+                );
+                assert_eq!(rc, 0, "{name:?}");
+            }
+            assert_eq!(ffi::git_treebuilder_write(&mut tree, builder), 0);
+            ffi::git_treebuilder_free(builder);
+        }
+        Oid::from_raw(&tree.id[..20], OidType::Sha1).unwrap()
+    }
+
+    /// `git_odb_write` of `data` as an object of type `kind`, which the object
+    /// database stores without parsing it; the id.
+    pub fn write_raw(repo: &TempRepo, data: &[u8], kind: ffi::git_object_t) -> Oid {
+        let odb = repository(repo).odb().unwrap();
+        let mut id = ffi::git_oid::default();
+        // SAFETY: the odb is live while `odb` is held; `id` is writable and `data` live
+        // for its length, read for the call only.
+        let rc = unsafe {
+            ffi::git_odb_write(
+                &mut id,
+                odb.as_c_ptr(),
+                data.as_ptr().cast(),
+                data.len(),
+                kind,
+            )
+        };
+        assert_eq!(rc, 0);
+        Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap()
+    }
+
+    /// Sets libgit2's object cache limit, in a child process that runs nothing else.
+    pub fn set_cache_max_size(bytes: isize) {
+        // SAFETY: the isolated children that call it run one thread meanwhile.
+        unsafe { libgit2::libgit2::core::common::set_cache_max_size(bytes) }
+    }
+
+    /// Enables or disables libgit2's object caches, in a child process that runs
+    /// nothing else.
+    pub fn enable_caching(enabled: bool) {
+        // SAFETY: as above.
+        unsafe { libgit2::libgit2::core::common::enable_caching(enabled) }
+    }
+}

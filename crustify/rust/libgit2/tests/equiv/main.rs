@@ -12,6 +12,7 @@ mod config;
 mod errors;
 mod global;
 mod index;
+mod object;
 mod odb;
 mod oid;
 mod oidarray;

@@ -1,0 +1,25 @@
+error[E0505]: cannot move out of `entry` because it is borrowed
+ --> tests/ub_safe/compile_fail/tree_entry_handle_outlives_box.rs:6:10
+  |
+4 | fn handle(entry: TreeEntryBox) -> TreeEntryRef<'static> {
+  |           ----- binding `entry` declared here
+5 |     let handle = entry.as_ref();
+  |                  ----- borrow of `entry` occurs here
+6 |     drop(entry);
+  |          ^^^^^ move out of `entry` occurs here
+7 |     handle
+  |     ------ returning this value requires that `entry` is borrowed for `'static`
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+5 |     let handle = entry.clone().as_ref();
+  |                       ++++++++
+
+error[E0515]: cannot return value referencing function parameter `entry`
+ --> tests/ub_safe/compile_fail/tree_entry_handle_outlives_box.rs:7:5
+  |
+5 |     let handle = entry.as_ref();
+  |                  ----- `entry` is borrowed here
+6 |     drop(entry);
+7 |     handle
+  |     ^^^^^^ returns a value referencing data owned by the current function
