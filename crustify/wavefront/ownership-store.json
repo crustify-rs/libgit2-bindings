@@ -94,6 +94,209 @@
    "fields": []
   },
   {
+   "name": "git_checkout_options",
+   "defined_in": "include/git2/checkout.h",
+   "_comment_agent": "Public options struct, caller-owned by value (stack or Rust storage); libgit2 never allocates or frees one it hands out. Init: git_checkout_options_init(opts, GIT_CHECKOUT_OPTIONS_VERSION) memcpys GIT_CHECKOUT_OPTIONS_INIT ({1}, rest zero) and fails (-1, GIT_ERROR_INVALID 'invalid version N on git_checkout_options') without touching *opts for version 0 or > 1; with version 1 it reaches no global, allocator or TLS. No destructor, disposer or cloner: every consumer takes `const git_checkout_options *` and copies by value (checkout_data_init memmoves it into data->opts, reset/worktree/merge/stash/cherrypick/revert copy and patch their local copy). Only internal copies own pointees: checkout_data owns `baseline` when it looked HEAD up itself (opts_free_baseline), and rebase_init_operation's rebase->options copy git_tree_dups `baseline` and git__strdups target_directory and the three labels, all released by git_rebase_free. C defects there (for the git_rebase batch): rebase memcpys `baseline_index` without a reference yet git_rebase_free calls git_index_free on it (drops the caller's reference); it keeps the caller's `paths` array, callbacks and payloads past the call; and its GIT_ERROR_CHECK_ALLOC tests the source label, not the copy. Wrapped in workdir/checkout.rs as the hand-written lifetime-carrying CheckoutOptions<'o> (+ Ref<'a,'o>/Mut<'a,'o>): strings, paths and baseline_index (as IndexRef<'o>) borrowed for 'o through safe setters; baseline and the callbacks+payloads as unsafe raw seams until git_tree and the checkout callbacks are wrapped.",
+   "fields": [
+    {
+     "name": "ancestor_label",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's label, borrowed and only read; NULL = \"ancestor\". Used in diff3/zdiff3 conflict markers. rebase's internal copy owns a git__strdup."
+     }
+    },
+    {
+     "name": "baseline",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's tree, borrowed for the checkout call and only read (git_iterator_for_tree); NULL (with baseline_index NULL) = HEAD's tree, which checkout looks up into its private copy and frees there (opts_free_baseline). rebase's internal copy owns a git_tree_dup reference released by git_rebase_free. The caller's struct never owns it."
+     }
+    },
+    {
+     "name": "baseline_index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Caller's index, borrowed for the checkout call; overrides baseline. Read through git_iterator_for_index(git_index_owner(idx), idx), which snapshots it (index readers count, entry sort under the index's own lock). Owned only by rebase's internal copy, wrongly: rebase memcpys the caller's pointer without git_index_owner/refcount increment and git_rebase_free git_index_frees it (C defect: drops a reference the rebase never took). Wrapped as a safe Option<IndexRef<'o>> setter/getter: libgit2's checkout counts a reference only for the call (git_index_snapshot_new/release), so an IndexBox stays sole once it returns."
+     }
+    },
+    {
+     "name": "notify_cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer; NULL = no notifications (checkout_notify returns 0 when NULL or when `why & notify_flags` is 0). Called on the checkout thread, synchronously, during git_checkout_{head,index,tree} (and every API forwarding checkout options), with notify_payload; a non-zero return cancels the checkout and is returned (checkout_notify sets an error 'notify_cb' message when the callback set none)."
+     }
+    },
+    {
+     "name": "notify_payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque user cookie, never dereferenced by libgit2; passed unchanged as notify_cb's last argument. Its type and mutability are the callback's."
+     }
+    },
+    {
+     "name": "our_label",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's label, borrowed and only read; NULL = \"ours\" (conflict markers and the ~ours side-file suffix). rebase's internal copy owns a git__strdup; stash and rebase fill their local copies with static labels."
+     }
+    },
+    {
+     "name": "perfdata_cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer; NULL = no report. Called once at the end of a successful git_checkout_iterator with a pointer to checkout_data's perfdata (valid for the call only) and perfdata_payload."
+     }
+    },
+    {
+     "name": "perfdata_payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque user cookie for perfdata_cb, never dereferenced by libgit2."
+     }
+    },
+    {
+     "name": "progress_cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function pointer; NULL = no progress reports (report_progress checks it). Called synchronously from checkout with (path or NULL, completed, total, progress_payload)."
+     }
+    },
+    {
+     "name": "progress_payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque user cookie for progress_cb, never dereferenced by libgit2."
+     }
+    },
+    {
+     "name": "target_directory",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's path string, borrowed and only read during the call (data->opts copies the pointer; NULL = the repository workdir, and a bare repo is then refused). Created with mkdir when missing. rebase's internal copy owns a git__strdup released by git_rebase_free."
+     }
+    },
+    {
+     "name": "their_label",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's label, borrowed and only read; NULL = \"theirs\". rebase's internal copy owns a git__strdup."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commitarray",
    "defined_in": "include/git2/commit.h",
    "_comment_agent": "By-value C struct {commits, count}, never allocated by libgit2 itself (header: 'the library will never allocate that object directly'): callers own it inline. Producer: git_repository_commit_parents, which overwrites both fields (out->count = 0; out->commits = NULL) without releasing what they held, then git_vector_detach's a vector of git_commit_lookup references (exact size, git__reallocarray storage) on success; {NULL, 0} for an unborn HEAD and on every failure. Internal consumer create_from_tree (commit.c) passes parents.commits as const git_commit *[] and disposes. git_commitarray_dispose: NULL-tolerant, git_commit_free on each of the first count commits, git__free(commits), memset 0. All-zero is the empty array; dispose accepts it, but git__free(NULL) reads git__allocator unsynchronised against the first git_libgit2_init (see git_oidarray), so the Rust CommitArrayDispose skips C when commits is NULL (which also tolerates a NULL commits with count > 0, which C would dereference). Not address-sensitive. No refcount, no lock. Elements are git_commit references from the repository's object cache (git_object_free = git_cached_obj_decref); they outlive the repository (git_commit__free never touches repo). Wrapped (repository wave 0 batch 2) as CommitArray / CommitArrayVal = CVal<CommitArray, CommitArrayDispose> in object/commit.rs: new() (empty), unsafe from_raw(git_commitarray) adoption, into_raw, len/is_empty, commit_ptrs() -> CSlice<*mut git_commit> (raw seam until git_commit is wrapped), clear(). Not Send/Sync pending the git_commit run. C DEFECT (for the git_repository_commit_parents symbol run): on a failure after the first parent is collected (malformed MERGE_HEAD line, or a MERGE_HEAD id that is not a commit), the done: path frees the collected commits with git__free instead of git_commit_free while the repository's object cache still holds them: a later lookup of that commit (or the repository's cache teardown) is a heap-use-after-free (ASan-confirmed: git_repository_commit_parents repository.c:4135 frees, git_object_lookup_prefix -> cache_get reads).",
@@ -1580,6 +1783,39 @@
       "nullable": true,
       "mutable": true,
       "note": "The caller's git_buf, held by value (stack or embedded); NULL is a no-op. Frees buf->ptr with git__free unless it is the static git_str__initstr (NULL included), then resets the struct to {git_str__initstr, 0, 0}: reusable, never freed itself."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_checkout_options_init",
+   "defined_in": "src/libgit2/checkout.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "The caller's storage, borrowed for the call; written whole (memcpy of GIT_CHECKOUT_OPTIONS_INIT: version 1, every other field zero/NULL) and only when `version` is 1. For version 0 or > 1 it returns -1 with GIT_ERROR_INVALID 'invalid version N on git_checkout_options' and leaves *opts untouched (still uninitialised if it was). Not NULL-checked: NULL with version 1 is a NULL write. With version 1 it reaches no global, allocator or thread state, so it needs no runtime pin."
      }
     }
    ]

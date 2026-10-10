@@ -5,6 +5,7 @@
 //! there; the Rust-only paths still run.
 
 mod buffer;
+mod checkout;
 mod commit;
 mod common;
 mod refdb;

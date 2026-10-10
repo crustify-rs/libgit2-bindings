@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `index` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/checkout_options_baseline_index_mutated_while_borrowed.rs:9:22
+   |
+ 8 |     options.as_mut().set_baseline_index(Some(index.as_ref()));
+   |                                              ----- immutable borrow occurs here
+ 9 |     let _exclusive = index.as_mut();
+   |                      ^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     let _ = options.as_ref().baseline_index();
+   |             ------- immutable borrow later used here

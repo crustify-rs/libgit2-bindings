@@ -1,0 +1,12 @@
+error[E0505]: cannot move out of `index` because it is borrowed
+  --> tests/ub_safe/compile_fail/checkout_options_baseline_index_outlives_owner.rs:9:10
+   |
+ 6 |     let index = Index::new().unwrap();
+   |         ----- binding `index` declared here
+ 7 |     let mut options = CheckoutOptions::new();
+ 8 |     options.as_mut().set_baseline_index(Some(index.as_ref()));
+   |                                              ----- borrow of `index` occurs here
+ 9 |     drop(index);
+   |          ^^^^^ move out of `index` occurs here
+10 |     let _ = options.as_ref().baseline_index();
+   |             ------- borrow later used here

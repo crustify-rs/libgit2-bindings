@@ -3,6 +3,7 @@
 //! `tests/equiv/<tu>.rs`.
 
 mod buffer;
+mod checkout;
 mod commit;
 mod common;
 mod config;
