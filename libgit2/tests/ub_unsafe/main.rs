@@ -13,3 +13,4 @@ mod repository;
 mod sys_alloc;
 mod sys_odb_backend;
 mod trace;
+mod tree;

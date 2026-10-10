@@ -1,0 +1,5 @@
+error[E0605]: non-primitive cast: `u32` as `UpdateAction`
+ --> tests/ub_safe/compile_fail/tree_update_action_from_int_cast.rs:6:13
+  |
+6 |     let _ = 2u32 as UpdateAction;
+  |             ^^^^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

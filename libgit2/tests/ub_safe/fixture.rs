@@ -1630,3 +1630,82 @@ pub mod head_and_lookups {
         }
     }
 }
+
+// --- `git2/tree.h`: `git_treebuilder` ----------------------------------------------
+
+/// Fixtures standing in for the tree-builder routines (`git_treebuilder_insert`,
+/// `_entrycount`, `_write`) and the `git_tree` lookup the tests drive a builder with;
+/// replace each once its safe counterpart lands.
+pub mod tree {
+    use std::ffi::{CStr, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::tree::TreeBuilderBox;
+
+    /// A SHA1 object id of `byte` repeated, for entries libgit2 does not check.
+    pub fn id(byte: u8) -> ffi::git_oid {
+        let mut id = [0; 32];
+        id[..20].fill(byte);
+        ffi::git_oid {
+            type_: ffi::GIT_OID_SHA1 as u8,
+            id,
+        }
+    }
+
+    /// `git_treebuilder_insert` of `name` naming `id` with `mode`; its return code.
+    pub fn insert(
+        builder: &mut TreeBuilderBox<'_>,
+        name: &CStr,
+        id: &ffi::git_oid,
+        mode: ffi::git_filemode_t,
+    ) -> c_int {
+        // SAFETY: the box's live builder, which the exclusive borrow keeps unaliased;
+        // a NUL-terminated name and a live id, both copied.
+        unsafe {
+            ffi::git_treebuilder_insert(
+                ptr::null_mut(),
+                builder.as_c_ptr(),
+                name.as_ptr(),
+                id,
+                mode,
+            )
+        }
+    }
+
+    /// `git_treebuilder_entrycount`.
+    pub fn count(builder: &TreeBuilderBox<'_>) -> usize {
+        // SAFETY: the box's live builder, only read.
+        unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) }
+    }
+
+    /// `git_treebuilder_get`'s file mode for `name`, if the builder holds it.
+    pub fn mode_of(builder: &TreeBuilderBox<'_>, name: &CStr) -> Option<ffi::git_filemode_t> {
+        // SAFETY: the box's live builder, only read; the entry it returns lives until
+        // the builder next changes, after the read.
+        unsafe {
+            let entry = ffi::git_treebuilder_get(builder.as_c_ptr(), name.as_ptr());
+            (!entry.is_null()).then(|| ffi::git_tree_entry_filemode_raw(entry))
+        }
+    }
+
+    /// `git_treebuilder_write`: the hex id of the tree written into the builder's
+    /// repository, or the return code.
+    pub fn write(builder: &mut TreeBuilderBox<'_>) -> Result<String, c_int> {
+        let mut out = ffi::git_oid::default();
+        // SAFETY: a writable id and the box's live builder, unaliased; its repository
+        // outlives it, as the box's borrow does.
+        let rc = unsafe { ffi::git_treebuilder_write(&mut out, builder.as_c_ptr()) };
+        if rc < 0 {
+            return Err(rc);
+        }
+        let mut hex = [0u8; 65];
+        // SAFETY: 65 writable bytes, NUL included, bound the write; `out` is live.
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+        Ok(CStr::from_bytes_until_nul(&hex)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned())
+    }
+}

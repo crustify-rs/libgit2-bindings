@@ -216,6 +216,7 @@ git_submodule_set_update
 git_submodule_update_strategy
 git_tag_name_is_valid
 git_trace_set
+git_tree_create_updated
 git_tree_entry_byindex
 git_tree_entry_filemode
 git_tree_entry_filemode_raw
@@ -225,6 +226,8 @@ git_tree_free
 git_tree_id
 git_tree_lookup
 git_tree_walk
+git_treebuilder_clear
+git_treebuilder_entrycount
 git_treebuilder_free
 git_treebuilder_get
 git_treebuilder_insert

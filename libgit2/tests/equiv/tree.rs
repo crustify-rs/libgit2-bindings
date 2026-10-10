@@ -8,6 +8,8 @@
 //! post-order calls back after the subtree and ignores a positive result. `expected`
 //! below is that documentation, compared with `git_tree_walk` over one tree of nested
 //! subtrees, step after step.
+//!
+//! The tree builder's lifecycle and `UpdateAction` are compared in [`builder`].
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -399,5 +401,620 @@ fn callback_results_act_as_each_mode_documents() {
             assert_eq!(refused.0, -1);
             assert!(refused.1.is_empty());
         }
+    }
+}
+
+mod builder {
+    //! Equivalence of `git2/tree.h`'s [`TreeBuilder`] lifecycle and [`UpdateAction`] with
+    //! libgit2's.
+    //!
+    //! - Builders: [`TreeBuilder::new`] and [`TreeBuilder::from_tree`] must build what
+    //!   `git_treebuilder_new` builds (with a NULL source and with a tree), and
+    //!   [`clear`](libgit2::libgit2::object::tree::TreeBuilderMut::clear) must leave what
+    //!   `git_treebuilder_clear` leaves. Each side runs the same steps over a bare
+    //!   repository of its own, built identically, with source trees looked up in a
+    //!   fixture repository it opened itself; after every step the builder's state is
+    //!   recorded (its entry count, the file mode of every name either side ever held, and
+    //!   the id `git_treebuilder_write` gives, or the error it reports) and compared. The
+    //!   routines the symbol batches will wrap (`git_treebuilder_insert`, `_entrycount`,
+    //!   `_get`, `_write`) run raw on both sides, the Rust side's through its owner's
+    //!   `as_c_ptr`.
+    //! - Allocation failures: libgit2's allocator is made to fail its `k`-th allocation
+    //!   inside the constructor, for each `k` until the constructor succeeds; both sides
+    //!   must fail at the same `k` with the same error class and message, and then build
+    //!   the same builder. This runs alone in a child process, since the allocator is
+    //!   process-global.
+    //! - Update actions: `git_tree_create_updated` accepts exactly the values
+    //!   [`UpdateAction::from_raw`] names, and does with each what its variant says.
+    //!
+    //! Documented divergences, outside these comparisons:
+    //!
+    //! - The Rust constructors return libgit2's error as an [`ErrorBuf`], without the
+    //!   return code (always `-1`); the class and message are compared.
+    //! - A builder cannot outlive its repository in Rust (its owner borrows the
+    //!   repository), where libgit2 frees one safely afterwards; only C does that here.
+    //! - `git_treebuilder_clear` returns `0` and fails only on a NULL builder, which the
+    //!   Rust handle cannot be; `clear` returns nothing.
+
+    use std::collections::BTreeSet;
+    use std::ffi::{CStr, CString, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::ptr::{self, NonNull};
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, UpdateAction};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::util::errors::ErrorBuf;
+
+    const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/resources");
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    /// `testrepo.git` trees: its `HEAD`'s (three blobs), and one holding three blobs and
+    /// the subtree `ab`.
+    const FLAT: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
+    const NESTED: &str = "ae90f12eea699729ed24555e40b9fd669da12a12";
+    /// `testrepo_256.git`'s `HEAD` tree, with SHA256 ids.
+    const FLAT_256: &str = "f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736";
+
+    /// The calling thread's last error class and message.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        unsafe {
+            let e = ffi::git_error_last();
+            (
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    fn rust_error(e: &ErrorBuf) -> (c_int, String) {
+        (e.raw_class(), e.message().to_string_lossy().into_owned())
+    }
+
+    /// The hex form of `id`.
+    fn hex(id: &ffi::git_oid) -> String {
+        let mut buf = [0u8; 65];
+        // SAFETY: 65 writable bytes bound the write; `id` is live.
+        unsafe { ffi::git_oid_tostr(buf.as_mut_ptr().cast(), buf.len(), id) };
+        CStr::from_bytes_until_nul(&buf)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// A SHA1 object id of `byte` repeated.
+    fn id(byte: u8) -> ffi::git_oid {
+        let mut id = [0; 32];
+        id[..20].fill(byte);
+        ffi::git_oid {
+            type_: ffi::GIT_OID_SHA1 as u8,
+            id,
+        }
+    }
+
+    /// A fresh bare repository in a temporary directory, removed on drop after the
+    /// repository it holds. Both sides hold theirs as a [`RepositoryBox`]; the C side
+    /// calls libgit2 on its raw pointer.
+    struct TempRepo {
+        path: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl TempRepo {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("crustify-tree-equiv-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let repo = Repository::init(&c_path, true).unwrap();
+            Self {
+                path,
+                repo: Some(repo),
+            }
+        }
+
+        fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn open(name: &str) -> RepositoryBox {
+        Repository::open(&CString::new(format!("{RESOURCES}/{name}")).unwrap()).unwrap()
+    }
+
+    /// The tree `hex` names in `repo`, one counted reference the caller frees.
+    fn lookup(repo: &RepositoryBox, hex: &str, kind: OidType) -> NonNull<ffi::git_tree> {
+        let oid = Oid::from_string(&CString::new(hex).unwrap(), kind).unwrap();
+        let id = ffi::git_oid {
+            type_: oid.as_ref().raw_kind(),
+            id: oid.as_ref().id(),
+        };
+        let mut tree = ptr::null_mut();
+        // SAFETY: a writable slot, the box's live repository and a live id of its type.
+        let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.as_c_ptr(), &id) };
+        assert_eq!(rc, 0);
+        NonNull::new(tree).unwrap()
+    }
+
+    fn free_tree(tree: NonNull<ffi::git_tree>) {
+        // SAFETY: a tree `lookup` handed out, released once.
+        unsafe { ffi::git_tree_free(tree.as_ptr()) }
+    }
+
+    /// The names `tree` holds.
+    fn names(tree: NonNull<ffi::git_tree>) -> Vec<CString> {
+        // SAFETY: a live tree, only read; each name is copied out while it lives.
+        unsafe {
+            (0..ffi::git_tree_entrycount(tree.as_ptr()))
+                .map(|i| {
+                    let entry = ffi::git_tree_entry_byindex(tree.as_ptr(), i);
+                    CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned()
+                })
+                .collect()
+        }
+    }
+
+    /// What a builder holds, as its routines report it.
+    #[derive(Debug, PartialEq, Eq)]
+    struct State {
+        count: usize,
+        modes: Vec<(CString, Option<ffi::git_filemode_t>)>,
+        written: Result<String, (c_int, String)>,
+    }
+
+    /// Reads `builder`'s state, `names` being every name either side ever held.
+    fn state(builder: *mut ffi::git_treebuilder, names: &BTreeSet<CString>) -> State {
+        // SAFETY: a live builder, unaliased during the reads; each entry `get` returns lives
+        // until the builder next changes, after its read; `out` is writable, and the
+        // builder's repository outlives it.
+        unsafe {
+            let count = ffi::git_treebuilder_entrycount(builder);
+            let modes = names
+                .iter()
+                .map(|name| {
+                    let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
+                    (
+                        name.clone(),
+                        (!entry.is_null()).then(|| ffi::git_tree_entry_filemode_raw(entry)),
+                    )
+                })
+                .collect();
+            let mut out = ffi::git_oid::default();
+            let written = if ffi::git_treebuilder_write(&mut out, builder) < 0 {
+                Err(c_last())
+            } else {
+                Ok(hex(&out))
+            };
+            State {
+                count,
+                modes,
+                written,
+            }
+        }
+    }
+
+    /// `git_treebuilder_insert` of a submodule entry `name` naming `id(byte)`; its return
+    /// code and, on failure, the error.
+    fn insert(
+        builder: *mut ffi::git_treebuilder,
+        name: &CStr,
+        byte: u8,
+    ) -> Result<(), (c_int, String)> {
+        // SAFETY: a live builder, unaliased; a NUL-terminated name and a live id, copied.
+        let rc = unsafe {
+            ffi::git_treebuilder_insert(
+                ptr::null_mut(),
+                builder,
+                name.as_ptr(),
+                &id(byte),
+                ffi::GIT_FILEMODE_COMMIT,
+            )
+        };
+        if rc < 0 { Err(c_last()) } else { Ok(()) }
+    }
+
+    /// One step of a builder's life, run on either side.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Insert(&'static CStr, u8),
+        Clear,
+    }
+
+    /// The C side: builds through `git_treebuilder_new` (seeded with `source` unless it
+    /// is `None`), runs `steps` and records the state after construction and each step.
+    fn c_run(
+        repo: &RepositoryBox,
+        source: Option<NonNull<ffi::git_tree>>,
+        steps: &[Step],
+        names: &BTreeSet<CString>,
+    ) -> Vec<State> {
+        let mut builder = ptr::null_mut();
+        let source = source.map_or(ptr::null(), |t| t.as_ptr().cast_const());
+        // SAFETY: a writable slot, the box's live repository, which outlives the builder,
+        // and NULL or a live tree.
+        let rc = unsafe { ffi::git_treebuilder_new(&mut builder, repo.as_c_ptr(), source) };
+        assert_eq!(rc, 0, "{:?}", c_last());
+        let mut states = vec![state(builder, names)];
+        for step in steps {
+            match *step {
+                Step::Insert(name, byte) => insert(builder, name, byte).unwrap(),
+                // SAFETY: a live builder, unaliased.
+                Step::Clear => assert_eq!(unsafe { ffi::git_treebuilder_clear(builder) }, 0),
+            }
+            states.push(state(builder, names));
+        }
+        // SAFETY: the builder `git_treebuilder_new` handed out, released once.
+        unsafe { ffi::git_treebuilder_free(builder) };
+        states
+    }
+
+    /// The Rust side of [`c_run`]: [`TreeBuilder::new`] or [`TreeBuilder::from_tree`], and
+    /// [`clear`](libgit2::libgit2::object::tree::TreeBuilderMut::clear).
+    fn rust_run(
+        repo: &RepositoryBox,
+        source: Option<NonNull<ffi::git_tree>>,
+        steps: &[Step],
+        names: &BTreeSet<CString>,
+    ) -> Vec<State> {
+        let mut builder: TreeBuilderBox<'_> = match source {
+            None => TreeBuilder::new(repo.as_ref()).unwrap(),
+            // SAFETY: a live tree the caller holds a reference to, through the call.
+            Some(tree) => unsafe { TreeBuilder::from_tree(repo.as_ref(), tree) }.unwrap(),
+        };
+        let mut states = vec![state(builder.as_c_ptr(), names)];
+        for step in steps {
+            match *step {
+                Step::Insert(name, byte) => insert(builder.as_c_ptr(), name, byte).unwrap(),
+                Step::Clear => builder.as_mut().clear(),
+            }
+            states.push(state(builder.as_c_ptr(), names));
+        }
+        states
+    }
+
+    /// Runs `steps` on both sides, from a builder seeded with the tree `seed` of the
+    /// fixture repository `fixture` (or an empty one), and compares every state.
+    fn compare(tag: &str, seed: Option<(&str, &str, OidType)>, steps: &[Step]) -> Vec<State> {
+        let c_repo = TempRepo::new(&format!("{tag}-c"));
+        let rust_repo = TempRepo::new(&format!("{tag}-rust"));
+        let c_fixture = seed.map(|(name, _, _)| open(name));
+        let rust_fixture = seed.map(|(name, _, _)| open(name));
+        let c_tree = seed.map(|(_, hex, kind)| lookup(c_fixture.as_ref().unwrap(), hex, kind));
+        let rust_tree =
+            seed.map(|(_, hex, kind)| lookup(rust_fixture.as_ref().unwrap(), hex, kind));
+
+        let mut all: BTreeSet<CString> =
+            c_tree.map(names).unwrap_or_default().into_iter().collect();
+        all.extend(steps.iter().filter_map(|s| match s {
+            Step::Insert(name, _) => Some((*name).to_owned()),
+            Step::Clear => None,
+        }));
+        all.insert(c"absent".to_owned());
+
+        let c_states = c_run(c_repo.repo(), c_tree, steps, &all);
+        let rust_states = rust_run(rust_repo.repo(), rust_tree, steps, &all);
+        c_tree.into_iter().chain(rust_tree).for_each(free_tree);
+        for (i, (c, rust)) in c_states.iter().zip(&rust_states).enumerate() {
+            assert_eq!(c, rust, "{tag}: state after step {i}");
+        }
+        assert_eq!(c_states.len(), rust_states.len());
+        c_states
+    }
+
+    const STEPS: &[Step] = &[
+        Step::Insert(c"e1", 1),
+        Step::Insert(c"e2", 2),
+        Step::Insert(c"e1", 3),
+        Step::Clear,
+        Step::Clear,
+        Step::Insert(c"e2", 2),
+        Step::Insert(c"README", 4),
+        Step::Clear,
+    ];
+
+    /// Empty builders: the empty tree first, then the same entries, clears and writes.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn empty_builders_match() {
+        let states = compare("empty", None, STEPS);
+        assert_eq!(states[0].written.as_deref(), Ok(EMPTY_TREE));
+        assert_eq!(states[0].count, 0);
+        assert_eq!(states[3].count, 2);
+        assert_eq!(states[4].written.as_deref(), Ok(EMPTY_TREE));
+    }
+
+    /// Builders seeded with flat and nested trees, the empty tree, and a SHA256 tree for a
+    /// SHA1 repository, before and after the same steps.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn seeded_builders_match() {
+        for (tag, seed) in [
+            ("flat", ("testrepo.git", FLAT, OidType::Sha1)),
+            ("nested", ("testrepo.git", NESTED, OidType::Sha1)),
+            ("sha256", ("testrepo_256.git", FLAT_256, OidType::Sha256)),
+        ] {
+            let states = compare(tag, Some(seed), STEPS);
+            if seed.2 == OidType::Sha1 {
+                assert_eq!(states[0].written.as_deref(), Ok(seed.1), "{tag}");
+            }
+            assert!(states[0].count >= 3, "{tag}");
+        }
+        let empty = TempRepo::new("seed-empty");
+        let mut builder = TreeBuilder::new(empty.repo().as_ref()).unwrap();
+        assert_eq!(
+            state(builder.as_c_ptr(), &BTreeSet::new())
+                .written
+                .as_deref(),
+            Ok(EMPTY_TREE)
+        );
+        builder.as_mut().clear();
+        drop(builder);
+        // The empty tree, now in a repository of its own on each side.
+        let c_repo = TempRepo::new("seed-empty-c");
+        let rust_repo = TempRepo::new("seed-empty-rust");
+        let c_tree = lookup(empty.repo(), EMPTY_TREE, OidType::Sha1);
+        let rust_tree = lookup(empty.repo(), EMPTY_TREE, OidType::Sha1);
+        let none = BTreeSet::new();
+        assert_eq!(
+            c_run(c_repo.repo(), Some(c_tree), STEPS, &none),
+            rust_run(rust_repo.repo(), Some(rust_tree), STEPS, &none)
+        );
+        free_tree(c_tree);
+        free_tree(rust_tree);
+    }
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+    /// Runs `body` alone in a child process, so no other test shares libgit2's globals.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.strip_prefix("equiv::").unwrap_or(test);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut c_void;
+        fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+        fn free(p: *mut c_void);
+    }
+
+    /// Allocations left before the failing one; `0` fails none.
+    static COUNTDOWN: AtomicUsize = AtomicUsize::new(0);
+
+    /// Whether this allocation is the one to fail; the child allocates on one thread.
+    fn fails() -> bool {
+        let left = COUNTDOWN.load(SeqCst);
+        if left == 0 {
+            return false;
+        }
+        COUNTDOWN.store(left - 1, SeqCst);
+        left == 1
+    }
+
+    unsafe extern "C" fn failing_malloc(
+        n: usize,
+        _: *const std::ffi::c_char,
+        _: c_int,
+    ) -> *mut c_void {
+        if fails() {
+            return ptr::null_mut();
+        }
+        // SAFETY: libc's `malloc`, for any size.
+        unsafe { malloc(n) }
+    }
+
+    unsafe extern "C" fn failing_realloc(
+        p: *mut c_void,
+        n: usize,
+        _: *const std::ffi::c_char,
+        _: c_int,
+    ) -> *mut c_void {
+        if fails() {
+            return ptr::null_mut();
+        }
+        // SAFETY: `p` is NULL or a live block of this libc-backed family.
+        unsafe { realloc(p, n) }
+    }
+
+    unsafe extern "C" fn plain_free(p: *mut c_void) {
+        // SAFETY: `p` is NULL or a live block of this libc-backed family.
+        unsafe { free(p) }
+    }
+
+    /// Each side's result under the failing allocator: the builder's state, or the error.
+    type Outcome = Result<State, (c_int, String)>;
+
+    /// A constructor fails its `k`-th allocation on both sides alike, for every `k` until
+    /// it succeeds, empty and seeded with a nested tree; the half-built builder is freed
+    /// (ASan: leak, double free).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn allocation_failures_match() {
+        isolated(
+            concat!(module_path!(), "::allocation_failures_match"),
+            || {
+                let allocator = ffi::git_allocator {
+                    gmalloc: Some(failing_malloc),
+                    grealloc: Some(failing_realloc),
+                    gfree: Some(plain_free),
+                };
+                // SAFETY: a fully set allocator, which libgit2 copies; it is libc-backed, as
+                // libgit2's default is, so blocks allocated before stay valid.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &allocator)
+                };
+                assert_eq!(rc, 0);
+
+                let c_repo = TempRepo::new("oom-c");
+                let rust_repo = TempRepo::new("oom-rust");
+                let fixture = open("testrepo.git");
+                let tree = lookup(&fixture, NESTED, OidType::Sha1);
+                let all: BTreeSet<CString> = names(tree).into_iter().collect();
+
+                for source in [None, Some(tree)] {
+                    let mut failures = 0;
+                    for k in 1.. {
+                        COUNTDOWN.store(k, SeqCst);
+                        let mut raw = ptr::null_mut();
+                        let src = source.map_or(ptr::null(), |t: NonNull<ffi::git_tree>| {
+                            t.as_ptr().cast_const()
+                        });
+                        // SAFETY: a writable slot, a live repository outliving the builder, and
+                        // NULL or a live tree.
+                        let rc = unsafe {
+                            ffi::git_treebuilder_new(&mut raw, c_repo.repo().as_c_ptr(), src)
+                        };
+                        COUNTDOWN.store(0, SeqCst);
+                        let c: Outcome = if rc < 0 {
+                            assert!(raw.is_null());
+                            Err(c_last())
+                        } else {
+                            let s = state(raw, &all);
+                            // SAFETY: the builder handed out above, released once.
+                            unsafe { ffi::git_treebuilder_free(raw) };
+                            Ok(s)
+                        };
+
+                        COUNTDOWN.store(k, SeqCst);
+                        let built = match source {
+                            None => TreeBuilder::new(rust_repo.repo().as_ref()),
+                            // SAFETY: a live tree, held through the call.
+                            Some(t) => unsafe {
+                                TreeBuilder::from_tree(rust_repo.repo().as_ref(), t)
+                            },
+                        };
+                        COUNTDOWN.store(0, SeqCst);
+                        let rust: Outcome = match built {
+                            Err(e) => Err(rust_error(&e)),
+                            Ok(b) => Ok(state(b.as_c_ptr(), &all)),
+                        };
+
+                        assert_eq!(
+                            c,
+                            rust,
+                            "failing allocation {k}, source {:?}",
+                            source.is_some()
+                        );
+                        match c {
+                            Err(_) => failures += 1,
+                            Ok(_) => break,
+                        }
+                    }
+                    assert!(failures >= 1);
+                    if source.is_some() {
+                        // The calloc, then each of the four entries and the map's growth.
+                        assert!(failures >= 5, "{failures}");
+                    }
+                }
+                free_tree(tree);
+                // SAFETY: NULL restores libgit2's default, libc-backed allocator.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                        ptr::null::<ffi::git_allocator>(),
+                    )
+                };
+                assert_eq!(rc, 0);
+            },
+        );
+    }
+
+    /// `git_tree_create_updated` over `baseline` with one update of `action` at `path`:
+    /// the new tree's id, or the error.
+    fn create_updated(
+        repo: &RepositoryBox,
+        baseline: NonNull<ffi::git_tree>,
+        action: ffi::git_tree_update_t,
+        path: &CStr,
+        byte: u8,
+    ) -> Result<String, (c_int, String)> {
+        let update = ffi::git_tree_update {
+            action,
+            id: id(byte),
+            filemode: ffi::GIT_FILEMODE_COMMIT,
+            path: path.as_ptr(),
+        };
+        let mut out = ffi::git_oid::default();
+        // SAFETY: a writable id, the box's live repository, a live tree of it, and one live
+        // update whose path is NUL-terminated.
+        let rc = unsafe {
+            ffi::git_tree_create_updated(&mut out, repo.as_c_ptr(), baseline.as_ptr(), 1, &update)
+        };
+        if rc < 0 { Err(c_last()) } else { Ok(hex(&out)) }
+    }
+
+    /// The values `git_tree_create_updated` accepts as an action are exactly those
+    /// [`UpdateAction::from_raw`] names; [`UpdateAction::Upsert`] adds the entry and
+    /// [`UpdateAction::Remove`] takes it out again; the C side passes the header's
+    /// constants, the Rust side its variants' values.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn update_actions_match_what_libgit2_accepts() {
+        let temp = TempRepo::new("actions");
+        let repo = temp.repo();
+        let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+        let base = state(builder.as_c_ptr(), &BTreeSet::new()).written.unwrap();
+        builder.as_mut().clear();
+        drop(builder);
+        let baseline = lookup(repo, &base, OidType::Sha1);
+
+        let c_added = create_updated(repo, baseline, ffi::GIT_TREE_UPDATE_UPSERT, c"sub", 7);
+        let rust_added = create_updated(repo, baseline, UpdateAction::Upsert.raw(), c"sub", 7);
+        assert_eq!(c_added, rust_added);
+        let added = c_added.unwrap();
+        assert_ne!(added, base);
+
+        let with_entry = lookup(repo, &added, OidType::Sha1);
+        let c_removed = create_updated(repo, with_entry, ffi::GIT_TREE_UPDATE_REMOVE, c"sub", 7);
+        let rust_removed = create_updated(repo, with_entry, UpdateAction::Remove.raw(), c"sub", 7);
+        assert_eq!(c_removed, rust_removed);
+        assert_eq!(c_removed.as_deref(), Ok(base.as_str()));
+
+        for raw in [0, 1, 2, 3, 0x100, u32::MAX] {
+            let accepted = create_updated(repo, with_entry, raw, c"sub", 7);
+            assert_eq!(
+                accepted.is_ok(),
+                UpdateAction::from_raw(raw).is_some(),
+                "{raw}"
+            );
+            if let Err(e) = accepted {
+                assert_eq!(
+                    e,
+                    (
+                        ffi::GIT_ERROR_TREE as c_int,
+                        "unknown action for update".into()
+                    )
+                );
+            }
+        }
+        free_tree(with_entry);
+        free_tree(baseline);
     }
 }
