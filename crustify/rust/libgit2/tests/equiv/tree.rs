@@ -9,8 +9,8 @@
 //! below is that documentation, compared with `git_tree_walk` over one tree of nested
 //! subtrees, step after step.
 //!
-//! The tree builder's lifecycle and `UpdateAction` are compared in [`builder`], the
-//! tree entry's lifecycle in [`tree_entry`].
+//! The tree builder's lifecycle, `UpdateAction` and `TreeUpdate` are compared in
+//! [`builder`], the tree entry's lifecycle in [`tree_entry`].
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -406,8 +406,8 @@ fn callback_results_act_as_each_mode_documents() {
 }
 
 mod builder {
-    //! Equivalence of `git2/tree.h`'s [`TreeBuilder`] lifecycle and [`UpdateAction`] with
-    //! libgit2's.
+    //! Equivalence of `git2/tree.h`'s [`TreeBuilder`] lifecycle, [`UpdateAction`] and
+    //! [`TreeUpdate`] with libgit2's.
     //!
     //! - Builders: [`TreeBuilder::new`] and [`TreeBuilder::from_tree`] must build what
     //!   `git_treebuilder_new` builds (with a NULL source and with a tree), and
@@ -427,6 +427,9 @@ mod builder {
     //!   process-global.
     //! - Update actions: `git_tree_create_updated` accepts exactly the values
     //!   [`UpdateAction::from_raw`] names, and does with each what its variant says.
+    //! - Updates: a [`TreeUpdate`] holds the fields C code fills in a `git_tree_update`
+    //!   for the same change, and an array of them makes `git_tree_create_updated` write
+    //!   the same trees, or fail with the same errors, step after step.
     //!
     //! Documented divergences, outside these comparisons:
     //!
@@ -446,9 +449,10 @@ mod builder {
     use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
     use libgit2::ffi;
+    use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectRef};
-    use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, UpdateAction};
+    use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, TreeUpdate, UpdateAction};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
     use libgit2::libgit2::util::errors::ErrorBuf;
@@ -1033,6 +1037,250 @@ mod builder {
         }
         free_tree(with_entry);
         free_tree(baseline);
+    }
+
+    /// One change of a [`tree_updates_match_c_structs`] step: the path, and for an upsert
+    /// the entry's object (a blob by index, or a submodule commit `id(byte)`) and mode.
+    #[derive(Clone, Copy, Debug)]
+    enum Change {
+        Upsert(&'static CStr, Target, FileMode),
+        Remove(&'static CStr),
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Target {
+        Blob(usize),
+        Id(u8),
+    }
+
+    /// The blobs both sides write, whose ids the upserts name.
+    const BLOBS: [&[u8]; 3] = [b"zero\n", b"one\n", b"two\n"];
+
+    /// Writes [`BLOBS`] into `repo`, returning their ids.
+    fn write_blobs(repo: &RepositoryBox) -> Vec<ffi::git_oid> {
+        BLOBS
+            .iter()
+            .map(|content| {
+                let mut out = ffi::git_oid::default();
+                // SAFETY: a writable id, the box's live repository and `content.len()`
+                // readable bytes.
+                let rc = unsafe {
+                    ffi::git_blob_create_from_buffer(
+                        &mut out,
+                        repo.as_c_ptr(),
+                        content.as_ptr().cast(),
+                        content.len(),
+                    )
+                };
+                assert_eq!(rc, 0, "{:?}", c_last());
+                out
+            })
+            .collect()
+    }
+
+    /// What C reads out of one update: its action, id (type and bytes), mode and path.
+    type Fields = (
+        ffi::git_tree_update_t,
+        u8,
+        [u8; 32],
+        ffi::git_filemode_t,
+        CString,
+    );
+
+    fn c_fields(update: &ffi::git_tree_update) -> Fields {
+        // SAFETY: every path of these updates is a live NUL-terminated `&'static CStr`.
+        let path = unsafe { CStr::from_ptr(update.path) };
+        (
+            update.action,
+            update.id.type_,
+            update.id.id,
+            update.filemode,
+            path.to_owned(),
+        )
+    }
+
+    fn rust_fields(update: &TreeUpdate<'_>) -> Fields {
+        let r = update.as_ref();
+        (
+            r.action().raw(),
+            r.id().raw_kind(),
+            r.id().id(),
+            r.filemode().raw(),
+            r.path().to_owned(),
+        )
+    }
+
+    /// `git_tree_create_updated` over `baseline` (the empty tree when `None`) with
+    /// `count` updates at `updates`, in `repo`: the new tree's id, or the error.
+    fn apply(
+        repo: &RepositoryBox,
+        baseline: Option<&str>,
+        updates: *const ffi::git_tree_update,
+        count: usize,
+    ) -> Result<String, (c_int, String)> {
+        let tree = baseline.map(|hex| lookup(repo, hex, OidType::Sha1));
+        let mut out = ffi::git_oid::default();
+        // SAFETY: a writable id, the box's live repository, NULL or a live tree of it, and
+        // `count` live updates whose paths are NUL-terminated, only read.
+        let rc = unsafe {
+            ffi::git_tree_create_updated(
+                &mut out,
+                repo.as_c_ptr(),
+                tree.map_or(ptr::null_mut(), NonNull::as_ptr),
+                count,
+                updates,
+            )
+        };
+        let result = if rc < 0 { Err(c_last()) } else { Ok(hex(&out)) };
+        if let Some(tree) = tree {
+            free_tree(tree);
+        }
+        result
+    }
+
+    /// The steps of [`tree_updates_match_c_structs`]: each a call of
+    /// `git_tree_create_updated` on the tree the last successful step wrote.
+    const UPDATE_STEPS: &[&[Change]] = &[
+        &[
+            Change::Upsert(c"a.txt", Target::Blob(0), FileMode::Blob),
+            Change::Upsert(c"dir/b.txt", Target::Blob(1), FileMode::BlobExecutable),
+            Change::Upsert(c"dir/sub/c.lnk", Target::Blob(2), FileMode::Link),
+            Change::Upsert(c"mod", Target::Id(7), FileMode::Commit),
+        ],
+        // A blob descended into as a tree.
+        &[Change::Upsert(
+            c"a.txt/inner",
+            Target::Blob(0),
+            FileMode::Blob,
+        )],
+        &[
+            Change::Remove(c"a.txt"),
+            Change::Upsert(c"dir/b.txt", Target::Blob(2), FileMode::Blob),
+            Change::Upsert(c"new/deep/x", Target::Blob(0), FileMode::Blob),
+        ],
+        // A tree replaced with a blob.
+        &[Change::Upsert(c"dir", Target::Blob(0), FileMode::Blob)],
+        // A blob the repository lacks.
+        &[Change::Upsert(
+            c"missing.txt",
+            Target::Id(0x42),
+            FileMode::Blob,
+        )],
+        // A mode no entry can have.
+        &[Change::Upsert(c"u", Target::Blob(0), FileMode::Unreadable)],
+        // The subtree left empty goes too.
+        &[Change::Remove(c"dir/sub/c.lnk")],
+        // Nothing to remove.
+        &[Change::Remove(c"nothing-here")],
+        // The same path twice.
+        &[
+            Change::Upsert(c"z", Target::Blob(0), FileMode::Blob),
+            Change::Remove(c"z"),
+        ],
+        &[
+            Change::Upsert(c"a.txt", Target::Blob(1), FileMode::Blob),
+            Change::Remove(c"mod"),
+            Change::Upsert(c"new/deep/y", Target::Id(9), FileMode::Commit),
+        ],
+    ];
+
+    /// A [`TreeUpdate`] must be the `git_tree_update` C code would build for the same
+    /// change: the same fields as C reads them, and the same trees, or errors, when
+    /// `git_tree_create_updated` applies an array of them, step after step. Each side
+    /// writes the same blobs into a bare repository of its own; the C side fills
+    /// `git_tree_update` structs as the header documents them, the Rust side builds
+    /// updates with [`TreeUpdate::upsert`] and [`TreeUpdate::remove`], or (every other
+    /// change) a removal rewritten into the change by the setters, and passes its
+    /// `[TreeUpdate]` to C in place.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn tree_updates_match_c_structs() {
+        let (c_temp, rust_temp) = (TempRepo::new("updates-c"), TempRepo::new("updates-rust"));
+        let (c_repo, rust_repo) = (c_temp.repo(), rust_temp.repo());
+        let c_blobs = write_blobs(c_repo);
+        let rust_blobs: Vec<Oid> = write_blobs(rust_repo)
+            .iter()
+            .map(|id| Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap())
+            .collect();
+
+        let (mut c_tip, mut rust_tip): (Option<String>, Option<String>) = (None, None);
+        let mut errors = 0;
+        for (n, step) in UPDATE_STEPS.iter().enumerate() {
+            let c_updates: Vec<ffi::git_tree_update> = step
+                .iter()
+                .map(|change| match *change {
+                    Change::Upsert(path, target, mode) => ffi::git_tree_update {
+                        action: ffi::GIT_TREE_UPDATE_UPSERT,
+                        id: match target {
+                            Target::Blob(i) => c_blobs[i],
+                            Target::Id(byte) => id(byte),
+                        },
+                        filemode: mode.raw(),
+                        path: path.as_ptr(),
+                    },
+                    Change::Remove(path) => ffi::git_tree_update {
+                        action: ffi::GIT_TREE_UPDATE_REMOVE,
+                        id: ffi::git_oid::default(),
+                        filemode: ffi::GIT_FILEMODE_UNREADABLE,
+                        path: path.as_ptr(),
+                    },
+                })
+                .collect();
+            let rust_updates: Vec<TreeUpdate<'static>> = step
+                .iter()
+                .enumerate()
+                .map(|(i, change)| match *change {
+                    Change::Upsert(path, target, mode) => {
+                        let target = match target {
+                            Target::Blob(i) => rust_blobs[i],
+                            Target::Id(byte) => {
+                                Oid::from_raw(&id(byte).id[..20], OidType::Sha1).unwrap()
+                            }
+                        };
+                        if i % 2 == 0 {
+                            TreeUpdate::upsert(path, target.as_ref(), mode)
+                        } else {
+                            let mut update = TreeUpdate::remove(c"placeholder");
+                            let mut m = update.as_mut();
+                            m.set_path(path);
+                            m.set_filemode(mode);
+                            m.id_mut().copy_from(target.as_ref());
+                            m.set_action(UpdateAction::Upsert);
+                            update
+                        }
+                    }
+                    Change::Remove(path) => TreeUpdate::remove(path),
+                })
+                .collect();
+            let c_view: Vec<Fields> = c_updates.iter().map(c_fields).collect();
+            let rust_view: Vec<Fields> = rust_updates.iter().map(rust_fields).collect();
+            assert_eq!(c_view, rust_view, "step {n}");
+
+            let c = apply(
+                c_repo,
+                c_tip.as_deref(),
+                c_updates.as_ptr(),
+                c_updates.len(),
+            );
+            let rust = apply(
+                rust_repo,
+                rust_tip.as_deref(),
+                rust_updates.as_ptr().cast::<ffi::git_tree_update>(),
+                rust_updates.len(),
+            );
+            assert_eq!(c, rust, "step {n}: {step:?}");
+            match (c, rust) {
+                (Ok(c), Ok(rust)) => (c_tip, rust_tip) = (Some(c), Some(rust)),
+                _ => errors += 1,
+            }
+        }
+        assert_eq!(errors, 6);
+        let tip = lookup(c_repo, c_tip.as_deref().unwrap(), OidType::Sha1);
+        assert_eq!(
+            names(tip),
+            [c"a.txt", c"dir", c"new"].map(CStr::to_owned).to_vec()
+        );
+        free_tree(tip);
     }
 }
 

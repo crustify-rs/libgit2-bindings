@@ -5,6 +5,18 @@
 //! the tree, so a raw value is converted fallibly ([`WalkMode::from_raw`]) and never
 //! transmuted.
 //!
+//! # Tree updates
+//!
+//! A [`TreeUpdate`] is a `git_tree_update`: one change, an [`UpdateAction`] at a path
+//! with the id and [`FileMode`] of the entry an upsert puts there, of the array
+//! `git_tree_create_updated` applies to a tree. libgit2 neither allocates, copies nor
+//! frees one: it reads the caller's array in place through a `const` pointer, for that
+//! call only, and keeps none of it. So Rust holds an update by value, `Copy`, with no
+//! teardown, `#[repr(transparent)]` over the C struct, so that a `[TreeUpdate]` is the
+//! array C reads. Its path is a `const char *` libgit2 dereferences unchecked and never
+//! frees: a `&'p CStr` the update borrows for `'p`, never NULL. Its action and mode are
+//! only ever set from [`UpdateAction`] and [`FileMode`] variants.
+//!
 //! # Tree builders
 //!
 //! A [`TreeBuilder`] is a `git_treebuilder`: an in-memory set of tree entries, keyed by
@@ -57,12 +69,14 @@
 use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
 use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::core::types::FileMode;
 use crate::libgit2::object::object::ObjectRef;
+use crate::libgit2::oid::oid::{OidMut, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
@@ -143,8 +157,8 @@ impl fmt::Display for UnnamedWalkMode {
 
 impl std::error::Error for UnnamedWalkMode {}
 
-/// What one `git_tree_update` asks `git_tree_create_updated` to do at its path: insert
-/// or replace the entry there, or remove it.
+/// What one `git_tree_update` ([`TreeUpdate`]) asks `git_tree_create_updated` to do at
+/// its path: insert or replace the entry there, or remove it.
 ///
 /// `git_tree_create_updated` refuses any other value with `GIT_ERROR_TREE` ("unknown
 /// action for update"), after building the trees above the path.
@@ -224,6 +238,388 @@ impl std::error::Error for UnnamedUpdateAction {}
 const _: () = assert!(
     size_of::<UpdateAction>() == size_of::<ffi::git_tree_update_t>()
         && align_of::<UpdateAction>() == align_of::<ffi::git_tree_update_t>()
+);
+
+/// One change for `git_tree_create_updated` to make to a tree (`git_tree_update`): an
+/// [`UpdateAction`] at a path, with the id and file mode of the entry an upsert puts
+/// there.
+///
+/// Built by [`upsert`](Self::upsert) or [`remove`](Self::remove); read it through
+/// [`as_ref`](Self::as_ref) and change it through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use ffibox::CZeroable;
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::object::tree::{TreeUpdate, UpdateAction};
+/// use libgit2::libgit2::oid::oid::Oid;
+///
+/// let id = Oid::zeroed();
+/// let mut update = TreeUpdate::upsert(c"dir/file.txt", id.as_ref(), FileMode::Blob);
+/// assert_eq!(update.as_ref().path(), c"dir/file.txt");
+/// update.as_mut().set_filemode(FileMode::BlobExecutable);
+/// update.as_mut().set_action(UpdateAction::Remove);
+/// assert_eq!(update.as_ref().action(), UpdateAction::Remove);
+///
+/// // A `const` array is the C array `git_tree_create_updated` reads.
+/// const REMOVALS: [TreeUpdate<'static>; 2] = [
+///     TreeUpdate::remove(c"README"),
+///     TreeUpdate::remove(c"src/old.c"),
+/// ];
+/// assert_eq!(REMOVALS[1].as_ref().path(), c"src/old.c");
+/// ```
+///
+/// `#[repr(transparent)]` over `git_tree_update`, so a pointer to it, or to the first of
+/// a `[TreeUpdate]`, is a pointer to the C struct or array, which C reads in place. `'p`
+/// is the lifetime of the path it points at, so an update cannot outlive it:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::object::tree::TreeUpdate;
+/// use std::ffi::CString;
+///
+/// let update;
+/// {
+///     let path = CString::new("dir/file.txt").unwrap();
+///     update = TreeUpdate::remove(&path);
+/// }
+/// let _ = update.as_ref().path();
+/// ```
+///
+/// The exclusive handle is invariant in `'p`, so one cannot be shrunk to store a
+/// shorter-lived path than its update was built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::tree::TreeUpdateMut;
+///
+/// fn shrink<'a, 'p>(m: TreeUpdateMut<'a, 'static>) -> TreeUpdateMut<'a, 'p> {
+///     m
+/// }
+/// ```
+///
+/// The shared handle only reads:
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::object::tree::TreeUpdate;
+///
+/// let update = TreeUpdate::remove(c"README");
+/// update.as_ref().set_path(c"other");
+/// ```
+///
+/// libgit2 never allocates, copies or frees one: it reads a caller's array through a
+/// `const` pointer for one call, keeping nothing. So an update is a plain value, with no
+/// teardown. Every field holds a value its setter accepts: a named action and file
+/// mode, and a path that is never NULL. `Copy`, `Send` and `Sync`, as a `&'p CStr` and
+/// plain values are: libgit2 never writes through the path, and only the exclusive
+/// handle writes the fields. Equal when every field is, the path by its contents.
+///
+/// Wraps: git_tree_update
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct TreeUpdate<'p>(ffi::git_tree_update, PhantomData<&'p CStr>);
+
+/// Shared borrow of a [`TreeUpdate`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct TreeUpdateRef<'a, 'p>(CBorrowedPtr<'a, TreeUpdate<'p>>);
+
+/// Exclusive borrow of a [`TreeUpdate`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct TreeUpdateMut<'a, 'p>(
+    TreeUpdateRef<'a, 'p>,
+    // Invariant in the update, and so in `'p`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut TreeUpdate<'p>>,
+);
+
+// SAFETY: `TreeUpdate` is `#[repr(transparent)]` over `git_tree_update` with a zero-sized
+// marker; both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, TreeUpdate<'p>>`
+// (`TreeUpdateMut` through `TreeUpdateRef`) with zero-sized markers and no `Drop`, hand
+// out no reference to the update, and `TreeUpdateRef` has no write operation.
+// `TreeUpdateMut` is invariant in the update through its
+// `PhantomData<&'a mut TreeUpdate<'p>>`.
+unsafe impl<'p> CCell for TreeUpdate<'p> {
+    type C = ffi::git_tree_update;
+    type Ref<'a>
+        = TreeUpdateRef<'a, 'p>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = TreeUpdateMut<'a, 'p>
+    where
+        Self: 'a;
+}
+
+// SAFETY: an update is two enum values, 33 bytes of id and a string pointer, which only
+// the setters write, a `&'p CStr`'s pointer: a shared, immutable borrow of `CStr`, which
+// is `Sync`, so it may be read from any thread. Nothing in the struct has thread affinity
+// or interior mutability, and nothing is released on drop.
+unsafe impl Send for TreeUpdate<'_> {}
+// SAFETY: as above; `TreeUpdateMut` is an exclusive borrow of such a value, as
+// `&mut TreeUpdate`.
+unsafe impl Send for TreeUpdateMut<'_, '_> {}
+
+// SAFETY: as above, and shared access only reads the fields (every write goes through
+// `TreeUpdateMut`, which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for TreeUpdate<'_> {}
+// SAFETY: as above; `TreeUpdateRef` is a shared borrow, as `&TreeUpdate`.
+unsafe impl Send for TreeUpdateRef<'_, '_> {}
+// SAFETY: as above.
+unsafe impl Sync for TreeUpdateRef<'_, '_> {}
+// SAFETY: `&TreeUpdateMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for TreeUpdateMut<'_, '_> {}
+
+impl<'p> TreeUpdate<'p> {
+    /// Insert, or replace, the entry at `path` with one naming `id` with mode
+    /// `filemode`.
+    ///
+    /// `path` is the entry's full path from the root tree, its components separated by
+    /// `/`; the trees above it are created as needed. The update is only built here:
+    /// `git_tree_create_updated` checks it when it runs, refusing for instance an
+    /// [`Unreadable`](FileMode::Unreadable) mode, an `id` of a blob or tree the
+    /// repository lacks, or the replacement of a tree with a blob or of a blob with a
+    /// tree.
+    pub fn upsert(path: &'p CStr, id: OidRef<'_>, filemode: FileMode) -> Self {
+        Self::new(UpdateAction::Upsert, path, copy_id(id), filemode)
+    }
+
+    /// Remove the entry at `path`, the entry's full path from the root tree, its
+    /// components separated by `/`. A tree left empty by the removal is removed too.
+    ///
+    /// Only the path is read for a removal: the id is libgit2's typeless, all-zero
+    /// `GIT_OID_NONE` and the mode [`Unreadable`](FileMode::Unreadable), until a setter
+    /// changes them.
+    pub const fn remove(path: &'p CStr) -> Self {
+        let none = ffi::git_oid {
+            type_: 0,
+            id: [0; ffi::GIT_OID_MAX_SIZE as usize],
+        };
+        Self::new(UpdateAction::Remove, path, none, FileMode::Unreadable)
+    }
+
+    const fn new(
+        action: UpdateAction,
+        path: &'p CStr,
+        id: ffi::git_oid,
+        filemode: FileMode,
+    ) -> Self {
+        Self(
+            ffi::git_tree_update {
+                action: action.raw(),
+                id,
+                filemode: filemode.raw(),
+                path: path.as_ptr(),
+            },
+            PhantomData,
+        )
+    }
+
+    /// Shared handle to the update — the getters.
+    pub fn as_ref(&self) -> TreeUpdateRef<'_, 'p> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        TreeUpdateRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the update — the setters.
+    pub fn as_mut(&mut self) -> TreeUpdateMut<'_, 'p> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        TreeUpdateMut(TreeUpdateRef(ptr), PhantomData)
+    }
+}
+
+/// The `git_oid` `id` holds, copied field by field.
+fn copy_id(id: OidRef<'_>) -> ffi::git_oid {
+    ffi::git_oid {
+        type_: id.raw_kind(),
+        id: id.id(),
+    }
+}
+
+impl PartialEq for TreeUpdate<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.as_ref(), other.as_ref());
+        let (x, y) = (a.id(), b.id());
+        a.action() == b.action()
+            && (x.raw_kind(), x.id()) == (y.raw_kind(), y.id())
+            && a.filemode() == b.filemode()
+            && a.path() == b.path()
+    }
+}
+
+impl Eq for TreeUpdate<'_> {}
+
+impl fmt::Debug for TreeUpdate<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'p> TreeUpdateRef<'a, 'p> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_tree_update *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_tree_update {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// What the update does at its path.
+    ///
+    /// Field: git_tree_update.action
+    pub fn action(&self) -> UpdateAction {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live update; the field
+        // is a plain integer.
+        let raw = unsafe { addr_of!((*p).action).read() };
+        // `new` and `set_action` only store a variant's value.
+        UpdateAction::from_raw(raw).expect("an update holds a named action")
+    }
+
+    /// The id of the object an upsert's entry names, in place, for as long as the
+    /// update is borrowed.
+    ///
+    /// Field: git_tree_update.id
+    pub fn id(&self) -> OidRef<'a> {
+        let p = self.as_ptr();
+        // SAFETY: the field projected from the shared handle's pointer to a live update
+        // is an initialised `git_oid`, which lives for `'a` with the update and which
+        // nothing writes meanwhile (every write needs the exclusive handle); `OidRef`
+        // only reads it.
+        unsafe { OidRef::from_ptr(addr_of!((*p).id).cast_mut()) }.expect("a field is never NULL")
+    }
+
+    /// The mode of an upsert's entry.
+    ///
+    /// Field: git_tree_update.filemode
+    pub fn filemode(&self) -> FileMode {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live update; the field
+        // is a plain integer.
+        let raw = unsafe { addr_of!((*p).filemode).read() };
+        // `new` and `set_filemode` only store a variant's value.
+        FileMode::from_raw(raw).expect("an update holds a named file mode")
+    }
+
+    /// The entry's full path from the root tree, borrowed for `'p`, as it was set.
+    ///
+    /// Field: git_tree_update.path
+    pub fn path(&self) -> &'p CStr {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live update. `new` and
+        // `set_path` store a `&'p CStr`'s pointer, a NUL-terminated string that outlives
+        // `'p` and that nothing writes, being shared-borrowed.
+        unsafe { CStr::from_ptr(addr_of!((*p).path).read()) }
+    }
+
+    /// A copy of the update, as a value of its own, borrowing the same path.
+    pub fn to_tree_update(&self) -> TreeUpdate<'p> {
+        TreeUpdate::new(
+            self.action(),
+            self.path(),
+            copy_id(self.id()),
+            self.filemode(),
+        )
+    }
+}
+
+impl fmt::Debug for TreeUpdateRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TreeUpdate")
+            .field("action", &self.action())
+            .field("id", &self.id())
+            .field("filemode", &self.filemode())
+            .field("path", &self.path())
+            .finish()
+    }
+}
+
+impl<'p> TreeUpdateMut<'_, 'p> {
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tree_update {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> TreeUpdateRef<'_, 'p> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> TreeUpdateMut<'_, 'p> {
+        TreeUpdateMut(self.0, PhantomData)
+    }
+
+    /// Replaces what the update does; the id and file mode stay, and are read again
+    /// when it becomes an upsert.
+    ///
+    /// Field: git_tree_update.action
+    pub fn set_action(&mut self, action: UpdateAction) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live update of a
+        // variant's value, which keeps `action`'s guarantee.
+        unsafe { addr_of_mut!((*p).action).write(action.raw()) }
+    }
+
+    /// The id of the object an upsert's entry names, in place, borrowed exclusively to
+    /// change it.
+    ///
+    /// Field: git_tree_update.id
+    pub fn id_mut(&mut self) -> OidMut<'_> {
+        let p = self.as_mut_ptr();
+        // SAFETY: the field projected from the exclusive handle's pointer to a live update
+        // is an initialised `git_oid`, any of whose bytes may be written; the result
+        // borrows this handle exclusively, so nothing else reaches the update meanwhile.
+        unsafe { OidMut::from_ptr(addr_of_mut!((*p).id)) }.expect("a field is never NULL")
+    }
+
+    /// Replaces the id with a copy of `id`, type and all 32 bytes.
+    ///
+    /// Field: git_tree_update.id
+    pub fn set_id(&mut self, id: OidRef<'_>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live update; the
+        // field is plain bytes, and `id` is copied out before the write.
+        unsafe { addr_of_mut!((*p).id).write(copy_id(id)) }
+    }
+
+    /// Replaces the mode of an upsert's entry.
+    ///
+    /// Field: git_tree_update.filemode
+    pub fn set_filemode(&mut self, filemode: FileMode) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live update of a
+        // variant's value, which keeps `filemode`'s guarantee.
+        unsafe { addr_of_mut!((*p).filemode).write(filemode.raw()) }
+    }
+
+    /// Replaces the path; the old string, borrowed, needs no release.
+    ///
+    /// Field: git_tree_update.path
+    pub fn set_path(&mut self, path: &'p CStr) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live update of a
+        // `&'p CStr`'s pointer, which keeps `path`'s guarantee; the old pointer is
+        // borrowed, so nothing is released.
+        unsafe { addr_of_mut!((*p).path).write(path.as_ptr()) }
+    }
+}
+
+impl fmt::Debug for TreeUpdateMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `TreeUpdate` is a `git_tree_update`, so a `[TreeUpdate]` is the array C reads in
+// place.
+const _: () = assert!(
+    size_of::<TreeUpdate<'static>>() == size_of::<ffi::git_tree_update>()
+        && align_of::<TreeUpdate<'static>>() == align_of::<ffi::git_tree_update>()
+        && size_of::<[TreeUpdate<'static>; 3]>() == size_of::<[ffi::git_tree_update; 3]>()
+        && size_of::<TreeUpdateRef<'static, 'static>>() == size_of::<*const ()>()
 );
 
 /// An in-memory tree being built (`git_treebuilder`): entries keyed by file name, which
@@ -864,6 +1260,213 @@ mod unit_tests {
         assert_eq!(back, p);
         // SAFETY: the builder `into_c` gave up, released once here.
         unsafe { TreeBuilderFree.c_drop(NonNull::new(back.cast::<TreeBuilder<'_>>()).unwrap()) };
+    }
+
+    /// `git_tree_update`'s value, handles and accessors. Nothing calls libgit2, so Miri
+    /// runs them all.
+    mod tree_update {
+        use crate::libgit2::core::types::FileMode;
+        use crate::libgit2::object::tree::*;
+        use crate::libgit2::oid::oid::{Oid, OidType};
+        use core::ffi::CStr;
+        use ffibox::CZeroable;
+        use std::ffi::CString;
+
+        /// A SHA1 id of `byte` repeated, built without libgit2.
+        fn sha1(byte: u8) -> Oid {
+            let mut id = Oid::zero(OidType::Sha1);
+            let mut bytes = [0; 32];
+            bytes[..20].fill(byte);
+            id.as_mut().set_id(bytes);
+            id
+        }
+
+        /// The C struct an update is, read whole through its shared handle.
+        fn raw(update: &TreeUpdate<'_>) -> ffi::git_tree_update {
+            // SAFETY: the handle addresses `update`, a live, initialised value.
+            unsafe { update.as_ref().as_ptr().read() }
+        }
+
+        fn same_id(a: &ffi::git_oid, b: &ffi::git_oid) -> bool {
+            (a.type_, a.id) == (b.type_, b.id)
+        }
+
+        #[test]
+        fn layout_is_the_c_struct() {
+            assert_eq!(
+                size_of::<TreeUpdate<'_>>(),
+                size_of::<ffi::git_tree_update>()
+            );
+            assert_eq!(
+                align_of::<TreeUpdate<'_>>(),
+                align_of::<ffi::git_tree_update>()
+            );
+            assert_eq!(size_of::<TreeUpdateRef<'_, '_>>(), size_of::<*const ()>());
+            assert_eq!(size_of::<TreeUpdateMut<'_, '_>>(), size_of::<*mut ()>());
+
+            // A `[TreeUpdate]` is the C array: element `i` is read where C reads it.
+            let paths = [c"a", c"b/c", c"d/e/f"];
+            let updates = paths.map(TreeUpdate::remove);
+            let base = updates.as_ptr().cast::<ffi::git_tree_update>();
+            for (i, path) in paths.iter().enumerate() {
+                // SAFETY: `i` is within the live array, which is `[git_tree_update; 3]`.
+                let c = unsafe { base.add(i).read() };
+                assert_eq!(c.path, path.as_ptr());
+                assert_eq!(c.action, ffi::GIT_TREE_UPDATE_REMOVE);
+                assert_eq!(updates[i].as_ref().as_ptr(), base.wrapping_add(i));
+            }
+        }
+
+        /// Each constructor fills every field of the C struct; the getters read them
+        /// back.
+        #[test]
+        fn constructors_fill_every_field() {
+            let id = sha1(0xab);
+            let path = CString::new("dir/sub/file.txt").unwrap();
+            let up = TreeUpdate::upsert(&path, id.as_ref(), FileMode::BlobExecutable);
+            let c = raw(&up);
+            assert_eq!(c.action, ffi::GIT_TREE_UPDATE_UPSERT);
+            assert!(same_id(&c.id, &raw_oid(&id)));
+            assert_eq!(c.filemode, ffi::GIT_FILEMODE_BLOB_EXECUTABLE);
+            assert_eq!(c.path, path.as_ptr());
+            let r = up.as_ref();
+            assert_eq!(r.action(), UpdateAction::Upsert);
+            assert_eq!(r.id().raw_kind(), OidType::Sha1.raw() as u8);
+            assert_eq!(r.id().id(), id.as_ref().id());
+            assert_eq!(r.filemode(), FileMode::BlobExecutable);
+            assert_eq!(r.path(), path.as_c_str());
+
+            const GONE: TreeUpdate<'static> = TreeUpdate::remove(c"README");
+            let c = raw(&GONE);
+            assert_eq!(c.action, ffi::GIT_TREE_UPDATE_REMOVE);
+            assert!(same_id(&c.id, &raw_oid(&Oid::zeroed())));
+            assert_eq!(c.filemode, ffi::GIT_FILEMODE_UNREADABLE);
+            assert_eq!(GONE.as_ref().path(), c"README");
+            assert_eq!(GONE.as_ref().filemode(), FileMode::Unreadable);
+            assert_eq!(GONE.as_ref().id().kind(), None);
+        }
+
+        fn raw_oid(id: &Oid) -> ffi::git_oid {
+            ffi::git_oid {
+                type_: id.as_ref().raw_kind(),
+                id: id.as_ref().id(),
+            }
+        }
+
+        /// Every setter rewrites its field alone, through the C struct.
+        #[test]
+        fn setters_rewrite_their_field_alone() {
+            let first = CString::new("first").unwrap();
+            let second = CString::new("a/much/longer/second/path").unwrap();
+            let mut update = TreeUpdate::upsert(&first, sha1(1).as_ref(), FileMode::Blob);
+            let before = raw(&update);
+
+            update.as_mut().set_action(UpdateAction::Remove);
+            let c = raw(&update);
+            assert_eq!(c.action, ffi::GIT_TREE_UPDATE_REMOVE);
+            assert!(same_id(&c.id, &before.id));
+            assert_eq!((c.filemode, c.path), (before.filemode, before.path));
+
+            update.as_mut().set_filemode(FileMode::Link);
+            assert_eq!(raw(&update).filemode, ffi::GIT_FILEMODE_LINK);
+            assert_eq!(update.as_ref().filemode(), FileMode::Link);
+
+            update.as_mut().set_path(&second);
+            assert_eq!(raw(&update).path, second.as_ptr());
+            assert_eq!(update.as_ref().path(), second.as_c_str());
+
+            update.as_mut().set_id(sha1(2).as_ref());
+            assert!(same_id(&raw(&update).id, &raw_oid(&sha1(2))));
+            {
+                let mut m = update.as_mut();
+                let mut id = m.id_mut();
+                id.set_kind(OidType::Sha256);
+                assert!(id.id_mut().set_elem(31, 0xff));
+            }
+            let c = raw(&update);
+            assert_eq!(c.id.type_, OidType::Sha256.raw() as u8);
+            assert_eq!(c.id.id[..20], [2; 20]);
+            assert_eq!(c.id.id[31], 0xff);
+            assert_eq!(update.as_ref().id().kind(), Some(OidType::Sha256));
+
+            update.as_mut().set_action(UpdateAction::Upsert);
+            let c = raw(&update);
+            assert_eq!(c.action, ffi::GIT_TREE_UPDATE_UPSERT);
+            assert_eq!(c.filemode, ffi::GIT_FILEMODE_LINK);
+            assert_eq!(c.path, second.as_ptr());
+        }
+
+        /// The handles reborrow onto the same struct, and the exclusive one reaches the
+        /// getters; a copy, by `Copy` or through a handle, is a value of its own.
+        #[test]
+        fn handles_and_copies() {
+            let mut update = TreeUpdate::remove(c"x");
+            let at = core::ptr::from_ref(&update).cast::<ffi::git_tree_update>();
+            {
+                let mut m = update.as_mut();
+                assert_eq!(m.as_mut_ptr().cast_const(), at);
+                assert_eq!(m.as_mut().as_mut_ptr().cast_const(), at);
+                assert_eq!(m.as_ref().as_ptr(), at);
+                m.as_mut().set_path(c"y");
+                assert_eq!(m.as_ref().path(), c"y");
+            }
+            assert_eq!(update.as_ref().as_ptr(), at);
+
+            let copy = update;
+            let through = update.as_ref().to_tree_update();
+            assert_eq!(copy, update);
+            assert_eq!(through, update);
+            update.as_mut().set_action(UpdateAction::Upsert);
+            assert_eq!(copy.as_ref().action(), UpdateAction::Remove);
+            assert_ne!(copy, update);
+            assert_eq!(through.as_ref().path(), c"y");
+        }
+
+        /// Equality compares every field, the path by its contents.
+        #[test]
+        fn equality_compares_every_field() {
+            let owned = CString::new("p").unwrap();
+            let base = TreeUpdate::upsert(c"p", sha1(1).as_ref(), FileMode::Blob);
+            assert_eq!(
+                base,
+                TreeUpdate::upsert(&owned, sha1(1).as_ref(), FileMode::Blob)
+            );
+            let mut other = base;
+            other.as_mut().set_path(c"q");
+            assert_ne!(base, other);
+            let mut other = base;
+            other.as_mut().set_filemode(FileMode::Tree);
+            assert_ne!(base, other);
+            let mut other = base;
+            other.as_mut().id_mut().set_raw_kind(0);
+            assert_ne!(base, other);
+            let mut other = base;
+            assert!(other.as_mut().id_mut().id_mut().set_elem(0, 2));
+            assert_ne!(base, other);
+            let mut other = base;
+            other.as_mut().set_action(UpdateAction::Remove);
+            assert_ne!(base, other);
+        }
+
+        #[test]
+        fn debug_shows_every_field() {
+            let mut update = TreeUpdate::remove(c"README");
+            let expected = format!(
+                "TreeUpdate {{ action: Remove, id: Oid {{ kind: 0, id: {} }}, \
+                 filemode: Unreadable, path: \"README\" }}",
+                "0".repeat(64)
+            );
+            assert_eq!(format!("{update:?}"), expected);
+            assert_eq!(format!("{:?}", update.as_ref()), expected);
+            assert_eq!(format!("{:?}", update.as_mut()), expected);
+            let path: &CStr = c"a/b";
+            let up = TreeUpdate::upsert(path, sha1(0x0f).as_ref(), FileMode::Commit);
+            let shown = format!("{up:?}");
+            assert!(
+                shown.starts_with("TreeUpdate { action: Upsert, id: Oid { kind: Sha1, id: 0f0f")
+            );
+            assert!(shown.ends_with(" }, filemode: Commit, path: \"a/b\" }"));
+        }
     }
 
     /// `git_tree_entry`'s owner, handles and lifecycle policy.
