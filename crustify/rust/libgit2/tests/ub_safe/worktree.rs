@@ -294,3 +294,150 @@ mod prune_options {
         );
     }
 }
+
+/// UB tests for `git2/worktree.h`: the `WorktreeBox` owner of a `git_worktree`, the
+/// handles it lends, and the `git_worktree_free` policy.
+///
+/// Worktrees are adopted from `git_worktree_lookup` by the fixture, which also reads
+/// and locks them through their boxes, standing in for the wrappers that do. Each box
+/// must release its struct and six strings exactly once (ASan: double free, use after
+/// free; LSan: leak), on whichever thread drops it, and shared boxes must race nothing
+/// (TSan). libgit2 writes a worktree in place (`git_worktree_lock`) between Rust
+/// reborrows of its handles (BSan). Handles that outlive their box and aliased exclusive
+/// handles do not compile (doctests on `WorktreeBox`); the box is not `Clone` (doctest).
+/// Every test calls libgit2, so none runs under Miri.
+mod worktree_box {
+    use std::sync::Barrier;
+    use std::thread;
+
+    use libgit2::libgit2::repository::worktree::{
+        Worktree, WorktreeBox, WorktreeFree, WorktreeMut, WorktreeRef,
+    };
+
+    use crate::fixture::worktree::{WorktreeRepo, is_locked, lock, name, path, unlock};
+
+    #[test]
+    fn worktrees_cross_threads() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<Worktree>();
+        send_sync::<WorktreeBox>();
+        send_sync::<WorktreeRef<'_>>();
+        send_sync::<WorktreeMut<'_>>();
+        send_sync::<WorktreeFree>();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lookups_release_everything() {
+        let repo = WorktreeRepo::new("release");
+        repo.add("a");
+        repo.add("b");
+        for _ in 0..16 {
+            let a = repo.lookup(c"a");
+            let b = repo.lookup(c"b");
+            assert_eq!(name(&a), c"a");
+            assert_eq!(name(&b), c"b");
+            assert_ne!(path(&a), path(&b));
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn replaced_box_is_released_once() {
+        let repo = WorktreeRepo::new("replace");
+        repo.add("a");
+        repo.add("b");
+        let mut w = repo.lookup(c"a");
+        assert_eq!(name(&w), c"a");
+        // The old worktree drops here, the new one at the end of the scope.
+        w = repo.lookup(c"b");
+        assert_eq!(name(&w), c"b");
+        let mut slot = Some(w);
+        assert_eq!(slot.take().map(|w| name(&w)), Some(c"b".to_owned()));
+        assert!(slot.is_none());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn worktree_outlives_its_repository() {
+        let repo = WorktreeRepo::new("outlive");
+        repo.add("wt");
+        let w = repo.lookup(c"wt");
+        let expected = path(&w);
+        // The repository is freed and its directory removed: the worktree holds copies.
+        repo.close();
+        assert_eq!(name(&w), c"wt");
+        assert_eq!(path(&w), expected);
+        let r = w.as_ref();
+        let _copy = r;
+        drop(w);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn box_moves_to_another_thread_and_drops_there() {
+        let repo = WorktreeRepo::new("send");
+        let names = [c"w0", c"w1", c"w2", c"w3"];
+        for n in names {
+            repo.add(n.to_str().unwrap());
+        }
+        let boxes: Vec<WorktreeBox> = names.iter().map(|n| repo.lookup(n)).collect();
+        let handles: Vec<_> = boxes
+            .into_iter()
+            .map(|w| thread::spawn(move || name(&w)))
+            .collect();
+        let read: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(read, names.map(|n| n.to_owned()));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn shared_box_reads_race_nothing() {
+        let repo = WorktreeRepo::new("sync");
+        repo.add("wt");
+        let w = repo.lookup(c"wt");
+        let expected = (name(&w), path(&w));
+        let start = Barrier::new(4);
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    start.wait();
+                    // Shared handles and C reads through the same box, concurrently.
+                    let r = w.as_ref();
+                    for _ in 0..32 {
+                        assert_eq!((name(&w), path(&w)), expected);
+                        assert_eq!(is_locked(&w), 0);
+                    }
+                    let _ = r;
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_writes_between_reborrows() {
+        let repo = WorktreeRepo::new("reborrow");
+        repo.add("wt");
+        let mut w = repo.lookup(c"wt");
+        for round in 0..4 {
+            {
+                // An exclusive handle and its reborrows, then a C write through the box.
+                let mut m = w.as_mut();
+                let inner = m.as_mut();
+                let _shared = inner.as_ref();
+            }
+            assert_eq!(lock(&mut w, c"held"), 0);
+            // A second lock is refused without writing.
+            assert!(lock(&mut w, c"again") < 0);
+            let r = w.as_ref();
+            let _ = r;
+            assert_eq!(is_locked(&w), 1);
+            assert_eq!(unlock(&mut w), 0);
+            // Unlocking an unlocked worktree reports 1 and writes nothing.
+            assert_eq!(unlock(&mut w), 1);
+            assert_eq!(is_locked(&w), 0, "round {round}");
+            assert_eq!(name(&w), c"wt");
+        }
+    }
+}

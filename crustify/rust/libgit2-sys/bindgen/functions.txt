@@ -124,6 +124,8 @@ git_repository_open_ext
 git_repository_path
 git_repository_refdb
 git_repository_set_index
+git_repository_state
+git_repository_state_cleanup
 git_repository_workdir
 git_repository_wrap_odb
 git_signature_dup
@@ -154,7 +156,13 @@ git_treebuilder_insert
 git_treebuilder_new
 git_treebuilder_write
 git_worktree_free
+git_worktree_is_locked
 git_worktree_is_prunable
+git_worktree_lock
 git_worktree_lookup
+git_worktree_name
+git_worktree_open_from_repository
+git_worktree_path
 git_worktree_prune
 git_worktree_prune_options_init
+git_worktree_unlock

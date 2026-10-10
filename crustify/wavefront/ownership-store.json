@@ -527,6 +527,12 @@
    "fields": []
   },
   {
+   "name": "git_repository_state_t",
+   "defined_in": "include/git2/repository.h",
+   "_comment_agent": "Plain C enum, values 0..=11, no lifecycle. Its only producer is git_repository_state, which returns it as an int (or -1 when copying the gitdir path fails); reset.c compares it against MERGE/REVERT/CHERRYPICK. Wrapped as a fieldless RepositoryState, converted fallibly from a raw value; GIT_REPOSITORY_STATE_NONE is the Clean variant.",
+   "fields": []
+  },
+  {
    "name": "git_signature",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "git_signature is a heap object owned by a single holder: CBox<Signature, SignatureFree> (git_signature_free drops it with both strings; git_signature_dup deep-copies it, refusing NULL fields that C would strdup). Public consumers otherwise receive `const git_signature *` borrowed from a parent (git_commit_author/committer, git_tag_tagger, git_note_author/committer, git_reflog_entry_committer, git_blame_hunk fields) and only read it; every `const git_signature *` argument (commit/tag/note/reflog/stash/rebase creation) is only read and copied, so a caller-built struct over borrowed strings (SignatureView) is a valid argument. `when` is an embedded git_time value. No refcount, no lock. Constructors: git_signature_new, git_signature_now, git_signature_from_buffer (alloc through out-param), git_signature_default / git_signature_default_from_env (need a git_repository; left to the object/signature symbol batch). C defects: git_signature_new leaks p (and p->name) when a string allocation fails; git_signature_dup leaks the partial copy on OOM; git_signature_default_from_env frees author/committer with git__free on error, leaking their strings.",
@@ -637,6 +643,91 @@
    "defined_in": "include/git2/trace.h",
    "_comment_agent": "C enum, values 0..6 (NONE..TRACE), passed by value. Consumers: git_trace_set stores any value in git_trace__data.level (GIT_ASSERT_ARG level == 0 || callback != NULL, an abort in Debug builds); git_trace() emits when git_trace__data.level >= level, so the integer order is the verbosity order; internal emitters only pass named levels (INFO/DEBUG/TRACE) to git_trace_cb. Wrapped as the fieldless TraceLevel enum (repr u32, Ord over the C values) with a fallible from_raw in core/trace.rs.",
    "fields": []
+  },
+  {
+   "name": "git_worktree",
+   "defined_in": "src/libgit2/worktree.h",
+   "_comment_agent": "git_worktree is opaque in the public API (forward-declared in git2/types.h); its body is private to src/libgit2/worktree.h and only worktree.c, repository.c (git_repository_open_from_worktree) and submodule.c (get_url_base) read fields. Sole owner, no refcount, no lock, no copy routine: CBox<Worktree, WorktreeFree> with git_worktree_free (frees six strings then the struct, NULL is a no-op). Constructors, all alloc through an out-param and all needing a git_repository: git_worktree_lookup (sets *out NULL first), git_worktree_open_from_repository (does NOT reset *out on failure and has no GIT_ASSERT_ARG on repo), git_worktree_add (needs git_worktree_add_options). Every string is copied (strdup / read from the worktree's files / prettified), so a worktree never borrows the repository it was looked up in and may outlive it. Only git_worktree_lock / git_worktree_unlock write through the struct (the `locked` bit, which nothing reads back); every other consumer reads.",
+   "fields": [
+    {
+     "name": "commondir_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Parent repository's common dir, read from `<gitdir>/commondir` by git_worktree__read_link. Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    },
+    {
+     "name": "gitdir_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Prettified path of `<commondir>/worktrees/<name>/`, detached from a git_str. Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    },
+    {
+     "name": "gitlink_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Path of the working tree's `.git` file, read from `<gitdir>/gitdir` by git_worktree__read_link (made absolute against the gitdir when relative). Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Worktree name: git__strdup of the lookup name, or git_fs_path_basename of the worktree repo's gitdir in open_from_repository; returned borrowed by git_worktree_name. Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    },
+    {
+     "name": "parent_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Parent working directory: git__strdup of git_repository_workdir(repo) in git_worktree_lookup (NULL when the repository is bare) or of the prettified `<commondir>/..` in open_from_repository. git_worktree_validate and get_url_base check it for NULL. Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    },
+    {
+     "name": "worktree_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Working directory: git_fs_path_dirname(gitlink_path); returned borrowed by git_worktree_path. Allocated from libgit2's allocator by open_worktree_dir (behind git_worktree_lookup, git_worktree_open_from_repository and git_worktree_add) and released by git_worktree_free with git__free; never written through or replaced after construction."
+     }
+    }
+   ]
   },
   {
    "name": "git_worktree_prune_options",
@@ -3959,6 +4050,70 @@
    ]
   },
   {
+   "name": "git_worktree_add",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG, then set to NULL; receives the worktree git_worktree_lookup loads once the gitdir, working directory, refs and checkout are created, owned by the caller (git_worktree_free). Stays NULL on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_free",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "wt",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "NULL is a no-op. Frees commondir_path, worktree_path, gitlink_path, gitdir_path, parent_path and name with git__free, then the struct. Releases every worktree the constructors hand out; also open_worktree_dir's error path, get_url_base, git_repository_foreach_worktree and git_repository_head_for_worktree on the worktrees they looked up."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_worktree_is_prunable",
    "defined_in": "src/libgit2/worktree.c",
    "ptr_args": [
@@ -3977,6 +4132,127 @@
       "nullable": true,
       "mutable": false,
       "note": "Read-only despite the non-const type: GIT_ERROR_CHECK_VERSION reads version (NULL passes), then memcpy copies it into a local; NULL means the {VERSION, 0} defaults. Not retained past the call. Flag bits outside git_worktree_prune_t are ignored."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_lookup",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; joined into the worktree's gitdir path and git__strdup'd as its name, never retained."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, set to NULL after the asserts on repo and name (out itself is not asserted); receives a fresh git__calloc'd worktree whose strings are all copies, owned by the caller (git_worktree_free). Stays NULL on failure: GIT_ENOTFOUND when `<commondir>/worktrees/<name>` is not a directory, -1 when it lacks commondir/gitdir/HEAD or a link cannot be read."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": null,
+      "note": "GIT_ASSERT_ARG; read for the call (commondir, workdir), never retained: the worktree copies what it needs, so it may outlive the repository."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_open_from_repository",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, NOT reset on failure (left as the caller initialised it); receives a fresh worktree owned by the caller (git_worktree_free) when repo is a worktree's repository. Fails with GIT_ERROR_WORKTREE 'cannot open worktree of a non-worktree repo' otherwise."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": null,
+      "note": "Not asserted: NULL dereferences in git_repository_is_worktree. Read for the call (gitdir, commondir), never retained."
      }
     }
    ]
