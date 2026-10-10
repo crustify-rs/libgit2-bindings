@@ -1,5 +1,5 @@
 {
-  "crate_path": "/target/crustify/rust",
+  "crate_path": "/target/crustify/.worktrees/rescan/2/crustify/rust",
   "counts": {
     "unsafe_blocks": 310,
     "unsafe_block_stmts": 18,
@@ -23,8 +23,12 @@
     "raw_ptr_seam": 81,
     "raw_ptr_wrapped": 5,
     "raw_ptr_pub_smell": 0,
-    "raw_ptr_priv_smell": 17,
-    "ref_to_type_wrapper": 44,
+    "raw_ptr_priv_smell": 18,
+    "ref_to_type_wrapper_sanctioned": 36,
+    "ref_to_type_wrapper_smell": 8,
+    "ref_to_type_wrapper_body_smell": 0,
+    "deref_impl_on_wrapper": 0,
+    "raw_ptr_fields": 1,
     "field_ref_wrapped": 0,
     "field_proj_wrapped": 60,
     "field_proj_outside_impl": 4,
@@ -34,71 +38,7 @@
     "raw_ptr_derefs": 65,
     "raw_ptr_derefs_outside_impl": 5,
     "total_stmts": 783,
-    "code_lines": 3196,
-    "raw_ptr_smell_sites": [
-      {
-        "file": "libgit2/libgit2/core/buffer.rs",
-        "count": 1,
-        "lines": [
-          197
-        ]
-      },
-      {
-        "file": "libgit2/libgit2/core/types.rs",
-        "count": 5,
-        "lines": [
-          1066,
-          1330,
-          1567,
-          1724,
-          1802
-        ]
-      },
-      {
-        "file": "libgit2/libgit2/odb/sys/odb_backend.rs",
-        "count": 7,
-        "lines": [
-          85,
-          206,
-          217,
-          257,
-          289,
-          299,
-          489
-        ]
-      },
-      {
-        "file": "libgit2/libgit2/util/sys/alloc.rs",
-        "count": 1,
-        "lines": [
-          312
-        ]
-      }
-    ],
-    "void_ptr_sites": [],
-    "field_proj_sites": [
-      {
-        "file": "libgit2/libgit2/core/types.rs",
-        "count": 3,
-        "lines": [
-          1068,
-          1569,
-          1804
-        ]
-      }
-    ],
-    "field_ref_sites": [],
-    "raw_deref_sites": [
-      {
-        "file": "libgit2/libgit2/core/types.rs",
-        "count": 3,
-        "lines": [
-          1068,
-          1569,
-          1804
-        ]
-      }
-    ]
+    "code_lines": 3196
   },
   "counts_unavailable": null,
   "undocumented_unsafe": {
@@ -123,8 +63,8 @@
   "derived": {
     "unsafe_fn_pub_ratio": 0.3434,
     "unsafe_fn_smell": 51,
-    "raw_ptr_smell": 17,
-    "raw_ptr_seam_ratio": 0.8265,
+    "raw_ptr_smell": 18,
+    "raw_ptr_seam_ratio": 0.8182,
     "unsafe_loc_ratio": 0.1283,
     "loc_per_unsafe_block": 10.3
   }
