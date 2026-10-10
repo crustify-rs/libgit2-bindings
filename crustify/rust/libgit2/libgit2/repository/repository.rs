@@ -905,12 +905,13 @@ impl<'o> InitOptionsMut<'_, 'o> {
         unsafe { addr_of_mut!((*p).mode).write(mode.raw()) }
     }
 
-    /// Sets the working directory; `None` means the repository directory's parent.
-    /// libgit2 resolves a relative path against the repository directory and, unless
-    /// it is that parent, writes a `.git` file there linking to the repository and
-    /// records it as `core.worktree`. Ignored for a bare repository; a non-bare
-    /// repository whose path does not end in `.git` needs one. Read during each call,
-    /// never kept.
+    /// Sets the working directory. `None` means the repository directory's parent,
+    /// for a repository path ending in `.git`; to any other path libgit2 then appends
+    /// `.git`, so that the path given is the working directory. With one, the
+    /// repository path is used as given; libgit2 resolves a relative working directory
+    /// against it and, unless it is the repository directory's parent, writes a `.git`
+    /// file there linking to the repository and records it as `core.worktree`. Ignored
+    /// for a bare repository. Read during each call, never kept.
     ///
     /// Field: git_repository_init_options.workdir_path
     pub fn set_workdir_path(&mut self, path: Option<&'o CStr>) {
@@ -937,8 +938,10 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// Sets the template directory a new repository is copied from; `None` means the
     /// `init.templatedir` setting or the system's template directory, and only with
     /// [`InitFlag::ExternalTemplate`]. A path makes libgit2 use an external template
-    /// whatever the flags; an empty one copies nothing, and a missing directory falls
-    /// back to the built-in template. Read during each call, never kept.
+    /// whatever the flags; an empty one copies nothing, a missing directory (or a
+    /// file) falls back to the built-in template, and a path the file system refuses
+    /// as invalid (an over-long component) fails the call with `GIT_EINVALIDSPEC`
+    /// once the repository directory exists. Read during each call, never kept.
     ///
     /// Field: git_repository_init_options.template_path
     pub fn set_template_path(&mut self, path: Option<&'o CStr>) {
