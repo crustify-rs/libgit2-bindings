@@ -208,10 +208,12 @@ git_trace_set
 git_tree_entry_byindex
 git_tree_entry_filemode
 git_tree_entry_filemode_raw
+git_tree_entry_name
 git_tree_entrycount
 git_tree_free
 git_tree_id
 git_tree_lookup
+git_tree_walk
 git_treebuilder_free
 git_treebuilder_get
 git_treebuilder_insert

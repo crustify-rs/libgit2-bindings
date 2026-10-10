@@ -1275,6 +1275,12 @@
    "fields": []
   },
   {
+   "name": "git_treewalk_mode",
+   "defined_in": "include/git2/tree.h",
+   "_comment_agent": "C enum passed by value, values 0 (GIT_TREEWALK_PRE) and 1 (GIT_TREEWALK_POST); no pointer fields, no lifecycle. Sole consumer git_tree_walk refuses any other value with GIT_ERROR_INVALID 'invalid walking mode for tree walk' and -1 before touching the tree or calling back. PRE calls back for an entry before descending into its subtree and a positive callback result skips that subtree; POST calls back after the subtree and ignores positive results; a negative result stops both and is returned (GIT_ERROR_CALLBACK set if no error exists). Internal callers pass only named values (index.c read_tree POST, pack-objects.c PRE). Wrapped as the fieldless WalkMode enum (repr u32, PreOrder/PostOrder) with a fallible from_raw / TryFrom (UnnamedWalkMode) in object/tree.rs.",
+   "fields": []
+  },
+  {
    "name": "git_worktree",
    "defined_in": "src/libgit2/worktree.h",
    "_comment_agent": "git_worktree is opaque in the public API (forward-declared in git2/types.h); its body is private to src/libgit2/worktree.h and only worktree.c, repository.c (git_repository_open_from_worktree) and submodule.c (get_url_base) read fields. Sole owner, no refcount, no lock, no copy routine: CBox<Worktree, WorktreeFree> with git_worktree_free (frees six strings then the struct, NULL is a no-op). Constructors, all alloc through an out-param and all needing a git_repository: git_worktree_lookup (sets *out NULL first), git_worktree_open_from_repository (does NOT reset *out on failure and has no GIT_ASSERT_ARG on repo), git_worktree_add (needs git_worktree_add_options). Every string is copied (strdup / read from the worktree's files / prettified), so a worktree never borrows the repository it was looked up in and may outlive it. Only git_worktree_lock / git_worktree_unlock write through the struct (the `locked` bit, which nothing reads back); every other consumer reads.",
