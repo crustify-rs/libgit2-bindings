@@ -1134,7 +1134,7 @@ pub mod annotated_commit {
     use libgit2::libgit2::refs::annotated_commit::AnnotatedCommitBox;
     use libgit2::libgit2::refs::refs::ReferenceBox;
     use libgit2::libgit2::repository::repository::{
-        InitFlag, InitOptions, RepositoryBox, RepositoryRef,
+        InitFlag, InitOptions, Repository, RepositoryBox, RepositoryRef,
     };
     use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
 
@@ -1196,9 +1196,7 @@ pub mod annotated_commit {
             m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
             m.set_initial_head(Some(c"main"));
             m.set_oid_type(OidType::from_raw(kind));
-            let (rc, repo) = super::repository_options::init_ext(&c_path, &mut opts);
-            assert_eq!(rc, 0);
-            let repo = repo.unwrap();
+            let repo = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
             let raw = repo.as_c_ptr();
             let mut odb = ptr::null_mut();
             // SAFETY: a live slot and the live repository; released below.
@@ -1355,8 +1353,8 @@ pub mod annotated_commit {
 
 // --- `git2/worktree.h`: `git_worktree_add` -----------------------------------------
 
-/// A repository to add linked worktrees to, through `git_worktree_add`; stands in for
-/// the reference lookup and `Worktree::add` wrappers, which replace it.
+/// A repository to add linked worktrees to, through `Worktree::add`; its reference
+/// lookup stands in for that routine's wrapper, which replaces it.
 pub mod worktree_add {
     use std::ffi::{CStr, CString, c_int};
     use std::os::unix::ffi::OsStrExt;
@@ -1366,8 +1364,7 @@ pub mod worktree_add {
     use libgit2::ffi;
     use libgit2::libgit2::refs::refs::ReferenceBox;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
-    use libgit2::libgit2::repository::worktree::{AddOptions, WorktreeBox};
-    use libgit2::libgit2::util::errors::last;
+    use libgit2::libgit2::repository::worktree::{AddOptions, Worktree, WorktreeBox};
 
     /// A fresh non-bare repository at `<base>/repo` whose `HEAD` is `main`, a commit of
     /// the empty tree (so a checkout loads no filter), with the branches `feature` and
@@ -1439,8 +1436,8 @@ pub mod worktree_add {
             unsafe { ReferenceBox::from_c(out) }.unwrap()
         }
 
-        /// `git_worktree_add(repo, name, <base>/wt/<name>, opts)`: the new worktree, or
-        /// the error code and message. libgit2 reads the options for the call only.
+        /// `Worktree::add(repo, name, <base>/wt/<name>, opts)`: the new worktree, or the
+        /// error code and message.
         pub fn add(
             &self,
             name: &str,
@@ -1449,23 +1446,14 @@ pub mod worktree_add {
             let c_name = CString::new(name).unwrap();
             let dir = self.base.join("wt").join(name);
             let c_dir = CString::new(dir.as_os_str().as_bytes()).unwrap();
-            let opts: *const ffi::git_worktree_add_options =
-                opts.map_or(ptr::null(), |o| ptr::from_ref(o).cast());
-            let raw = self.repo.as_ref().unwrap().as_c_ptr();
-            let mut out = ptr::null_mut();
-            // SAFETY: a live slot, the live repository, two NUL-terminated strings and
-            // NULL or live options (`AddOptions` is `#[repr(transparent)]` over the C
-            // struct), all read for the call.
-            let rc = unsafe {
-                ffi::git_worktree_add(&mut out, raw, c_name.as_ptr(), c_dir.as_ptr(), opts)
-            };
-            if rc < 0 {
-                assert!(out.is_null());
-                return Err((rc, last().message().to_string_lossy().into_owned()));
-            }
-            // SAFETY: the fresh worktree the call looked up, owned by the caller and
-            // released by `git_worktree_free`.
-            Ok(unsafe { WorktreeBox::from_c(out) }.unwrap())
+            let repo = self.repo.as_ref().unwrap().as_ref();
+            Worktree::add(repo, &c_name, &c_dir, opts.map(AddOptions::as_ref))
+                .map_err(|e| (e.raw_code(), e.message().to_string_lossy().into_owned()))
+        }
+
+        /// The repository.
+        pub fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
         }
 
         /// The new worktree `name`'s administrative directory.
@@ -1480,53 +1468,6 @@ pub mod worktree_add {
             drop(self.repo.take());
             let _ = std::fs::remove_dir_all(&self.base);
         }
-    }
-}
-
-// --- `git2/repository.h`, `git2/sys/repository.h`: the init and new options -------
-
-/// `git_repository_init_ext` and `git_repository_new_ext` over the safe option types,
-/// standing in for their wrappers (a later batch), which replace them. Each reaches the
-/// C struct through the options' documented `#[repr(transparent)]` layout.
-pub mod repository_options {
-    use std::ffi::{CStr, c_int};
-    use std::ptr;
-
-    use libgit2::ffi;
-    use libgit2::libgit2::repository::repository::{InitOptions, RepositoryBox};
-    use libgit2::libgit2::repository::sys::repository::NewOptions;
-
-    /// `git_repository_init_ext(path, opts)`, which writes the options' flags, so it
-    /// takes them exclusively: the return, and the repository the call left in its
-    /// slot (on success, and after a failure past its inner open).
-    pub fn init_ext(path: &CStr, opts: &mut InitOptions<'_>) -> (c_int, Option<RepositoryBox>) {
-        let opts = ptr::from_mut(opts).cast::<ffi::git_repository_init_options>();
-        let mut out = ptr::null_mut();
-        // SAFETY: a live NULL slot, a NUL-terminated path, and live options whose
-        // strings the `'_` borrow keeps alive for the call, which only reads them and
-        // writes the flags through the exclusive borrow.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), opts) };
-        // SAFETY: the slot is NULL or a fresh repository the caller owns alone,
-        // released by `git_repository_free`, as `RepositoryFree` does.
-        (rc, unsafe { RepositoryBox::from_c(out) })
-    }
-
-    /// `git_repository_new_ext(opts)`, which only reads them: the return, and the
-    /// repository on success.
-    pub fn new_ext(opts: &NewOptions) -> (c_int, Option<RepositoryBox>) {
-        let opts = ptr::from_ref(opts).cast::<ffi::git_repository_new_options>();
-        let mut out = ptr::null_mut();
-        // SAFETY: a live NULL slot and live options; `git_repository_new_ext` takes a
-        // non-const pointer but only reads it (version and `oid_type`).
-        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts.cast_mut()) };
-        // SAFETY: the slot is NULL or a fresh repository the caller owns alone.
-        (rc, unsafe { RepositoryBox::from_c(out) })
-    }
-
-    /// `git_repository_oid_type(repo)`, standing in for its wrapper.
-    pub fn oid_type(repo: &RepositoryBox) -> ffi::git_oid_t {
-        // SAFETY: a live repository, only read.
-        unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) }
     }
 }
 
@@ -1617,18 +1558,14 @@ pub mod submodule {
 
 // --- `git2/repository.h`: routines (head and lookups) --------------------------------
 
-/// Copies of libgit2's test repositories, and a stand-in for the
-/// `git_repository_fetchhead_foreach` wrapper (a later batch), which replaces it.
+/// Copies of libgit2's test repositories.
 pub mod head_and_lookups {
-    use std::ffi::{CString, c_int};
+    use std::ffi::CString;
     use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
 
-    use libgit2::ffi;
-    use libgit2::libgit2::repository::repository::{
-        FetchheadForeachCallback, Repository, RepositoryBox,
-    };
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/resources");
 
@@ -1691,18 +1628,5 @@ pub mod head_and_lookups {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
-    }
-
-    /// `git_repository_fetchhead_foreach` with `callback`'s function and payload; its
-    /// return. A caught panic is left for the caller to resume.
-    pub fn fetchhead_foreach(
-        repo: &RepositoryBox,
-        callback: &mut FetchheadForeachCallback<'_>,
-    ) -> c_int {
-        let repo = repo.as_c_ptr();
-        let (f, payload) = callback.raw();
-        // SAFETY: a live repository, used on this thread, and the callback's own
-        // function and payload, which stays put and otherwise unused for the call.
-        unsafe { ffi::git_repository_fetchhead_foreach(repo, f, payload) }
     }
 }

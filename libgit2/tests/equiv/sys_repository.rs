@@ -8,13 +8,15 @@
 /// values C accepts. Then one sequence of option changes runs twice: once on a C struct
 /// written field by field, once on a [`NewOptions`] through its setters, each
 /// persisting across the steps. After every step the getters must read what the C
-/// struct holds, and `git_repository_new_ext` must behave the same with either: its
-/// return, the error of a failure, the new repository's object id type and bareness,
-/// and the options left unchanged. [`Repository::with_oid_type`], which builds its
-/// options through [`NewOptions`], must match `git_repository_new_ext` with C's.
+/// struct holds, and [`Repository::new_ext`] with the Rust options must behave as
+/// `git_repository_new_ext` with the C struct: the return, the error of a failure, the
+/// new repository's object id type and bareness, and the options left unchanged.
+/// [`Repository::with_oid_type`], which builds its options through [`NewOptions`], must
+/// match `git_repository_new_ext` with C's.
 ///
 /// [`NewOptions`]: libgit2::libgit2::repository::sys::repository::NewOptions
 /// [`NewOptions::new`]: libgit2::libgit2::repository::sys::repository::NewOptions::new
+/// [`Repository::new_ext`]: libgit2::libgit2::repository::repository::Repository::new_ext
 /// [`Repository::with_oid_type`]: libgit2::libgit2::repository::repository::Repository::with_oid_type
 mod new_options {
     use std::ffi::{CStr, c_int};
@@ -23,7 +25,7 @@ mod new_options {
     use libgit2::ffi;
     use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::repository::repository::Repository;
-    use libgit2::libgit2::repository::sys::repository::NewOptions;
+    use libgit2::libgit2::repository::sys::repository::{NewOptions, NewOptionsRef};
 
     fn init() {
         // SAFETY: no arguments; the reference is never released.
@@ -111,6 +113,24 @@ mod new_options {
         (rc, error, repo_state)
     }
 
+    /// `Repository::new_ext(opts)`, as [`new_ext`] records it.
+    fn rust_new_ext(opts: NewOptionsRef<'_>) -> Call {
+        match Repository::new_ext(opts) {
+            Ok(repo) => {
+                let r = repo.as_ref();
+                (
+                    0,
+                    None,
+                    Some((r.oid_type().raw(), c_int::from(r.is_bare()))),
+                )
+            }
+            Err(e) => {
+                let message = e.message().to_string_lossy().into_owned();
+                (e.raw_code(), Some((e.raw_class(), message)), None)
+            }
+        }
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn new_ext_reads_rust_options_as_c_options() {
@@ -166,8 +186,7 @@ mod new_options {
             rust_change(&mut rust);
             assert_eq!(fields(&rust), (c.version, c.oid_type), "{tag}: fields");
             let c_call = new_ext(&mut c);
-            let rust_ptr = ptr::from_mut(&mut rust).cast::<ffi::git_repository_new_options>();
-            let rust_call = new_ext(rust_ptr);
+            let rust_call = rust_new_ext(rust.as_ref());
             assert_eq!(rust_call, c_call, "{tag}");
             assert_eq!(
                 fields(&rust),

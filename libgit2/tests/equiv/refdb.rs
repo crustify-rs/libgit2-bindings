@@ -28,8 +28,10 @@ mod owner {
     use std::ptr::{self, NonNull};
 
     use libgit2::ffi;
-    use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox};
-    use libgit2::libgit2::repository::repository::RepositoryBox;
+    use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox, RefdbType};
+    use libgit2::libgit2::repository::repository::{
+        InitFlag, InitOptions, Repository, RepositoryBox,
+    };
     use libgit2::libgit2::util::errors::ErrorBuf;
 
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
@@ -106,22 +108,13 @@ mod owner {
                 .join(format!("crustify-refdb-equiv-{}-{tag}", std::process::id()));
             let _ = fs::remove_dir_all(&path);
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
-            let mut opts = ffi::git_repository_init_options::default();
-            // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-            let rc = unsafe {
-                ffi::git_repository_init_options_init(
-                    &mut opts,
-                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-                )
-            };
-            assert_eq!(rc, 0);
-            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-            opts.refdb_type = format;
-            let mut repo = ptr::null_mut();
-            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
-            // call.
-            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
-            assert_eq!(rc, 0, "{:?}", c_last());
+            let mut opts = InitOptions::new();
+            let mut m = opts.as_mut();
+            m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+            m.set_refdb_type(Some(RefdbType::from_raw(format).unwrap()));
+            let repo = Repository::init_ext(&c_path, opts.as_mut())
+                .unwrap()
+                .into_c();
             let mut odb = ptr::null_mut();
             let mut blob = ffi::git_oid::default();
             let data = b"refdb equivalence\n";

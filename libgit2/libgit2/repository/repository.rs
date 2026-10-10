@@ -27,8 +27,10 @@
 //! storage are typed, `None` for the zero default: libgit2 does not check them, and
 //! creates a repository it cannot open from a value it does not name.
 //!
-//! `git_repository_init_ext` writes to its options, ORing internal bits into their
-//! flags, so it takes them exclusively ([`InitOptionsMut`]).
+//! `git_repository_init_ext` ([`Repository::init_ext`]) writes to its options, ORing
+//! internal bits into their flags, so it takes them exclusively ([`InitOptionsMut`]);
+//! the wrapper clears those bits before each call, where libgit2 would read the ones a
+//! previous call left as describing this one.
 //!
 //! # Repository state
 //!
@@ -63,7 +65,8 @@
 //! repository for their `includeIf` conditions) and references ([`ReferenceBox`])
 //! borrow it. [`discover`] finds a repository without
 //! opening it, and a [`FetchheadForeachCallback`] is the closure
-//! `git_repository_fetchhead_foreach` calls with each [`FetchheadEntry`].
+//! [`for_each_fetchhead`](RepositoryRef::for_each_fetchhead) calls with each
+//! [`FetchheadEntry`].
 //!
 //! A repository built without paths ([`Repository::new`], [`Repository::wrap_odb`]) has
 //! no git directory, common directory or working directory. libgit2 resolves some
@@ -223,7 +226,8 @@ impl std::error::Error for UnnamedInitFlag {}
 /// libgit2 reads bits no [`InitFlag`] names too: `git_repository_init_ext` ORs its
 /// own internal bits (`1 << 16` for a path ending in `.git`, `1 << 17` for a working
 /// directory that is its parent, `1 << 18` for a reinitialisation) into the options
-/// it is given, and reads them back on the next call with those options.
+/// it is given, and reads them back on the next call with those options, which
+/// [`Repository::init_ext`] prevents by clearing them before each call.
 /// [`from_bits_retain`](Self::from_bits_retain) keeps every bit, so
 /// [`bits`](Self::bits) returns what C produced; [`from_bits_truncate`](Self::from_bits_truncate)
 /// keeps the named ones only. [`iter`](Self::iter) and [`contains`](Self::contains)
@@ -887,7 +891,7 @@ impl<'o> InitOptionsMut<'_, 'o> {
 
     /// Replaces the init flags, every bit as given: libgit2 tests the bits
     /// [`InitFlag`] names and its own internal ones (see [`InitFlags`]), and ignores
-    /// the rest.
+    /// the rest; [`Repository::init_ext`] clears the internal ones before its call.
     ///
     /// Field: git_repository_init_options.flags
     pub fn set_flags(&mut self, flags: InitFlags) {
@@ -956,7 +960,8 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// Sets the branch `HEAD` points at: a name below `refs/heads/`, or a full
     /// reference name starting with `refs/`. `None` means the `init.defaultbranch`
     /// setting, or `master`, and leaves a reinitialised repository's `HEAD` alone.
-    /// Read during each call, never kept.
+    /// libgit2 writes the name to `HEAD` without checking that it is a valid reference
+    /// name. Read during each call, never kept.
     ///
     /// Field: git_repository_init_options.initial_head
     pub fn set_initial_head(&mut self, head: Option<&'o CStr>) {
@@ -1753,13 +1758,21 @@ impl fmt::Display for RepositoryError {
 
 impl std::error::Error for RepositoryError {}
 
+/// The bits `git_repository_init_ext` ORs into its options' flags for its own use
+/// (`GIT_REPOSITORY_INIT__HAS_DOTGIT`, `__NATURAL_WD`, `__IS_REINIT`, private to
+/// `repository.c`), and reads back from them.
+const INIT_INTERNAL_BITS: u32 = 1 << 16 | 1 << 17 | 1 << 18;
+
 /// The repository a constructor returned `rc` for, adopted from its out slot.
 ///
 /// `git_repository_init` can fail after it opened the repository, leaving it in the
 /// slot (and then may return a positive code, see [`Repository::init`]); it is
 /// released here, after the error is copied out. A slot left NULL on success would be
 /// a libgit2 bug, reported as the thread's error.
-fn constructed(rc: c_int, repo: Option<RepositoryBox>) -> Result<RepositoryBox, RepositoryError> {
+pub(crate) fn constructed(
+    rc: c_int,
+    repo: Option<RepositoryBox>,
+) -> Result<RepositoryBox, RepositoryError> {
     match repo {
         Some(repo) if rc == 0 => Ok(repo),
         repo => {
@@ -1771,7 +1784,7 @@ fn constructed(rc: c_int, repo: Option<RepositoryBox>) -> Result<RepositoryBox, 
 }
 
 /// The failure reported when libgit2 cannot be initialised, without calling it.
-fn unpinned() -> RepositoryError {
+pub(crate) fn unpinned() -> RepositoryError {
     RepositoryError {
         code: ErrorCode::Generic.raw(),
         error: last(),
@@ -1803,20 +1816,9 @@ impl Repository {
     ///
     /// Wraps: git_repository_new_ext
     pub fn with_oid_type(oid_type: OidType) -> Result<RepositoryBox, RepositoryError> {
-        if !runtime_pinned() {
-            return Err(unpinned());
-        }
         let mut opts = NewOptions::new();
-        let mut m = opts.as_mut();
-        m.set_oid_type(Some(oid_type));
-        let opts = m.as_mut_ptr();
-        let mut out = ptr::null_mut();
-        // SAFETY: `out` is a writable slot and `opts` live options of the current
-        // version naming a valid type, read for the call only. The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts) };
-        // SAFETY: `git_repository_new_ext` leaves `out` NULL on failure, or writes a
-        // fresh repository the caller owns alone.
-        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+        opts.as_mut().set_oid_type(Some(oid_type));
+        Self::new_ext(opts.as_ref())
     }
 
     /// Opens the repository at `path`: a repository directory (`.git`, or a bare
@@ -1893,6 +1895,74 @@ impl Repository {
         // The runtime is pinned.
         let rc = unsafe { ffi::git_repository_init(&mut out, path.as_ptr(), bare.into()) };
         // SAFETY: `git_repository_init` leaves `out` NULL, or writes the fresh
+        // repository it opened, owned by the caller alone, whatever it returns.
+        constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// Creates a repository at `path`, or reinitialises the one there, as `opts`
+    /// directs, and opens it: [`init`](Self::init) with every option of
+    /// [`InitOptions`] (`init(path, bare)` is this with [`InitFlag::Mkpath`], plus
+    /// [`InitFlag::Bare`] when `bare`, and the other options at their defaults). `path`
+    /// is the repository directory for a bare repository, or for one whose path ends in
+    /// `.git` or that has a [working directory](InitOptionsMut::set_workdir_path) of its
+    /// own; any other path is the working directory, the repository going in
+    /// `path/.git`.
+    ///
+    /// Fails with libgit2's error: with [`ErrorCode::Exists`] when the path holds a
+    /// repository and [`InitFlag::NoReinit`] is set, or when a directory on the way is
+    /// a file; with `GIT_ERROR_INVALID` for options of a version libgit2 does not know.
+    /// As for `init`, libgit2 can fail after opening the repository, which is then
+    /// released here: when the `origin` remote of
+    /// [`set_origin_url`](InitOptionsMut::set_origin_url) cannot be added (a
+    /// reinitialised repository that has one fails with [`ErrorCode::Exists`] once it
+    /// is otherwise reinitialised), or when its reference storage cannot be set up.
+    ///
+    /// libgit2 writes to the options: it ORs its own internal bits into their
+    /// [`flags`](InitOptionsRef::flags) (a path ending in `.git`, a working directory
+    /// that is its parent, a reinitialisation; see [`InitFlags`]), and reads them back
+    /// on the next call, where they describe the previous path. This wrapper clears
+    /// those three bits before each call, so the options can be reused: libgit2 itself
+    /// would, for one, skip the `.git` link and `core.worktree` of a repository whose
+    /// working directory is elsewhere after an init whose working directory was the
+    /// parent. After the call the flags hold the bits this call set (none when the
+    /// options were refused for their version), as they would after a first call in C.
+    ///
+    /// ```
+    /// use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
+    ///
+    /// # if cfg!(miri) { return; }
+    /// let dir = std::env::temp_dir().join(format!("init-ext-doc-{}", std::process::id()));
+    /// let path = std::ffi::CString::new(dir.join("repo").to_str().unwrap()).unwrap();
+    /// let mut opts = InitOptions::new();
+    /// opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkpath);
+    /// opts.as_mut().set_initial_head(Some(c"trunk"));
+    /// let repo = Repository::init_ext(&path, opts.as_mut()).unwrap();
+    /// assert!(repo.as_ref().is_bare());
+    /// assert!(repo.as_ref().is_head_unborn().unwrap());
+    /// # drop(repo);
+    /// # std::fs::remove_dir_all(&dir).unwrap();
+    /// ```
+    ///
+    /// Wraps: git_repository_init_ext
+    pub fn init_ext(
+        path: &CStr,
+        mut opts: InitOptionsMut<'_, '_>,
+    ) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let flags = opts.as_ref().flags().bits() & !INIT_INTERNAL_BITS;
+        opts.set_flags(InitFlags::from_bits_retain(flags));
+        let opts = opts.as_mut_ptr();
+        let mut out = ptr::null_mut();
+        // The options' version is checked by libgit2; their object id type and reference
+        // storage are 0 or named values (the typed setters).
+        // SAFETY: `out` is a writable slot, NULL so a failure before the inner open
+        // leaves it NULL; `path` NUL-terminated; `opts` the exclusive handle's live
+        // options, whose flags libgit2 writes and whose strings (NULL or borrowed for
+        // `'o`, which outlives the handle) it reads for the call only. Runtime pinned.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), opts) };
+        // SAFETY: `git_repository_init_ext` leaves `out` NULL, or writes the fresh
         // repository it opened, owned by the caller alone, whatever it returns.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
     }
@@ -3323,9 +3393,9 @@ type FetchheadFn<'f> = dyn FnMut(FetchheadEntry<'_>) -> ControlFlow<()> + 'f;
 /// libgit2 calls with each entry of `FETCH_HEAD`, through a C function and a payload
 /// pointing at this handle.
 ///
-/// [`call`](Self::call) runs it as libgit2 does, safely. A C caller gets the function
-/// and payload from [`raw`](Self::raw). The closure is borrowed, so it keeps its state
-/// for the caller to read afterwards:
+/// [`RepositoryRef::for_each_fetchhead`] hands it to libgit2, and [`call`](Self::call)
+/// runs it as libgit2 does, safely. The closure is borrowed, so it keeps its state for
+/// the caller to read afterwards:
 ///
 /// ```
 /// use std::ops::ControlFlow;
@@ -3360,8 +3430,9 @@ type FetchheadFn<'f> = dyn FnMut(FetchheadEntry<'_>) -> ControlFlow<()> + 'f;
 /// ```
 ///
 /// The trampoline catches a panic of the closure rather than unwind into C: the call
-/// stops the iteration, and [`call`](Self::call) resumes the panic once C has
-/// returned (a C caller does so with [`resume_panic`](Self::resume_panic)).
+/// stops the iteration, and [`call`](Self::call) or
+/// [`for_each_fetchhead`](RepositoryRef::for_each_fetchhead) resumes the panic once C
+/// has returned.
 ///
 /// Wraps: git_repository_fetchhead_foreach_cb
 /// Handwritten
@@ -3413,27 +3484,26 @@ impl<'f> FetchheadForeachCallback<'f> {
         }
     }
 
-    /// The C function and payload a C caller (`git_repository_fetchhead_foreach`)
-    /// passes on: a raw seam until that routine is wrapped. The function is never
-    /// `None`. The payload points at this handle:
-    /// it stays valid while the handle is neither moved, dropped nor used otherwise,
-    /// and only for calls from the thread that holds the handle.
+    /// The C function and payload `git_repository_fetchhead_foreach` is given. The
+    /// function is never `None`. The payload points at this handle: it stays valid
+    /// while the handle is neither moved, dropped nor used otherwise, and only for
+    /// calls from the thread that holds the handle.
     ///
     /// The function returns 0 to continue, or `GIT_EUSER` to stop when the closure
     /// returned `Break` or panicked.
-    pub fn raw(&mut self) -> (ffi::git_repository_fetchhead_foreach_cb, *mut c_void) {
+    pub(crate) fn raw(&mut self) -> (ffi::git_repository_fetchhead_foreach_cb, *mut c_void) {
         (Some(fetchhead_with), ptr::from_mut(self).cast())
     }
 
     /// Whether the last call stopped the iteration: the closure returned `Break`, or
-    /// panicked. Tells a C caller's `GIT_EUSER` from libgit2's own errors.
+    /// panicked. Tells the callback's `GIT_EUSER` from libgit2's own errors.
     pub fn stopped(&self) -> bool {
         self.stopped
     }
 
     /// Resumes a panic the closure raised during a call from C, which the trampoline
     /// caught so it did not unwind into C; does nothing when there is none.
-    pub fn resume_panic(&mut self) {
+    pub(crate) fn resume_panic(&mut self) {
         if let Some(panic) = self.panic.take() {
             panic::resume_unwind(panic);
         }
@@ -3489,6 +3559,72 @@ unsafe extern "C" fn fetchhead_with(
         Err(panic) => {
             this.panic = Some(panic);
             ErrorCode::User.raw()
+        }
+    }
+}
+
+impl RepositoryRef<'_> {
+    /// Calls `callback` with each entry of the repository's `FETCH_HEAD`, in file
+    /// order, until its closure returns `Break`: `Ok(Continue(()))` when every entry
+    /// was seen, `Ok(Break(()))` when the closure stopped the walk. A panic of the
+    /// closure stops the walk too, and is resumed here once libgit2 has returned.
+    ///
+    /// Each line is parsed before its call, so the entries before a malformed line
+    /// are seen and the walk then fails with `GIT_ERROR_FETCHHEAD` and the line's
+    /// number (an empty line, a bad id, a bad `not-for-merge` marker or description,
+    /// a last line without its newline); ids are read as the repository's type. Fails
+    /// with [`ErrorCode::NotFound`] when there is no `FETCH_HEAD`, and for a repository
+    /// without paths, whose `FETCH_HEAD` libgit2 would read from the process's working
+    /// directory.
+    ///
+    /// libgit2 reads the file and calls back synchronously, on this thread, so the
+    /// closure may use this repository's shared handles meanwhile, but not its
+    /// exclusive one:
+    ///
+    /// ```compile_fail,E0502
+    /// use std::ops::ControlFlow;
+    /// use libgit2::libgit2::repository::repository::{
+    ///     FetchheadEntry, FetchheadForeachCallback, RepositoryBox,
+    /// };
+    ///
+    /// fn walk(mut repo: RepositoryBox) {
+    ///     let mut rename = |_: FetchheadEntry<'_>| {
+    ///         let _ = repo.as_mut().set_namespace(None);
+    ///         ControlFlow::Continue(())
+    ///     };
+    ///     let mut callback = FetchheadForeachCallback::new(&mut rename);
+    ///     let _ = repo.as_ref().for_each_fetchhead(&mut callback);
+    /// }
+    /// ```
+    ///
+    /// When the closure stops the walk, libgit2 leaves
+    /// "`git_repository_fetchhead_foreach` callback returned -7" as the thread's error
+    /// unless one is set already (by a libgit2 call the closure made, say).
+    ///
+    /// Wraps: git_repository_fetchhead_foreach
+    pub fn for_each_fetchhead(
+        &self,
+        callback: &mut FetchheadForeachCallback<'_>,
+    ) -> Result<ControlFlow<()>, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        if self.path().is_none() {
+            return Err(pathless());
+        }
+        callback.stopped = false;
+        let repo = self.as_ptr().cast_mut();
+        let (f, payload) = callback.raw();
+        // SAFETY: a live repository with a git directory, used on this thread, which
+        // the routine only reads (its `gitdir` and object id type); the callback's own
+        // trampoline and payload, which nothing else touches until the call returns
+        // (`callback` is exclusively borrowed). The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_fetchhead_foreach(repo, f, payload) };
+        callback.resume_panic();
+        match rc {
+            0 => Ok(ControlFlow::Continue(())),
+            ffi::GIT_EUSER if callback.stopped => Ok(ControlFlow::Break(())),
+            rc => Err(RepositoryError::from_libgit2(rc)),
         }
     }
 }
@@ -4005,6 +4141,8 @@ mod unit_tests {
                         Repository::open(c".").unwrap_err(),
                         Repository::open_bare(c".").unwrap_err(),
                         Repository::init(c".", true).unwrap_err(),
+                        Repository::init_ext(c".", InitOptions::new().as_mut()).unwrap_err(),
+                        Repository::new_ext(NewOptions::new().as_ref()).unwrap_err(),
                         Repository::open_ext(Some(c"."), OpenFlags::empty(), None).unwrap_err(),
                         Repository::exists_ext(Some(c"."), OpenFlags::empty(), None).unwrap_err(),
                         discover(c".", true, None).unwrap_err(),
@@ -5286,6 +5424,216 @@ mod unit_tests {
             assert!(format!("{callback:?}").contains("panicked: false"));
             let resumed = panic::catch_unwind(AssertUnwindSafe(|| callback.call(entry(&id))));
             assert!(resumed.is_err());
+        }
+    }
+
+    mod init_ext_and_fetchhead {
+        use super::super::*;
+        use core::cell::Cell;
+        use std::ffi::CString;
+        use std::fs;
+        use std::os::unix::ffi::OsStrExt;
+        use std::path::{Path, PathBuf};
+
+        fn scratch(tag: &str) -> PathBuf {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-init-ext-unit-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+
+        fn c_path(path: &Path) -> CString {
+            CString::new(path.as_os_str().as_bytes()).unwrap()
+        }
+
+        /// The working directory a repository at `path` reopens with.
+        fn reopened_workdir(path: &Path) -> Option<String> {
+            let repo = Repository::open(&c_path(path)).unwrap();
+            repo.as_ref()
+                .workdir()
+                .map(|w| w.to_str().unwrap().to_owned())
+        }
+
+        /// libgit2 reads the internal bits an earlier `git_repository_init_ext` left in
+        /// reused options: after an init whose working directory was the parent of a
+        /// `.git` path, an init with a working directory elsewhere writes neither the
+        /// `.git` link nor `core.worktree`, and the repository reopens with the wrong
+        /// working directory. The wrapper clears the bits first. C's defect is shown on
+        /// a C struct alongside.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn init_ext_does_not_reuse_the_bits_of_an_earlier_call() {
+            assert!(runtime_pinned());
+            let root = scratch("reuse");
+            for side in ["c", "rust"] {
+                fs::create_dir_all(root.join(side)).unwrap();
+            }
+            let wd = [c_path(&root.join("c/wd")), c_path(&root.join("rust/wd"))];
+
+            // C: the options carry `__HAS_DOTGIT | __NATURAL_WD` into the second call.
+            let mut c = InitOptions::new().0;
+            c.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
+            for (path, workdir) in [("c/a/.git", None), ("c/sep.git", Some(&wd[0]))] {
+                c.workdir_path = workdir.map_or(ptr::null(), |w| w.as_ptr());
+                let path = c_path(&root.join(path));
+                let mut out = ptr::null_mut();
+                // SAFETY: a writable slot, a NUL-terminated path and live options whose
+                // strings outlive the call.
+                let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), &mut c) };
+                assert_eq!(rc, 0);
+                // SAFETY: the fresh repository, freed once.
+                unsafe { ffi::git_repository_free(out) };
+            }
+            assert_eq!(c.flags & INIT_INTERNAL_BITS, 1 << 16 | 1 << 17);
+            assert!(!root.join("c/wd/.git").exists());
+            let c_workdir = reopened_workdir(&root.join("c/sep.git"));
+            assert_eq!(c_workdir, Some(format!("{}/", root.join("c").display())));
+
+            // Rust: the same options, reused, give the repository its own working
+            // directory.
+            let mut opts = InitOptions::new();
+            opts.as_mut().set_flags(InitFlag::Mkpath.into());
+            let first = Repository::init_ext(&c_path(&root.join("rust/a/.git")), opts.as_mut());
+            drop(first.unwrap());
+            assert_eq!(opts.as_ref().flags().unnamed_bits(), 1 << 16 | 1 << 17);
+            opts.as_mut().set_workdir_path(Some(&wd[1]));
+            let repo = Repository::init_ext(&c_path(&root.join("rust/sep.git")), opts.as_mut());
+            drop(repo.unwrap());
+            assert_eq!(opts.as_ref().flags(), InitFlags::from(InitFlag::Mkpath));
+            let gitlink = fs::read_to_string(root.join("rust/wd/.git")).unwrap();
+            assert!(gitlink.starts_with("gitdir: "), "{gitlink}");
+            let config = fs::read_to_string(root.join("rust/sep.git/config")).unwrap();
+            assert!(config.contains("worktree = "), "{config}");
+            let workdir = reopened_workdir(&root.join("rust/sep.git"));
+            assert_eq!(
+                workdir,
+                Some(format!("{}/", root.join("rust/wd").display()))
+            );
+            fs::remove_dir_all(&root).unwrap();
+        }
+
+        /// Internal bits a caller stores through `set_flags` are cleared too, and a
+        /// reinitialisation's bit is set afresh by the call that reinitialises.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn init_ext_clears_internal_bits_the_caller_set() {
+            assert!(runtime_pinned());
+            let root = scratch("caller-bits");
+            let wd = c_path(&root.join("wd"));
+            let mut opts = InitOptions::new();
+            let mut m = opts.as_mut();
+            m.set_flags(InitFlags::from_bits_retain(
+                InitFlag::Mkpath.raw() | INIT_INTERNAL_BITS | 1 << 20,
+            ));
+            m.set_workdir_path(Some(&wd));
+            let path = c_path(&root.join("repo.git"));
+            drop(Repository::init_ext(&path, opts.as_mut()).unwrap());
+            // An unnamed bit libgit2 does not read is kept.
+            assert_eq!(
+                opts.as_ref().flags().bits(),
+                InitFlag::Mkpath.raw() | 1 << 20
+            );
+            assert!(root.join("wd/.git").is_file());
+            drop(Repository::init_ext(&path, opts.as_mut()).unwrap());
+            assert_eq!(opts.as_ref().flags().unnamed_bits(), 1 << 18 | 1 << 20);
+            fs::remove_dir_all(&root).unwrap();
+        }
+
+        /// `git_repository_init` returns 1 with a live repository when a reftable
+        /// repository's `reftable` directory cannot be made; `init_ext` reads that as a
+        /// failure too, and frees the repository (LSan in the sanitized runs).
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn init_ext_fails_and_frees_on_a_positive_return() {
+            assert!(runtime_pinned());
+            let root = scratch("reftable-file");
+            let path = root.join("repo.git");
+            fs::create_dir_all(path.join("objects")).unwrap();
+            fs::create_dir_all(path.join("refs")).unwrap();
+            fs::write(path.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::write(
+                path.join("config"),
+                "[core]\n\trepositoryformatversion = 1\n\tbare = true\n\
+                 [extensions]\n\trefstorage = reftable\n",
+            )
+            .unwrap();
+            fs::write(path.join("reftable"), "not a directory\n").unwrap();
+            let mut opts = InitOptions::new();
+            let mut m = opts.as_mut();
+            m.set_flags(InitFlag::Bare.into());
+            m.set_refdb_type(Some(RefdbType::Reftable));
+            let error = Repository::init_ext(&c_path(&path), opts.as_mut()).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+            assert!(
+                error
+                    .message()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("failed to make directory"),
+                "{error:?}"
+            );
+            fs::remove_dir_all(&root).unwrap();
+        }
+
+        /// A repository without paths has no `FETCH_HEAD`: libgit2 would read the
+        /// process's working directory's. Refused before the call, the callback never
+        /// called.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn for_each_fetchhead_refuses_a_repository_without_paths() {
+            let repo = Repository::new().unwrap();
+            let calls = Cell::new(0);
+            let mut count = |_: FetchheadEntry<'_>| {
+                calls.set(calls.get() + 1);
+                ControlFlow::Continue(())
+            };
+            let mut callback = FetchheadForeachCallback::new(&mut count);
+            let error = repo.as_ref().for_each_fetchhead(&mut callback).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(error.message(), c"path cannot exist in repository");
+            assert!(!callback.stopped());
+            drop(callback);
+            assert_eq!(calls.get(), 0);
+        }
+
+        /// A stop is told from libgit2's errors by the callback's own record, which each
+        /// walk resets: a failure after a stopped walk is an error, not a stop.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn for_each_fetchhead_tells_a_stop_from_a_later_failure() {
+            assert!(runtime_pinned());
+            let root = scratch("stop-then-fail");
+            let path = root.join("repo.git");
+            let mut opts = InitOptions::new();
+            opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
+            let repo = Repository::init_ext(&c_path(&path), opts.as_mut()).unwrap();
+            let line = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\t\tbranch 'main' of x\n";
+            fs::write(path.join("FETCH_HEAD"), line.repeat(2)).unwrap();
+            let mut stop = |_: FetchheadEntry<'_>| ControlFlow::Break(());
+            let mut callback = FetchheadForeachCallback::new(&mut stop);
+            let walked = repo.as_ref().for_each_fetchhead(&mut callback);
+            assert_eq!(walked, Ok(ControlFlow::Break(())));
+            assert!(callback.stopped());
+            fs::remove_file(path.join("FETCH_HEAD")).unwrap();
+            let error = repo.as_ref().for_each_fetchhead(&mut callback).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+            assert!(!callback.stopped());
+            // A stop at a malformed line's predecessor never reaches the bad line.
+            fs::write(path.join("FETCH_HEAD"), format!("{line}garbage\n")).unwrap();
+            let walked = repo.as_ref().for_each_fetchhead(&mut callback);
+            assert_eq!(walked, Ok(ControlFlow::Break(())));
+            drop(callback);
+            let mut go = |_: FetchheadEntry<'_>| ControlFlow::Continue(());
+            let mut callback = FetchheadForeachCallback::new(&mut go);
+            let error = repo.as_ref().for_each_fetchhead(&mut callback).unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::FetchHead));
+            assert_eq!(error.message(), c"invalid object ID in FETCH_HEAD line 2");
+            drop(repo);
+            fs::remove_dir_all(&root).unwrap();
         }
     }
 }

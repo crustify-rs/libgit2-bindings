@@ -61,7 +61,8 @@
 //! # Routines
 //!
 //! [`Worktree::lookup`] and [`Worktree::open_from_repository`] build a worktree from a
-//! [`RepositoryRef`], and [`list`] names a repository's worktrees; a [`WorktreeRef`]
+//! [`RepositoryRef`], [`Worktree::add`] creates one (with [`AddOptions`]), and [`list`]
+//! names a repository's worktrees; a [`WorktreeRef`]
 //! reads one ([`name`](WorktreeRef::name), [`path`](WorktreeRef::path),
 //! [`validate`](WorktreeRef::validate), [`is_locked`](WorktreeRef::is_locked),
 //! [`lock_reason`](WorktreeRef::lock_reason)) and prunes it
@@ -74,7 +75,9 @@
 //! - `git_worktree_lookup` passes the repository's common directory to `strlen`
 //!   unchecked, which is NULL for a repository without paths (`git_repository_new`,
 //!   `git_repository_wrap_odb`): [`Worktree::lookup`] refuses such a repository with
-//!   `GIT_ENOTFOUND`, as libgit2 refuses other paths it has none for, and [`list`]
+//!   `GIT_ENOTFOUND`, as libgit2 refuses other paths it has none for, as does
+//!   [`Worktree::add`] (`git_worktree_add` would create `worktrees/` in the process's
+//!   working directory before tripping over the same NULL), and [`list`]
 //!   reports that it has no worktrees, where `git_worktree_list` would list the
 //!   `worktrees/` directory of the process's working directory.
 //! - `git_worktree_list` removes the entries that are not worktrees while iterating
@@ -1347,6 +1350,97 @@ impl Worktree {
         let worktree = unsafe { WorktreeBox::from_c(out) };
         Ok(worktree.expect("git_worktree_open_from_repository succeeded without a worktree"))
     }
+
+    /// Adds the linked worktree `name` to `repo`, checked out at the new directory
+    /// `path`, and returns it, as `git worktree add` does: libgit2 creates the
+    /// administrative directory `<commondir>/worktrees/<name>/` and its files, the
+    /// working directory `path` with its `.git` link, and the worktree's own `HEAD`,
+    /// which points at the branch `opts` names, then checks that branch out into
+    /// `path` with the options' checkout options. `None` takes
+    /// [`AddOptions::new`]'s defaults.
+    ///
+    /// The branch is [`reference`](AddOptionsRef::reference) when one is set (a local
+    /// branch that no other working tree has checked out; one of another repository
+    /// lends only its name); otherwise the local branch `name` when
+    /// [`checkout_existing`](AddOptionsRef::checkout_existing) is set and it exists;
+    /// otherwise a new branch `name`, created at `repo`'s `HEAD` with a reflog entry
+    /// (which fails with [`ErrorCode::Exists`] when it exists already, with
+    /// [`ErrorCode::InvalidSpec`] when `name` is not a valid branch name, and with
+    /// [`ErrorCode::UnbornBranch`] when `HEAD` is unborn). A branch that is not local,
+    /// or that a working tree has checked out, fails with `GIT_ERROR_WORKTREE`; but
+    /// libgit2's check of the working trees can let the add through once `worktrees/`
+    /// holds directories that are not worktrees' (as failed adds leave, below):
+    /// `git_worktree_list` may keep one of them (see [`list`]), and the check stops at
+    /// the first it cannot open.
+    ///
+    /// Only the last component of `path` is created, and of the administrative
+    /// directory (and `worktrees/` when it is missing): each fails with
+    /// [`ErrorCode::Exists`] when it exists already, and `path` with `GIT_ERROR_OS`
+    /// when its parent is missing. libgit2 joins `name` to the administrative path as
+    /// given, so a name with `/` or `..` components reaches other directories (or
+    /// fails when their parents are missing). Fails with [`ErrorCode::NotFound`] for a
+    /// repository without paths, where libgit2 would create `worktrees/` in the
+    /// process's working directory and then trip over its missing common directory.
+    ///
+    /// One failure, of the common directory's path that cannot be resolved once the
+    /// worktree's directories are made, returns 1 without a worktree (a precedence slip
+    /// in libgit2), which C callers testing for a negative code take for success: it is
+    /// reported as an error all the same, with `GIT_ERROR`.
+    ///
+    /// libgit2 does not undo what it made before a failure. A failed checkout (one
+    /// [`CheckoutOptionsMut`] directs elsewhere, say) comes after every file is written
+    /// and the branch is set up: the worktree is left behind, looked up by
+    /// [`lookup`](Self::lookup) but never checked out, and keeps its branch checked
+    /// out, so adding it again fails until it is pruned. A working directory that
+    /// cannot be made leaves the administrative directory alone behind, and the branch
+    /// a failed add created stays.
+    ///
+    /// libgit2 reads the options, and copies the reference, for the call only.
+    ///
+    /// Wraps: git_worktree_add
+    pub fn add(
+        repo: RepositoryRef<'_>,
+        name: &CStr,
+        path: &CStr,
+        opts: Option<AddOptionsRef<'_, '_>>,
+    ) -> Result<WorktreeBox, WorktreeError> {
+        if commondir(repo).is_none() {
+            return Err(refused(ffi::GIT_ENOTFOUND, NO_PATH));
+        }
+        let opts = opts.map_or(ptr::null(), |o| o.as_ptr());
+        let mut out = ptr::null_mut();
+        let rc = checked(
+            || {
+                // The options are of the current version (no setter changes it); their
+                // reference is attached and borrowed, with its repository, for `'o`, which
+                // outlives this call, as do their checkout options' borrows.
+                // SAFETY: `out` is a writable slot the routine NULLs first; `repo` a live
+                // repository on this thread with a common directory; `name` and `path`
+                // NUL-terminated, copied; `opts` NULL or live options, copied and read for
+                // the call only.
+                unsafe {
+                    ffi::git_worktree_add(
+                        &mut out,
+                        repo.as_ptr().cast_mut(),
+                        name.as_ptr(),
+                        path.as_ptr(),
+                        opts,
+                    )
+                }
+            },
+            generic,
+        )?;
+        // SAFETY: `out` is NULL, or (on a 0 return) the fresh worktree
+        // `git_worktree_lookup` built, whose strings are all copies, owned by the caller
+        // alone and released by `git_worktree_free`.
+        match unsafe { WorktreeBox::from_c(out) } {
+            Some(worktree) if rc == 0 => Ok(worktree),
+            worktree => {
+                drop(worktree);
+                Err(WorktreeError::from_libgit2(ffi::GIT_ERROR, generic(rc)))
+            }
+        }
+    }
 }
 
 impl<'a> WorktreeRef<'a> {
@@ -2317,6 +2411,118 @@ mod unit_tests {
             assert!(source.source().is_none());
             let buf: ErrorBuf = e.clone().into();
             assert_eq!(&buf, e.error());
+        }
+    }
+
+    mod adding {
+        use super::super::*;
+        use std::ffi::CString;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::process::Command;
+
+        use crate::libgit2::refs::refs::ReferenceBox;
+        use crate::libgit2::repository::repository::Repository;
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, which may change its working directory.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        fn scratch(tag: &str) -> PathBuf {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-worktree-add-unit-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+
+        fn c_path(path: &std::path::Path) -> CString {
+            CString::new(path.as_os_str().as_bytes()).unwrap()
+        }
+
+        /// A repository without paths has no common directory: `git_worktree_add`
+        /// joins the NULL to `worktrees` and creates that, and the worktree's own
+        /// directory, in the process's working directory, before its
+        /// `GIT_ASSERT_ARG` on the NULL fails (or aborts a debug build). The wrapper
+        /// refuses such a repository first. Run in a child that works in a scratch
+        /// directory, where C's defect is shown too (not in the debug build).
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn add_refuses_a_repository_without_paths() {
+            isolated(
+                concat!(module_path!(), "::add_refuses_a_repository_without_paths"),
+                || {
+                    let root = scratch("pathless");
+                    let main_path = c_path(&root.join("main"));
+                    let main = Repository::init(&main_path, true).unwrap();
+                    let line = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\n";
+                    fs::write(root.join("main/refs/heads/topic"), line).unwrap();
+                    let mut out = ptr::null_mut();
+                    let name = c"refs/heads/topic";
+                    // SAFETY: a writable slot, the live repository and a NUL-terminated
+                    // name.
+                    let rc = unsafe {
+                        ffi::git_reference_lookup(&mut out, main.as_c_ptr(), name.as_ptr())
+                    };
+                    assert_eq!(rc, 0);
+                    // SAFETY: a fresh attached reference the test owns alone, freed by
+                    // `git_reference_free`; `main` outlives it.
+                    let topic = unsafe { ReferenceBox::from_c(out) }.unwrap();
+                    let cwd = root.join("cwd");
+                    fs::create_dir(&cwd).unwrap();
+                    std::env::set_current_dir(&cwd).unwrap();
+                    let pathless = Repository::new().unwrap();
+                    let mut opts = AddOptions::new();
+                    opts.as_mut().set_reference(Some(topic.as_ref()));
+                    let wt = c_path(&root.join("wt"));
+                    let error = Worktree::add(pathless.as_ref(), c"wt", &wt, Some(opts.as_ref()))
+                        .unwrap_err();
+                    assert_eq!(error.code(), Some(ErrorCode::NotFound));
+                    assert_eq!(error.message(), c"path cannot exist in repository");
+                    assert_eq!(fs::read_dir(&cwd).unwrap().count(), 0);
+                    assert!(!root.join("wt").exists());
+                    if std::env::var("CRUSTIFY_BUILD_VARIANT").as_deref() != Ok("coverage") {
+                        let mut out = ptr::null_mut();
+                        let raw = pathless.as_c_ptr();
+                        let opts = opts.as_ref().as_ptr();
+                        // SAFETY: a writable slot, the live repository, NUL-terminated
+                        // strings and live options; the release build fails the NULL
+                        // common directory's assertion.
+                        let rc = unsafe {
+                            ffi::git_worktree_add(&mut out, raw, c"wt".as_ptr(), wt.as_ptr(), opts)
+                        };
+                        // `(err = prettify_dir(..) < 0)`: the failure returns 1, and no
+                        // worktree.
+                        assert_eq!((rc, out.is_null()), (1, true));
+                        assert!(cwd.join("worktrees/wt").is_dir());
+                    }
+                    // The options' last use is above; the reference they borrowed goes now.
+                    drop(topic);
+                    drop(main);
+                    std::env::set_current_dir(std::env::temp_dir()).unwrap();
+                    fs::remove_dir_all(&root).unwrap();
+                },
+            );
         }
     }
 }

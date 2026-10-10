@@ -635,11 +635,12 @@ mod repository_owner {
 /// copy), through reborrows, and across threads under the `Send` / `Sync` the crate
 /// asserts (TSan); `new` runs on many threads before anything initialised libgit2
 /// (`git_repository_init_options_init` copies a template, touching no global state).
-/// libgit2 reads the options in `git_repository_init_ext`, standing in for its wrapper
-/// in `fixture`: every string is read in bounds (ASan), the flags it ORs in are written
-/// through the exclusive borrow, and nothing is kept past the call, so the options may
-/// be reused, moved to another thread or dropped right after (BSan: a foreign write
-/// between Rust reborrows, no retained pointer). The object id type and reference
+/// libgit2 reads the options in `git_repository_init_ext` (`Repository::init_ext`):
+/// every string is read in bounds (ASan), the flags it ORs in are written through the
+/// exclusive borrow, and nothing is kept past the call, so the options may be reused,
+/// moved to another thread or dropped right after (BSan: a foreign write between Rust
+/// reborrows, no retained pointer); a repository the call leaves behind a failure is
+/// released once (ASan, LSan). The object id type and reference
 /// storage only take named values, and a string, the options' handles and borrows that
 /// outlive their sources do not compile (`compile_fail/`, the type's doctests). Every
 /// test builds its options through `git_repository_init_options_init`, so Miri skips
@@ -655,10 +656,10 @@ mod init_options {
     use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::refs::refdb::RefdbType;
     use libgit2::libgit2::repository::repository::{
-        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsMut, InitOptionsRef,
+        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsMut, InitOptionsRef, Repository,
     };
+    use libgit2::libgit2::util::errors::ErrorCode;
 
-    use crate::fixture::repository_options::{init_ext, oid_type};
     use crate::fixture::{init, isolated};
 
     /// `n` distinct strings of lengths `base + 1`, `base + 2`, ...
@@ -994,8 +995,7 @@ mod init_options {
         m.set_description(Some(&description));
         m.set_initial_head(Some(&head));
         m.set_origin_url(Some(&url));
-        let (rc, repo) = init_ext(&repo_path, &mut opts);
-        assert_eq!(rc, 0);
+        let repo = Repository::init_ext(&repo_path, opts.as_mut()).unwrap();
         drop(repo);
         assert_eq!(opts.as_ref().initial_head(), Some(head.as_c_str()));
         assert_eq!(
@@ -1011,11 +1011,10 @@ mod init_options {
 
         // The same options again: a reinitialisation, reading the strings once more.
         // It fails adding `origin` a second time (`GIT_EEXISTS`), after opening the
-        // repository, which it leaves in the slot: released here, once (LSan, ASan).
-        let (rc, repo) = init_ext(&repo_path, &mut opts);
-        assert_eq!(rc, -4);
-        assert!(repo.is_some());
-        drop(repo);
+        // repository, which it leaves in the slot: released by the wrapper, once (LSan,
+        // ASan).
+        let error = Repository::init_ext(&repo_path, opts.as_mut()).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Exists));
         // libgit2 wrote its reinitialisation bit through the exclusive borrow; the
         // handle taken afresh reads it, and the strings are untouched.
         assert_eq!(opts.as_ref().flags().unnamed_bits(), 1 << 18);
@@ -1031,14 +1030,13 @@ mod init_options {
         m.set_oid_type(Some(OidType::Sha256));
         let kind = thread::scope(|s| {
             s.spawn(|| {
-                let (rc, repo) = init_ext(&bare, &mut opts);
-                assert_eq!(rc, 0);
-                oid_type(&repo.unwrap())
+                let repo = Repository::init_ext(&bare, opts.as_mut()).unwrap();
+                repo.as_ref().oid_type()
             })
             .join()
             .unwrap()
         });
-        assert_eq!(kind, OidType::Sha256.raw());
+        assert_eq!(kind, OidType::Sha256);
         assert!(root.0.join("bare/hooks/post-commit").exists());
         assert_eq!(opts.as_ref().template_path(), Some(template.as_c_str()));
         // The options' last use is above; the strings they borrowed go only now.
@@ -1053,9 +1051,8 @@ mod init_options {
         for version in [0, 2, u32::MAX] {
             let mut opts = InitOptions::new();
             opts.as_mut().set_version(version);
-            let (rc, repo) = init_ext(&root.c_path("never"), &mut opts);
-            assert_eq!(rc, -1, "version {version}");
-            assert!(repo.is_none());
+            let error = Repository::init_ext(&root.c_path("never"), opts.as_mut()).unwrap_err();
+            assert_eq!(error.raw_code(), -1, "version {version}");
             assert!(!root.0.join("never").exists());
         }
     }
@@ -1793,8 +1790,9 @@ mod heads_and_parts {
 /// `FETCH_HEAD` callback: every borrowed result read while its repository lives, every
 /// owned one used after it is gone, each corrected C path driven (a `MERGE_HEAD` C
 /// would free cached commits over, a worktree's `HEAD` whose repository C frees, a
-/// pathless repository's worktrees), the callback reentered and panicking through C,
-/// and repositories used on threads of their own.
+/// pathless repository's worktrees), the callback reentered and panicking through C
+/// (driven by `for_each_fetchhead`, the entries it lends read in bounds and only during
+/// their call), and repositories used on threads of their own.
 mod head_and_lookups {
     use std::cell::Cell;
     use std::ffi::{CStr, CString};
@@ -1809,7 +1807,7 @@ mod head_and_lookups {
     use libgit2::libgit2::util::errors::ErrorCode;
 
     use crate::fixture::commit_and_config::commit_id;
-    use crate::fixture::head_and_lookups::{Sandbox, fetchhead_foreach};
+    use crate::fixture::head_and_lookups::Sandbox;
     use crate::fixture::isolated;
     use crate::fixture::refs::view_unattached;
 
@@ -2019,8 +2017,9 @@ mod head_and_lookups {
         pathless.as_mut().cleanup();
     }
 
-    /// The callback driven by C, reentering the repository from its closure, then
-    /// stopping; and a closure's panic, caught in C's call and resumed after it.
+    /// The callback driven by C through `for_each_fetchhead`, reentering the repository
+    /// from its closure, then stopping; and a closure's panic, caught in C's call and
+    /// resumed after it.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn fetchhead_callback_reenters_and_panics_through_c() {
@@ -2051,11 +2050,10 @@ mod head_and_lookups {
         };
         let mut callback = FetchheadForeachCallback::new(&mut reenter);
         assert_eq!(
-            fetchhead_foreach(&repo, &mut callback),
-            ErrorCode::User.raw()
+            repo.as_ref().for_each_fetchhead(&mut callback),
+            Ok(ControlFlow::Break(()))
         );
         assert!(callback.stopped());
-        callback.resume_panic();
         drop(callback);
         assert_eq!(seen.get(), 2);
 
@@ -2063,12 +2061,9 @@ mod head_and_lookups {
             panic!("entry {:?}", entry.ref_name);
         };
         let mut callback = FetchheadForeachCallback::new(&mut panicking);
-        assert_eq!(
-            fetchhead_foreach(&repo, &mut callback),
-            ErrorCode::User.raw()
-        );
-        let resumed =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback.resume_panic()));
+        let resumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            repo.as_ref().for_each_fetchhead(&mut callback)
+        }));
         assert!(
             resumed
                 .unwrap_err()
@@ -2077,7 +2072,64 @@ mod head_and_lookups {
                 .contains("refs/heads/master")
         );
         // Nothing is left to resume, and the callback is reusable.
-        callback.resume_panic();
+        assert!(callback.stopped());
+        sandbox.write("bare/FETCH_HEAD", "");
+        assert_eq!(
+            repo.as_ref().for_each_fetchhead(&mut callback),
+            Ok(ControlFlow::Continue(()))
+        );
+        assert!(!callback.stopped());
+    }
+
+    /// Each thread walks its own repository's `FETCH_HEAD`, the entries copied out
+    /// during their calls; a repository without paths is refused on any thread (TSan,
+    /// ASan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_walks_on_threads() {
+        let sandbox = Sandbox::new("fetchhead-threads");
+        let line =
+            |id: &str, name: &str| format!("{id}\t\tbranch '{name}' of git://example.com/x.git\n");
+        let contents = [
+            line("a65fedf39aefe402d3bb6e24df4d4f5fe4547750", "master"),
+            line("258f0e2a959a364e40ed6603d5d44fbb24765b10", "haacked"),
+            "a4a7dce85cf63874e984719f4fdd239f5145052f\n".to_owned(),
+        ]
+        .concat();
+        sandbox.write("bare/FETCH_HEAD", &contents);
+        thread::scope(|s| {
+            for t in 0..6 {
+                let sandbox = &sandbox;
+                s.spawn(move || {
+                    let repo = sandbox.open("bare");
+                    let mut seen = Vec::new();
+                    let mut copy = |entry: FetchheadEntry<'_>| {
+                        let name = entry.ref_name.map(CStr::to_owned);
+                        seen.push((name, entry.id.to_hex_string().unwrap()));
+                        ControlFlow::Continue(())
+                    };
+                    let mut callback = FetchheadForeachCallback::new(&mut copy);
+                    for _ in 0..8 {
+                        let walked = repo.as_ref().for_each_fetchhead(&mut callback);
+                        assert_eq!(walked, Ok(ControlFlow::Continue(())), "thread {t}");
+                    }
+                    drop(callback);
+                    assert_eq!(seen.len(), 24);
+                    assert_eq!(
+                        seen[2],
+                        (None, "a4a7dce85cf63874e984719f4fdd239f5145052f".into())
+                    );
+                    let pathless = Repository::new().unwrap();
+                    let mut never = |_: FetchheadEntry<'_>| -> ControlFlow<()> { unreachable!() };
+                    let mut callback = FetchheadForeachCallback::new(&mut never);
+                    let error = pathless
+                        .as_ref()
+                        .for_each_fetchhead(&mut callback)
+                        .unwrap_err();
+                    assert_eq!(error.code(), Some(ErrorCode::NotFound));
+                });
+            }
+        });
     }
 
     /// `HEAD` detached, in a child: writing it reads the time through glibc's

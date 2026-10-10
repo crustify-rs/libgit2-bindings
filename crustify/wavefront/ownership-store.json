@@ -4738,6 +4738,63 @@
    ]
   },
   {
+   "name": "git_repository_fetchhead_foreach",
+   "defined_in": "src/libgit2/fetchhead.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Callback invoked synchronously per parsed line (GIT_ASSERT_ARG non-NULL); a non-zero return stops the walk and is returned, with git_error_set_after_callback naming the callback only when no error is set."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque payload passed through to cb, never dereferenced or kept past the call."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only gitdir and oid_type are read, for the call. A NULL gitdir (git_repository_new / wrap_odb) is joined as \"\" so FETCH_HEAD is read from the process cwd: the Rust wrapper refuses pathless repositories (ENOTFOUND, GIT_ERROR_INVALID)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_fetchhead_foreach_cb",
    "defined_in": null,
    "ptr_args": [
@@ -5357,11 +5414,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "other"
+       "lifetime": "arg:opts"
       },
       "nullable": false,
       "mutable": true,
-      "note": "Options; init_ext WRITES opts->flags (|= GIT_REPOSITORY_INIT__IS_REINIT on reinit), otherwise read for the call."
+      "note": "Options; init_ext ORs internal bits into opts->flags (1<<16 HAS_DOTGIT, 1<<17 NATURAL_WD, 1<<18 IS_REINIT) and READS them back on a reused struct (C-confirmed: stale NATURAL_WD skips the gitlink and core.worktree of a later separate-workdir init). Version refusal leaves flags untouched. The Rust wrapper clears the three bits before each call. Strings read for the call only."
      }
     },
     {
@@ -7330,6 +7387,38 @@
    },
    "ptr_args": [
     {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Worktree/branch name, joined unchecked to <commondir>/worktrees (\"..\"/\"/\" escape); copied, not retained."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "memcpy'd after the version check; ref is git_reference_dup'ed, checkout options copied and read for the inner git_checkout_head. NULL = defaults."
+     }
+    },
+    {
      "name": "out",
      "ptr": {
       "scalar": {
@@ -7347,6 +7436,38 @@
       "nullable": false,
       "mutable": true,
       "note": "GIT_ASSERT_ARG, then set to NULL; receives the worktree git_worktree_lookup loads once the gitdir, working directory, refs and checkout are created, owned by the caller (git_worktree_free). Stays NULL on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Read for commondir/HEAD; may create branch `name` through its refdb (reflog via git_signature_now). NULL commondir (pathless repo) makes it mkdir ./worktrees in the cwd, then prettify_dir(NULL) asserts and `(err = ... < 0)` returns 1 with *out NULL: wrapper refuses pathless repos."
+     }
+    },
+    {
+     "name": "worktree",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:worktree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Working directory path; only its last component is created (GIT_MKDIR_EXCL); copied, not retained."
      }
     }
    ]

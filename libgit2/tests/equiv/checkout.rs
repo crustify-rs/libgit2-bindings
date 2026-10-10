@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 use libgit2::ffi;
 use libgit2::libgit2::core::strarray::StrArrayView;
 use libgit2::libgit2::index::index::IndexArc;
+use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
 use libgit2::libgit2::workdir::checkout::{CheckoutOptions, CheckoutOptionsRef};
 
 /// `git_checkout_strategy_t` bits, from `git2/checkout.h`: the `-sys` crate does not bind
@@ -114,21 +115,12 @@ impl Fixture {
         let _ = fs::remove_dir_all(&root);
         let work = root.join("work");
         let c_work = CString::new(work.as_os_str().as_bytes()).unwrap();
-        let mut opts = ffi::git_repository_init_options::default();
-        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-        let rc = unsafe {
-            ffi::git_repository_init_options_init(
-                &mut opts,
-                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-            )
-        };
-        assert_eq!(rc, 0);
-        opts.flags = ffi::GIT_REPOSITORY_INIT_MKPATH;
-        let mut repo = ptr::null_mut();
-        // SAFETY: `repo` is a live slot, `c_work` NUL-terminated and `opts` live, all
-        // read for the call only.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_work.as_ptr(), &mut opts) };
-        assert_eq!(rc, 0, "{:?}", c_last(&root));
+        let mut opts = InitOptions::new();
+        opts.as_mut().set_flags(InitFlag::Mkpath.into());
+        // The raw repository both sides' calls use; `Drop` frees it.
+        let repo = Repository::init_ext(&c_work, opts.as_mut())
+            .unwrap()
+            .into_c();
         let mut index = ptr::null_mut();
         // SAFETY: `repo` is live; the result is a new reference to its index.
         let rc = unsafe { ffi::git_repository_index(&mut index, repo) };
