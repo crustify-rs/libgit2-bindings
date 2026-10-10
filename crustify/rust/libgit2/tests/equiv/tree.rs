@@ -9,8 +9,9 @@
 //! below is that documentation, compared with `git_tree_walk` over one tree of nested
 //! subtrees, step after step.
 //!
-//! The tree builder's lifecycle, `UpdateAction` and `TreeUpdate` are compared in
-//! [`builder`], the tree entry's lifecycle in [`tree_entry`].
+//! The tree object's lifecycle is compared in [`tree_object`], the tree builder's,
+//! `UpdateAction` and `TreeUpdate` in [`builder`], the tree entry's lifecycle in
+//! [`tree_entry`].
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -450,9 +451,9 @@ mod builder {
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::FileMode;
-    use libgit2::libgit2::core::types::ObjectType;
-    use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectRef};
-    use libgit2::libgit2::object::tree::{TreeBuilder, TreeBuilderBox, TreeUpdate, UpdateAction};
+    use libgit2::libgit2::object::tree::{
+        Tree, TreeArc, TreeBuilder, TreeBuilderBox, TreeRef, TreeUpdate, UpdateAction,
+    };
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
     use libgit2::libgit2::util::errors::ErrorBuf;
@@ -562,10 +563,10 @@ mod builder {
         unsafe { ffi::git_tree_free(tree.as_ptr()) }
     }
 
-    /// The tree `hex` names in `repo`, as the Rust side holds it: an object owner.
-    fn lookup_object<'r>(repo: &'r RepositoryBox, hex: &str, kind: OidType) -> ObjectArc<'r> {
+    /// The tree `hex` names in `repo`, as the Rust side holds it.
+    fn lookup_object<'r>(repo: &'r RepositoryBox, hex: &str, kind: OidType) -> TreeArc<'r> {
         let oid = Oid::from_string(&CString::new(hex).unwrap(), kind).unwrap();
-        Object::lookup(repo.as_ref(), oid.as_ref(), Some(ObjectType::Tree)).unwrap()
+        Tree::lookup(repo.as_ref(), oid.as_ref()).unwrap()
     }
 
     /// The names `tree` holds.
@@ -679,7 +680,7 @@ mod builder {
     /// [`clear`](libgit2::libgit2::object::tree::TreeBuilderMut::clear).
     fn rust_run(
         repo: &RepositoryBox,
-        source: Option<ObjectRef<'_, '_>>,
+        source: Option<TreeRef<'_, '_>>,
         steps: &[Step],
         names: &BTreeSet<CString>,
     ) -> Vec<State> {
@@ -1300,9 +1301,8 @@ mod tree_entry {
     //! [`path_lookups_match_c`] compares [`TreeEntry::bypath`] with
     //! `git_tree_entry_bypath` on every probe path, the ones that fail included: the
     //! entry each finds (as above), or the code, error class and message. Documented
-    //! divergence, outside that comparison: an object that is not a tree is refused by
-    //! the wrapper (`GIT_EINVALIDSPEC`, `GIT_ERROR_TREE`), where the C routine reads it
-    //! as one.
+    //! divergence, outside that comparison: an object that is not a tree has no
+    //! [`TreeRef`] to look into, where the C routine reads it as a tree.
     //!
     //! [`TreeEntryRef::to_tree_entry`]: libgit2::libgit2::object::tree::TreeEntryRef::to_tree_entry
 
@@ -1310,12 +1310,10 @@ mod tree_entry {
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::object::object::Object;
-    use libgit2::libgit2::object::tree::{TreeEntry, TreeEntryBox};
+    use libgit2::libgit2::object::tree::{Tree, TreeEntry, TreeEntryBox, TreeRef};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::Repository;
-    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     const TESTREPO: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -1419,10 +1417,9 @@ mod tree_entry {
             );
             assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
         }
-        // The Rust side: its own repository, and the tree as an object.
+        // The Rust side: its own repository, and the tree.
         let rust_repo = Repository::open(&path).unwrap();
-        let rust_tree =
-            Object::lookup(rust_repo.as_ref(), tree_id.as_ref(), Some(ObjectType::Tree)).unwrap();
+        let rust_tree = Tree::lookup(rust_repo.as_ref(), tree_id.as_ref()).unwrap();
 
         // Step 1: an owned entry per path on each side.
         let c_entries: Vec<_> = PATHS.iter().map(|p| bypath(c_tree, p)).collect();
@@ -1550,8 +1547,7 @@ mod tree_entry {
             assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
         }
         let rust_repo = Repository::open(&path).unwrap();
-        let rust_tree =
-            Object::lookup(rust_repo.as_ref(), tree_id.as_ref(), Some(ObjectType::Tree)).unwrap();
+        let rust_tree = Tree::lookup(rust_repo.as_ref(), tree_id.as_ref()).unwrap();
 
         let mut c_entries = Vec::new();
         let mut rust_entries = Vec::new();
@@ -1582,14 +1578,11 @@ mod tree_entry {
         }
         assert_eq!(c_entries.len(), 7);
 
-        // The documented divergence: objects that are not trees are refused in Rust.
+        // The documented divergence: an object that is not a tree has no tree handle.
         let commit_id =
             Oid::from_string(c"763d71aadf09a7951596c9746c024e7eece7c7af", OidType::Sha1).unwrap();
         let commit = Object::lookup(rust_repo.as_ref(), commit_id.as_ref(), None).unwrap();
-        let e = TreeEntry::bypath(commit.as_ref(), c"README").unwrap_err();
-        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec));
-        assert_eq!(e.class(), Some(ErrorClass::Tree));
-        assert_eq!(e.message(), c"the object is not a tree");
+        assert!(TreeRef::from_object(commit.as_ref()).is_none());
 
         // The tree and the repositories go; the entries are still read alike.
         // SAFETY: the tree and repository are released once, the tree first.
@@ -1607,5 +1600,412 @@ mod tree_entry {
             // SAFETY: each entry is released once.
             unsafe { ffi::git_tree_entry_free(e) };
         }
+    }
+}
+
+mod tree_object {
+    //! Equivalence of `git2/tree.h`'s tree owner and constructors with the C routines
+    //! they wrap.
+    //!
+    //! [`Tree::lookup`] must find what `git_tree_lookup` finds, and
+    //! [`Tree::lookup_prefix`] what `git_tree_lookup_prefix` does: the same tree (its id
+    //! and type, and every entry's name, raw file mode and id, as C reads them) or the
+    //! same failure (code, error class and message). Each side opens the repository on
+    //! its own and runs one script of lookups, in order: trees of `testrepo.git` at
+    //! every depth, ids of commits, blobs and tags, missing and zero ids, prefixes of 0 to
+    //! past 40 digits, ambiguous prefixes, and repeats. After every step the sides are
+    //! compared, and so is which earlier result each new tree is the same object as (the
+    //! cache hands back the tree it holds). Then each side copies every result
+    //! (`git_tree_dup`; `clone`, [`TreeRef::to_tree`], and a hand-over to an object
+    //! owner and back on the Rust side), releases the originals, and compares the copies,
+    //! and the lookups after the releases. A repository without a git directory is
+    //! compared the same way, and so is one holding trees libgit2 cannot parse beside
+    //! well-formed ones.
+    //!
+    //! Documented divergence, outside these comparisons: an id of another type than the
+    //! repository's is refused by the wrappers (code `-1`, `GIT_ERROR_INVALID`), where the
+    //! C routines format it out of bounds; the unit tests of `tree.rs` hold the refusal.
+    //!
+    //! [`TreeRef::to_tree`]: libgit2::libgit2::object::tree::TreeRef::to_tree
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::tree::{Tree, TreeArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    use super::{init, last_error};
+
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+
+    /// Trees of `testrepo.git`: `HEAD`'s, commit `763d71a`'s, its subtrees `ab`, `ab/c`,
+    /// `ab/de` and `ab/de/fgh`, and the two trees starting `1810`.
+    const TREES: [&str; 8] = [
+        "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162",
+        "ae90f12eea699729ed24555e40b9fd669da12a12",
+        "f1425cef211cc08caa31e7b545ffb232acb098c3",
+        "9a03079b8a8ee85a0bee58bf9be3da8b62414ed4",
+        "b6361fc6a97178d8fc8639fdeed71c775ab52593",
+        "3259a6bd5b57fb9c1281bb7ed3167b50f224cb54",
+        "1810dff58d8a660512d4832e740f692884338ccd",
+        "181037049a54a1eb5fab404658a3a250b44335d7",
+    ];
+    const COMMIT: &str = "763d71aadf09a7951596c9746c024e7eece7c7af";
+    const BLOB: &str = "1385f264afb75a56a5bec74243be9b367ba4ca08";
+    const TAG: &str = "b25fa35b38051e4ae45d4222e795f9df2e43f1d1";
+    const MISSING: &str = "dededededededededededededededededededede";
+    const ZERO: &str = "0000000000000000000000000000000000000000";
+
+    /// One entry of a tree, as C reads it: name, raw file mode, id.
+    type Entry = (String, u32, String);
+
+    /// What a lookup gave: the tree's id and type and its entries, as C reads them, or
+    /// the failure.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum Outcome {
+        Found(String, ffi::git_object_t, Vec<Entry>),
+        Failed(c_int, c_int, String),
+    }
+
+    fn hex_of(id: *const ffi::git_oid) -> String {
+        let mut out = [0u8; 65];
+        // SAFETY: a live id, formatted into 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// C's view of a live tree.
+    fn found(tree: *mut ffi::git_tree) -> Outcome {
+        let object = tree.cast::<ffi::git_object>();
+        // SAFETY: `tree` is a live tree, a `git_object` of type tree; each entry, its
+        // name and id live as long as it and are copied at once.
+        unsafe {
+            let entries = (0..ffi::git_tree_entrycount(tree))
+                .map(|i| {
+                    let e = ffi::git_tree_entry_byindex(tree, i);
+                    (
+                        CStr::from_ptr(ffi::git_tree_entry_name(e))
+                            .to_string_lossy()
+                            .into_owned(),
+                        ffi::git_tree_entry_filemode_raw(e),
+                        hex_of(ffi::git_tree_entry_id(e)),
+                    )
+                })
+                .collect();
+            Outcome::Found(
+                hex_of(ffi::git_object_id(object)),
+                ffi::git_object_type(object),
+                entries,
+            )
+        }
+    }
+
+    /// One lookup of the script: an id (or prefix) in hex, and a length (`None` for the
+    /// full lookup).
+    #[derive(Clone, Copy, Debug)]
+    struct Step<'a> {
+        hex: &'a str,
+        len: Option<usize>,
+    }
+
+    /// The C side: the raw repository and the trees it looked up.
+    struct CSide {
+        repo: *mut ffi::git_repository,
+        held: Vec<*mut ffi::git_tree>,
+    }
+
+    impl CSide {
+        fn open(path: &str) -> Self {
+            let path = CString::new(path).unwrap();
+            let mut repo = ptr::null_mut();
+            // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
+            let rc = unsafe {
+                ffi::git_repository_open_ext(
+                    &mut repo,
+                    path.as_ptr(),
+                    ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                    ptr::null(),
+                )
+            };
+            assert_eq!(rc, 0);
+            Self {
+                repo,
+                held: Vec::new(),
+            }
+        }
+
+        fn pathless() -> Self {
+            let mut repo = ptr::null_mut();
+            // SAFETY: a writable slot.
+            assert_eq!(unsafe { ffi::git_repository_new(&mut repo) }, 0);
+            Self {
+                repo,
+                held: Vec::new(),
+            }
+        }
+
+        /// The step's outcome, and the index of the earlier result it is the same tree
+        /// as; a found tree is held.
+        fn run(&mut self, step: Step<'_>) -> (Outcome, Option<usize>) {
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id, and `hex.len()` readable bytes of hex digits.
+            let rc = unsafe {
+                ffi::git_oid_from_prefix(
+                    &mut id,
+                    step.hex.as_ptr().cast(),
+                    step.hex.len(),
+                    ffi::GIT_OID_SHA1,
+                )
+            };
+            assert_eq!(rc, 0);
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot, the live repository, and a live id of its type
+            // read for the call.
+            let rc = unsafe {
+                match step.len {
+                    None => ffi::git_tree_lookup(&mut out, self.repo, &id),
+                    Some(len) => ffi::git_tree_lookup_prefix(&mut out, self.repo, &id, len),
+                }
+            };
+            if rc < 0 {
+                let (class, message) = last_error();
+                return (Outcome::Failed(rc, class, message), None);
+            }
+            let same = self.held.iter().position(|&h| h == out);
+            self.held.push(out);
+            (found(out), same)
+        }
+
+        /// Copies every held tree (`git_tree_dup`), releases the originals, and views the
+        /// copies.
+        fn copy_and_release(&mut self) -> Vec<Outcome> {
+            let copies: Vec<_> = self
+                .held
+                .iter()
+                .map(|&t| {
+                    let mut out = ptr::null_mut();
+                    // SAFETY: `t` is a live reference this side holds.
+                    assert_eq!(unsafe { ffi::git_tree_dup(&mut out, t) }, 0);
+                    assert_eq!(out, t);
+                    out
+                })
+                .collect();
+            for t in std::mem::replace(&mut self.held, copies) {
+                // SAFETY: each original reference is released once; its copy remains.
+                unsafe { ffi::git_tree_free(t) };
+            }
+            self.held.iter().map(|&t| found(t)).collect()
+        }
+    }
+
+    impl Drop for CSide {
+        fn drop(&mut self) {
+            // SAFETY: every held reference is released once, then the repository.
+            unsafe {
+                for &t in &self.held {
+                    ffi::git_tree_free(t);
+                }
+                ffi::git_repository_free(self.repo);
+            }
+        }
+    }
+
+    /// C's view of what a wrapper gave.
+    fn outcome(result: &Result<TreeArc<'_>, RepositoryError>) -> Outcome {
+        match result {
+            Ok(tree) => found(tree.as_c_ptr()),
+            Err(e) => Outcome::Failed(
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            ),
+        }
+    }
+
+    /// The Rust side's step: the outcome, and the earlier result it is the same tree as.
+    fn run_rust<'r>(
+        repo: &'r RepositoryBox,
+        held: &mut Vec<TreeArc<'r>>,
+        step: Step<'_>,
+    ) -> (Outcome, Option<usize>) {
+        let id = Oid::from_prefix(step.hex.as_bytes(), OidType::Sha1).unwrap();
+        let result = match step.len {
+            None => Tree::lookup(repo.as_ref(), id.as_ref()),
+            Some(len) => Tree::lookup_prefix(repo.as_ref(), id.as_ref(), len),
+        };
+        let seen = outcome(&result);
+        let Ok(tree) = result else {
+            return (seen, None);
+        };
+        let same = held.iter().position(|h| TreeArc::ptr_eq(h, &tree));
+        held.push(tree);
+        (seen, same)
+    }
+
+    fn script() -> Vec<Step<'static>> {
+        let mut steps = Vec::new();
+        for hex in TREES.into_iter().chain([COMMIT, BLOB, TAG, MISSING, ZERO]) {
+            steps.push(Step { hex, len: None });
+            steps.push(Step { hex, len: Some(9) });
+        }
+        for len in [0, 1, 3, 4, 5, 7, 8, 20, 39, 40, 41, 64, usize::MAX] {
+            steps.push(Step {
+                hex: TREES[1],
+                len: Some(len),
+            });
+        }
+        // Two trees start `1810`, a commit and a blob `3d35`; the others start one tree.
+        for hex in ["1810", "3d35", "1810d", "18103", "ae90f", "944c", "ffff"] {
+            steps.push(Step {
+                hex,
+                len: Some(hex.len()),
+            });
+        }
+        steps.push(Step {
+            hex: TREES[1],
+            len: None,
+        });
+        steps
+    }
+
+    /// Runs `script` on both sides, comparing after each step and after the copies; the
+    /// number of trees the script found.
+    fn compare(mut c: CSide, rust: &RepositoryBox, script: &[Step<'_>]) -> usize {
+        let mut held = Vec::new();
+        for &step in script {
+            assert_eq!(c.run(step), run_rust(rust, &mut held, step), "{step:?}");
+        }
+        let c_copies = c.copy_and_release();
+        let copies: Vec<_> = held
+            .iter()
+            .enumerate()
+            .map(|(i, t)| match i % 3 {
+                0 => t.clone(),
+                1 => t.as_ref().to_tree(),
+                _ => Tree::from_object(Tree::into_object(t.clone())).unwrap(),
+            })
+            .collect();
+        for (copy, original) in copies.iter().zip(&held) {
+            assert!(TreeArc::ptr_eq(copy, original));
+        }
+        drop(held);
+        let rust_copies: Vec<_> = copies.iter().map(|t| found(t.as_c_ptr())).collect();
+        assert_eq!(c_copies, rust_copies);
+        let found = copies.len();
+
+        // The same lookups again, with only the copies alive.
+        let mut held = copies;
+        for &step in script {
+            assert_eq!(
+                c.run(step),
+                run_rust(rust, &mut held, step),
+                "again: {step:?}"
+            );
+        }
+        found
+    }
+
+    #[test]
+    fn lookups_match_c() {
+        init();
+        let rust = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+        // Each tree twice, ten prefix lengths of one, and four unique prefixes, and the
+        // repeat.
+        assert_eq!(compare(CSide::open(TESTREPO), &rust, &script()), 31);
+    }
+
+    #[test]
+    fn lookups_in_a_repository_without_paths_match_c() {
+        init();
+        let rust = Repository::new().unwrap();
+        let steps = [
+            Step {
+                hex: TREES[1],
+                len: None,
+            },
+            Step {
+                hex: TREES[1],
+                len: Some(7),
+            },
+            Step {
+                hex: TREES[1],
+                len: Some(3),
+            },
+        ];
+        assert_eq!(compare(CSide::pathless(), &rust, &steps), 0);
+    }
+
+    /// A repository holding trees libgit2 cannot parse, beside well-formed ones (the
+    /// empty tree, and one entry): each lookup fails, or succeeds, alike.
+    #[test]
+    fn lookups_of_unparsable_trees_match_c() {
+        init();
+        let path = std::env::temp_dir().join(format!("crustify-tree-equiv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let path_str = path.to_str().unwrap().to_owned();
+        let leaf: Vec<u8> = b"100644 leaf\0".iter().copied().chain([0x5a; 20]).collect();
+        let objects: Vec<(Vec<u8>, ffi::git_object_t)> = vec![
+            (b"100644 one\0short".to_vec(), ffi::GIT_OBJECT_TREE),
+            (
+                b"100644 a\0aaaaaaaaaaaaaaaaaaaa100644 b".to_vec(),
+                ffi::GIT_OBJECT_TREE,
+            ),
+            (
+                b"10x644 a\0aaaaaaaaaaaaaaaaaaaa".to_vec(),
+                ffi::GIT_OBJECT_TREE,
+            ),
+            (
+                b"100644a\0aaaaaaaaaaaaaaaaaaaa".to_vec(),
+                ffi::GIT_OBJECT_TREE,
+            ),
+            (
+                b"100644 \0aaaaaaaaaaaaaaaaaaaa".to_vec(),
+                ffi::GIT_OBJECT_TREE,
+            ),
+            (b"100644 no-nul".to_vec(), ffi::GIT_OBJECT_TREE),
+            (Vec::new(), ffi::GIT_OBJECT_TREE),
+            (leaf, ffi::GIT_OBJECT_TREE),
+            (b"fine\n".to_vec(), ffi::GIT_OBJECT_BLOB),
+        ];
+        let ids: Vec<String> = {
+            let repo = Repository::init(&CString::new(path_str.as_str()).unwrap(), true).unwrap();
+            let odb = repo.as_ref().odb().unwrap();
+            objects
+                .iter()
+                .map(|(data, kind)| {
+                    let mut id = ffi::git_oid::default();
+                    // SAFETY: a live odb, a writable id, `data` read for the call.
+                    let rc = unsafe {
+                        ffi::git_odb_write(
+                            &mut id,
+                            odb.as_c_ptr(),
+                            data.as_ptr().cast(),
+                            data.len(),
+                            *kind,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    hex_of(&id)
+                })
+                .collect()
+        };
+        let mut steps = Vec::new();
+        for hex in &ids {
+            steps.push(Step { hex, len: None });
+            steps.push(Step { hex, len: Some(12) });
+        }
+        let rust = Repository::open(&CString::new(path_str.as_str()).unwrap()).unwrap();
+        assert_eq!(compare(CSide::open(&path_str), &rust, &steps), 4);
+        drop(rust);
+        let _ = std::fs::remove_dir_all(&path);
     }
 }

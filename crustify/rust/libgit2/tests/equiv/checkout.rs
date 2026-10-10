@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 use libgit2::ffi;
 use libgit2::libgit2::core::strarray::StrArrayView;
 use libgit2::libgit2::index::index::IndexArc;
+use libgit2::libgit2::object::tree::TreeArc;
 use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
 use libgit2::libgit2::workdir::checkout::{CheckoutOptions, CheckoutOptionsRef};
 
@@ -92,6 +93,9 @@ struct Fixture {
     /// The repository's index, for C; `index_ref` holds the reference.
     index: *mut ffi::git_index,
     trees: [*mut ffi::git_tree; 2],
+    /// The Rust side's owners of `trees`, one more counted reference each, released in
+    /// `Drop` before the repository, which `'static` stands for.
+    tree_refs: Vec<TreeArc<'static>>,
     targets: Vec<CString>,
     index_ref: IndexArc,
 }
@@ -138,9 +142,21 @@ impl Fixture {
             repo,
             index,
             trees: [ptr::null_mut(); 2],
+            tree_refs: Vec::new(),
         };
         fixture.trees[0] = fixture.write_tree(TREE1);
         fixture.trees[1] = fixture.write_tree(TREE2);
+        for tree in fixture.trees {
+            let mut copy = ptr::null_mut();
+            // SAFETY: the tree is live; `git_tree_dup` counts one more reference on it,
+            // given to the owner and released by `git_tree_free`, which `Drop` runs
+            // before the repository is freed.
+            let owner = unsafe {
+                assert_eq!(ffi::git_tree_dup(&mut copy, tree), 0);
+                TreeArc::from_c(copy).unwrap()
+            };
+            fixture.tree_refs.push(owner);
+        }
         fixture.write_files(TREE1);
         let _ = fs::remove_file(fixture.work.join("e.txt"));
         // SAFETY: the index and tree are live.
@@ -277,6 +293,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        self.tree_refs.clear();
         // SAFETY: each object is the live reference `new` took, freed once, after every
         // options value pointing at it; `index_ref` releases the index's.
         unsafe {
@@ -456,11 +473,13 @@ impl Step {
         m.set_file_mode(self.file_mode);
         m.set_file_open_flags(self.open_flags);
         m.set_notify_flags(self.notify_flags);
-        let (tree, _) = self.baseline(f);
+        m.set_baseline(match self.baseline {
+            Baseline::Tree(i) => Some(f.tree_refs[i].as_ref()),
+            Baseline::Head | Baseline::Index => None,
+        });
         m.set_baseline_index((self.baseline == Baseline::Index).then(|| f.index_ref.as_ref()));
-        // SAFETY: the callbacks are sound for any arguments libgit2 passes, the payload
-        // is a `RefCell<Log>` and the baseline tree the fixture's, all of which outlive
-        // the options.
+        // SAFETY: the callbacks are sound for any arguments libgit2 passes, and the
+        // payload is a `RefCell<Log>`, which outlives the options.
         unsafe {
             match self.notify {
                 Notify::Off => m.set_notify_callback(None, ptr::null_mut()),
@@ -476,7 +495,6 @@ impl Step {
             } else {
                 m.set_perfdata_callback(None, ptr::null_mut());
             }
-            m.set_baseline(tree);
         }
         if self.paths.is_empty() {
             m.clear_paths();
@@ -612,7 +630,8 @@ fn rust_fields(o: CheckoutOptionsRef<'_, '_>, f: &Fixture, log: &RefCell<Log>) -
             .collect(),
         // The fixture has one index; an `IndexRef` lends no pointer to compare.
         baseline: f.name_of(
-            o.baseline(),
+            o.baseline()
+                .map_or(ptr::null_mut(), |t| t.to_tree().as_c_ptr()),
             o.baseline_index().map_or(ptr::null_mut(), |_| f.index),
         ),
         strings: [

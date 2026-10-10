@@ -11,10 +11,12 @@
 //! global state, so nothing races (TSan). Illegal borrows are in `compile_fail/`, and
 //! in the type's doctests.
 //!
-//! The baseline index is borrowed from its owner, an `IndexBox` or an `IndexArc`: real
-//! checkouts read it (ASan), and the owner releases it only after the options. The
-//! checkout routines and the repository are not wrapped yet: [`repo`] stands in for
-//! them, as `fixture` does for other missing constructors.
+//! The baseline index is borrowed from its owner, an `IndexBox` or an `IndexArc`, and
+//! the baseline tree from its `TreeArc`: real checkouts read them (ASan), libgit2 counts
+//! a reference of its own on the tree for each call, which it must give back (LSan),
+//! and the owners release them only after the options. The checkout routines and the
+//! repository are not wrapped yet: [`repo`] stands in for them, as `fixture` does for
+//! other missing constructors.
 //!
 //! Every test builds its options through `git_checkout_options_init`, so Miri skips
 //! them; the inline unit tests run the accessors under Miri over a Rust-built value.
@@ -26,11 +28,16 @@ use std::thread;
 use libgit2::libgit2::core::global;
 use libgit2::libgit2::core::strarray::{StrArray, StrArrayView};
 use libgit2::libgit2::index::index::{Index, IndexArc};
+use libgit2::libgit2::object::tree::TreeArc;
 use libgit2::libgit2::workdir::checkout::{
     CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef,
 };
 
 use crate::fixture::isolated;
+
+/// `git_checkout_strategy_t`'s `GIT_CHECKOUT_FORCE`, from `git2/checkout.h`: the `-sys`
+/// crate does not bind the enum.
+const GIT_CHECKOUT_FORCE: u32 = 1 << 1;
 
 /// `n` distinct strings of lengths 1, 2, 3, ...
 fn strings(n: usize) -> Vec<CString> {
@@ -77,7 +84,7 @@ fn defaults_then_every_setter() {
         (0, 0, 0, 0)
     );
     assert!(!o.disable_filters() && o.notify_flags() == 0 && o.paths().is_empty());
-    assert!(o.baseline().is_null() && o.baseline_index().is_none());
+    assert!(o.baseline().is_none() && o.baseline_index().is_none());
     assert!(o.notify_callback().0.is_none() && o.progress_callback().0.is_none());
     assert!(o.perfdata_callback().0.is_none());
     assert_eq!((o.target_directory(), o.our_label()), (None, None));
@@ -266,6 +273,7 @@ mod repo {
 
     use libgit2::ffi;
     use libgit2::libgit2::index::index::{IndexArc, IndexBox};
+    use libgit2::libgit2::object::tree::TreeArc;
     use libgit2::libgit2::workdir::checkout::CheckoutOptions;
 
     /// A non-bare repository whose working directory and index hold `old` (`a.txt`
@@ -360,6 +368,19 @@ mod repo {
             }
         }
 
+        /// One more counted reference to `tree`, owned by the safe wrapper, which
+        /// borrows the repository.
+        pub fn tree(&self, tree: Tree) -> TreeArc<'_> {
+            let mut copy = ptr::null_mut();
+            // SAFETY: the tree is live; `git_tree_dup` counts one more reference on it,
+            // given to the owner and released by `git_tree_free`; the repository outlives
+            // the owner, which borrows `self`.
+            unsafe {
+                assert_eq!(ffi::git_tree_dup(&mut copy, tree.0), 0);
+                TreeArc::from_c(copy).unwrap()
+            }
+        }
+
         /// Fills `index` with `tree`'s entries.
         pub fn read_tree(&self, index: &mut IndexBox, tree: Tree) {
             // SAFETY: the index is exclusively borrowed, and the tree live.
@@ -436,4 +457,70 @@ fn a_shared_baseline_index_outlives_the_options_and_the_repository() {
     // The index reference outlives the repository that also kept it.
     drop(repo);
     drop(index);
+}
+
+/// A baseline tree borrowed from its owner is read by real checkouts, through every
+/// owner of the same tree (a lookup's and its clones'), and replaced or cleared without
+/// a release; libgit2 counts a reference of its own on it for each call and gives it
+/// back (LSan). The options' borrows end before the trees are released (ASan).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_baseline_tree_is_read_then_released_after_the_options() {
+    let repo = repo::Repo::new("baseline-tree");
+    let old = repo.tree(repo.old);
+    let clone = old.clone();
+    let new = repo.tree(repo.new);
+    {
+        let mut options = CheckoutOptions::new();
+        options.as_mut().set_baseline(Some(old.as_ref()));
+        let read = options.as_ref().baseline().unwrap().to_tree();
+        assert!(TreeArc::ptr_eq(&read, &old));
+        drop(read);
+        // The working directory matches the baseline, so the update is safe.
+        assert_eq!(repo.checkout(repo.new, &options), 0);
+        assert_eq!(repo.a(), "new\n");
+        // The baseline is now stale: `new`'s files read as local changes, kept.
+        options.as_mut().set_baseline(Some(clone.as_ref()));
+        assert_eq!(repo.checkout(repo.old, &options), 0);
+        assert_eq!(repo.a(), "new\n");
+        options.as_mut().set_baseline(Some(new.as_ref()));
+        assert_eq!(repo.checkout(repo.old, &options), 0);
+        assert_eq!(repo.a(), "old\n");
+        // `None` means `HEAD`'s, which is unborn: every dirty file conflicts.
+        options.as_mut().set_baseline(None);
+        assert!(options.as_ref().baseline().is_none());
+        std::fs::write(repo.root.join("work/a.txt"), "dirty\n").unwrap();
+        assert_eq!(
+            repo.checkout(repo.new, &options),
+            libgit2::ffi::GIT_ECONFLICT
+        );
+    }
+    drop(old);
+    assert_eq!(repo.a(), "dirty\n");
+    drop((clone, new));
+}
+
+/// Two options share one baseline tree while a handle borrowed from them is read, then
+/// both are dropped before the tree, and the tree before the repository.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn options_sharing_a_baseline_tree_are_dropped_before_it() {
+    let repo = repo::Repo::new("baseline-shared");
+    let tree = repo.tree(repo.old);
+    {
+        let mut a = CheckoutOptions::new();
+        let mut b = CheckoutOptions::new();
+        a.as_mut().set_baseline(Some(tree.as_ref()));
+        b.as_mut().set_baseline(a.as_ref().baseline());
+        let from_b = b.as_ref().baseline().unwrap();
+        assert!(TreeArc::ptr_eq(&from_b.to_tree(), &tree));
+        b.as_mut().set_strategy(GIT_CHECKOUT_FORCE);
+        assert_eq!(repo.checkout(repo.new, &b), 0);
+        assert_eq!(repo.a(), "new\n");
+        // Against `a`'s baseline, `old`, the forced `new` reads as a local change, kept.
+        assert_eq!(repo.checkout(repo.old, &a), 0);
+        assert_eq!(repo.a(), "new\n");
+    }
+    drop(tree);
+    drop(repo);
 }

@@ -1731,17 +1731,15 @@ pub mod tree {
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::object::ObjectArc;
-    use libgit2::libgit2::object::tree::TreeBuilderBox;
+    use libgit2::libgit2::object::tree::{TreeArc, TreeBuilderBox};
 
-    /// `git_tree_entrycount` and each entry's name and raw file mode, of `tree`, an
-    /// object of type tree; stands in for the `git_tree` getters.
-    pub fn entries(tree: &ObjectArc<'_>) -> Vec<(CString, ffi::git_filemode_t)> {
-        let tree: *const ffi::git_tree = tree.as_c_ptr().cast();
-        // SAFETY: the owner's live object, of type tree per the caller, only read; each
-        // entry lives with it and is copied out.
+    /// `git_tree_entrycount` and each entry's name and raw file mode, of `tree`; stands
+    /// in for the `git_tree` getters.
+    pub fn entries(tree: &TreeArc<'_>) -> Vec<(CString, ffi::git_filemode_t)> {
+        let tree = tree.as_c_ptr();
+        // SAFETY: the owner's live tree, only read; each entry lives with it and is
+        // copied out.
         unsafe {
-            assert_eq!(ffi::git_object_type(tree.cast()), ffi::GIT_OBJECT_TREE);
             (0..ffi::git_tree_entrycount(tree))
                 .map(|i| {
                     let entry = ffi::git_tree_entry_byindex(tree, i);

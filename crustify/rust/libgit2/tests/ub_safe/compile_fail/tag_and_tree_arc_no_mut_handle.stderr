@@ -1,0 +1,29 @@
+error[E0599]: the method `as_mut` exists for mutable reference `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::tag::Tag<'static>, TagFree>`, but its trait bounds were not satisfied
+ --> tests/ub_safe/compile_fail/tag_and_tree_arc_no_mut_handle.rs:7:9
+  |
+7 |     tag.as_mut()
+  |         ^^^^^^
+  |
+ ::: $FFIBOX/src/shared.rs
+  |
+  | pub struct CArc<T, D: CDrop<T>> {
+  | ------------------------------- doesn't satisfy `_: AsMut<_>`
+  |
+  = note: the following trait bounds were not satisfied:
+          `ffibox::shared::CArc<libgit2::libgit2::object::tag::Tag<'static>, TagFree>: AsMut<_>`
+          which is required by `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::tag::Tag<'static>, TagFree>: AsMut<_>`
+
+error[E0599]: the method `as_mut` exists for mutable reference `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::tree::Tree<'static>, TreeFree>`, but its trait bounds were not satisfied
+  --> tests/ub_safe/compile_fail/tag_and_tree_arc_no_mut_handle.rs:11:10
+   |
+11 |     tree.as_mut()
+   |          ^^^^^^
+   |
+  ::: $FFIBOX/src/shared.rs
+   |
+   | pub struct CArc<T, D: CDrop<T>> {
+   | ------------------------------- doesn't satisfy `_: AsMut<_>`
+   |
+   = note: the following trait bounds were not satisfied:
+           `ffibox::shared::CArc<libgit2::libgit2::object::tree::Tree<'static>, TreeFree>: AsMut<_>`
+           which is required by `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::tree::Tree<'static>, TreeFree>: AsMut<_>`

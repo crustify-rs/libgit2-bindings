@@ -23,10 +23,11 @@
 //!
 //! The baseline index is borrowed for `'o` as an [`IndexRef`], from the
 //! [`IndexBox`](crate::libgit2::index::index::IndexBox) or
-//! [`IndexArc`](crate::libgit2::index::index::IndexArc) holding it. The pointers whose
-//! types this crate does not wrap yet stay raw seams, with `unsafe` setters whose
-//! callers vouch for what the borrow checker cannot: the baseline tree (`git_tree`),
-//! and the notification, progress and performance callbacks with their payloads. The flags fields take the raw bits of
+//! [`IndexArc`](crate::libgit2::index::index::IndexArc) holding it, and the baseline
+//! tree as a [`TreeRef`], from the [`TreeArc`](crate::libgit2::object::tree::TreeArc)
+//! holding it. The pointers whose types this crate does not wrap yet stay raw seams,
+//! with `unsafe` setters whose callers vouch for what the borrow checker cannot: the
+//! notification, progress and performance callbacks with their payloads. The flags fields take the raw bits of
 //! `git_checkout_strategy_t` and `git_checkout_notify_t` until those are wrapped.
 //!
 //! `git_rebase_init` and `git_rebase_open` are the one exception to "read during the
@@ -47,6 +48,7 @@ use ffibox::{CBorrowedPtr, CCell};
 use crate::ffi;
 use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::index::index::IndexRef;
+use crate::libgit2::object::tree::TreeRef;
 
 /// Options for a checkout (`git_checkout_options`), held by value in Rust storage.
 ///
@@ -198,8 +200,9 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     ///
     /// `ptr` must address live, initialised options (or be NULL) that outlive `'a` and
     /// that nothing writes while the handle lives, whose strings, path list and
-    /// baseline index outlive `'o` (strings NULL or NUL-terminated; `paths` as
-    /// [`StrArrayRef`] requires; the index NULL or one an [`IndexRef<'o>`] may designate).
+    /// baseline tree and index outlive `'o` (strings NULL or NUL-terminated; `paths` as
+    /// [`StrArrayRef`] requires; the tree NULL or one a [`TreeRef<'o, 'o>`] may
+    /// designate; the index NULL or one an [`IndexRef<'o>`] may designate).
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_checkout_options) -> Option<Self> {
         let ptr = ptr::NonNull::new(ptr.cast::<CheckoutOptions<'o>>())?;
@@ -354,16 +357,18 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
         paths.expect("a field address is not NULL")
     }
 
-    /// The baseline tree the working directory is compared against; NULL, the default,
-    /// means `HEAD`'s (unless a [`baseline_index`](Self::baseline_index) is set).
-    ///
-    /// Raw seam: this crate does not wrap `git_tree` yet.
+    /// The baseline tree the working directory is compared against; `None`, the
+    /// default, means `HEAD`'s (unless a [`baseline_index`](Self::baseline_index) is
+    /// set). Borrowed for `'o`, as it was set.
     ///
     /// Field: git_checkout_options.baseline
-    pub fn baseline(&self) -> *mut ffi::git_tree {
+    pub fn baseline(&self) -> Option<TreeRef<'o, 'o>> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).baseline).read() }
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `TreeRef<'o, 'o>`'s pointer, a tree its holder keeps
+        // live and nobody writes for `'o`, of a repository outliving `'o`, which this
+        // handle only lends on.
+        unsafe { TreeRef::from_ptr(addr_of!((*p).baseline).read()) }
     }
 
     /// The baseline index, which overrides [`baseline`](Self::baseline); `None` by
@@ -458,7 +463,7 @@ impl fmt::Debug for CheckoutOptionsRef<'_, '_> {
             .field("notify_callback", &notify.is_some())
             .field("progress_callback", &progress.is_some())
             .field("paths", &self.paths())
-            .field("baseline", &self.baseline())
+            .field("baseline", &self.baseline().is_some())
             .field("baseline_index", &self.baseline_index().is_some())
             .field("target_directory", &self.target_directory())
             .field("ancestor_label", &self.ancestor_label())
@@ -694,21 +699,20 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
         unsafe { addr_of_mut!((*p).paths).write(empty) }
     }
 
-    /// Sets the baseline tree the working directory is compared against; NULL means
-    /// `HEAD`'s. libgit2 only reads it, taking a reference of its own for each call.
+    /// Sets the baseline tree the working directory is compared against; `None` means
+    /// `HEAD`'s. libgit2 only reads it, taking a reference of its own for each call
+    /// (and a rebase, for as long as it lives).
     ///
-    /// Raw seam: this crate does not wrap `git_tree` yet.
-    ///
-    /// # Safety
-    ///
-    /// `tree` must be NULL or point to a `git_tree` that stays live (its caller keeps a
-    /// reference to it) until these options are dropped or the baseline is replaced.
+    /// The tree is borrowed for `'o` from the owner holding it, which then outlives the
+    /// options, as does the repository the tree was looked up in.
     ///
     /// Field: git_checkout_options.baseline
-    pub unsafe fn set_baseline(&mut self, tree: *mut ffi::git_tree) {
+    pub fn set_baseline(&mut self, tree: Option<TreeRef<'o, 'o>>) {
+        let tree = tree.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
         // SAFETY: a write through the exclusive handle's pointer to live options; the
-        // field is plain data, so the old value needs no drop.
+        // field is plain data, so the old value needs no drop. The tree is NULL or one a
+        // `TreeRef<'o, 'o>` vouches for, as `baseline()` requires.
         unsafe { addr_of_mut!((*p).baseline).write(tree) }
     }
 
@@ -878,7 +882,7 @@ mod unit_tests {
         assert_eq!((o.file_open_flags(), o.notify_flags()), (0, 0));
         assert!(!o.disable_filters());
         assert!(o.paths().is_empty());
-        assert!(o.baseline().is_null() && o.baseline_index().is_none());
+        assert!(o.baseline().is_none() && o.baseline_index().is_none());
         assert_eq!(o.target_directory(), None);
         assert_eq!(
             (o.ancestor_label(), o.our_label(), o.their_label()),
@@ -1072,8 +1076,8 @@ mod unit_tests {
             m.set_notify_callback(None, ptr::null_mut());
             m.set_progress_callback(None, ptr::null_mut());
             m.set_perfdata_callback(None, ptr::null_mut());
-            m.set_baseline(ptr::null_mut());
         }
+        m.set_baseline(None);
         m.set_baseline_index(None);
         assert_eq!(fields(options.as_ref()), fields(template().as_ref()));
     }
@@ -1088,7 +1092,7 @@ mod unit_tests {
         assert_eq!(options.0.baseline_index, index.as_c_ptr());
         let read = options.as_ref().baseline_index().unwrap();
         assert_eq!(read.as_ptr(), index.as_ref().as_ptr());
-        assert!(options.as_ref().baseline().is_null());
+        assert!(options.as_ref().baseline().is_none());
         options.as_mut().set_baseline_index(Some(shared.as_ref()));
         assert_eq!(
             options.as_ref().baseline_index().unwrap().as_ptr(),
@@ -1147,7 +1151,7 @@ mod unit_tests {
             "notify_callback: false",
             "progress_callback: false",
             "paths: [\"x\"]",
-            "baseline: 0x0",
+            "baseline: false",
             "baseline_index: false",
             "target_directory: None",
             "ancestor_label: None",

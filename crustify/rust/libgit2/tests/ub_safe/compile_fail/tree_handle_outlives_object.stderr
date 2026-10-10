@@ -1,0 +1,17 @@
+error[E0515]: cannot return value referencing function parameter `object`
+ --> tests/ub_safe/compile_fail/tree_handle_outlives_object.rs:7:5
+  |
+7 |     TreeRef::from_object(object.as_ref()).unwrap()
+  |     ^^^^^^^^^^^^^^^^^^^^^------^^^^^^^^^^^^^^^^^^^
+  |     |                    |
+  |     |                    `object` is borrowed here
+  |     returns a value referencing data owned by the current function
+
+error[E0515]: cannot return value referencing function parameter `tree`
+  --> tests/ub_safe/compile_fail/tree_handle_outlives_object.rs:11:5
+   |
+11 |     tree.as_ref()
+   |     ----^^^^^^^^^
+   |     |
+   |     returns a value referencing data owned by the current function
+   |     `tree` is borrowed here

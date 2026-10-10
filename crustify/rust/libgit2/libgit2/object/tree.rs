@@ -17,6 +17,34 @@
 //! frees: a `&'p CStr` the update borrows for `'p`, never NULL. Its action and mode are
 //! only ever set from [`UpdateAction`] and [`FileMode`] variants.
 //!
+//! # Trees
+//!
+//! A [`Tree`] is a `git_tree`: a tree object, parsed from a repository's object
+//! database. It is an [`Object`](crate::libgit2::object::object::Object) of type tree:
+//! the struct starts with the `git_object`, and `git_tree_lookup`, `git_tree_free` and
+//! `git_tree_dup` are `git_object_lookup` (of type tree), `git_object_free` and
+//! `git_object_dup` behind a cast. It is opaque: libgit2 publishes no field.
+//!
+//! So a tree is owned as an object is (see [`object`](crate::libgit2::object::object)'s
+//! module docs): a [`TreeArc`] is one counted reference, given back by `git_tree_free`,
+//! and its `Clone` takes another on the same object through `git_tree_dup`; the
+//! repository's cache counts one more no owner sees, so no owner proves itself the only
+//! one, and none lends [`TreeMut`]. The parse fills the tree's entries, whose names
+//! point into the raw object data the tree keeps a reference to, before libgit2 hands
+//! the object out, and nothing writes them until the last reference frees them with the
+//! tree (`git_tree__free`), so the shared [`TreeRef`] reads an object nobody changes,
+//! and an entry borrowed from it lives as long as that borrow. A tree carries the
+//! lifetime `'r` of the repository borrow it was looked up through, whose cache it
+//! shares and which looking up its subtrees reaches, and is neither `Send` nor `Sync`,
+//! as an object is.
+//!
+//! A tree is an object, and an object of type tree is a tree: [`TreeRef::as_object`]
+//! views a tree as its object, [`TreeRef::from_object`] views an object of type tree
+//! as a tree, and [`Tree::from_object`] and [`Tree::into_object`] hand one counted
+//! reference from one owner to the other, checking the object's type on the way in.
+//! libgit2 itself never checks the type of what it is given as a tree, so every wrapper
+//! taking one takes a [`TreeRef`].
+//!
 //! # Tree builders
 //!
 //! A [`TreeBuilder`] is a `git_treebuilder`: an in-memory set of tree entries, keyed by
@@ -71,15 +99,17 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, define_ctype, impl_cdrop};
+use ffibox::{
+    CArc, CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CRefClone, define_ctype, impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::core::types::FileMode;
-use crate::libgit2::object::object::ObjectRef;
+use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
 use crate::libgit2::oid::oid::{OidMut, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
-use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
-use crate::libgit2::util::sys::errors::{runtime_pinned, set};
+use crate::libgit2::util::errors::{ErrorBuf, last};
+use crate::libgit2::util::sys::errors::runtime_pinned;
 
 /// The order in which `git_tree_walk` calls back for a tree's entries and those of the
 /// subtrees it loads on the way: either way, once per entry it reaches, each tree's entries in
@@ -622,6 +652,346 @@ const _: () = assert!(
         && size_of::<TreeUpdateRef<'static, 'static>>() == size_of::<*const ()>()
 );
 
+/// A tree object (`git_tree`), parsed from a repository's object database: an
+/// [`Object`](crate::libgit2::object::object::Object) of type tree, listing the
+/// entries of one directory.
+///
+/// libgit2 allocates, counts and frees it, so it is only ever reached through a
+/// [`TreeArc`] and its handles, built by [`lookup`](Self::lookup) and
+/// [`lookup_prefix`](Self::lookup_prefix), or adopted from an object owner by
+/// [`from_object`](Self::from_object). It is opaque: no field is published.
+///
+/// `'r` is the borrow of the repository the tree was looked up in, as for an object
+/// (see the [module docs](self#trees)). The lifetime only shrinks:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::tree::TreeArc;
+///
+/// fn widen<'r>(tree: TreeArc<'r>) -> TreeArc<'static> {
+///     tree
+/// }
+/// ```
+///
+/// and a tree stays on the thread that looked it up:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::tree::TreeArc;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(tree: TreeArc<'static>) {
+///     send(tree)
+/// }
+/// ```
+///
+/// Wraps: git_tree
+/// Handwritten
+#[repr(transparent)]
+pub struct Tree<'r>(ffi::git_tree, PhantomData<(*const (), &'r ())>);
+
+/// Shared borrow of a [`Tree`]. `Copy`, like `&T`.
+///
+/// It stays on the thread of the tree's repository, as the owner does:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::tree::TreeRef;
+///
+/// fn sync<T: Sync>() {}
+/// sync::<TreeRef<'static, 'static>>();
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct TreeRef<'a, 'r>(CBorrowedPtr<'a, Tree<'r>>);
+
+/// Exclusive borrow of a [`Tree`]. Reaches the shared handle with
+/// [`as_ref`](Self::as_ref).
+///
+/// No owner hands one out: every tree is shared with its repository's cache.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct TreeMut<'a, 'r>(
+    TreeRef<'a, 'r>,
+    // Invariant in the tree, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Tree<'r>>,
+);
+
+// SAFETY: `Tree` is `#[repr(transparent)]` over `git_tree` with a zero-sized marker;
+// both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Tree<'r>>` (`TreeMut`
+// through `TreeRef`) with zero-sized markers and no `Drop`, hand out no reference to the
+// C object, and `TreeRef` has no write operation. `TreeMut` is invariant in the tree
+// through its `PhantomData<&'a mut Tree<'r>>`.
+unsafe impl<'r> CCell for Tree<'r> {
+    type C = ffi::git_tree;
+    type Ref<'a>
+        = TreeRef<'a, 'r>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = TreeMut<'a, 'r>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'r> TreeRef<'a, 'r> {
+    /// Borrows a raw pointer; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live tree looked up in a repository that
+    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
+    /// least that long) and which no one writes during `'a`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_tree) -> Option<Self> {
+        // SAFETY: a non-null pointer the caller vouches for, per this function's
+        // contract; `Tree` is transparent over `git_tree`.
+        NonNull::new(ptr.cast_mut()).map(|p| TreeRef(unsafe { CBorrowedPtr::new(p.cast()) }))
+    }
+
+    /// Read-only pointer to the C object.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_tree {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The tree `object` is, borrowed as long as `object` is; `None` for an object of
+    /// another type.
+    pub fn from_object(object: ObjectRef<'a, 'r>) -> Option<Self> {
+        if !is_tree(object) {
+            return None;
+        }
+        // SAFETY: an object of type tree was allocated and parsed as a `git_tree`,
+        // whose first member is that `git_object`, so the pointer addresses the whole
+        // tree; the object handle keeps it live and unwritten for `'a`, and its
+        // repository outlives `'r`.
+        unsafe { Self::from_ptr(object.as_ptr().cast()) }
+    }
+
+    /// The tree as the object it is, borrowed as long as this handle: what every
+    /// `git_object` routine takes.
+    pub fn as_object(&self) -> ObjectRef<'a, 'r> {
+        // SAFETY: a `git_tree` starts with its `git_object`, so the tree's pointer is
+        // its object's, live and unwritten for `'a` as the tree is, of a repository that
+        // outlives `'r`.
+        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) };
+        object.expect("a handle is never NULL")
+    }
+
+    /// Another counted reference to the tree, as `git_tree_dup` takes one: the same
+    /// tree, now also kept alive by the result, which may outlive this borrow but not
+    /// the repository.
+    ///
+    /// Wraps: git_tree_dup
+    pub fn to_tree(&self) -> TreeArc<'r> {
+        let tree = self.0.as_non_null();
+        // SAFETY: the handle addresses a live tree for `'a`, whose reference its holder
+        // keeps meanwhile; one more is counted on it here.
+        if !unsafe { TreeFree.c_up_ref(tree) } {
+            unreachable!("git_tree_dup cannot fail");
+        }
+        // SAFETY: the reference just counted, given to the result, which `git_tree_free`
+        // releases; the tree's repository outlives `'r`, which the result carries.
+        unsafe { TreeArc::from_raw(tree.as_ptr()) }.expect("a handle is never NULL")
+    }
+}
+
+/// Whether `object` is of type tree, as libgit2 recorded it when parsing it.
+fn is_tree(object: ObjectRef<'_, '_>) -> bool {
+    // SAFETY: the handle addresses a live object; `git_object_type` reads its cached
+    // type.
+    unsafe { ffi::git_object_type(object.as_ptr()) == ffi::GIT_OBJECT_TREE }
+}
+
+impl<'a, 'r> TreeMut<'a, 'r> {
+    /// Borrows a raw pointer exclusively; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// As [`TreeRef::from_ptr`], plus: nothing else reaches the tree while the result
+    /// lives, its repository's cache included.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_tree) -> Option<Self> {
+        // SAFETY: the caller upholds `TreeRef::from_ptr`'s contract and exclusivity.
+        unsafe { TreeRef::from_ptr(ptr) }.map(|r| TreeMut(r, PhantomData))
+    }
+
+    /// Writable pointer to the C object.
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tree {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> TreeRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> TreeMut<'_, 'r> {
+        TreeMut(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for TreeRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tree").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for TreeMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Releases one counted reference to a tree through `git_tree_free`, and takes another
+/// through `git_tree_dup`.
+///
+/// They are `git_object_free` and `git_object_dup` behind a cast: the free decrements
+/// the object's atomic count and, at zero, frees the tree with its entries and its
+/// reference to the raw object data (`git_tree__free`), never reading its repository;
+/// the copy increments the same count and hands back the same pointer. Neither can
+/// fail, and neither allocates.
+///
+/// Wraps: git_tree_free
+/// Wraps: git_tree_dup
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TreeFree;
+
+// SAFETY: `git_tree_free` gives back exactly one counted reference of a live tree (a
+// NULL pointer, which it skips, never reaches it); the tree outlives the call through
+// that reference, and is freed only once the count, which the cache's reference is part
+// of, reaches zero.
+unsafe impl<'r> CDrop<Tree<'r>> for TreeFree {
+    unsafe fn c_drop(&self, ptr: NonNull<Tree<'r>>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live tree of which the
+        // caller gives up one reference; `Tree` is transparent over `git_tree`.
+        unsafe { ffi::git_tree_free(ptr.as_ptr().cast()) }
+    }
+}
+
+// SAFETY: `git_tree_dup` atomically increments the count of the live tree it is given
+// and stores that same pointer in `out`, returning 0: the tree then owes one more
+// `git_tree_free`, which this policy performs, and `ptr` stays valid. It never fails.
+// `c_is_sole_owner` keeps its `false` default: the repository's cache counts a reference
+// no owner sees, and a later lookup may take another.
+unsafe impl<'r> CRefClone<Tree<'r>> for TreeFree {
+    unsafe fn c_up_ref(&self, ptr: NonNull<Tree<'r>>) -> bool {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; `ptr` addresses a live tree whose reference
+        // the caller holds, per `c_up_ref`'s contract.
+        let rc = unsafe { ffi::git_tree_dup(&mut out, ptr.as_ptr().cast()) };
+        debug_assert_eq!(out, ptr.as_ptr().cast());
+        rc == 0
+    }
+}
+
+/// One counted reference to a [`Tree`], given back by `git_tree_free` on drop; `clone`
+/// takes another through `git_tree_dup`, on the same tree.
+pub type TreeArc<'r> = CArc<Tree<'r>, TreeFree>;
+
+impl<'r> Tree<'r> {
+    /// The tree `id` names in `repo`.
+    ///
+    /// The repository's cache answers when it holds the tree, with the tree it holds;
+    /// otherwise libgit2 reads it from the object database, parses it and, under the
+    /// cache's size limit, caches it, so that every later lookup of the id, as a tree
+    /// or as an object, yields the same tree while the cache keeps it.
+    ///
+    /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup) with
+    /// type [`ObjectType::Tree`](crate::libgit2::core::types::ObjectType::Tree) does:
+    /// with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// when the object database has no such object, or the object is not a tree (class
+    /// `GIT_ERROR_INVALID`, "the requested type does not match the type in the ODB"),
+    /// and with libgit2's error when the tree cannot be read or parsed. An `id` of
+    /// another type than `repo`'s is refused before the call, as there.
+    ///
+    /// Wraps: git_tree_lookup
+    pub fn lookup(repo: RepositoryRef<'r>, id: OidRef<'_>) -> Result<TreeArc<'r>, RepositoryError> {
+        id_fits(repo, id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; `repo` is a live
+        // repository on this thread, whose odb libgit2 loads and whose cache it fills
+        // through this shared handle, as `RepositoryRef` allows; `id` is a live id of
+        // the repository's type (checked above), read for the call only.
+        let rc = unsafe { ffi::git_tree_lookup(&mut out, repo.as_ptr().cast_mut(), id.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` holds one counted reference to a live tree of
+        // `repo`, borrowed for `'r`, given to the result and released by
+        // `git_tree_free`.
+        let tree = unsafe { TreeArc::from_c(out) };
+        Ok(tree.expect("a lookup succeeded without a tree"))
+    }
+
+    /// The tree whose id starts with the first `len` hex digits of `id`, in `repo`; a
+    /// `len` past the repository's full length means the full id.
+    ///
+    /// The digits past `len` are ignored, and every object in the database is a
+    /// candidate, whatever its type: the prefix must name exactly one, which must then
+    /// be a tree. Fails as
+    /// [`Object::lookup_prefix`](crate::libgit2::object::object::Object::lookup_prefix)
+    /// with type tree does, and refuses an `id` of another type than `repo`'s as it
+    /// does, whatever `len`.
+    ///
+    /// Wraps: git_tree_lookup_prefix
+    pub fn lookup_prefix(
+        repo: RepositoryRef<'r>,
+        id: OidRef<'_>,
+        len: usize,
+    ) -> Result<TreeArc<'r>, RepositoryError> {
+        id_fits(repo, id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `lookup`; libgit2 clamps `len` to the repository's length, and
+        // copies at most `(len + 1) / 2` of `id`'s bytes, with its type, into its key.
+        let rc = unsafe {
+            ffi::git_tree_lookup_prefix(&mut out, repo.as_ptr().cast_mut(), id.as_ptr(), len)
+        };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` holds one counted reference to a live tree of
+        // `repo`, borrowed for `'r`, given to the result and released by
+        // `git_tree_free`.
+        let tree = unsafe { TreeArc::from_c(out) };
+        Ok(tree.expect("a lookup succeeded without a tree"))
+    }
+
+    /// `object`'s reference, as a tree's: the same object, still counted once, now
+    /// owned as the tree it is; `object` back, untouched, when it is not of type tree.
+    pub fn from_object(object: ObjectArc<'r>) -> Result<TreeArc<'r>, ObjectArc<'r>> {
+        if !is_tree(object.as_ref()) {
+            return Err(object);
+        }
+        let raw = object.into_c();
+        // SAFETY: the reference the object owner gave up, to a live object of type
+        // tree, so a `git_tree`, of a repository borrowed for `'r`; `git_tree_free`
+        // releases it as `git_object_free` would.
+        let tree = unsafe { TreeArc::from_c(raw.cast()) };
+        Ok(tree.expect("an owner is never NULL"))
+    }
+
+    /// `tree`'s reference, as an object's: the same tree, still counted once, now owned
+    /// as an object.
+    pub fn into_object(tree: TreeArc<'r>) -> ObjectArc<'r> {
+        let raw = tree.into_c();
+        // SAFETY: the reference the tree owner gave up, to a live tree, which starts
+        // with its `git_object`, of a repository borrowed for `'r`; `git_object_free`
+        // releases it as `git_tree_free` would.
+        let object = unsafe { ObjectArc::from_c(raw.cast()) };
+        object.expect("an owner is never NULL")
+    }
+}
+
+// A `Tree` is a `git_tree`, never held by value; the owner is one pointer.
+const _: () = assert!(
+    size_of::<Tree<'static>>() == size_of::<ffi::git_tree>()
+        && size_of::<TreeArc<'static>>() == size_of::<*mut ffi::git_tree>()
+        && size_of::<Option<TreeArc<'static>>>() == size_of::<*mut ffi::git_tree>()
+);
+
 /// An in-memory tree being built (`git_treebuilder`): entries keyed by file name, which
 /// libgit2 writes out as a tree object.
 ///
@@ -862,29 +1232,26 @@ impl<'r> TreeBuilder<'r> {
         constructed(rc, unsafe { TreeBuilderBox::from_c(out) })
     }
 
-    /// A builder for `repo` holding a copy of each entry of `source`, an object of type
-    /// tree: their names, ids and file modes as the tree spells them, unchecked. The
-    /// builder keeps nothing of `source`, which may be dropped as soon as this returns.
+    /// A builder for `repo` holding a copy of each entry of `source`: their names, ids
+    /// and file modes as the tree spells them, unchecked. The builder keeps nothing of
+    /// `source`, which may be dropped as soon as this returns.
     ///
     /// `source` may come from any repository. Its ids are copied as they are, so a tree
     /// of a repository of another object id type gives a builder that writes a malformed
-    /// tree, as libgit2 does.
+    /// tree, as libgit2 does. An object of another type than tree has no [`TreeRef`]
+    /// ([`TreeRef::from_object`] refuses it), so libgit2 never reads one as a tree.
     ///
-    /// Refuses, with a `GIT_ERROR_TREE` error "the object is not a tree", an object of
-    /// another type, which libgit2 would read as a tree. Fails, with libgit2's error,
-    /// when it runs out of memory, having freed the entries it copied.
+    /// Fails, with libgit2's error, when it runs out of memory, having freed the entries
+    /// it copied.
     ///
     /// Wraps: git_treebuilder_new
     pub fn from_tree(
         repo: RepositoryRef<'r>,
-        source: ObjectRef<'_, '_>,
+        source: TreeRef<'_, '_>,
     ) -> Result<TreeBuilderBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
         }
-        let Some(source) = as_tree(source) else {
-            return Err(last());
-        };
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
         // the builder only records (no entry is checked while seeding); `source` a live
@@ -896,20 +1263,6 @@ impl<'r> TreeBuilder<'r> {
         // SAFETY: as in `new`: a fresh builder for `repo` the caller owns alone, or NULL.
         constructed(rc, unsafe { TreeBuilderBox::from_c(out) })
     }
-}
-
-/// The `git_tree` an object of type tree is, live for as long as the handle; for an
-/// object of any other type, `None`, with a `GIT_ERROR_TREE` error "the object is not a
-/// tree" set as the thread's.
-fn as_tree(object: ObjectRef<'_, '_>) -> Option<NonNull<ffi::git_tree>> {
-    // SAFETY: the handle addresses a live object; `git_object_type` reads its cached
-    // type.
-    if unsafe { ffi::git_object_type(object.as_ptr()) } != ffi::GIT_OBJECT_TREE {
-        set(ErrorClass::Tree, c"the object is not a tree");
-        return None;
-    }
-    // A tree object is a `git_tree`, whose first member is the `git_object`.
-    NonNull::new(object.as_ptr().cast_mut().cast())
 }
 
 /// The builder a `git_treebuilder_new` returning `rc` left in its out slot (adopted as
@@ -1032,35 +1385,29 @@ fn dup(source: TreeEntryRef<'_>) -> Option<TreeEntryBox> {
 }
 
 impl TreeEntry {
-    /// The entry at `path` under `tree`, an object of type tree, as a copy of its own:
-    /// each `/`-separated component of `path` is looked up in turn, the subtrees it
-    /// names read from `tree`'s repository, and the last component's entry is copied
-    /// out, as `git_tree_entry_dup` copies one. The result holds nothing of `tree` or
-    /// its repository, and outlives both.
+    /// The entry at `path` under `tree`, as a copy of its own: each `/`-separated
+    /// component of `path` is looked up in turn, the subtrees it names read from
+    /// `tree`'s repository, and the last component's entry is copied out, as
+    /// `git_tree_entry_dup` copies one. The result holds nothing of `tree` or its
+    /// repository, and outlives both.
     ///
     /// The components are matched as the tree spells them: `.` and `..` name nothing,
     /// a trailing `/` is accepted only after a tree, and an empty component (an empty
     /// `path`, or a leading or doubled `/`) is an invalid path.
     ///
-    /// Refuses, with [`ErrorCode::InvalidSpec`] and a `GIT_ERROR_TREE` error "the
-    /// object is not a tree", an object of another type, which libgit2 would read as a
-    /// tree (a commit or tag is peeled to its tree by
-    /// [`ObjectRef::lookup_bypath`]). Fails with [`ErrorCode::NotFound`] (class
-    /// `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a `/`
-    /// after an entry that is not a tree; and with libgit2's error when a subtree
-    /// cannot be read, or the copy cannot be allocated.
+    /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// (class `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a
+    /// `/` after an entry that is not a tree; and with libgit2's error when a subtree
+    /// cannot be read, or the copy cannot be allocated. A commit or tag is peeled to its
+    /// tree by [`ObjectRef::lookup_bypath`].
     ///
     /// Wraps: git_tree_entry_bypath
-    pub fn bypath(tree: ObjectRef<'_, '_>, path: &CStr) -> Result<TreeEntryBox, RepositoryError> {
-        let Some(tree) = as_tree(tree) else {
-            return Err(RepositoryError::from_libgit2(ErrorCode::InvalidSpec.raw()));
-        };
+    pub fn bypath(tree: TreeRef<'_, '_>, path: &CStr) -> Result<TreeEntryBox, RepositoryError> {
         let mut out = ptr::null_mut();
-        // SAFETY: `out` is a writable slot, set only on success; `tree` is a live tree
-        // for the call, which the handle it came from keeps alive, whose repository is
-        // live for that handle's `'r` and used on this thread only, as `RepositoryRef`
-        // allows, where libgit2 looks the subtrees up; `path` is NUL-terminated and
-        // read for the call only.
+        // SAFETY: `out` is a writable slot, set only on success; `tree` is a live tree,
+        // unwritten while the handle lives, whose repository is live for the handle's
+        // `'r` and used on this thread only, as `RepositoryRef` allows, where libgit2
+        // looks the subtrees up; `path` is NUL-terminated and read for the call only.
         let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_ptr(), path.as_ptr()) };
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
@@ -1469,10 +1816,212 @@ mod unit_tests {
         }
     }
 
+    /// `git_tree`'s owner, handles, lifecycle policy and conversions.
+    mod tree_object {
+        use crate::ffi;
+        use crate::libgit2::core::types::ObjectType;
+        use crate::libgit2::object::object::{Object, ObjectArc, ObjectRef};
+        use crate::libgit2::object::tree::*;
+        use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
+        use core::ffi::CStr;
+        use core::mem::size_of;
+        use ffibox::{CDrop, CRefClone};
+
+        /// `testrepo.git`: commit `763d71a`, whose tree `ae90f12` holds `README`.
+        const TESTREPO: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git\0"
+        );
+        const TREE: &CStr = c"ae90f12eea699729ed24555e40b9fd669da12a12";
+        const COMMIT: &CStr = c"763d71aadf09a7951596c9746c024e7eece7c7af";
+        const README: &CStr = c"1385f264afb75a56a5bec74243be9b367ba4ca08";
+
+        fn open() -> RepositoryBox {
+            assert!(runtime_pinned());
+            Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap()).unwrap()
+        }
+
+        fn sha1(hex: &CStr) -> Oid {
+            Oid::from_string(hex, OidType::Sha1).unwrap()
+        }
+
+        /// C's id and type of a live object.
+        fn view(object: ObjectRef<'_, '_>) -> (String, ffi::git_object_t) {
+            let p = object.as_ptr();
+            // SAFETY: `p` is a live object the handle borrows; its id lives as long as it
+            // and is formatted at once.
+            unsafe {
+                let id = OidRef::from_ptr(ffi::git_object_id(p).cast_mut()).unwrap();
+                (id.to_hex_string().unwrap(), ffi::git_object_type(p))
+            }
+        }
+
+        fn tree_view() -> (String, ffi::git_object_t) {
+            (TREE.to_str().unwrap().to_owned(), ffi::GIT_OBJECT_TREE)
+        }
+
+        #[test]
+        fn layout_matches_c() {
+            assert_eq!(size_of::<Tree<'_>>(), size_of::<ffi::git_tree>());
+            assert_eq!(size_of::<TreeArc<'_>>(), size_of::<*mut ffi::git_tree>());
+            assert_eq!(
+                size_of::<Option<TreeArc<'_>>>(),
+                size_of::<*mut ffi::git_tree>()
+            );
+            assert_eq!(
+                size_of::<TreeRef<'_, '_>>(),
+                size_of::<*const ffi::git_tree>()
+            );
+            assert_eq!(
+                size_of::<TreeMut<'_, '_>>(),
+                size_of::<*const ffi::git_tree>()
+            );
+            assert_eq!(size_of::<TreeFree>(), 0);
+        }
+
+        /// The handles' seams, and the view as an object, over a pointer nothing reads,
+        /// so Miri runs them: `git_tree` is opaque, of size zero, so a dangling aligned
+        /// pointer addresses all of it.
+        #[test]
+        fn handles_without_c() {
+            // SAFETY: NULL is refused without being read.
+            assert!(unsafe { TreeRef::from_ptr(ptr::null()) }.is_none());
+            // SAFETY: as above.
+            assert!(unsafe { TreeMut::from_ptr(ptr::null_mut()) }.is_none());
+            let p = NonNull::<ffi::git_tree>::dangling().as_ptr();
+            // SAFETY: a zero-sized object at an aligned pointer, never read or written,
+            // and reached by this handle alone.
+            let mut m = unsafe { TreeMut::from_ptr(p) }.unwrap();
+            assert_eq!(m.as_mut_ptr(), p);
+            assert_eq!(m.as_mut().as_mut_ptr(), p);
+            let r = m.as_ref();
+            assert_eq!(r.as_ptr(), p.cast_const());
+            assert_eq!(r.as_object().as_ptr(), p.cast_const().cast());
+            assert_eq!(format!("{r:?}"), "Tree { .. }");
+            assert_eq!(format!("{m:?}"), "Tree { .. }");
+        }
+
+        /// The policy driven by hand: the up-ref counts one more reference on the same
+        /// pointer, which an adopted owner and the free each settle; `to_tree` takes one
+        /// through a borrowed handle, which outlives the owner it came from.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn policy_counts_references_on_one_tree() {
+            let repo = open();
+            let tree = Tree::lookup(repo.as_ref(), sha1(TREE).as_ref()).unwrap();
+            let p = NonNull::new(tree.as_ptr()).unwrap();
+            // SAFETY: `tree` holds a reference to the live tree at `p`.
+            assert!(unsafe { TreeFree.c_up_ref(p) });
+            // SAFETY: the reference just counted, given to the owner.
+            let adopted = unsafe { TreeArc::from_raw(p.as_ptr()) }.unwrap();
+            assert!(TreeArc::ptr_eq(&adopted, &tree));
+            let raw = adopted.into_c();
+            // SAFETY: `raw` is the reference `into_c` gave up, released once here.
+            unsafe { TreeFree.c_drop(NonNull::new(raw).unwrap().cast()) };
+
+            // SAFETY: `tree` keeps the tree alive while the handle lives.
+            let borrowed = unsafe { TreeRef::from_ptr(tree.as_c_ptr()) }.unwrap();
+            let copy = borrowed.to_tree();
+            let clone = copy.clone();
+            assert!(TreeArc::ptr_eq(&copy, &tree) && TreeArc::ptr_eq(&clone, &tree));
+            drop(tree);
+            drop(copy);
+            assert_eq!(view(clone.as_ref().as_object()), tree_view());
+        }
+
+        /// A tree lookup is the object lookup of type tree: the same cached object, and
+        /// another type is not found; an id of another type than the repository's is
+        /// refused before C, at every length.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn lookups_find_trees_only() {
+            let repo = open();
+            let r = repo.as_ref();
+            let tree = Tree::lookup(r, sha1(TREE).as_ref()).unwrap();
+            let short = Tree::lookup_prefix(r, sha1(TREE).as_ref(), 7).unwrap();
+            let object = Object::lookup(r, sha1(TREE).as_ref(), Some(ObjectType::Tree)).unwrap();
+            assert!(TreeArc::ptr_eq(&tree, &short));
+            assert_eq!(tree.as_c_ptr().cast(), object.as_c_ptr());
+            for hex in [COMMIT, README] {
+                for e in [
+                    Tree::lookup(r, sha1(hex).as_ref()).unwrap_err(),
+                    Tree::lookup_prefix(r, sha1(hex).as_ref(), 10).unwrap_err(),
+                ] {
+                    assert_eq!(e.code(), Some(ErrorCode::NotFound));
+                    assert_eq!(e.class(), Some(ErrorClass::Invalid));
+                }
+            }
+            let e = Tree::lookup_prefix(r, sha1(TREE).as_ref(), 3).unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::Ambiguous));
+
+            let mut wide = Oid::from_raw(&sha1(TREE).as_ref().id(), OidType::Sha256).unwrap();
+            for kind in [OidType::Sha256.raw() as u8, 0, 9, u8::MAX] {
+                wide.as_mut().set_raw_kind(kind);
+                let mut refused = vec![Tree::lookup(r, wide.as_ref()).unwrap_err()];
+                for len in [0, 4, 7, 40, 41, 64, usize::MAX] {
+                    refused.push(Tree::lookup_prefix(r, wide.as_ref(), len).unwrap_err());
+                }
+                for e in refused {
+                    assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                    assert_eq!(
+                        e.message(),
+                        c"specified object ID type does not match repository object ID type"
+                    );
+                }
+            }
+        }
+
+        /// Owners and handles convert between tree and object, keeping one count per
+        /// owner; an object of another type stays an object, untouched.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn conversions_check_the_type_and_keep_the_count() {
+            let repo = open();
+            let r = repo.as_ref();
+            let lookup = |hex: &CStr| Object::lookup(r, sha1(hex).as_ref(), None).unwrap();
+
+            for (hex, kind) in [
+                (COMMIT, ffi::GIT_OBJECT_COMMIT),
+                (README, ffi::GIT_OBJECT_BLOB),
+            ] {
+                let other = lookup(hex);
+                assert!(TreeRef::from_object(other.as_ref()).is_none());
+                let other = Tree::from_object(other).unwrap_err();
+                assert_eq!(view(other.as_ref()).1, kind);
+            }
+
+            let object = lookup(TREE);
+            let viewed = TreeRef::from_object(object.as_ref()).unwrap();
+            assert_eq!(viewed.as_ptr().cast(), object.as_ref().as_ptr());
+            let from_view = viewed.to_tree();
+            let tree = Tree::from_object(object.clone()).unwrap();
+            assert!(TreeArc::ptr_eq(&tree, &from_view));
+            let back: ObjectArc<'_> = Tree::into_object(tree);
+            assert!(ObjectArc::ptr_eq(&back, &object));
+            drop((object, back));
+            assert_eq!(view(from_view.as_ref().as_object()), tree_view());
+        }
+
+        /// The cache's reference is never visible, so an owner never proves itself
+        /// sole: no exclusive handle, no box.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn an_owner_is_never_sole() {
+            let repo = open();
+            let mut tree = Tree::lookup(repo.as_ref(), sha1(TREE).as_ref()).unwrap();
+            assert!(tree.get_mut().is_none());
+            let tree = tree.try_into_box().unwrap_err();
+            assert_eq!(format!("{:?}", tree.as_ref()), "Tree { .. }");
+        }
+    }
+
     /// `git_tree_entry`'s owner, handles and lifecycle policy.
     mod tree_entry {
         use crate::libgit2::object::tree::*;
         use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::ErrorClass;
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
         use core::ffi::{CStr, c_char, c_int, c_void};
@@ -1573,65 +2122,36 @@ mod unit_tests {
             assert_eq!(rc, 0);
         }
 
-        /// `testrepo.git` and the tree `TREE` of it, raw; both freed on drop. Stands in for
-        /// the `git_tree` wrapper.
-        struct Tree {
-            repo: *mut ffi::git_repository,
-            tree: *mut ffi::git_tree,
+        /// `testrepo.git`, opened read-only.
+        fn open() -> RepositoryBox {
+            assert!(runtime_pinned());
+            Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap()).unwrap()
         }
 
-        impl Tree {
-            fn open() -> Self {
-                assert!(runtime_pinned());
-                let mut repo = ptr::null_mut();
-                // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
-                let rc = unsafe {
-                    ffi::git_repository_open_ext(
-                        &mut repo,
-                        TESTREPO.as_ptr().cast(),
-                        ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
-                        ptr::null(),
-                    )
-                };
-                assert_eq!(rc, 0);
-                let id = Oid::from_string(TREE, OidType::Sha1).unwrap();
-                let mut tree = ptr::null_mut();
-                // SAFETY: a writable slot, the open repository and a live id of its type.
-                let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo, id.as_ref().as_ptr()) };
-                assert_eq!(rc, 0);
-                Self { repo, tree }
-            }
+        /// The tree `TREE` of `repo`.
+        fn lookup_tree(repo: &RepositoryBox) -> TreeArc<'_> {
+            let id = Oid::from_string(TREE, OidType::Sha1).unwrap();
+            Tree::lookup(repo.as_ref(), id.as_ref()).unwrap()
+        }
 
-            /// The tree's own entry `name`, borrowed for as long as the tree is.
-            fn entry(&self, name: &CStr) -> TreeEntryRef<'_> {
-                // SAFETY: the live tree, and a NUL-terminated name read for the call; the
-                // entry is the tree's, unchanged until it is freed, after `'_`.
-                unsafe {
-                    let entry = ffi::git_tree_entry_byname(self.tree, name.as_ptr());
-                    TreeEntryRef::from_ptr(entry.cast_mut()).unwrap()
-                }
-            }
-
-            /// `git_tree_entry_bypath(path)`, adopted.
-            fn bypath(&self, path: &CStr) -> TreeEntryBox {
-                let mut out = ptr::null_mut();
-                // SAFETY: a writable slot, the live tree and a NUL-terminated path.
-                let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, self.tree, path.as_ptr()) };
-                assert_eq!(rc, 0);
-                // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
-                unsafe { TreeEntryBox::from_c(out) }.unwrap()
+        /// The tree's own entry `name`, borrowed for as long as the tree is.
+        fn entry<'a>(tree: TreeRef<'a, '_>, name: &CStr) -> TreeEntryRef<'a> {
+            // SAFETY: the live tree, and a NUL-terminated name read for the call; the
+            // entry is the tree's, unchanged until it is freed, after `'a`.
+            unsafe {
+                let entry = ffi::git_tree_entry_byname(tree.as_ptr(), name.as_ptr());
+                TreeEntryRef::from_ptr(entry.cast_mut()).unwrap()
             }
         }
 
-        impl Drop for Tree {
-            fn drop(&mut self) {
-                // SAFETY: both are live and freed once, the tree first; every entry
-                // borrowed from the tree borrowed `self`.
-                unsafe {
-                    ffi::git_tree_free(self.tree);
-                    ffi::git_repository_free(self.repo);
-                }
-            }
+        /// `git_tree_entry_bypath(path)`, adopted through `from_c`.
+        fn adopt_bypath(tree: TreeRef<'_, '_>, path: &CStr) -> TreeEntryBox {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot, the live tree and a NUL-terminated path.
+            let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_ptr(), path.as_ptr()) };
+            assert_eq!(rc, 0);
+            // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
+            unsafe { TreeEntryBox::from_c(out) }.unwrap()
         }
 
         /// C's name, hex id and raw mode of a live entry.
@@ -1717,13 +2237,15 @@ mod unit_tests {
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn copies_outlive_the_tree() {
-            let tree = Tree::open();
-            let borrowed = tree.entry(c"README");
+            let repo = open();
+            let tree = lookup_tree(&repo);
+            let borrowed = entry(tree.as_ref(), c"README");
             assert_eq!(view(borrowed), expected("README", README));
             let copy = borrowed.to_tree_entry().unwrap();
-            let nested = tree.bypath(c"ab/de/fgh/1.txt");
+            let nested = adopt_bypath(tree.as_ref(), c"ab/de/fgh/1.txt");
             let nested_copy = nested.as_ref().to_tree_entry().unwrap();
             drop(tree);
+            drop(repo);
 
             assert_eq!(view(copy.as_ref()), expected("README", README));
             let clone = copy.clone();
@@ -1751,10 +2273,11 @@ mod unit_tests {
                 concat!(module_path!(), "::allocation_failure_is_reported"),
                 || {
                     install_refusing();
-                    let tree = Tree::open();
-                    let owned = tree.bypath(c"README");
+                    let repo = open();
+                    let tree = lookup_tree(&repo);
+                    let owned = adopt_bypath(tree.as_ref(), c"README");
                     REFUSE.store(true, SeqCst);
-                    let borrowed = tree.entry(c"README").to_tree_entry();
+                    let borrowed = entry(tree.as_ref(), c"README").to_tree_entry();
                     let from_owner = owned.as_ref().to_tree_entry();
                     let cloned = owned.try_clone();
                     REFUSE.store(false, SeqCst);
@@ -1768,36 +2291,31 @@ mod unit_tests {
             );
         }
 
-        /// `bypath` looks into a tree object at every depth and hands out an owned copy;
-        /// an object of any other type is refused in Rust, with the error set on the
-        /// thread, before libgit2 reads it as a tree (the corrected divergence); and a
-        /// refused allocation for the copy is libgit2's out-of-memory error.
+        /// `bypath` looks into a tree at every depth and hands out an owned copy, through
+        /// a tree looked up as one or viewed as one from an object; an object of any other
+        /// type has no tree handle, so libgit2 never reads it as a tree; and a refused
+        /// allocation for the copy is libgit2's out-of-memory error.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
-        fn bypath_looks_only_into_trees() {
+        fn bypath_copies_out_of_trees() {
             isolated(
-                concat!(module_path!(), "::bypath_looks_only_into_trees"),
+                concat!(module_path!(), "::bypath_copies_out_of_trees"),
                 || {
                     use crate::libgit2::object::object::Object;
-                    use crate::libgit2::repository::repository::Repository;
                     use crate::libgit2::util::errors::ErrorCode;
                     install_refusing();
-                    let repo =
-                        Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap())
-                            .unwrap();
-                    let lookup = |hex: &CStr| {
+                    let repo = open();
+                    let object = |hex: &CStr| {
                         let id = Oid::from_string(hex, OidType::Sha1).unwrap();
                         Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap()
                     };
-                    let tree = lookup(TREE);
+                    let tree = lookup_tree(&repo);
                     let entry = TreeEntry::bypath(tree.as_ref(), c"ab/de/fgh/1.txt").unwrap();
                     assert_eq!(view(entry.as_ref()), expected("1.txt", NESTED));
+                    let as_object = object(TREE);
+                    let viewed = TreeRef::from_object(as_object.as_ref()).unwrap();
                     assert_eq!(
-                        view(
-                            TreeEntry::bypath(tree.as_ref(), c"README")
-                                .unwrap()
-                                .as_ref()
-                        ),
+                        view(TreeEntry::bypath(viewed, c"README").unwrap().as_ref()),
                         expected("README", README)
                     );
                     let e = TreeEntry::bypath(tree.as_ref(), c"ab/nope").unwrap_err();
@@ -1810,12 +2328,8 @@ mod unit_tests {
                         README,
                         c"b25fa35b38051e4ae45d4222e795f9df2e43f1d1",
                     ] {
-                        let other = lookup(hex);
-                        let e = TreeEntry::bypath(other.as_ref(), c"README").unwrap_err();
-                        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec), "{hex:?}");
-                        assert_eq!(e.class(), Some(ErrorClass::Tree));
-                        assert_eq!(e.message(), c"the object is not a tree");
-                        assert_eq!(last().message(), c"the object is not a tree");
+                        let other = object(hex);
+                        assert!(TreeRef::from_object(other.as_ref()).is_none(), "{hex:?}");
                     }
 
                     REFUSE.store(true, SeqCst);
@@ -1824,7 +2338,7 @@ mod unit_tests {
                     let e = refused.unwrap_err();
                     assert_eq!(e.code(), Some(ErrorCode::Generic));
                     assert_eq!(e.class(), Some(ErrorClass::NoMemory));
-                    drop(tree);
+                    drop((tree, as_object));
                     drop(repo);
                     assert_eq!(view(entry.as_ref()), expected("1.txt", NESTED));
                 },
