@@ -1,4 +1,5 @@
-//! UB tests for `git2/blob.h`: `data_is_binary` (`git_blob_data_is_binary`).
+//! UB tests for `git2/blob.h`: `data_is_binary` (`git_blob_data_is_binary`), and the
+//! filter flags in [`filter_flags`].
 //!
 //! libgit2 reads the slice it is given, up to four bytes at once when it looks for a
 //! byte-order mark, and nothing else. Each input sits in an exact-length heap buffer,
@@ -118,4 +119,114 @@ fn concurrent_calls_share_nothing() {
             });
         }
     });
+}
+
+/// The filter flags: the enum `FilterFlag` and the flag set `FilterFlags`.
+///
+/// `FilterFlag` is a fieldless enum over C's `git_blob_filter_flag_t`. The only safe
+/// way in from a raw value is `from_raw` / `try_from`, which must reject every value
+/// without a variant rather than produce an invalid discriminant (which Miri and UBSan
+/// would flag on the next read); an `as` cast to it does not compile (`compile_fail/`).
+/// `FilterFlags` keeps any `u32`, so its operations must stay in range for every bit
+/// pattern, its shifts and masks included (UBSan). Nothing here reaches libgit2, so
+/// every test runs under Miri; both types are plain values, `Send` and `Sync` by
+/// construction, with nothing shared to race (TSan) and no pointer to retain (BSan).
+mod filter_flags {
+    use std::collections::HashSet;
+    use std::hint::black_box;
+    use std::thread;
+
+    use libgit2::libgit2::object::blob::{FilterFlag, FilterFlags};
+
+    /// Every value around the declared ones, each single bit, and a coarse stride
+    /// across the whole type.
+    fn probes() -> impl Iterator<Item = u32> {
+        (0..=300)
+            .chain((0..32).map(|k| 1u32 << k))
+            .chain((0..=u32::MAX).step_by(1 << 26))
+            .chain([u32::MAX - 1, u32::MAX])
+    }
+
+    /// Bit patterns for `FilterFlags`: each single bit, its complement, and the
+    /// extremes.
+    fn bit_patterns() -> impl Iterator<Item = u32> {
+        (0..32)
+            .flat_map(|k| [1 << k, !(1 << k)])
+            .chain([0, u32::MAX, 0b1111, 0x8000_0000])
+    }
+
+    #[test]
+    fn flag_from_raw_yields_only_valid_flags() {
+        let mut seen = HashSet::new();
+        for raw in probes() {
+            // `black_box` keeps the conversion from being folded at compile time.
+            if let Some(flag) = FilterFlag::from_raw(black_box(raw)) {
+                // Reading the discriminant back validates it.
+                assert_eq!(flag.raw(), raw);
+                assert!(!format!("{flag:?}").is_empty());
+                seen.insert(flag);
+            } else {
+                assert_eq!(FilterFlag::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            }
+        }
+        assert_eq!(seen.len(), FilterFlag::ALL.len());
+    }
+
+    #[test]
+    fn option_niche_holds_for_every_value() {
+        // `Option<FilterFlag>` stores `None` in a value no variant uses: a rejected
+        // value must never alias a variant, nor a variant read as `None`.
+        for raw in probes() {
+            let flag = black_box(FilterFlag::from_raw(raw));
+            assert_eq!(flag.map(FilterFlag::raw).unwrap_or(raw), raw);
+        }
+    }
+
+    #[test]
+    fn flags_stay_in_range_for_every_bit_pattern() {
+        for bits in bit_patterns() {
+            let mut set = FilterFlags::from_bits_retain(black_box(bits));
+            assert_eq!(set.bits(), bits);
+            let named: Vec<_> = set.iter().collect();
+            assert!(named.len() <= FilterFlag::ALL.len());
+            assert!(named.iter().all(|&f| set.contains(f)));
+            assert_eq!(set.into_iter().count(), named.len());
+            assert!(!format!("{set:?}").is_empty());
+            let truncated = FilterFlags::from_bits_truncate(bits);
+            assert_eq!(truncated.unnamed_bits(), 0);
+            assert_eq!(truncated.bits() | set.unnamed_bits(), bits);
+            for flag in FilterFlag::ALL {
+                set.insert(flag);
+                assert!(set.contains(flag));
+                set.remove(flag);
+                assert!(!set.contains(flag));
+            }
+            assert_eq!(set.bits(), set.unnamed_bits());
+            set |= FilterFlags::from_bits_retain(bits);
+            assert_eq!(set.bits(), bits);
+        }
+    }
+
+    /// Sets built and read on several threads at once, and moved between them.
+    #[test]
+    fn sets_cross_threads() {
+        let shared = FilterFlag::CheckForBinary | FilterFlag::AttributesFromCommit;
+        thread::scope(|s| {
+            let handles: Vec<_> = FilterFlag::ALL
+                .into_iter()
+                .map(|flag| {
+                    let shared = &shared;
+                    s.spawn(move || {
+                        let mut mine = *shared;
+                        mine |= flag;
+                        assert!(mine.contains(flag));
+                        mine
+                    })
+                })
+                .collect();
+            for h in handles {
+                assert!(h.join().unwrap().bits() & shared.bits() == shared.bits());
+            }
+        });
+    }
 }

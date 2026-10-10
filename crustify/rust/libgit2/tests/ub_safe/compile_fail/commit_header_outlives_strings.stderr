@@ -1,0 +1,16 @@
+error[E0505]: cannot move out of `field` because it is borrowed
+ --> tests/ub_safe/compile_fail/commit_header_outlives_strings.rs:8:10
+  |
+6 |     let field = CString::new("line_one").unwrap();
+  |         ----- binding `field` declared here
+7 |     let header = Header::new(&field, c"value");
+  |                              ------ borrow of `field` occurs here
+8 |     drop(field);
+  |          ^^^^^ move out of `field` occurs here
+9 |     let _ = header.as_ref().field();
+  |             ------ borrow later used here
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+7 |     let header = Header::new(&field.clone(), c"value");
+  |                                    ++++++++

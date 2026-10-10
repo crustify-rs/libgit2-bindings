@@ -1,5 +1,7 @@
 //! Safe wrappers over `include/git2/commit.h`.
 //!
+//! # Commit arrays
+//!
 //! A [`CommitArray`] is a `git_commitarray`: a run of `count` commit pointers,
 //! `commits`, in one buffer of libgit2's allocator, each pointer holding one reference
 //! to a `git_commit`. libgit2 never allocates the struct itself: callers hold it by
@@ -37,12 +39,30 @@
 //! `git_commit_parent` and every other lookup through a commit read it. So the
 //! `git_commit` run's handle must borrow the repository, as `Reference<'r>` and
 //! `Odb<'r>` do, and the array that holds such handles with it.
+//!
+//! # Extra headers
+//!
+//! A [`Header`] is a `git_commit_header`: a field name and a value that
+//! `git_commit_create_ext` (and `git_commit_create_from_stage`, through the same
+//! options) writes into the commit it creates, after `committer` and any `encoding`, as
+//! `<field> <value>\n`, each newline of the value continued by a space. libgit2 never
+//! allocates, keeps or frees one: callers build an array of them for the options'
+//! `extra_headers`, which the call reads and forgets. So Rust holds a header by value,
+//! borrowing both strings for `'h`, and a `[Header<'h>]` is the C array, the type being
+//! `#[repr(transparent)]` over the struct.
+//!
+//! Neither string is ever NULL: libgit2 refuses a NULL one (`GIT_ERROR_INVALID`, from
+//! `format_header_field`'s argument checks), so a header has no NULL state and no
+//! `Default`. libgit2 writes the field as given, without checking it for a space or a
+//! newline, either of which yields a commit git parses differently; a header keeps any
+//! string, as the C struct does.
 
+use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CDispose, CSlice, CVal, define_ctype};
+use ffibox::{CBorrowedPtr, CCell, CDispose, CSlice, CVal, define_ctype};
 
 use crate::ffi;
 
@@ -263,6 +283,268 @@ const _: () = assert!(
         && size_of::<CommitArrayVal>() == size_of::<ffi::git_commitarray>()
 );
 
+/// One extra header of a commit being created (`git_commit_header`): a field name and
+/// its value, both borrowed for `'h`, as the options of `git_commit_create_ext` take
+/// them in an array.
+///
+/// Built by [`new`](Self::new); read it through [`as_ref`](Self::as_ref) and change it
+/// through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::object::commit::Header;
+///
+/// let mut header = Header::new(c"line_one", c"First extra header");
+/// assert_eq!(header.as_ref().field(), c"line_one");
+/// header.as_mut().set_value(c"Second\nline");
+/// assert_eq!(header.as_ref().value(), c"Second\nline");
+///
+/// // A `const` array is the C array the options point at.
+/// const HEADERS: [Header<'static>; 2] = [
+///     Header::new(c"line_one", c"First extra header"),
+///     Header::new(c"line_two", c"Second extra header"),
+/// ];
+/// assert_eq!(HEADERS[1].as_ref().field(), c"line_two");
+/// ```
+///
+/// `#[repr(transparent)]` over `git_commit_header`, so a pointer to it, or to the first
+/// of a `[Header]`, is a pointer to the C struct or array, which C reads in place. `'h`
+/// is the lifetime of the strings it points at, so a header cannot outlive them:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::object::commit::Header;
+/// use std::ffi::CString;
+///
+/// let header;
+/// {
+///     let value = CString::new("Extra").unwrap();
+///     header = Header::new(c"field", &value);
+/// }
+/// let _ = header.as_ref().value();
+/// ```
+///
+/// The exclusive handle is invariant in `'h`, so one cannot be shrunk to store a
+/// shorter-lived string than its header was built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::commit::HeaderMut;
+///
+/// fn shrink<'a, 'h>(m: HeaderMut<'a, 'static>) -> HeaderMut<'a, 'h> {
+///     m
+/// }
+/// ```
+///
+/// The shared handle only reads:
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::object::commit::Header;
+///
+/// let header = Header::new(c"field", c"value");
+/// header.as_ref().set_value(c"other");
+/// ```
+///
+/// `Copy`, `Send` and `Sync`, as a pair of `&'h CStr`s is: libgit2 never writes
+/// through the strings, and only the exclusive handle writes the fields. Equal when
+/// both strings are.
+///
+/// Wraps: git_commit_header
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct Header<'h>(ffi::git_commit_header, PhantomData<&'h CStr>);
+
+/// Shared borrow of a [`Header`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct HeaderRef<'a, 'h>(CBorrowedPtr<'a, Header<'h>>);
+
+/// Exclusive borrow of a [`Header`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct HeaderMut<'a, 'h>(
+    HeaderRef<'a, 'h>,
+    // Invariant in the header, and so in `'h`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Header<'h>>,
+);
+
+// SAFETY: `Header` is `#[repr(transparent)]` over `git_commit_header` with a zero-sized
+// marker; both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Header<'h>>`
+// (`HeaderMut` through `HeaderRef`) with zero-sized markers and no `Drop`, hand out no
+// reference to the header, and `HeaderRef` has no write operation. `HeaderMut` is
+// invariant in the header through its `PhantomData<&'a mut Header<'h>>`.
+unsafe impl<'h> CCell for Header<'h> {
+    type C = ffi::git_commit_header;
+    type Ref<'a>
+        = HeaderRef<'a, 'h>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = HeaderMut<'a, 'h>
+    where
+        Self: 'a;
+}
+
+// SAFETY: a header is two string pointers that only the setters write, each a
+// `&'h CStr`'s pointer: shared, immutable borrows of `CStr`, which is `Sync`, so they
+// may be read from any thread. Nothing in the struct has thread affinity or interior
+// mutability, and nothing is released on drop.
+unsafe impl Send for Header<'_> {}
+// SAFETY: as above; `HeaderMut` is an exclusive borrow of such a value, as
+// `&mut Header`.
+unsafe impl Send for HeaderMut<'_, '_> {}
+
+// SAFETY: as above, and shared access only reads the fields (every write goes through
+// `HeaderMut`, which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for Header<'_> {}
+// SAFETY: as above; `HeaderRef` is a shared borrow, as `&Header`.
+unsafe impl Send for HeaderRef<'_, '_> {}
+// SAFETY: as above.
+unsafe impl Sync for HeaderRef<'_, '_> {}
+// SAFETY: `&HeaderMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for HeaderMut<'_, '_> {}
+
+impl<'h> Header<'h> {
+    /// The header `<field> <value>`. libgit2 writes both as given, each newline of
+    /// `value` continued by a space; `field` should hold neither a space nor a newline.
+    pub const fn new(field: &'h CStr, value: &'h CStr) -> Self {
+        Self(
+            ffi::git_commit_header {
+                field: field.as_ptr(),
+                value: value.as_ptr(),
+            },
+            PhantomData,
+        )
+    }
+
+    /// Shared handle to the header — the getters.
+    pub fn as_ref(&self) -> HeaderRef<'_, 'h> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        HeaderRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the header — the setters.
+    pub fn as_mut(&mut self) -> HeaderMut<'_, 'h> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        HeaderMut(HeaderRef(ptr), PhantomData)
+    }
+}
+
+impl PartialEq for Header<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.as_ref(), other.as_ref());
+        a.field() == b.field() && a.value() == b.value()
+    }
+}
+
+impl Eq for Header<'_> {}
+
+impl fmt::Debug for Header<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'h> HeaderRef<'a, 'h> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_commit_header *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_header {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The field name, borrowed for `'h`, as it was set.
+    ///
+    /// Field: git_commit_header.field
+    pub fn field(&self) -> &'h CStr {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live header. `new` and
+        // every setter store a `&'h CStr`'s pointer, a NUL-terminated string that
+        // outlives `'h` and that nothing writes, being shared-borrowed.
+        unsafe { CStr::from_ptr(addr_of!((*p).field).read()) }
+    }
+
+    /// The value, borrowed for `'h`, as it was set.
+    ///
+    /// Field: git_commit_header.value
+    pub fn value(&self) -> &'h CStr {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live header. `new` and
+        // every setter store a `&'h CStr`'s pointer, a NUL-terminated string that
+        // outlives `'h` and that nothing writes, being shared-borrowed.
+        unsafe { CStr::from_ptr(addr_of!((*p).value).read()) }
+    }
+
+    /// A copy of the header, as a value of its own, borrowing the same strings.
+    pub fn to_header(&self) -> Header<'h> {
+        Header::new(self.field(), self.value())
+    }
+}
+
+impl fmt::Debug for HeaderRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Header")
+            .field("field", &self.field())
+            .field("value", &self.value())
+            .finish()
+    }
+}
+
+impl<'h> HeaderMut<'_, 'h> {
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_header {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> HeaderRef<'_, 'h> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> HeaderMut<'_, 'h> {
+        HeaderMut(self.0, PhantomData)
+    }
+
+    /// Replaces the field name; the old string, borrowed, needs no release.
+    ///
+    /// Field: git_commit_header.field
+    pub fn set_field(&mut self, field: &'h CStr) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live header of a
+        // `&'h CStr`'s pointer, which keeps the getters' guarantee; the old pointer is
+        // borrowed, so nothing is released.
+        unsafe { addr_of_mut!((*p).field).write(field.as_ptr()) }
+    }
+
+    /// Replaces the value; the old string, borrowed, needs no release.
+    ///
+    /// Field: git_commit_header.value
+    pub fn set_value(&mut self, value: &'h CStr) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to a live header of a
+        // `&'h CStr`'s pointer, which keeps the getters' guarantee; the old pointer is
+        // borrowed, so nothing is released.
+        unsafe { addr_of_mut!((*p).value).write(value.as_ptr()) }
+    }
+}
+
+impl fmt::Debug for HeaderMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `Header` is a `git_commit_header`, so a `[Header]` is the array C reads in place.
+const _: () = assert!(
+    size_of::<Header<'static>>() == size_of::<ffi::git_commit_header>()
+        && align_of::<Header<'static>>() == align_of::<ffi::git_commit_header>()
+        && size_of::<[Header<'static>; 3]>() == size_of::<[ffi::git_commit_header; 3]>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -324,6 +606,83 @@ mod unit_tests {
 
     fn ids(array: CommitArrayRef<'_>) -> Vec<String> {
         array.commit_ptrs().elems().map(hex).collect()
+    }
+
+    #[test]
+    fn header_layout_matches_c() {
+        assert_eq!(size_of::<Header<'_>>(), size_of::<ffi::git_commit_header>());
+        assert_eq!(
+            size_of::<HeaderRef<'_, '_>>(),
+            size_of::<*const ffi::git_commit_header>()
+        );
+        assert_eq!(
+            size_of::<HeaderMut<'_, '_>>(),
+            size_of::<*const ffi::git_commit_header>()
+        );
+    }
+
+    /// `new` stores the strings' own pointers, which the getters read back and C sees
+    /// in place, through the header and through the first element of an array.
+    #[test]
+    fn header_stores_the_borrowed_pointers() {
+        let (field, value) = (c"line_one", c"First extra header");
+        let header = Header::new(field, value);
+        let r = header.as_ref();
+        assert_eq!(r.field(), field);
+        assert_eq!(r.value(), value);
+        assert_eq!(r.field().as_ptr(), field.as_ptr());
+        assert_eq!(r.value().as_ptr(), value.as_ptr());
+        // SAFETY: the handle's pointer addresses `header`, live and unwritten here.
+        let raw = unsafe { r.as_ptr().read() };
+        assert_eq!((raw.field, raw.value), (field.as_ptr(), value.as_ptr()));
+
+        let headers = [header, Header::new(c"line_two", c"Second extra header")];
+        let array: *const ffi::git_commit_header = headers.as_ptr().cast();
+        // SAFETY: `Header` is transparent over `git_commit_header`, so `array` addresses
+        // two live C structs, the array's elements, read only here.
+        let second = unsafe { array.add(1).read() };
+        // SAFETY: the second header stores a `&'static CStr`'s pointer.
+        assert_eq!(unsafe { CStr::from_ptr(second.field) }, c"line_two");
+    }
+
+    /// The setters replace one string each, through a handle and a reborrow; a copy is
+    /// independent of the header it came from.
+    #[test]
+    fn header_setters_reborrows_and_copies() {
+        let owned_field = std::ffi::CString::new("owned").unwrap();
+        let mut header = Header::new(c"a", c"b");
+        {
+            let mut m = header.as_mut();
+            m.set_field(&owned_field);
+            {
+                let mut inner = m.as_mut();
+                inner.set_value(c"multi\nline");
+                assert_eq!(inner.as_ref().field(), c"owned");
+            }
+            assert_eq!(m.as_ref().value(), c"multi\nline");
+            assert_eq!(
+                format!("{m:?}"),
+                r#"Header { field: "owned", value: "multi\nline" }"#
+            );
+        }
+        let copy = header.as_ref().to_header();
+        let mut second = header;
+        second.as_mut().set_value(c"");
+        assert_eq!(header.as_ref().value(), c"multi\nline");
+        assert_eq!(second.as_ref().value(), c"");
+        assert_eq!(copy, header);
+        assert_ne!(copy, second);
+        assert_eq!(format!("{header:?}"), format!("{:?}", header.as_ref()));
+    }
+
+    /// Equality compares the strings, not their addresses.
+    #[test]
+    fn header_equality_is_by_content() {
+        let field = std::ffi::CString::new("line_one").unwrap();
+        let value = std::ffi::CString::new("x").unwrap();
+        assert_eq!(Header::new(&field, &value), Header::new(c"line_one", c"x"));
+        assert_ne!(Header::new(&field, &value), Header::new(c"line_one", c"y"));
+        assert_ne!(Header::new(&field, &value), Header::new(c"line_two", c"x"));
     }
 
     #[test]

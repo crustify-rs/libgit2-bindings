@@ -1,0 +1,11 @@
+error[E0605]: non-primitive cast: `u32` as `FilterFlag`
+ --> tests/ub_safe/compile_fail/blob_filter_flag_from_int_cast.rs:7:13
+  |
+7 |     let _ = raw as FilterFlag;
+  |             ^^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object
+
+error[E0605]: non-primitive cast: `i32` as `FilterFlag`
+ --> tests/ub_safe/compile_fail/blob_filter_flag_from_int_cast.rs:8:13
+  |
+8 |     let _ = 16 as FilterFlag;
+  |             ^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

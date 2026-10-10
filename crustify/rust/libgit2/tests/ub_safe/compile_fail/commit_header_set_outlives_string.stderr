@@ -1,0 +1,11 @@
+error[E0597]: `value` does not live long enough
+  --> tests/ub_safe/compile_fail/commit_header_set_outlives_string.rs:10:35
+   |
+ 9 |         let value = CString::new("short-lived").unwrap();
+   |             ----- binding `value` declared here
+10 |         header.as_mut().set_value(&value);
+   |                                   ^^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `value` dropped here while still borrowed
+12 |     let _ = header.as_ref().value();
+   |             ------ borrow later used here
