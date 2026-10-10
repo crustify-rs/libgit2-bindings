@@ -1,0 +1,18 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_worktree_add_options",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [
+        "version",
+        "ref",
+        "lock",
+        "checkout_options",
+        "checkout_existing"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    }
+  ]
+}
