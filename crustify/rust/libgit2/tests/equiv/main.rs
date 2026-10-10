@@ -3,7 +3,9 @@
 //! `tests/equiv/<tu>.rs`.
 
 mod buffer;
+mod commit;
 mod common;
+mod config;
 mod errors;
 mod global;
 mod oid;
