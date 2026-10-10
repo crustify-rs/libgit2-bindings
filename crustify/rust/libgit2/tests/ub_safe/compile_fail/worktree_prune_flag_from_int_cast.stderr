@@ -1,0 +1,5 @@
+error[E0605]: non-primitive cast: `u32` as `PruneFlag`
+ --> tests/ub_safe/compile_fail/worktree_prune_flag_from_int_cast.rs:7:13
+  |
+7 |     let _ = raw as PruneFlag;
+  |             ^^^^^^^^^^^^^^^^ an `as` expression can only be used to convert between primitive types or to coerce to a specific trait object

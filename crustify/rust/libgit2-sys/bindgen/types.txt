@@ -31,4 +31,6 @@ git_submodule_recurse_t
 git_submodule_update_t
 git_time
 git_trace_level_t
+git_worktree_prune_options
+git_worktree_prune_t
 git_writestream
