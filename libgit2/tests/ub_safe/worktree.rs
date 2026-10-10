@@ -298,14 +298,13 @@ mod prune_options {
 /// UB tests for `git2/worktree.h`: the `WorktreeBox` owner of a `git_worktree`, the
 /// handles it lends, and the `git_worktree_free` policy.
 ///
-/// Worktrees are adopted from `git_worktree_lookup` by the fixture, which also reads
-/// and locks them through their boxes, standing in for the wrappers that do. Each box
-/// must release its struct and six strings exactly once (ASan: double free, use after
-/// free; LSan: leak), on whichever thread drops it, and shared boxes must race nothing
-/// (TSan). libgit2 writes a worktree in place (`git_worktree_lock`) between Rust
-/// reborrows of its handles (BSan). Handles that outlive their box and aliased exclusive
-/// handles do not compile (doctests on `WorktreeBox`); the box is not `Clone` (doctest).
-/// Every test calls libgit2, so none runs under Miri.
+/// Worktrees come from `Worktree::lookup`, and are read and locked through their
+/// handles. Each box must release its struct and six strings exactly once (ASan: double
+/// free, use after free; LSan: leak), on whichever thread drops it, and shared boxes
+/// must race nothing (TSan). libgit2 writes a worktree in place (`git_worktree_lock`)
+/// between Rust reborrows of its handles (BSan). Handles that outlive their box and
+/// aliased exclusive handles do not compile (doctests on `WorktreeBox`); the box is not
+/// `Clone` (doctest). Every test calls libgit2, so none runs under Miri.
 mod worktree_box {
     use std::sync::Barrier;
     use std::thread;
@@ -314,7 +313,7 @@ mod worktree_box {
         Worktree, WorktreeBox, WorktreeFree, WorktreeMut, WorktreeRef,
     };
 
-    use crate::fixture::worktree::{WorktreeRepo, is_locked, lock, name, path, unlock};
+    use crate::fixture::worktree::WorktreeRepo;
 
     #[test]
     fn worktrees_cross_threads() {
@@ -335,9 +334,9 @@ mod worktree_box {
         for _ in 0..16 {
             let a = repo.lookup(c"a");
             let b = repo.lookup(c"b");
-            assert_eq!(name(&a), c"a");
-            assert_eq!(name(&b), c"b");
-            assert_ne!(path(&a), path(&b));
+            assert_eq!(a.as_ref().name(), c"a");
+            assert_eq!(b.as_ref().name(), c"b");
+            assert_ne!(a.as_ref().path(), b.as_ref().path());
         }
     }
 
@@ -348,12 +347,15 @@ mod worktree_box {
         repo.add("a");
         repo.add("b");
         let mut w = repo.lookup(c"a");
-        assert_eq!(name(&w), c"a");
+        assert_eq!(w.as_ref().name(), c"a");
         // The old worktree drops here, the new one at the end of the scope.
         w = repo.lookup(c"b");
-        assert_eq!(name(&w), c"b");
+        assert_eq!(w.as_ref().name(), c"b");
         let mut slot = Some(w);
-        assert_eq!(slot.take().map(|w| name(&w)), Some(c"b".to_owned()));
+        assert_eq!(
+            slot.take().map(|w| w.as_ref().name().to_owned()),
+            Some(c"b".to_owned())
+        );
         assert!(slot.is_none());
     }
 
@@ -363,11 +365,11 @@ mod worktree_box {
         let repo = WorktreeRepo::new("outlive");
         repo.add("wt");
         let w = repo.lookup(c"wt");
-        let expected = path(&w);
+        let expected = w.as_ref().path().to_owned();
         // The repository is freed and its directory removed: the worktree holds copies.
         repo.close();
-        assert_eq!(name(&w), c"wt");
-        assert_eq!(path(&w), expected);
+        assert_eq!(w.as_ref().name(), c"wt");
+        assert_eq!(w.as_ref().path(), &*expected);
         let r = w.as_ref();
         let _copy = r;
         drop(w);
@@ -384,7 +386,7 @@ mod worktree_box {
         let boxes: Vec<WorktreeBox> = names.iter().map(|n| repo.lookup(n)).collect();
         let handles: Vec<_> = boxes
             .into_iter()
-            .map(|w| thread::spawn(move || name(&w)))
+            .map(|w| thread::spawn(move || w.as_ref().name().to_owned()))
             .collect();
         let read: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
         assert_eq!(read, names.map(|n| n.to_owned()));
@@ -396,7 +398,7 @@ mod worktree_box {
         let repo = WorktreeRepo::new("sync");
         repo.add("wt");
         let w = repo.lookup(c"wt");
-        let expected = (name(&w), path(&w));
+        let expected = (w.as_ref().name().to_owned(), w.as_ref().path().to_owned());
         let start = Barrier::new(4);
         thread::scope(|s| {
             for _ in 0..4 {
@@ -405,10 +407,9 @@ mod worktree_box {
                     // Shared handles and C reads through the same box, concurrently.
                     let r = w.as_ref();
                     for _ in 0..32 {
-                        assert_eq!((name(&w), path(&w)), expected);
-                        assert_eq!(is_locked(&w), 0);
+                        assert_eq!((r.name(), r.path()), (&*expected.0, &*expected.1));
+                        assert_eq!(r.is_locked(), Ok(false));
                     }
-                    let _ = r;
                 });
             }
         });
@@ -427,17 +428,16 @@ mod worktree_box {
                 let inner = m.as_mut();
                 let _shared = inner.as_ref();
             }
-            assert_eq!(lock(&mut w, c"held"), 0);
+            w.as_mut().lock(Some(c"held")).unwrap();
             // A second lock is refused without writing.
-            assert!(lock(&mut w, c"again") < 0);
+            assert!(w.as_mut().lock(Some(c"again")).is_err());
             let r = w.as_ref();
-            let _ = r;
-            assert_eq!(is_locked(&w), 1);
-            assert_eq!(unlock(&mut w), 0);
-            // Unlocking an unlocked worktree reports 1 and writes nothing.
-            assert_eq!(unlock(&mut w), 1);
-            assert_eq!(is_locked(&w), 0, "round {round}");
-            assert_eq!(name(&w), c"wt");
+            assert_eq!(r.is_locked(), Ok(true));
+            assert_eq!(w.as_mut().unlock(), Ok(true));
+            // Unlocking an unlocked worktree reports `false` and writes nothing.
+            assert_eq!(w.as_mut().unlock(), Ok(false));
+            assert_eq!(w.as_ref().is_locked(), Ok(false), "round {round}");
+            assert_eq!(w.as_ref().name(), c"wt");
         }
     }
 }
@@ -471,7 +471,6 @@ mod add_options {
     use libgit2::libgit2::repository::worktree::{AddOptions, AddOptionsMut, AddOptionsRef};
 
     use crate::fixture::isolated;
-    use crate::fixture::worktree::{is_locked, name};
     use crate::fixture::worktree_add::AddRepo;
 
     /// The plain fields, as the getters read them.
@@ -549,8 +548,8 @@ mod add_options {
             opts.as_mut().set_reference(Some(feature.as_ref()));
             opts.as_mut().set_lock(true);
             let w = repo.add("beta", Some(&opts)).unwrap();
-            assert_eq!(name(&w), c"beta");
-            assert_eq!(is_locked(&w), 1);
+            assert_eq!(w.as_ref().name(), c"beta");
+            assert_eq!(w.as_ref().is_locked(), Ok(true));
             // The reference is now checked out there: a second worktree is refused.
             let (rc, message) = repo.add("gamma", Some(&opts)).err().unwrap();
             assert_eq!(rc, -1);
@@ -587,7 +586,7 @@ mod add_options {
         let mut opts = AddOptions::new();
         opts.as_mut().set_checkout_existing(true);
         let w = repo.add("alpha", Some(&opts)).unwrap();
-        assert_eq!(is_locked(&w), 0);
+        assert_eq!(w.as_ref().is_locked(), Ok(false));
         drop(w);
     }
 
@@ -601,7 +600,7 @@ mod add_options {
         opts.as_mut().set_reference(Some(feature.as_ref()));
         // libgit2 takes the name only; `repo` has its own `feature`.
         let w = repo.add("wt", Some(&opts)).unwrap();
-        assert_eq!(name(&w), c"wt");
+        assert_eq!(w.as_ref().name(), c"wt");
         // The options are done with the reference; it goes before its repository.
         drop(w);
         drop(feature);
@@ -680,7 +679,7 @@ mod add_options {
                     opts.as_mut().set_reference(Some(feature.as_ref()));
                     opts.as_mut().set_lock(t % 2 == 0);
                     let w = repo.add("wt", Some(&opts)).unwrap();
-                    assert_eq!(is_locked(&w), i32::from(t % 2 == 0));
+                    assert_eq!(w.as_ref().is_locked(), Ok(t % 2 == 0));
                     for _ in 0..64 {
                         assert_eq!(read(AddOptions::new().as_ref()).0, AddOptions::VERSION);
                     }
@@ -695,7 +694,7 @@ mod add_options {
         // No reference, no existing branch: a new one named after the worktree, at
         // `HEAD`.
         let w = repo.add("fresh", Some(&AddOptions::new())).unwrap();
-        assert_eq!(name(&w), c"fresh");
+        assert_eq!(w.as_ref().name(), c"fresh");
         assert!(heads.join("fresh").is_file());
         // `checkout_existing` with no such branch falls back to creating it.
         let mut opts = AddOptions::new();
@@ -736,5 +735,246 @@ mod add_options {
             concat!(module_path!(), "::new_needs_no_initialised_libgit2"),
             new_before_init,
         );
+    }
+}
+
+/// UB tests for the worktree routines: `Worktree::lookup` / `open_from_repository`,
+/// `list`, the readers on `WorktreeRef` and the lock routines on `WorktreeMut`.
+///
+/// The strings `name` and `path` return borrow the worktree and must stay readable
+/// for as long as its handle (ASan: use after free; a string outliving its box does not
+/// compile, doctest on `WorktreeRef::name`). The arrays and buffers the routines fill
+/// (`list`, whose filtering moves strings within the array and frees the dropped ones,
+/// and `lock_reason`) must release every allocation once, failed calls included (ASan,
+/// LSan). The readers run on many threads at once through one shared box, as the
+/// worktree's `Sync` claims, while only the exclusive handle locks (TSan; locking
+/// through a shared handle does not compile, doctest on `WorktreeMut::lock`). A
+/// repository without paths, whose NULL common directory libgit2 would pass to
+/// `strlen`, must be refused before C (ASan/UBSan: NULL dereference). C writes the
+/// `locked` bit between Rust reborrows (BSan). Every test calls libgit2, so none runs
+/// under Miri.
+mod routines {
+    use std::fs;
+    use std::sync::Barrier;
+    use std::thread;
+
+    use libgit2::libgit2::core::strarray::StrArrayVal;
+    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::repository::worktree::{
+        PruneFlag, PruneOptions, Worktree, WorktreeError, list,
+    };
+
+    use crate::fixture::worktree::WorktreeRepo;
+
+    fn names(array: &StrArrayVal) -> Vec<String> {
+        let mut names: Vec<_> = array
+            .as_ref()
+            .iter()
+            .map(|n| n.to_str().unwrap().to_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn strings_live_as_long_as_the_handle() {
+        let repo = WorktreeRepo::new("strings");
+        repo.add("wt");
+        let mut w = repo.lookup(c"wt");
+        let (name, path) = {
+            let r = w.as_ref();
+            (r.name(), r.path())
+        };
+        // The strings outlive the handle they came from, as long as the box is shared.
+        let expected = repo.workdir("wt");
+        assert_eq!(path.to_str().unwrap(), expected.to_str().unwrap());
+        assert_eq!(w.as_ref().name(), name);
+        let copy = w.as_ref();
+        assert_eq!(copy.path(), path);
+        // Then an exclusive reborrow reads the same strings, and C writes in between.
+        let mut m = w.as_mut();
+        m.lock(None).unwrap();
+        assert_eq!(m.as_ref().name(), c"wt");
+        assert_eq!(m.as_mut().unlock(), Ok(true));
+        assert_eq!(w.as_ref().name().to_bytes(), b"wt");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lists_release_every_string() {
+        let repo = WorktreeRepo::new("list");
+        for name in ["a", "b", "c"] {
+            repo.add(name);
+        }
+        // Entries libgit2 lets through and the wrapper drops: directories without a
+        // worktree's files, and plain files.
+        for junk in ["j1", "j2", "j3", "j4", "j5"] {
+            fs::create_dir_all(repo.admin(junk)).unwrap();
+        }
+        fs::write(repo.admin("file"), "").unwrap();
+        for _ in 0..8 {
+            let listed = list(repo.repo()).unwrap();
+            assert_eq!(names(&listed), ["a", "b", "c"]);
+        }
+        // Every worktree pruned by hand: only junk is left, and dropped.
+        for name in ["a", "b", "c"] {
+            fs::remove_dir_all(repo.admin(name)).unwrap();
+        }
+        assert!(list(repo.repo()).unwrap().as_ref().is_empty());
+        fs::remove_dir_all(repo.base.join("repo/.git/worktrees")).unwrap();
+        assert!(list(repo.repo()).unwrap().as_ref().is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lists_cross_threads_and_outlive_the_repository() {
+        let repo = WorktreeRepo::new("list-send");
+        repo.add("wt");
+        let listed = list(repo.repo()).unwrap();
+        repo.close();
+        let read = thread::spawn(move || names(&listed)).join().unwrap();
+        assert_eq!(read, ["wt"]);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn repositories_without_paths_are_refused_before_c() {
+        crate::fixture::init();
+        let odb = libgit2::libgit2::odb::odb::Odb::new().unwrap();
+        for repo in [
+            Repository::new().unwrap(),
+            Repository::wrap_odb(odb).unwrap(),
+        ] {
+            assert!(list(repo.as_ref()).unwrap().as_ref().is_empty());
+            let e = Worktree::lookup(repo.as_ref(), c"wt").unwrap_err();
+            assert_eq!(e.raw_code(), libgit2::ffi::GIT_ENOTFOUND);
+            assert!(Worktree::open_from_repository(repo.as_ref()).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failed_lookups_release_everything() {
+        let repo = WorktreeRepo::new("failed");
+        repo.add("wt");
+        fs::create_dir_all(repo.admin("broken")).unwrap();
+        fs::write(repo.admin("broken").join("commondir"), "../..\n").unwrap();
+        fs::write(repo.admin("broken").join("HEAD"), "x\n").unwrap();
+        fs::create_dir(repo.admin("broken").join("gitdir")).unwrap();
+        for _ in 0..8 {
+            assert!(Worktree::lookup(repo.repo(), c"absent").is_err());
+            assert!(Worktree::lookup(repo.repo(), c"broken").is_err());
+            assert!(Worktree::lookup(repo.repo(), c"").is_err());
+            assert!(Worktree::open_from_repository(repo.repo()).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn worktree_opened_from_its_repository_outlives_it() {
+        let repo = WorktreeRepo::new("open-from");
+        repo.add("wt");
+        let workdir = repo.workdir("wt");
+        let c_dir = std::ffi::CString::new(workdir.to_str().unwrap()).unwrap();
+        let opened = Repository::open(&c_dir).unwrap();
+        let w = Worktree::open_from_repository(opened.as_ref()).unwrap();
+        drop(opened);
+        repo.close();
+        assert_eq!(w.as_ref().name(), c"wt");
+        assert!(w.as_ref().validate().is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lock_reasons_release_their_buffers() {
+        let repo = WorktreeRepo::new("reason");
+        repo.add("wt");
+        let mut w = repo.lookup(c"wt");
+        assert!(w.as_ref().lock_reason().unwrap().is_none());
+        for reason in [Some(c"because"), None, Some(c"")] {
+            w.as_mut().lock(reason).unwrap();
+            let held = w.as_ref().lock_reason().unwrap().unwrap();
+            let bytes = held.as_ref().as_bytes();
+            assert_eq!(bytes, reason.map_or(&b""[..], |r| r.to_bytes()));
+            assert_eq!(w.as_mut().unlock(), Ok(true));
+            // The buffer is the caller's: the unlock frees nothing it holds.
+            assert_eq!(held.as_ref().as_bytes(), bytes);
+        }
+        // An unreadable `locked` entry fails, with nothing to release.
+        fs::create_dir(repo.admin("wt").join("locked")).unwrap();
+        for _ in 0..4 {
+            assert!(w.as_ref().lock_reason().is_err());
+        }
+        assert!(w.as_mut().unlock().is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn shared_readers_race_nothing() {
+        let repo = WorktreeRepo::new("readers");
+        repo.add("wt");
+        let w = repo.lookup(c"wt");
+        let start = Barrier::new(4);
+        let opts = PruneOptions::new();
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    start.wait();
+                    let r = w.as_ref();
+                    for _ in 0..16 {
+                        assert_eq!(r.name(), c"wt");
+                        assert_eq!(r.validate(), Ok(()));
+                        assert_eq!(r.is_locked(), Ok(false));
+                        assert!(r.lock_reason().unwrap().is_none());
+                        // Valid, so not prunable: the reason stays on this thread.
+                        assert_eq!(r.is_prunable(opts.as_ref()), Ok(false));
+                        assert!(r.prune(opts.as_ref()).is_err());
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn exclusive_handle_locks_on_another_thread() {
+        let repo = WorktreeRepo::new("lock-thread");
+        repo.add("wt");
+        let mut w = repo.lookup(c"wt");
+        let m = w.as_mut();
+        thread::scope(|s| {
+            s.spawn(move || {
+                let mut m = m;
+                m.lock(Some(c"from a thread")).unwrap();
+                assert_eq!(m.as_ref().is_locked(), Ok(true));
+            });
+        });
+        let error: WorktreeError = thread::spawn({
+            let mut w = repo.lookup(c"wt");
+            move || w.as_mut().lock(None).unwrap_err()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(error.raw_code(), libgit2::ffi::GIT_ELOCKED);
+        assert_eq!(w.as_mut().unlock(), Ok(true));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn pruned_worktree_stays_readable() {
+        let repo = WorktreeRepo::new("prune");
+        repo.add("wt");
+        let w = repo.lookup(c"wt");
+        let mut opts = PruneOptions::new();
+        opts.as_mut()
+            .set_flags(PruneFlag::Valid | PruneFlag::WorkingTree);
+        w.as_ref().prune(opts.as_ref()).unwrap();
+        assert!(!repo.admin("wt").exists() && !repo.workdir("wt").exists());
+        // The struct and its strings are untouched; the directories are gone.
+        assert_eq!(w.as_ref().name(), c"wt");
+        assert!(w.as_ref().validate().is_err());
+        assert!(w.as_ref().prune(opts.as_ref()).is_err());
+        assert_eq!(w.as_ref().is_locked(), Ok(false));
     }
 }

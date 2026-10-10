@@ -43,6 +43,14 @@
 //! A [`Repository`] is the opaque `git_repository`, which libgit2 allocates and frees
 //! with no count: one [`RepositoryBox`] owns it, built by the constructors on
 //! [`Repository`], which report a failure as a [`RepositoryError`].
+//!
+//! A repository built without paths ([`Repository::new`], [`Repository::wrap_odb`]) has
+//! no git directory, common directory or working directory. libgit2 resolves some
+//! paths against those regardless, so against the process's working directory; the
+//! wrappers whose routines would then write or remove files there refuse such a
+//! repository instead ([`RepositoryMut::cleanup_state`], and
+//! [`Worktree::lookup`](crate::libgit2::repository::worktree::Worktree::lookup), whose
+//! routine would read a NULL path).
 
 use core::ffi::{CStr, c_int, c_uint};
 use core::fmt;
@@ -54,11 +62,12 @@ use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use ffibox::{CBorrowedPtr, CBox, CCell, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::odb::odb::OdbArc;
 use crate::libgit2::oid::oid::OidType;
 use crate::libgit2::refs::refdb::RefdbType;
 use crate::libgit2::repository::sys::repository::NewOptions;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 
 /// One option of `git_repository_init_ext`, a single bit of an [`InitFlags`] set
 /// (`git_repository_init_flag_t`). Each is off by default.
@@ -1643,7 +1652,7 @@ impl RepositoryError {
     /// The failure a constructor reported by returning `rc`, with the thread's last
     /// error. A positive `rc` is a failure too (see [`Repository::init`]), reported as
     /// `GIT_ERROR`.
-    fn from_libgit2(rc: c_int) -> Self {
+    pub(crate) fn from_libgit2(rc: c_int) -> Self {
         Self {
             code: if rc < 0 { rc } else { ErrorCode::Generic.raw() },
             error: last(),
@@ -1851,6 +1860,132 @@ impl Repository {
         // SAFETY: `git_repository_init` leaves `out` NULL, or writes the fresh
         // repository it opened, owned by the caller alone, whatever it returns.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
+    }
+}
+
+impl Repository {
+    /// A repository over the object database `odb`, with no paths, config, index or
+    /// working directory: the repository API (object lookups, its object cache) over an
+    /// odb built by hand, custom backends and all. Its objects are ids of the odb's
+    /// type.
+    ///
+    /// The repository takes a reference to `odb` of its own and becomes its owner (see
+    /// [`odb`](crate::libgit2::odb::odb#the-owning-repository)), so it accepts only an
+    /// odb no repository owns yet, an `OdbArc<'static>`; the reference passed in is
+    /// released once the repository holds its own.
+    ///
+    /// Fails only when libgit2 runs out of memory, or cannot be initialised.
+    ///
+    /// An odb a repository lent (`OdbArc<'r>`) is not accepted:
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::odb::odb::OdbArc;
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// fn rewrap<'r>(odb: OdbArc<'r>) {
+    ///     let _ = Repository::wrap_odb(odb);
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_repository_wrap_odb
+    pub fn wrap_odb(odb: OdbArc<'static>) -> Result<RepositoryBox, RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, NULL so that a failure (which leaves it
+        // untouched) leaves it NULL; `odb` is a live odb no repository owns (`'static`),
+        // of a type libgit2 names (every safe constructor gives one), which the new
+        // repository takes a reference to and owns. The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_wrap_odb(&mut out, odb.as_c_ptr()) };
+        // SAFETY: `git_repository_wrap_odb` writes a fresh repository the caller owns
+        // alone only on success.
+        let repo = constructed(rc, unsafe { RepositoryBox::from_c(out) });
+        drop(odb);
+        repo
+    }
+}
+
+impl<'a> RepositoryRef<'a> {
+    /// The repository's working directory, with a trailing slash; `None` for a bare
+    /// repository, and for one without paths.
+    ///
+    /// The string is the repository's, borrowed for as long as the handle: libgit2
+    /// replaces it only when the working directory is changed or the repository made
+    /// bare, through a [`RepositoryMut`], which no shared borrow outlives. Nor does
+    /// the string outlive the repository:
+    ///
+    /// ```compile_fail,E0505
+    /// use core::ffi::CStr;
+    /// use libgit2::libgit2::repository::repository::RepositoryBox;
+    ///
+    /// fn escape(repo: RepositoryBox) -> Option<&'static CStr> {
+    ///     let workdir = repo.as_ref().workdir();
+    ///     drop(repo);
+    ///     workdir
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_repository_workdir
+    pub fn workdir(&self) -> Option<&'a CStr> {
+        // SAFETY: a live repository on this thread; the routine only reads its
+        // `is_bare` and `workdir` fields.
+        let dir = unsafe { ffi::git_repository_workdir(self.as_ptr()) };
+        // SAFETY: `workdir` is NULL or a NUL-terminated string the repository owns,
+        // freed only with it, by `git_repository_set_workdir` or by
+        // `git_repository_set_bare`, whose wrappers take a `RepositoryMut`, which the
+        // `'a` borrow excludes; so it lives for `'a`.
+        (!dir.is_null()).then(|| unsafe { CStr::from_ptr(dir) })
+    }
+}
+
+impl RepositoryMut<'_> {
+    /// Removes what a stopped merge, revert, cherry-pick, bisect, rebase or mailbox
+    /// application left in the git directory: the `MERGE_HEAD`, `MERGE_MODE`,
+    /// `MERGE_MSG` and `BISECT_LOG` files, the `rebase-merge/`, `rebase-apply/` and
+    /// `sequencer/` directories, and the `REVERT_HEAD` and `CHERRY_PICK_HEAD`
+    /// references, so that the state is [`RepositoryState::Clean`]. What is missing is
+    /// skipped.
+    ///
+    /// Fails with libgit2's error when one of them cannot be removed (with
+    /// `GIT_ERROR_OS` for a file, which libgit2 reports without an error of its own),
+    /// and with [`ErrorCode::NotFound`] for a repository without paths, which has no
+    /// git directory: libgit2 would remove those names from the process's working
+    /// directory.
+    ///
+    /// It removes files through the exclusive handle alone:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::repository::repository::RepositoryBox;
+    ///
+    /// fn cleanup(repo: &RepositoryBox) {
+    ///     let _ = repo.as_ref().cleanup_state();
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_repository_state_cleanup
+    pub fn cleanup_state(&mut self) -> Result<(), RepositoryError> {
+        if !runtime_pinned() {
+            return Err(unpinned());
+        }
+        clear();
+        // SAFETY: a live repository on this thread; the routine only reads its `gitdir`
+        // field.
+        if unsafe { ffi::git_repository_path(self.as_ref().as_ptr()) }.is_null() {
+            set(ErrorClass::Invalid, c"path cannot exist in repository");
+            return Err(RepositoryError::from_libgit2(ErrorCode::NotFound.raw()));
+        }
+        // SAFETY: a live repository on this thread, exclusively borrowed, with a git
+        // directory the removals are relative to; its reference database may be loaded
+        // and written. The runtime is pinned.
+        let rc = unsafe { ffi::git_repository_state_cleanup(self.as_mut_ptr()) };
+        if rc < 0 {
+            if last().class() == Some(ErrorClass::None) {
+                set(ErrorClass::Os, c"failed to remove a repository state file");
+            }
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        Ok(())
     }
 }
 
@@ -2735,6 +2870,144 @@ mod unit_tests {
                 let raw = unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) };
                 assert_eq!(raw, kind.raw());
             }
+        }
+    }
+
+    mod routines {
+        use super::super::*;
+        use std::ffi::CString;
+        use std::fs;
+        use std::os::unix::ffi::OsStrExt;
+        use std::path::{Path, PathBuf};
+        use std::process::Command;
+
+        use crate::libgit2::odb::odb::Odb;
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, which may change its working directory.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        fn scratch(tag: &str) -> PathBuf {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-routines-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+
+        fn c_path(path: &Path) -> CString {
+            CString::new(path.as_os_str().as_bytes()).unwrap()
+        }
+
+        /// Lays the state files `git_repository_state_cleanup` removes out in `dir`.
+        fn lay_state(dir: &Path) {
+            for file in ["MERGE_HEAD", "MERGE_MODE", "MERGE_MSG", "BISECT_LOG"] {
+                fs::write(dir.join(file), "x\n").unwrap();
+            }
+            for sub in ["rebase-merge", "rebase-apply", "sequencer"] {
+                fs::create_dir_all(dir.join(sub)).unwrap();
+                fs::write(dir.join(sub).join("todo"), "x\n").unwrap();
+            }
+        }
+
+        fn state_left(dir: &Path) -> Vec<&'static str> {
+            [
+                "MERGE_HEAD",
+                "MERGE_MODE",
+                "MERGE_MSG",
+                "BISECT_LOG",
+                "rebase-merge",
+                "rebase-apply",
+                "sequencer",
+            ]
+            .into_iter()
+            .filter(|f| dir.join(f).exists())
+            .collect()
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn cleanup_state_refuses_a_repository_without_paths() {
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::cleanup_state_refuses_a_repository_without_paths"
+                ),
+                || {
+                    // libgit2 resolves the state files against the NULL git directory of a
+                    // repository without paths, so against the working directory.
+                    let cwd = scratch("cwd");
+                    std::env::set_current_dir(&cwd).unwrap();
+                    lay_state(&cwd);
+                    let c_repo = Repository::new().unwrap();
+                    // SAFETY: the box's live repository, on this thread.
+                    let rc = unsafe { ffi::git_repository_state_cleanup(c_repo.as_c_ptr()) };
+                    assert_eq!(rc, 0);
+                    assert_eq!(state_left(&cwd), Vec::<&str>::new(), "C removed them");
+
+                    lay_state(&cwd);
+                    let odb = Odb::new().unwrap();
+                    for mut repo in [
+                        Repository::new().unwrap(),
+                        Repository::wrap_odb(odb).unwrap(),
+                    ] {
+                        let e = repo.as_mut().cleanup_state().unwrap_err();
+                        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+                        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+                        assert_eq!(e.message(), c"path cannot exist in repository");
+                    }
+                    assert_eq!(state_left(&cwd).len(), 7, "Rust left them");
+                    std::env::set_current_dir(std::env::temp_dir()).unwrap();
+                    fs::remove_dir_all(&cwd).unwrap();
+                },
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn cleanup_state_clears_a_stale_error() {
+            let dir = scratch("stale");
+            let mut repo = Repository::init(&c_path(&dir), true).unwrap();
+            lay_state(&dir);
+            crate::libgit2::util::sys::errors::set(ErrorClass::Odb, c"stale");
+            repo.as_mut().cleanup_state().unwrap();
+            assert_eq!(last().class(), Some(ErrorClass::None));
+            assert!(state_left(&dir).is_empty());
+            drop(repo);
+            fs::remove_dir_all(&dir).unwrap();
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn wrap_odb_releases_the_odb_with_the_repository() {
+            let odb = Odb::with_oid_type(OidType::Sha256).unwrap();
+            let repo = Repository::wrap_odb(odb).unwrap();
+            // SAFETY: the box's live repository, only read.
+            let kind = unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) };
+            assert_eq!(kind, OidType::Sha256.raw());
+            assert_eq!(repo.as_ref().workdir(), None);
+            drop(repo);
+            // LSan sees the odb freed with its last reference, the repository's.
         }
     }
 }

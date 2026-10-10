@@ -1561,3 +1561,643 @@ mod add_options {
         assert_eq!(rust_log, c_log);
     }
 }
+
+/// The worktree routines against libgit2: `Worktree::lookup` and
+/// `open_from_repository`, `list`, and the readers and lock routines on the handles,
+/// against `git_worktree_lookup`, `git_worktree_open_from_repository`,
+/// `git_worktree_list`, `git_worktree_name` / `_path` / `_validate` / `_is_locked` /
+/// `_is_prunable` / `_prune` and `git_worktree_lock` / `_unlock`.
+///
+/// Each side owns a repository with two linked worktrees laid out by hand, under its own
+/// root; both run the same sequence of steps, the C side through the raw routines, the
+/// Rust side through the safe API, each holding the worktrees it looked up across the
+/// steps. After every step they must agree on the result (the return, or the value the
+/// wrapper reads out of it: a name, a path relative to the root, a lock reason, a list
+/// of names), on the error (class and message, the root masked; for `is_prunable`'s
+/// "not prunable" through the thread's last error), and on which administrative
+/// directories, working directories and `locked` files exist.
+///
+/// Where libgit2 fails without setting an error, the Rust error is the wrapper's own
+/// (see the module docs of `worktree`): those steps compare the return code and check
+/// that C set none. The corrected behaviours (`list`'s skipped entries, `prune` after a
+/// failed check, repositories without paths) have their regressions in the unit tests;
+/// `list` is compared here on directories where libgit2 checks every entry (one entry
+/// that is not a worktree, or none).
+mod routines {
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::repository::worktree::{
+        PruneFlag, PruneFlags, PruneOptions, Worktree, WorktreeBox, WorktreeError, list,
+    };
+    use libgit2::libgit2::util::errors::last;
+
+    const NAMES: [&str; 2] = ["wt1", "wt2"];
+
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Lookup(&'static str),
+        OpenFromMain,
+        OpenFromWorktree(&'static str),
+        Name(usize),
+        Path(usize),
+        Validate(usize),
+        IsLocked(usize),
+        LockReason(usize),
+        Lock(usize, Option<&'static CStr>),
+        Unlock(usize),
+        IsPrunable(usize, u32),
+        Prune(usize, u32),
+        List,
+        AddJunk(&'static str),
+        RemoveWorkdir(&'static str),
+        LockDir(&'static str),
+        /// Removes the worktree's administrative directory.
+        RemoveAdmin(&'static str),
+        /// Points the worktree's `commondir` file at a directory that does not exist.
+        PointCommondir(&'static str),
+    }
+
+    /// What a step returned: the code, the value read out of it, and the thread's error
+    /// (`None` for `GIT_ERROR_NONE`), the root masked.
+    #[derive(Debug, PartialEq)]
+    struct Record {
+        code: c_int,
+        value: Option<String>,
+        error: Option<(c_int, String)>,
+        state: Vec<(&'static str, bool, bool, bool)>,
+    }
+
+    /// The thread's last error as C reports it; `None` for `GIT_ERROR_NONE`.
+    fn c_last() -> Option<(c_int, String)> {
+        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
+        // its message is a C string, live until the next libgit2 call on this thread.
+        unsafe {
+            let e = ffi::git_error_last();
+            if (*e).klass == ffi::GIT_ERROR_NONE as c_int {
+                return None;
+            }
+            let message = CStr::from_ptr((*e).message).to_string_lossy().into_owned();
+            Some(((*e).klass, message))
+        }
+    }
+
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    fn options(flags: u32) -> PruneOptions {
+        let mut opts = PruneOptions::new();
+        opts.as_mut().set_flags(PruneFlags::from_bits_retain(flags));
+        opts
+    }
+
+    /// The layout both sides share: a repository and the worktrees in [`NAMES`].
+    struct Layout {
+        root: PathBuf,
+    }
+
+    impl Layout {
+        fn new(tag: &str) -> Self {
+            init();
+            let root = std::env::temp_dir().join(format!(
+                "crustify-worktree-routines-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn repo_path(&self) -> CString {
+            CString::new(self.root.join("repo").as_os_str().as_bytes()).unwrap()
+        }
+
+        fn admin(&self, name: &str) -> PathBuf {
+            self.root.join("repo/.git/worktrees").join(name)
+        }
+
+        fn workdir(&self, name: &str) -> PathBuf {
+            self.root.join(name)
+        }
+
+        fn add(&self, name: &str) {
+            let admin = self.admin(name);
+            let workdir = self.workdir(name);
+            fs::create_dir_all(&admin).unwrap();
+            fs::create_dir_all(&workdir).unwrap();
+            fs::write(admin.join("commondir"), "../..\n").unwrap();
+            let link = workdir.join(".git");
+            fs::write(admin.join("gitdir"), format!("{}\n", link.display())).unwrap();
+            fs::write(admin.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::write(&link, format!("gitdir: {}\n", admin.display())).unwrap();
+        }
+
+        /// The steps that only change the file system; `None` for the others.
+        fn touch(&self, step: Step) -> Option<()> {
+            match step {
+                Step::AddJunk(name) => fs::create_dir_all(self.admin(name)).unwrap(),
+                Step::RemoveWorkdir(name) => fs::remove_dir_all(self.workdir(name)).unwrap(),
+                Step::LockDir(name) => fs::create_dir(self.admin(name).join("locked")).unwrap(),
+                Step::RemoveAdmin(name) => fs::remove_dir_all(self.admin(name)).unwrap(),
+                Step::PointCommondir(name) => {
+                    let missing = self.root.join("missing-commondir");
+                    fs::write(
+                        self.admin(name).join("commondir"),
+                        format!("{}\n", missing.display()),
+                    )
+                    .unwrap()
+                }
+                _ => return None,
+            }
+            Some(())
+        }
+
+        fn mask(&self, s: &str) -> String {
+            s.replace(&self.root.display().to_string(), "<root>")
+        }
+
+        fn record(
+            &self,
+            code: c_int,
+            value: Option<String>,
+            error: Option<(c_int, String)>,
+        ) -> Record {
+            Record {
+                code,
+                value: value.map(|v| self.mask(&v)),
+                error: error.map(|(k, m)| (k, self.mask(&m))),
+                state: NAMES
+                    .iter()
+                    .map(|&n| {
+                        (
+                            n,
+                            self.admin(n).exists(),
+                            self.workdir(n).exists(),
+                            self.admin(n).join("locked").exists(),
+                        )
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for Layout {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Whether `step` returning `code` reports a failure, whose error is compared: a
+    /// negative code, or "not prunable". A success may leave an older error in place.
+    fn failure(step: Step, code: c_int) -> bool {
+        code < 0 || (matches!(step, Step::IsPrunable(..)) && code == 0)
+    }
+
+    fn sorted_names(mut names: Vec<String>) -> Option<String> {
+        names.sort();
+        Some(names.join(","))
+    }
+
+    // --- the C side -----------------------------------------------------------------
+
+    struct CSide {
+        layout: Layout,
+        repo: *mut ffi::git_repository,
+        worktrees: Vec<*mut ffi::git_worktree>,
+    }
+
+    impl CSide {
+        fn new(tag: &str) -> Self {
+            let layout = Layout::new(tag);
+            let mut repo = ptr::null_mut();
+            let path = layout.repo_path();
+            // SAFETY: a writable slot and a NUL-terminated path; the result is freed by
+            // `drop`.
+            let rc = unsafe { ffi::git_repository_init(&mut repo, path.as_ptr(), 0) };
+            assert_eq!(rc, 0);
+            for n in NAMES {
+                layout.add(n);
+            }
+            Self {
+                layout,
+                repo,
+                worktrees: Vec::new(),
+            }
+        }
+
+        fn keep(&mut self, rc: c_int, wt: *mut ffi::git_worktree) -> (c_int, Option<String>) {
+            if rc != 0 {
+                return (rc, None);
+            }
+            self.worktrees.push(wt);
+            // SAFETY: the live worktree just kept; its name is a C string it owns.
+            let name = unsafe { CStr::from_ptr(ffi::git_worktree_name(wt)) };
+            (rc, Some(name.to_string_lossy().into_owned()))
+        }
+
+        fn run(&mut self, step: Step) -> Record {
+            // SAFETY: no arguments; clears this thread's error state.
+            unsafe { ffi::git_error_clear() };
+            if self.layout.touch(step).is_some() {
+                return self.layout.record(0, None, None);
+            }
+            let wt = |i: usize, s: &Self| s.worktrees[i];
+            // SAFETY: every call below takes live worktrees and repositories this side
+            // owns, live out slots and NUL-terminated strings, read for the call.
+            let (code, value) = unsafe {
+                match step {
+                    Step::Lookup(name) => {
+                        let c_name = CString::new(name).unwrap();
+                        let mut out = ptr::null_mut();
+                        let rc = ffi::git_worktree_lookup(&mut out, self.repo, c_name.as_ptr());
+                        self.keep(rc, out)
+                    }
+                    Step::OpenFromMain => {
+                        let mut out = ptr::null_mut();
+                        let rc = ffi::git_worktree_open_from_repository(&mut out, self.repo);
+                        self.keep(rc, out)
+                    }
+                    Step::OpenFromWorktree(name) => {
+                        let dir =
+                            CString::new(self.layout.workdir(name).as_os_str().as_bytes()).unwrap();
+                        let mut repo = ptr::null_mut();
+                        assert_eq!(ffi::git_repository_open(&mut repo, dir.as_ptr()), 0);
+                        let mut out = ptr::null_mut();
+                        let rc = ffi::git_worktree_open_from_repository(&mut out, repo);
+                        ffi::git_repository_free(repo);
+                        self.keep(rc, out)
+                    }
+                    Step::Name(i) => {
+                        let name = CStr::from_ptr(ffi::git_worktree_name(wt(i, self)));
+                        (0, Some(name.to_string_lossy().into_owned()))
+                    }
+                    Step::Path(i) => {
+                        let path = CStr::from_ptr(ffi::git_worktree_path(wt(i, self)));
+                        (0, Some(path.to_string_lossy().into_owned()))
+                    }
+                    Step::Validate(i) => (ffi::git_worktree_validate(wt(i, self)), None),
+                    Step::IsLocked(i) => (
+                        ffi::git_worktree_is_locked(ptr::null_mut(), wt(i, self)),
+                        None,
+                    ),
+                    Step::LockReason(i) => {
+                        let mut buf = ffi::git_buf::default();
+                        let rc = ffi::git_worktree_is_locked(&mut buf, wt(i, self));
+                        let reason = (rc > 0).then(|| {
+                            let bytes = std::slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size);
+                            String::from_utf8_lossy(bytes).into_owned()
+                        });
+                        if buf.reserved > 0 {
+                            ffi::git_buf_dispose(&mut buf);
+                        }
+                        (rc, reason)
+                    }
+                    Step::Lock(i, reason) => {
+                        let reason = reason.map_or(ptr::null(), CStr::as_ptr);
+                        (ffi::git_worktree_lock(wt(i, self), reason), None)
+                    }
+                    Step::Unlock(i) => (ffi::git_worktree_unlock(wt(i, self)), None),
+                    Step::IsPrunable(i, flags) => {
+                        let mut opts = ffi::git_worktree_prune_options {
+                            version: ffi::GIT_WORKTREE_PRUNE_OPTIONS_VERSION,
+                            flags,
+                        };
+                        (ffi::git_worktree_is_prunable(wt(i, self), &mut opts), None)
+                    }
+                    Step::Prune(i, flags) => {
+                        let mut opts = ffi::git_worktree_prune_options {
+                            version: ffi::GIT_WORKTREE_PRUNE_OPTIONS_VERSION,
+                            flags,
+                        };
+                        (ffi::git_worktree_prune(wt(i, self), &mut opts), None)
+                    }
+                    Step::List => {
+                        let mut array = ffi::git_strarray::default();
+                        let rc = ffi::git_worktree_list(&mut array, self.repo);
+                        let names = (0..array.count)
+                            .map(|k| {
+                                CStr::from_ptr(*array.strings.add(k))
+                                    .to_string_lossy()
+                                    .into_owned()
+                            })
+                            .collect();
+                        ffi::git_strarray_dispose(&mut array);
+                        (rc, sorted_names(names))
+                    }
+                    Step::AddJunk(_)
+                    | Step::RemoveWorkdir(_)
+                    | Step::LockDir(_)
+                    | Step::RemoveAdmin(_)
+                    | Step::PointCommondir(_) => unreachable!(),
+                }
+            };
+            self.layout
+                .record(code, value, failure(step, code).then(c_last).flatten())
+        }
+    }
+
+    impl Drop for CSide {
+        fn drop(&mut self) {
+            for wt in self.worktrees.drain(..) {
+                // SAFETY: each worktree this side looked up, released once.
+                unsafe { ffi::git_worktree_free(wt) };
+            }
+            // SAFETY: the repository `new` made, released once.
+            unsafe { ffi::git_repository_free(self.repo) };
+        }
+    }
+
+    // --- the Rust side --------------------------------------------------------------
+
+    struct RustSide {
+        worktrees: Vec<WorktreeBox>,
+        repo: RepositoryBox,
+        layout: Layout,
+    }
+
+    /// A Rust failure as the C side records it: the code, and the error unless the
+    /// wrapper supplied it for a routine that set none (`own_error`).
+    fn failed(e: WorktreeError) -> (c_int, Option<String>, Option<(c_int, String)>, bool) {
+        let error = (e.raw_class(), e.message().to_string_lossy().into_owned());
+        (e.raw_code(), None, Some(error), true)
+    }
+
+    impl RustSide {
+        fn new(tag: &str) -> Self {
+            let layout = Layout::new(tag);
+            let repo = Repository::init(&layout.repo_path(), false).unwrap();
+            for n in NAMES {
+                layout.add(n);
+            }
+            Self {
+                worktrees: Vec::new(),
+                repo,
+                layout,
+            }
+        }
+
+        fn keep(
+            &mut self,
+            w: Result<WorktreeBox, WorktreeError>,
+        ) -> (c_int, Option<String>, Option<(c_int, String)>, bool) {
+            match w {
+                Ok(w) => {
+                    let name = w.as_ref().name().to_string_lossy().into_owned();
+                    self.worktrees.push(w);
+                    (0, Some(name), None, false)
+                }
+                Err(e) => failed(e),
+            }
+        }
+
+        /// The record, and whether a failure's error is one the wrapper may have set.
+        fn run(&mut self, step: Step) -> (Record, bool) {
+            if self.layout.touch(step).is_some() {
+                return (self.layout.record(0, None, None), false);
+            }
+            let unit = |r: Result<(), WorktreeError>| match r {
+                Ok(()) => (0, None, None, false),
+                Err(e) => failed(e),
+            };
+            let (code, value, error, own) = match step {
+                Step::Lookup(name) => {
+                    let name = CString::new(name).unwrap();
+                    let w = Worktree::lookup(self.repo.as_ref(), &name);
+                    self.keep(w)
+                }
+                Step::OpenFromMain => {
+                    let w = Worktree::open_from_repository(self.repo.as_ref());
+                    self.keep(w)
+                }
+                Step::OpenFromWorktree(name) => {
+                    let dir =
+                        CString::new(self.layout.workdir(name).as_os_str().as_bytes()).unwrap();
+                    let repo = Repository::open(&dir).unwrap();
+                    let w = Worktree::open_from_repository(repo.as_ref());
+                    drop(repo);
+                    self.keep(w)
+                }
+                Step::Name(i) => {
+                    let name = self.worktrees[i].as_ref().name();
+                    (0, Some(name.to_string_lossy().into_owned()), None, false)
+                }
+                Step::Path(i) => {
+                    let path = self.worktrees[i].as_ref().path();
+                    (0, Some(path.to_string_lossy().into_owned()), None, false)
+                }
+                Step::Validate(i) => unit(self.worktrees[i].as_ref().validate()),
+                Step::IsLocked(i) => match self.worktrees[i].as_ref().is_locked() {
+                    Ok(locked) => (c_int::from(locked), None, None, false),
+                    Err(e) => failed(e),
+                },
+                Step::LockReason(i) => match self.worktrees[i].as_ref().lock_reason() {
+                    Ok(reason) => {
+                        let reason = reason
+                            .map(|b| String::from_utf8_lossy(b.as_ref().as_bytes()).into_owned());
+                        (c_int::from(reason.is_some()), reason, None, false)
+                    }
+                    Err(e) => failed(e),
+                },
+                Step::Lock(i, reason) => unit(self.worktrees[i].as_mut().lock(reason)),
+                Step::Unlock(i) => match self.worktrees[i].as_mut().unlock() {
+                    Ok(was_locked) => (c_int::from(!was_locked), None, None, false),
+                    Err(e) => failed(e),
+                },
+                Step::IsPrunable(i, flags) => {
+                    let opts = options(flags);
+                    match self.worktrees[i].as_ref().is_prunable(opts.as_ref()) {
+                        Ok(true) => (1, None, None, false),
+                        // The reason is the thread's last error, as C leaves it.
+                        Ok(false) => {
+                            let e = last();
+                            let error = (e.raw_class(), e.message().to_string_lossy().into_owned());
+                            (0, None, Some(error), false)
+                        }
+                        Err(e) => failed(e),
+                    }
+                }
+                Step::Prune(i, flags) => {
+                    let opts = options(flags);
+                    unit(self.worktrees[i].as_ref().prune(opts.as_ref()))
+                }
+                Step::List => match list(self.repo.as_ref()) {
+                    Ok(names) => {
+                        let names = names
+                            .as_ref()
+                            .iter()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .collect();
+                        (0, sorted_names(names), None, false)
+                    }
+                    Err(e) => failed(e),
+                },
+                Step::AddJunk(_)
+                | Step::RemoveWorkdir(_)
+                | Step::LockDir(_)
+                | Step::RemoveAdmin(_)
+                | Step::PointCommondir(_) => unreachable!(),
+            };
+            let error = if failure(step, code) { error } else { None };
+            (self.layout.record(code, value, error), own)
+        }
+    }
+
+    /// Runs `steps` on both sides, comparing after every step.
+    fn compare(tag: &str, steps: &[Step]) {
+        let mut c = CSide::new(&format!("{tag}-c"));
+        let mut rust = RustSide::new(&format!("{tag}-rust"));
+        for (k, &step) in steps.iter().enumerate() {
+            let expected = c.run(step);
+            let (mut got, own) = rust.run(step);
+            if own && expected.error.is_none() {
+                // libgit2 set no error: the wrapper's own stands in for it.
+                assert!(got.error.is_some(), "step {k} {step:?}");
+                got.error = None;
+            }
+            assert_eq!(got, expected, "step {k} {step:?}");
+        }
+    }
+
+    const VALID: u32 = PruneFlag::Valid.raw();
+    const LOCKED: u32 = PruneFlag::Locked.raw();
+    const WORKING_TREE: u32 = PruneFlag::WorkingTree.raw();
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lookups_and_readers_match_c() {
+        use Step::*;
+        compare(
+            "readers",
+            &[
+                List,
+                Lookup("wt1"),
+                Lookup("absent"),
+                Lookup(""),
+                Name(0),
+                Path(0),
+                Validate(0),
+                OpenFromMain,
+                OpenFromWorktree("wt2"),
+                Name(1),
+                Path(1),
+                Validate(1),
+                AddJunk("junk"),
+                List,
+                Lookup("junk"),
+                RemoveWorkdir("wt1"),
+                Validate(0),
+                Path(0),
+                List,
+            ],
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lock_sequences_match_c() {
+        use Step::*;
+        compare(
+            "locks",
+            &[
+                Lookup("wt1"),
+                Lookup("wt1"),
+                IsLocked(0),
+                LockReason(0),
+                Lock(0, Some(c"moving disks")),
+                IsLocked(0),
+                IsLocked(1),
+                LockReason(1),
+                Lock(1, None),
+                Lock(0, Some(c"again")),
+                Unlock(1),
+                Unlock(0),
+                Lock(0, None),
+                LockReason(0),
+                Lock(1, Some(c"")),
+                Unlock(1),
+                IsLocked(0),
+                LockDir("wt2"),
+                Lookup("wt2"),
+                IsLocked(2),
+                LockReason(2),
+                Lock(2, None),
+            ],
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn prune_sequences_match_c() {
+        use Step::*;
+        compare(
+            "prune",
+            &[
+                Lookup("wt1"),
+                Lookup("wt2"),
+                IsPrunable(0, 0),
+                Prune(0, 0),
+                Lock(0, Some(c"kept")),
+                IsPrunable(0, VALID),
+                Prune(0, VALID),
+                IsPrunable(0, VALID | LOCKED),
+                Prune(0, VALID | LOCKED),
+                Validate(0),
+                IsPrunable(0, VALID | LOCKED),
+                Prune(0, VALID | LOCKED),
+                List,
+                Lookup("wt1"),
+                RemoveWorkdir("wt2"),
+                IsPrunable(1, 0),
+                Prune(1, WORKING_TREE),
+                List,
+                Name(1),
+                Lookup("wt2"),
+            ],
+        );
+        compare(
+            "prune-tree",
+            &[
+                Lookup("wt1"),
+                Prune(0, VALID | WORKING_TREE),
+                Prune(0, VALID | WORKING_TREE),
+                Lookup("wt2"),
+                Prune(1, VALID | WORKING_TREE | 1 << 9),
+                List,
+            ],
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failures_on_a_changed_disk_match_c() {
+        use Step::*;
+        compare(
+            "changed",
+            &[
+                Lookup("wt1"),
+                RemoveAdmin("wt1"),
+                Lock(0, Some(c"gone")),
+                Unlock(0),
+                IsLocked(0),
+                LockReason(0),
+                Validate(0),
+                IsPrunable(0, VALID),
+                Prune(0, VALID),
+                PointCommondir("wt2"),
+                Lookup("wt2"),
+                Validate(1),
+                IsPrunable(1, 0),
+                IsPrunable(1, VALID),
+                Prune(1, VALID),
+                List,
+            ],
+        );
+    }
+}

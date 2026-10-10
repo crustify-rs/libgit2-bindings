@@ -4996,6 +4996,165 @@
    ]
   },
   {
+   "name": "git_repository_state_cleanup",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Removes MERGE_HEAD/MERGE_MODE/MERGE_MSG/BISECT_LOG (p_unlink: fails -1 WITHOUT an error message) and rebase-merge/, rebase-apply/, sequencer/ (rmdir_r) joined to repo->gitdir, then REVERT_HEAD/CHERRY_PICK_HEAD through the refdb (lazily loaded into the repo). HAZARD: with a NULL gitdir (git_repository_new / wrap_odb) git_str_joinpath treats NULL as \"\" and the files backend uses NULL paths too, so it removes those names relative to the process's cwd; the safe wrapper refuses such a repository (ENOTFOUND, 'path cannot exist in repository'). Wrapped on RepositoryMut."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_submodule_cache_all",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. git_submodule_cache_init(&repo->submodule_cache, repo) OVERWRITES the slot without freeing a previous cache: a second call leaks the old cache and its submodule references (LSan-confirmed); on failure the slot keeps its old value. git_submodule_lookup and diff generation read the slot (diff keeps it in a local across notify callbacks), so the wrapper takes RepositoryMut and clears first."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_submodule_cache_clear",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. git_submodule_cache_free(repo->submodule_cache) (NULL no-op; drops each cached submodule's reference, then the map and struct) and NULLs the slot; always returns 0. Also run by git_repository__cleanup / free. Submodules looked up through the cache hold their own reference and survive."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_workdir",
+   "defined_in": "src/libgit2/repository.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG_WITH_RETVAL(NULL); reads is_bare and workdir only."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:repo"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "repo->workdir (with trailing slash), or NULL for a bare repository or one without paths. Owned by the repository; freed/replaced only by git_repository_set_workdir and git_repository_set_bare (and git_repository_free), so it borrows the repository until such a call: the Rust getter ties it to RepositoryRef<'a>, which requires those setters to take RepositoryMut."
+    }
+   }
+  },
+  {
+   "name": "git_repository_wrap_odb",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Not asserted (odb->options.oid_type read first; GIT_ASSERT on an invalid type, leaking the repo). git_repository_set_odb takes its own counted reference (GIT_REFCOUNT_INC) and makes the repository the odb's owner (rc.owner) without checking for a previous owner; the caller keeps its reference. So the wrapper accepts only an odb no repository owns (OdbArc<'static>) and releases the caller's reference after the call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, not asserted and not NULLed: written only on success with a fresh repository (no paths, is_bare 0, refdb_type FILES) owned by the caller (git_repository_free); left untouched when repository_alloc fails."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_signature_default",
    "defined_in": "src/libgit2/signature.c",
    "lifetime": {
@@ -5640,6 +5799,46 @@
    ]
   },
   {
+   "name": "git_worktree_is_locked",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "reason",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:reason"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional out buffer: NULL skips reading the reason. Otherwise converted with git_buf_tostr (takes over an owned buffer), cleared, filled with the `locked` file's contents when locked, and handed back with git_buf_fromstr (owned when allocated; static empty string when not locked). Caller disposes with git_buf_dispose. On a read error (e.g. `locked` is a directory) the buffer is left as converted."
+     }
+    },
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live worktree, only read (its six owned strings); never retained. Reads the file system (<gitdir>/locked), not wt->locked."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_worktree_is_prunable",
    "defined_in": "src/libgit2/worktree.c",
    "ptr_args": [
@@ -5658,6 +5857,101 @@
       "nullable": true,
       "mutable": false,
       "note": "Read-only despite the non-const type: GIT_ERROR_CHECK_VERSION reads version (NULL passes), then memcpy copies it into a local; NULL means the {VERSION, 0} defaults. Not retained past the call. Flag bits outside git_worktree_prune_t are ignored."
+     }
+    },
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live worktree, only read (its six owned strings); never retained. Not asserted. Returns 1 prunable, 0 not (the reason set as the thread's error), <0 on a version or locked-read error. Precedence slip `ret = (git_str_printf(..) < 0)` makes an OOM there return 1."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_list",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; reads repo->commondir only. HAZARD: NULL commondir (repository without paths) joins as \"\", listing <cwd>/worktrees/; the wrapper returns an empty list instead."
+     }
+    },
+    {
+     "name": "wts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:wts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Overwritten with {NULL,0} first, without disposing what it held; on success receives a git_vector_detach'd array of git__strdup'd names owned by the caller (git_strarray_dispose); NULL/0 when worktrees/ is missing or empty. C DEFECT: entries failing is_worktree_dir are removed with git_vector_remove inside git_vector_foreach, so the entry after each removed one is never checked and is listed (C-confirmed: 4 junk dirs + 1 worktree lists a junk name). A dirload failure leaks the partial vector."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_lock",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "reason",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional lock reason, attached not-owned and written to the file; read for the call only. NULL = empty file."
+     }
+    },
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Live worktree, WRITTEN: sets wt->locked = 1 after creating <gitdir>/locked (O_EXCL). Returns GIT_ELOCKED WITHOUT setting an error when already locked. Wrapped on WorktreeMut (the Worktree Sync proof relies on it)."
      }
     }
    ]
@@ -5725,10 +6019,47 @@
       },
       "nullable": false,
       "mutable": null,
-      "note": "GIT_ASSERT_ARG; read for the call (commondir, workdir), never retained: the worktree copies what it needs, so it may outlive the repository."
+      "note": "GIT_ASSERT_ARG; read for the call (commondir, workdir), never retained: the worktree copies what it needs, so it may outlive the repository. HAZARD: repo->commondir goes to strlen through git_str_join3 unchecked, so a repository without paths (git_repository_new, wrap_odb: commondir NULL) is a NULL dereference; the wrapper refuses it first. Failures with no error message: GIT_ENOTFOUND (no such dir) and -1 (not a worktree dir)."
      }
     }
    ]
+  },
+  {
+   "name": "git_worktree_name",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG_WITH_RETVAL(NULL); reads wt->name."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:wt"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "wt->name, a non-NULL git__strdup'd copy the worktree owns; freed only by git_worktree_free, so it borrows the worktree."
+    }
+   }
   },
   {
    "name": "git_worktree_open_from_repository",
@@ -5784,6 +6115,43 @@
    ]
   },
   {
+   "name": "git_worktree_path",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG_WITH_RETVAL(NULL); reads wt->worktree_path."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:wt"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "wt->worktree_path, dirname of the gitdir link: a non-NULL copy the worktree owns, freed only by git_worktree_free, so it borrows the worktree."
+    }
+   }
+  },
+  {
    "name": "git_worktree_prune",
    "defined_in": "src/libgit2/worktree.c",
    "ptr_args": [
@@ -5802,6 +6170,23 @@
       "nullable": true,
       "mutable": false,
       "note": "Read-only despite the non-const type: GIT_ERROR_CHECK_VERSION reads version (NULL passes), then memcpy copies it into a local; NULL means the {VERSION, 0} defaults. Not retained past the call. Flag bits outside git_worktree_prune_t are ignored. HAZARD for the safe wrapper: prune tests `!git_worktree_is_prunable(wt, &popts)`, so an is_prunable ERROR (<0, e.g. GIT_ENOTFOUND 'requested file is a directory' when the `locked` entry cannot be read, checked only without GIT_WORKTREE_PRUNE_LOCKED) counts as prunable and prune deletes the gitdir anyway; git_futils_rmdir_r then clears the error state (pinned in tests/equiv/worktree.rs::prune_options::prune_reads_the_options_alike)."
+     }
+    },
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live worktree, only read (its six owned strings); never retained. Not asserted. Deletes <commondir>/worktrees/<name> and, with PRUNE_WORKING_TREE, dirname(gitlink_path) on disk; the struct stays valid. Treats an is_prunable error as prunable (see opts); the safe wrapper calls is_prunable first and reports its error."
      }
     }
    ]
@@ -5835,6 +6220,52 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller-provided storage, written in full by memcpy of the {VERSION, 0} template when version is in 1..=GIT_WORKTREE_PRUNE_OPTIONS_VERSION; left untouched (error set) otherwise. GIT_INIT_STRUCTURE_FROM_TEMPLATE has no NULL check: a NULL opts with a valid version is a NULL write."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_unlock",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "GIT_ASSERT_ARG. Live worktree, WRITTEN: clears wt->locked after unlinking <gitdir>/locked. Returns 1 when not locked; a failed p_unlink (e.g. `locked` is a directory) returns -1 WITHOUT setting an error. Wrapped on WorktreeMut."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_validate",
+   "defined_in": "src/libgit2/worktree.c",
+   "ptr_args": [
+    {
+     "name": "wt",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG. Live worktree, only read (its six owned strings); never retained. Checks gitdir_path (is_worktree_dir), parent_path (when set), commondir_path, worktree_path exist; GIT_ERROR + GIT_ERROR_WORKTREE message on the first missing."
      }
     }
    ]

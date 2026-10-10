@@ -719,12 +719,12 @@ impl TempRepo {
 // --- `git2/odb.h`: `git_odb` -------------------------------------------------------
 
 pub mod odb {
-    //! Stand-ins for the odb readers and writers and the `git_repository` wrapper,
-    //! which replace them; each reaches the odb through its owner's raw seam.
+    //! Stand-ins for the odb readers and writers and for `git_repository_odb`, which
+    //! their wrappers replace; each reaches the odb through its owner's raw seam.
 
     use libgit2::ffi;
     use libgit2::libgit2::odb::odb::OdbArc;
-    use libgit2::libgit2::repository::repository::RepositoryBox;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// `git_odb_write` of a blob; the id, or the error code.
     pub fn write_blob(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
@@ -762,23 +762,17 @@ pub mod odb {
         unsafe { ffi::git_odb_num_backends(odb.as_c_ptr()) }
     }
 
-    /// A repository over an odb (`git_repository_wrap_odb`), which holds a reference of
-    /// its own and becomes the odb's owner; freed on drop. Stands in for the
-    /// `git_repository_wrap_odb` wrapper, which consumes an `OdbArc<'static>` (an odb
-    /// no repository owns yet; the repository's own reference keeps it) and lends it
-    /// back through [`odb`](Self::odb), borrowing the repository.
+    /// A repository over an odb ([`Repository::wrap_odb`]), which holds a reference of
+    /// its own and becomes the odb's owner; freed on drop. [`odb`](Self::odb) stands in
+    /// for the `git_repository_odb` wrapper, which lends the odb back, borrowing the
+    /// repository.
+    ///
+    /// [`Repository::wrap_odb`]: libgit2::libgit2::repository::repository::Repository::wrap_odb
     pub struct Repo(RepositoryBox);
 
     impl Repo {
         pub fn wrap(odb: OdbArc<'static>) -> Self {
-            let mut repo = core::ptr::null_mut();
-            // SAFETY: `repo` is a writable slot; the odb is live, and the repository
-            // takes a reference to it.
-            let rc = unsafe { ffi::git_repository_wrap_odb(&mut repo, odb.as_c_ptr()) };
-            assert_eq!(rc, 0);
-            drop(odb);
-            // SAFETY: the fresh repository the call wrote, owned here alone.
-            Self(unsafe { RepositoryBox::from_c(repo) }.unwrap())
+            Self(Repository::wrap_odb(odb).unwrap())
         }
 
         /// A new reference to the repository's odb (`git_repository_odb`), borrowing
@@ -1075,18 +1069,16 @@ pub mod index {
 // --- `git2/worktree.h` ---------------------------------------------------------------
 
 pub mod worktree {
-    //! Worktrees adopted from `git_worktree_lookup`, and the accessors read through
-    //! their boxes; they stand in for `Worktree::lookup` and the worktree getters and
-    //! lock routines, which replace them.
+    //! Repositories with linked worktrees laid out on disk, for the worktree wrappers
+    //! to look up.
 
     use std::ffi::{CStr, CString};
     use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
 
-    use libgit2::ffi;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
-    use libgit2::libgit2::repository::worktree::WorktreeBox;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::repository::worktree::{Worktree, WorktreeBox};
 
     /// A non-bare repository in a temporary directory, to which [`add`](Self::add) lays
     /// out linked worktrees on disk as `git_worktree_add` would; freed and removed on
@@ -1110,11 +1102,21 @@ pub mod worktree {
             }
         }
 
+        /// The worktree `name`'s administrative directory.
+        pub fn admin(&self, name: &str) -> PathBuf {
+            self.base.join("repo/.git/worktrees").join(name)
+        }
+
+        /// The worktree `name`'s working directory.
+        pub fn workdir(&self, name: &str) -> PathBuf {
+            self.base.join("worktrees").join(name)
+        }
+
         /// Lays out the worktree `name`: its administrative directory under
         /// `.git/worktrees/` and its working directory beside the repository.
         pub fn add(&self, name: &str) {
-            let admin = self.base.join("repo/.git/worktrees").join(name);
-            let workdir = self.base.join("worktrees").join(name);
+            let admin = self.admin(name);
+            let workdir = self.workdir(name);
             fs::create_dir_all(&admin).unwrap();
             fs::create_dir_all(&workdir).unwrap();
             fs::write(admin.join("commondir"), "../..\n").unwrap();
@@ -1124,16 +1126,14 @@ pub mod worktree {
             fs::write(gitlink, format!("gitdir: {}\n", admin.display())).unwrap();
         }
 
-        /// The worktree `name`, adopted from `git_worktree_lookup`.
+        /// The repository.
+        pub fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+
+        /// The worktree `name`.
         pub fn lookup(&self, name: &CStr) -> WorktreeBox {
-            let mut out = core::ptr::null_mut();
-            let repo = self.repo.as_ref().unwrap().as_c_ptr();
-            // SAFETY: a live slot, the live repository and a NUL-terminated name, only
-            // read.
-            let rc = unsafe { ffi::git_worktree_lookup(&mut out, repo, name.as_ptr()) };
-            assert_eq!(rc, 0);
-            // SAFETY: a fresh worktree the caller owns, released by `git_worktree_free`.
-            unsafe { WorktreeBox::from_c(out) }.unwrap()
+            Worktree::lookup(self.repo(), name).unwrap()
         }
 
         /// Frees the repository and removes its directory, leaving the worktrees looked
@@ -1147,37 +1147,6 @@ pub mod worktree {
             drop(self.repo.take());
             let _ = fs::remove_dir_all(&self.base);
         }
-    }
-
-    /// `git_worktree_name` through the box.
-    pub fn name(w: &WorktreeBox) -> CString {
-        // SAFETY: the box's live worktree, only read; the name lives as long as it.
-        unsafe { CStr::from_ptr(ffi::git_worktree_name(w.as_c_ptr())) }.to_owned()
-    }
-
-    /// `git_worktree_path` through the box.
-    pub fn path(w: &WorktreeBox) -> CString {
-        // SAFETY: as above.
-        unsafe { CStr::from_ptr(ffi::git_worktree_path(w.as_c_ptr())) }.to_owned()
-    }
-
-    /// `git_worktree_is_locked(NULL, w)`: 1 when locked, 0 when not.
-    pub fn is_locked(w: &WorktreeBox) -> i32 {
-        // SAFETY: the box's live worktree, only read; a NULL reason is not filled.
-        unsafe { ffi::git_worktree_is_locked(core::ptr::null_mut(), w.as_c_ptr()) }
-    }
-
-    /// `git_worktree_lock(w, reason)`, which writes the worktree's `locked` bit.
-    pub fn lock(w: &mut WorktreeBox, reason: &CStr) -> i32 {
-        // SAFETY: the box's live worktree, exclusively borrowed for the write; the
-        // reason is read for the call.
-        unsafe { ffi::git_worktree_lock(w.as_c_ptr(), reason.as_ptr()) }
-    }
-
-    /// `git_worktree_unlock(w)`, which clears the `locked` bit.
-    pub fn unlock(w: &mut WorktreeBox) -> i32 {
-        // SAFETY: as above.
-        unsafe { ffi::git_worktree_unlock(w.as_c_ptr()) }
     }
 }
 
@@ -1590,5 +1559,90 @@ pub mod repository_options {
     pub fn oid_type(repo: &RepositoryBox) -> ffi::git_oid_t {
         // SAFETY: a live repository, only read.
         unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) }
+    }
+}
+
+// --- `git2/sys/repository.h`: the submodule cache ------------------------------------
+
+pub mod submodule {
+    //! A repository with one configured submodule, and submodules looked up through
+    //! `git_submodule_lookup`, standing in for the submodule wrappers.
+
+    use std::ffi::{CStr, CString};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    /// A non-bare repository whose `.gitmodules` configures the submodule `sub`;
+    /// removed on drop.
+    pub struct ModulesRepo {
+        pub base: PathBuf,
+        pub repo: RepositoryBox,
+    }
+
+    impl ModulesRepo {
+        pub fn new(tag: &str) -> Self {
+            super::init();
+            let base = std::env::temp_dir().join(format!(
+                "crustify-submodule-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&base);
+            let c_path = CString::new(base.as_os_str().as_bytes()).unwrap();
+            let repo = Repository::init(&c_path, false).unwrap();
+            let this = Self { base, repo };
+            this.set_ignore("none");
+            this
+        }
+
+        /// Rewrites `.gitmodules` with `sub`'s `ignore` setting.
+        pub fn set_ignore(&self, ignore: &str) {
+            fs::write(
+                self.base.join(".gitmodules"),
+                format!(
+                    "[submodule \"sub\"]\n\tpath = sub\n\turl = https://example.com/sub\n\
+                     \tignore = {ignore}\n"
+                ),
+            )
+            .unwrap();
+        }
+    }
+
+    impl Drop for ModulesRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// A counted submodule reference from `git_submodule_lookup`, released by
+    /// `git_submodule_free`. It keeps a bare pointer to its repository, but neither
+    /// reader here (`git_submodule_ignore`) nor the free follows it, so it may outlive
+    /// the repository.
+    pub struct Submodule(*mut ffi::git_submodule);
+
+    impl Submodule {
+        pub fn lookup(repo: &RepositoryBox, name: &CStr) -> Result<Self, i32> {
+            let mut sm = core::ptr::null_mut();
+            // SAFETY: a writable slot, the box's live repository on this thread and a
+            // NUL-terminated name, read for the call.
+            let rc = unsafe { ffi::git_submodule_lookup(&mut sm, repo.as_c_ptr(), name.as_ptr()) };
+            if rc == 0 { Ok(Self(sm)) } else { Err(rc) }
+        }
+
+        /// `git_submodule_ignore`: the setting the submodule was loaded with.
+        pub fn ignore(&self) -> ffi::git_submodule_ignore_t {
+            // SAFETY: the live submodule this reference counts; only its fields are read.
+            unsafe { ffi::git_submodule_ignore(self.0) }
+        }
+    }
+
+    impl Drop for Submodule {
+        fn drop(&mut self) {
+            // SAFETY: the one reference this value holds, released once.
+            unsafe { ffi::git_submodule_free(self.0) }
+        }
     }
 }

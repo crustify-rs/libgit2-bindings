@@ -57,6 +57,37 @@
 //! [`ReferenceRef`]: `git_worktree_add` copies its database link and reaches its
 //! repository through it. The embedded checkout options are reached in place, as a
 //! [`CheckoutOptionsRef`] or [`CheckoutOptionsMut`] over the same `'o`.
+//!
+//! # Routines
+//!
+//! [`Worktree::lookup`] and [`Worktree::open_from_repository`] build a worktree from a
+//! [`RepositoryRef`], and [`list`] names a repository's worktrees; a [`WorktreeRef`]
+//! reads one ([`name`](WorktreeRef::name), [`path`](WorktreeRef::path),
+//! [`validate`](WorktreeRef::validate), [`is_locked`](WorktreeRef::is_locked),
+//! [`lock_reason`](WorktreeRef::lock_reason)) and prunes it
+//! ([`is_prunable`](WorktreeRef::is_prunable), [`prune`](WorktreeRef::prune)); a
+//! [`WorktreeMut`] locks and unlocks it, the only routines that write the struct. Each
+//! reports a failure as a [`WorktreeError`].
+//!
+//! The wrappers keep four libgit2 defects from reaching Rust callers:
+//!
+//! - `git_worktree_lookup` passes the repository's common directory to `strlen`
+//!   unchecked, which is NULL for a repository without paths (`git_repository_new`,
+//!   `git_repository_wrap_odb`): [`Worktree::lookup`] refuses such a repository with
+//!   `GIT_ENOTFOUND`, as libgit2 refuses other paths it has none for, and [`list`]
+//!   reports that it has no worktrees, where `git_worktree_list` would list the
+//!   `worktrees/` directory of the process's working directory.
+//! - `git_worktree_list` removes the entries that are not worktrees while iterating
+//!   over them, so the entry after each removed one escapes the check: [`list`] drops
+//!   those too.
+//! - `git_worktree_prune` takes an error from `git_worktree_is_prunable` (such as an
+//!   unreadable `locked` file) for "prunable" and deletes the worktree:
+//!   [`WorktreeRef::prune`] asks first, and reports that error instead.
+//! - Several routines fail without setting an error of their own (`GIT_ELOCKED` from
+//!   `git_worktree_lock`, a lock file `git_worktree_unlock` cannot remove, a missing
+//!   or malformed worktree in `git_worktree_lookup`), leaving whatever an earlier call
+//!   set as the thread's last error: each wrapper clears the error first, and gives
+//!   such a failure an error that describes it.
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
@@ -65,11 +96,19 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ops::{BitOr, BitOrAssign};
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 use ffibox::{CBorrowedPtr, CBox, CCell, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::core::buffer::{Buf, BufVal};
+use crate::libgit2::core::strarray::{StrArray, StrArrayVal};
 use crate::libgit2::refs::refs::ReferenceRef;
+use crate::libgit2::repository::repository::RepositoryRef;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 use crate::libgit2::workdir::checkout::{CheckoutOptionsMut, CheckoutOptionsRef};
 
 /// One `git_worktree_prune_t` bit: a check `git_worktree_is_prunable` skips, or the
@@ -1057,6 +1096,463 @@ const _: () = assert!(
         && align_of::<AddOptions<'_>>() == align_of::<ffi::git_worktree_add_options>()
 );
 
+/// A worktree routine's failure: the code it returned, and the error it left as the
+/// thread's last libgit2 error, copied out.
+///
+/// The code tells the failures apart: [`ErrorCode::NotFound`] when there is no
+/// worktree of that name, [`ErrorCode::Locked`] when locking a locked worktree,
+/// [`ErrorCode::Generic`] for the rest. Where libgit2 fails without an error of its
+/// own, the wrapper sets one (see the [module docs](self#routines)).
+///
+/// Handwritten
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct WorktreeError {
+    code: c_int,
+    error: ErrorBuf,
+}
+
+impl WorktreeError {
+    /// The failure a routine reported by returning `rc`, with the thread's last error;
+    /// when it is `GIT_ERROR_NONE` (the routine set none), `fallback` is set first.
+    fn from_libgit2(rc: c_int, fallback: (ErrorClass, &CStr)) -> Self {
+        let mut error = last();
+        if error.class() == Some(ErrorClass::None) {
+            set(fallback.0, fallback.1);
+            error = last();
+        }
+        Self { code: rc, error }
+    }
+
+    /// The failure reported when libgit2 cannot be initialised, without calling it.
+    fn unpinned() -> Self {
+        Self {
+            code: ErrorCode::Generic.raw(),
+            error: last(),
+        }
+    }
+
+    /// The returned code; `None` for one the header does not name
+    /// ([`raw_code`](Self::raw_code) has it).
+    pub fn code(&self) -> Option<ErrorCode> {
+        ErrorCode::from_raw(self.code)
+    }
+
+    /// The returned code, always negative.
+    pub fn raw_code(&self) -> c_int {
+        self.code
+    }
+
+    /// The error's class; `None` for a class the header does not name
+    /// ([`raw_class`](Self::raw_class) has it).
+    pub fn class(&self) -> Option<ErrorClass> {
+        self.error.class()
+    }
+
+    /// The error's class as libgit2 stored it.
+    pub fn raw_class(&self) -> c_int {
+        self.error.raw_class()
+    }
+
+    /// The error message.
+    pub fn message(&self) -> &CStr {
+        self.error.message()
+    }
+
+    /// The error, without the code.
+    pub fn error(&self) -> &ErrorBuf {
+        &self.error
+    }
+}
+
+/// The error, without the code.
+impl From<WorktreeError> for ErrorBuf {
+    fn from(error: WorktreeError) -> Self {
+        error.error
+    }
+}
+
+impl fmt::Debug for WorktreeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("WorktreeError");
+        match self.code() {
+            Some(code) => s.field("code", &code),
+            None => s.field("code", &self.code),
+        };
+        s.field("error", &self.error).finish()
+    }
+}
+
+impl fmt::Display for WorktreeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for WorktreeError {}
+
+/// The error libgit2 gives a path a repository without paths cannot have.
+const NO_PATH: (ErrorClass, &CStr) = (ErrorClass::Invalid, c"path cannot exist in repository");
+
+/// Runs the libgit2 routine `call` with the runtime pinned and the thread's error
+/// cleared, and reports a negative return as a [`WorktreeError`], whose error is
+/// `fallback(rc)` when the routine set none.
+fn checked(
+    call: impl FnOnce() -> c_int,
+    fallback: impl FnOnce(c_int) -> (ErrorClass, &'static CStr),
+) -> Result<c_int, WorktreeError> {
+    if !runtime_pinned() {
+        return Err(WorktreeError::unpinned());
+    }
+    clear();
+    let rc = call();
+    if rc < 0 {
+        return Err(WorktreeError::from_libgit2(rc, fallback(rc)));
+    }
+    Ok(rc)
+}
+
+/// A failure the wrapper reports itself, with code `rc` and the error `error`, without
+/// calling the routine.
+fn refused(rc: c_int, error: (ErrorClass, &CStr)) -> WorktreeError {
+    if !runtime_pinned() {
+        return WorktreeError::unpinned();
+    }
+    clear();
+    WorktreeError::from_libgit2(rc, error)
+}
+
+/// The fallback of a routine that sets an error on every failing path.
+fn generic(_: c_int) -> (ErrorClass, &'static CStr) {
+    (ErrorClass::Worktree, c"worktree operation failed")
+}
+
+/// The repository's common directory, which holds its `worktrees/`; `None` for a
+/// repository without paths.
+fn commondir(repo: RepositoryRef<'_>) -> Option<&CStr> {
+    // SAFETY: `repo` is a live repository on this thread; the routine only reads its
+    // `commondir` field.
+    let dir = unsafe { ffi::git_repository_commondir(repo.as_ptr()) };
+    // SAFETY: `commondir` is NULL or a NUL-terminated string the repository owns; it is
+    // set when the repository is opened and replaced by no routine, so it lives as long
+    // as `repo` is borrowed.
+    (!dir.is_null()).then(|| unsafe { CStr::from_ptr(dir) })
+}
+
+/// Whether `dir` is a worktree's administrative directory, as libgit2 tells one:
+/// it holds the files `commondir`, `gitdir` and `HEAD`.
+fn is_worktree_dir(dir: &Path) -> bool {
+    ["commondir", "gitdir", "HEAD"]
+        .iter()
+        .all(|file| dir.join(file).is_file())
+}
+
+/// The names of `repo`'s linked worktrees: the directories under
+/// `<commondir>/worktrees/` that hold a worktree's `commondir`, `gitdir` and `HEAD`
+/// files. The order is the directory's.
+///
+/// Empty when there is no such directory, and for a repository without paths
+/// (`git_worktree_list` would list the process's working directory then). Every entry
+/// is checked, where libgit2 skips the one after each entry it drops (see the
+/// [module docs](self#routines)). Fails with libgit2's error when the directory cannot
+/// be read.
+///
+/// Wraps: git_worktree_list
+pub fn list(repo: RepositoryRef<'_>) -> Result<StrArrayVal, WorktreeError> {
+    let mut names = StrArray::new();
+    let Some(commondir) = commondir(repo) else {
+        return Ok(names);
+    };
+    let array = names.as_mut().as_mut_ptr();
+    checked(
+        || {
+            // SAFETY: `array` is a live, empty array the routine fills with an array
+            // and strings of libgit2's allocator, which it then owns, or leaves empty
+            // on failure; `repo` is a live repository on this thread, only read.
+            unsafe { ffi::git_worktree_list(array, repo.as_ptr().cast_mut()) }
+        },
+        generic,
+    )?;
+    let base = Path::new(OsStr::from_bytes(commondir.to_bytes())).join("worktrees");
+    let mut strings = names.as_mut().take_strings();
+    let slice = strings.as_mut_slice();
+    let mut kept = 0;
+    for i in 0..slice.len() {
+        if is_worktree_dir(&base.join(OsStr::from_bytes(slice[i].as_bytes()))) {
+            slice.swap(kept, i);
+            kept += 1;
+        }
+    }
+    let mut array = names.as_mut();
+    array.set_strings(strings);
+    array.truncate(kept);
+    Ok(names)
+}
+
+impl Worktree {
+    /// The linked worktree `name` of `repo`: the one whose administrative directory is
+    /// `<commondir>/worktrees/<name>`.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when there is no such directory (or `repo`
+    /// has no paths), and with [`ErrorCode::Generic`] when it is not a worktree's (it
+    /// lacks its `commondir`, `gitdir` or `HEAD` file) or a link in it cannot be read.
+    ///
+    /// Wraps: git_worktree_lookup
+    pub fn lookup(repo: RepositoryRef<'_>, name: &CStr) -> Result<WorktreeBox, WorktreeError> {
+        if commondir(repo).is_none() {
+            return Err(refused(ffi::GIT_ENOTFOUND, NO_PATH));
+        }
+        let mut out = ptr::null_mut();
+        checked(
+            || {
+                // SAFETY: `out` is a writable slot, which the routine sets to NULL first;
+                // `repo` is a live repository on this thread with a common directory,
+                // only read; `name` is NUL-terminated, copied and not retained.
+                unsafe {
+                    ffi::git_worktree_lookup(&mut out, repo.as_ptr().cast_mut(), name.as_ptr())
+                }
+            },
+            |rc| match rc {
+                ffi::GIT_ENOTFOUND => (ErrorClass::Worktree, c"worktree does not exist"),
+                _ => (ErrorClass::Worktree, c"not a valid worktree directory"),
+            },
+        )?;
+        // SAFETY: on success `out` is a fresh worktree whose strings are all copies, owned
+        // by the caller alone and released by `git_worktree_free`.
+        let worktree = unsafe { WorktreeBox::from_c(out) };
+        Ok(worktree.expect("git_worktree_lookup succeeded without a worktree"))
+    }
+
+    /// The linked worktree `repo` was opened from: `repo` must have been opened at a
+    /// worktree's working directory (or its administrative directory).
+    ///
+    /// Fails with `GIT_ERROR_WORKTREE` "cannot open worktree of a non-worktree repo"
+    /// otherwise, and with libgit2's error when the worktree's files cannot be read.
+    ///
+    /// Wraps: git_worktree_open_from_repository
+    pub fn open_from_repository(repo: RepositoryRef<'_>) -> Result<WorktreeBox, WorktreeError> {
+        let mut out = ptr::null_mut();
+        checked(
+            || {
+                // SAFETY: `out` is a writable slot, NULL so that a failure, which leaves
+                // it untouched, leaves it NULL; `repo` is a live repository on this
+                // thread, only read.
+                unsafe {
+                    ffi::git_worktree_open_from_repository(&mut out, repo.as_ptr().cast_mut())
+                }
+            },
+            |_| (ErrorClass::Worktree, c"not a valid worktree directory"),
+        )?;
+        // SAFETY: on success `out` is a fresh worktree whose strings are all copies, owned
+        // by the caller alone and released by `git_worktree_free`.
+        let worktree = unsafe { WorktreeBox::from_c(out) };
+        Ok(worktree.expect("git_worktree_open_from_repository succeeded without a worktree"))
+    }
+}
+
+impl<'a> WorktreeRef<'a> {
+    /// The worktree's name, the last component of its administrative directory.
+    ///
+    /// The string is the worktree's, so it cannot outlive the box:
+    ///
+    /// ```compile_fail,E0505
+    /// use core::ffi::CStr;
+    /// use libgit2::libgit2::repository::worktree::WorktreeBox;
+    ///
+    /// fn escape(w: WorktreeBox) -> &'static CStr {
+    ///     let name = w.as_ref().name();
+    ///     drop(w);
+    ///     name
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_worktree_name
+    pub fn name(&self) -> &'a CStr {
+        // SAFETY: a live worktree, only read.
+        let name = unsafe { ffi::git_worktree_name(self.as_ptr()) };
+        // SAFETY: a worktree's `name` is a non-NULL copy it owns, written when it is
+        // built and freed only with it, so it lives for `'a`.
+        unsafe { CStr::from_ptr(name) }
+    }
+
+    /// The path of the worktree's working directory, as its `gitdir` file records it
+    /// (the directory of the `.git` link), without a trailing slash.
+    ///
+    /// Wraps: git_worktree_path
+    pub fn path(&self) -> &'a CStr {
+        // SAFETY: a live worktree, only read.
+        let path = unsafe { ffi::git_worktree_path(self.as_ptr()) };
+        // SAFETY: a worktree's `worktree_path` is a non-NULL copy it owns, written when
+        // it is built and freed only with it, so it lives for `'a`.
+        unsafe { CStr::from_ptr(path) }
+    }
+
+    /// Checks that the worktree's directories still exist: its administrative
+    /// directory (with its `commondir`, `gitdir` and `HEAD` files), the parent
+    /// repository's working directory, the common directory and its own working
+    /// directory, in that order.
+    ///
+    /// Fails with [`ErrorCode::Generic`] and a `GIT_ERROR_WORKTREE` message naming the
+    /// first one missing.
+    ///
+    /// Wraps: git_worktree_validate
+    pub fn validate(&self) -> Result<(), WorktreeError> {
+        checked(
+            || {
+                // SAFETY: a live worktree, only read.
+                unsafe { ffi::git_worktree_validate(self.as_ptr()) }
+            },
+            generic,
+        )?;
+        Ok(())
+    }
+
+    /// Whether the worktree is locked: its administrative directory holds a `locked`
+    /// file. Reads the file system, not the state [`WorktreeMut::lock`] recorded.
+    ///
+    /// Wraps: git_worktree_is_locked
+    pub fn is_locked(&self) -> Result<bool, WorktreeError> {
+        let rc = checked(
+            || {
+                // SAFETY: a NULL reason, which the routine does not fill; a live
+                // worktree, only read.
+                unsafe { ffi::git_worktree_is_locked(ptr::null_mut(), self.as_ptr()) }
+            },
+            generic,
+        )?;
+        Ok(rc != 0)
+    }
+
+    /// The reason the worktree is locked: the contents of its `locked` file (empty when
+    /// none was given), or `None` when it is not locked.
+    ///
+    /// Fails, with libgit2's error, when the `locked` entry cannot be read (a
+    /// directory, say).
+    ///
+    /// Wraps: git_worktree_is_locked
+    pub fn lock_reason(&self) -> Result<Option<BufVal>, WorktreeError> {
+        let mut reason = Buf::new();
+        let rc = checked(
+            || {
+                // SAFETY: `reason` is a live, empty buffer the routine fills from
+                // libgit2's allocator (or with its static empty string) on success; a
+                // live worktree, only read.
+                unsafe { ffi::git_worktree_is_locked(reason.as_mut().as_mut_ptr(), self.as_ptr()) }
+            },
+            generic,
+        )?;
+        Ok((rc != 0).then_some(reason))
+    }
+
+    /// Whether [`prune`](Self::prune) would prune the worktree under `opts`: it is not
+    /// locked (unless [`PruneFlag::Locked`]), not valid (unless [`PruneFlag::Valid`];
+    /// see [`validate`](Self::validate)), and its administrative directory exists.
+    ///
+    /// When it is not prunable, libgit2 leaves the reason as the thread's last error,
+    /// which [`last`] reads. Fails when `opts`' version is not one libgit2 accepts, or
+    /// when the `locked` entry cannot be read.
+    ///
+    /// Wraps: git_worktree_is_prunable
+    pub fn is_prunable(&self, opts: PruneOptionsRef<'_>) -> Result<bool, WorktreeError> {
+        let rc = checked(
+            || {
+                // SAFETY: a live worktree and live options, both only read (the routine
+                // copies the options) despite the non-const parameters.
+                unsafe {
+                    ffi::git_worktree_is_prunable(
+                        self.as_ptr().cast_mut(),
+                        opts.as_ptr().cast_mut(),
+                    )
+                }
+            },
+            generic,
+        )?;
+        Ok(rc != 0)
+    }
+
+    /// Prunes the worktree under `opts`: deletes its administrative directory and,
+    /// with [`PruneFlag::WorkingTree`], its working directory if it still has its
+    /// `.git` link. The worktree itself stays readable.
+    ///
+    /// Fails with [`ErrorCode::Generic`] and the reason
+    /// [`is_prunable`](Self::is_prunable) gives when it is not prunable, with that
+    /// routine's error when it fails (where libgit2 would prune all the same; see the
+    /// [module docs](self#routines)), and with libgit2's error when a directory cannot
+    /// be removed.
+    ///
+    /// Wraps: git_worktree_prune
+    pub fn prune(&self, opts: PruneOptionsRef<'_>) -> Result<(), WorktreeError> {
+        if !self.is_prunable(opts)? {
+            return Err(WorktreeError::from_libgit2(
+                ErrorCode::Generic.raw(),
+                generic(0),
+            ));
+        }
+        checked(
+            || {
+                // SAFETY: a live worktree and live options, both only read despite the
+                // non-const parameters; the routine deletes directories, not the struct.
+                unsafe {
+                    ffi::git_worktree_prune(self.as_ptr().cast_mut(), opts.as_ptr().cast_mut())
+                }
+            },
+            generic,
+        )?;
+        Ok(())
+    }
+}
+
+impl WorktreeMut<'_> {
+    /// Locks the worktree: creates its `locked` file, holding `reason` (or nothing).
+    ///
+    /// Fails with [`ErrorCode::Locked`] when it is already locked, and with libgit2's
+    /// error when the file cannot be created.
+    ///
+    /// It writes the worktree, so a shared handle cannot lock it:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::repository::worktree::WorktreeBox;
+    ///
+    /// fn lock(w: &WorktreeBox) {
+    ///     let _ = w.as_ref().lock(None);
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_worktree_lock
+    pub fn lock(&mut self, reason: Option<&CStr>) -> Result<(), WorktreeError> {
+        let reason = reason.map_or(ptr::null(), CStr::as_ptr);
+        let worktree = self.as_mut_ptr();
+        checked(
+            || {
+                // SAFETY: a live worktree, exclusively borrowed, whose `locked` bit the
+                // routine writes; `reason` is NULL or NUL-terminated, read for the call.
+                unsafe { ffi::git_worktree_lock(worktree, reason) }
+            },
+            |_| (ErrorClass::Worktree, c"worktree is already locked"),
+        )?;
+        Ok(())
+    }
+
+    /// Unlocks the worktree: removes its `locked` file. `true` when it was locked,
+    /// `false` when there was nothing to remove.
+    ///
+    /// Fails with libgit2's error when the file cannot be checked, and with
+    /// `GIT_ERROR_OS` when it cannot be removed.
+    ///
+    /// Wraps: git_worktree_unlock
+    pub fn unlock(&mut self) -> Result<bool, WorktreeError> {
+        let worktree = self.as_mut_ptr();
+        let rc = checked(
+            || {
+                // SAFETY: a live worktree, exclusively borrowed, whose `locked` bit the
+                // routine writes.
+                unsafe { ffi::git_worktree_unlock(worktree) }
+            },
+            |_| (ErrorClass::Os, c"failed to remove the worktree's lock file"),
+        )?;
+        Ok(rc == 0)
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     mod prune_options {
@@ -1563,6 +2059,264 @@ mod unit_tests {
             assert!(opts.0.ref_.is_null() && opts.as_ref().reference().is_none());
             // The options never owned it: the box still frees it once.
             drop(main);
+        }
+    }
+
+    mod routines {
+        use super::super::*;
+        use std::ffi::CString;
+        use std::fs;
+        use std::path::PathBuf;
+
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use crate::libgit2::util::sys::errors::set_str;
+
+        /// A non-bare repository with linked worktrees laid out on disk by
+        /// [`add`](Self::add), as `git_worktree_add` leaves them; the directory is
+        /// removed on drop.
+        struct Linked {
+            base: PathBuf,
+            repo: RepositoryBox,
+        }
+
+        impl Linked {
+            fn new(tag: &str) -> Self {
+                let base = std::env::temp_dir().join(format!(
+                    "crustify-worktree-routines-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = fs::remove_dir_all(&base);
+                let path = CString::new(base.join("repo").as_os_str().as_bytes()).unwrap();
+                let repo = Repository::init(&path, false).unwrap();
+                Self { base, repo }
+            }
+
+            fn admin(&self, name: &str) -> PathBuf {
+                self.base.join("repo/.git/worktrees").join(name)
+            }
+
+            fn add(&self, name: &str) {
+                let admin = self.admin(name);
+                let workdir = self.base.join("wt").join(name);
+                fs::create_dir_all(&admin).unwrap();
+                fs::create_dir_all(&workdir).unwrap();
+                fs::write(admin.join("commondir"), "../..\n").unwrap();
+                let link = workdir.join(".git");
+                fs::write(admin.join("gitdir"), format!("{}\n", link.display())).unwrap();
+                fs::write(admin.join("HEAD"), format!("ref: refs/heads/{name}\n")).unwrap();
+                fs::write(link, format!("gitdir: {}\n", admin.display())).unwrap();
+            }
+
+            /// `git_worktree_list` as C reports it: the names, or the code.
+            fn c_list(&self) -> Vec<CString> {
+                let mut raw = ffi::git_strarray::default();
+                // SAFETY: a live, empty array the routine fills; the live repository,
+                // only read.
+                let rc = unsafe { ffi::git_worktree_list(&mut raw, self.repo.as_c_ptr()) };
+                assert_eq!(rc, 0);
+                let names = (0..raw.count)
+                    // SAFETY: `count` NUL-terminated strings, live until the dispose.
+                    .map(|i| unsafe { CStr::from_ptr(*raw.strings.add(i)) }.to_owned())
+                    .collect();
+                // SAFETY: the array the routine filled, released once.
+                unsafe { ffi::git_strarray_dispose(&mut raw) };
+                names
+            }
+        }
+
+        impl Drop for Linked {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.base);
+            }
+        }
+
+        fn sorted(names: StrArrayVal) -> Vec<CString> {
+            let mut names: Vec<_> = names.as_ref().iter().map(CStr::to_owned).collect();
+            names.sort();
+            names
+        }
+
+        /// A stale error, as an earlier failing call would leave one.
+        fn stale() {
+            set_str(ErrorClass::Odb, c"stale").unwrap();
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn list_checks_the_entries_libgit2_lets_through() {
+            // libgit2 removes a non-worktree entry while iterating, skipping the next
+            // one: among four such entries and a worktree, in any directory order, at
+            // least one directly follows another, so C lists it.
+            let linked = Linked::new("list");
+            for junk in ["j1", "j2", "j3", "j4"] {
+                fs::create_dir_all(linked.admin(junk)).unwrap();
+            }
+            linked.add("good");
+            let c = linked.c_list();
+            assert!(c.len() > 1, "C listed {c:?}");
+            assert!(c.contains(&c"good".to_owned()));
+            let rust = sorted(list(linked.repo.as_ref()).unwrap());
+            assert_eq!(rust, [c"good".to_owned()]);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn list_keeps_the_directory_order_of_the_worktrees() {
+            let linked = Linked::new("order");
+            for name in ["a", "b", "c"] {
+                linked.add(name);
+            }
+            fs::create_dir_all(linked.admin("junk")).unwrap();
+            fs::write(linked.admin("file"), "").unwrap();
+            let c: Vec<_> = linked
+                .c_list()
+                .into_iter()
+                .filter(|n| ![c"junk", c"file"].contains(&n.as_c_str()))
+                .collect();
+            let rust: Vec<_> = list(linked.repo.as_ref())
+                .unwrap()
+                .as_ref()
+                .iter()
+                .map(CStr::to_owned)
+                .collect();
+            assert_eq!(rust, c);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn repository_without_paths_has_no_worktrees() {
+            let repo = Repository::new().unwrap();
+            assert!(list(repo.as_ref()).unwrap().as_ref().is_empty());
+            stale();
+            // C would pass the NULL common directory to `strlen`.
+            let e = Worktree::lookup(repo.as_ref(), c"wt").unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::NotFound));
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            assert_eq!(e.message(), c"path cannot exist in repository");
+            let e = Worktree::open_from_repository(repo.as_ref()).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Worktree));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn prune_refuses_when_is_prunable_fails() {
+            let linked = Linked::new("prune");
+            linked.add("wt");
+            let w = Worktree::lookup(linked.repo.as_ref(), c"wt").unwrap();
+            // A `locked` directory: unreadable as a lock reason, so `is_prunable` fails,
+            // which `git_worktree_prune` would take for "prunable".
+            fs::create_dir(linked.admin("wt").join("locked")).unwrap();
+            let opts = PruneOptions::from(ffi::git_worktree_prune_options {
+                version: PruneOptions::VERSION,
+                flags: PruneFlag::Valid.raw(),
+            });
+            let e = w.as_ref().is_prunable(opts.as_ref()).unwrap_err();
+            let again = w.as_ref().prune(opts.as_ref()).unwrap_err();
+            assert_eq!(again, e);
+            assert_eq!(e.code(), Some(ErrorCode::NotFound));
+            assert!(linked.admin("wt").exists(), "the worktree was pruned");
+            // With the lock ignored, the check passes and the worktree goes.
+            let mut opts = opts;
+            opts.as_mut()
+                .set_flags(PruneFlag::Valid | PruneFlag::Locked);
+            assert_eq!(w.as_ref().is_prunable(opts.as_ref()), Ok(true));
+            w.as_ref().prune(opts.as_ref()).unwrap();
+            assert!(!linked.admin("wt").exists());
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn not_prunable_is_reported_with_the_reason() {
+            let linked = Linked::new("valid");
+            linked.add("wt");
+            let w = Worktree::lookup(linked.repo.as_ref(), c"wt").unwrap();
+            let opts = PruneOptions::new();
+            assert_eq!(w.as_ref().is_prunable(opts.as_ref()), Ok(false));
+            assert_eq!(last().message(), c"not pruning valid working tree");
+            let e = w.as_ref().prune(opts.as_ref()).unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::Generic));
+            assert_eq!(e.class(), Some(ErrorClass::Worktree));
+            assert_eq!(e.message(), c"not pruning valid working tree");
+            assert!(linked.admin("wt").exists());
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn messageless_failures_get_an_error_of_their_own() {
+            let linked = Linked::new("messages");
+            linked.add("wt");
+            fs::create_dir_all(linked.admin("broken")).unwrap();
+
+            stale();
+            let e = Worktree::lookup(linked.repo.as_ref(), c"absent").unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::NotFound));
+            assert_eq!(e.class(), Some(ErrorClass::Worktree));
+            assert_eq!(e.message(), c"worktree does not exist");
+
+            stale();
+            let e = Worktree::lookup(linked.repo.as_ref(), c"broken").unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::Generic));
+            assert_eq!(e.message(), c"not a valid worktree directory");
+
+            let mut w = Worktree::lookup(linked.repo.as_ref(), c"wt").unwrap();
+            w.as_mut().lock(None).unwrap();
+            stale();
+            let e = w.as_mut().lock(Some(c"again")).unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::Locked));
+            assert_eq!(e.class(), Some(ErrorClass::Worktree));
+            assert_eq!(e.message(), c"worktree is already locked");
+            assert_eq!(w.as_mut().unlock(), Ok(true));
+
+            // A `locked` directory counts as a lock that `unlink` cannot remove.
+            fs::create_dir(linked.admin("wt").join("locked")).unwrap();
+            stale();
+            let e = w.as_mut().unlock().unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::Generic));
+            assert_eq!(e.class(), Some(ErrorClass::Os));
+            assert_eq!(
+                e.message(),
+                c"failed to remove the worktree's lock file: Is a directory"
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn errors_set_by_libgit2_are_kept() {
+            let linked = Linked::new("kept");
+            linked.add("wt");
+            let w = Worktree::lookup(linked.repo.as_ref(), c"wt").unwrap();
+            fs::remove_dir_all(linked.base.join("wt/wt")).unwrap();
+            stale();
+            let e = w.as_ref().validate().unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Worktree));
+            let message = e.message().to_str().unwrap();
+            assert!(message.starts_with("worktree directory '"), "{message}");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn error_reads_as_its_parts() {
+            let linked = Linked::new("error");
+            let e = Worktree::lookup(linked.repo.as_ref(), c"absent").unwrap_err();
+            assert_eq!(e.raw_code(), ffi::GIT_ENOTFOUND);
+            assert_eq!(e.raw_class(), ffi::GIT_ERROR_WORKTREE as c_int);
+            assert_eq!(e.error().message(), e.message());
+            assert_eq!(e.to_string(), "worktree does not exist");
+            assert_eq!(
+                format!("{e:?}"),
+                "WorktreeError { code: NotFound, error: ErrorBuf { class: Worktree, \
+                 message: \"worktree does not exist\" } }"
+            );
+            let unnamed = WorktreeError {
+                code: -12345,
+                error: e.error().clone(),
+            };
+            assert_eq!(unnamed.code(), None);
+            assert!(format!("{unnamed:?}").starts_with("WorktreeError { code: -12345,"));
+            let source: &dyn std::error::Error = &e;
+            assert!(source.source().is_none());
+            let buf: ErrorBuf = e.clone().into();
+            assert_eq!(&buf, e.error());
         }
     }
 }
