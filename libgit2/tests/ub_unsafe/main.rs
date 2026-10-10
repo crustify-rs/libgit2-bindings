@@ -8,6 +8,7 @@ mod buffer;
 mod checkout;
 mod commit;
 mod common;
+mod filter;
 mod message;
 mod refdb;
 mod repository;

@@ -1,0 +1,32 @@
+error[E0515]: cannot return value referencing local variable `repo`
+  --> tests/ub_safe/compile_fail/filter_list_outlives_repository.rs:10:5
+   |
+10 |     FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap()
+   |     ^^^^^^^^^^^^^^^^----^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |               |
+   |     |               `repo` is borrowed here
+   |     returns a value referencing data owned by the current function
+
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/filter_list_outlives_repository.rs:16:10
+   |
+14 |     let repo = Repository::open(c".").unwrap();
+   |         ---- binding `repo` declared here
+15 |     let list = FilterList::load(repo.as_ref(), c"a.txt", ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+   |                                 ---- borrow of `repo` occurs here
+16 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+17 |     drop(list);
+   |          ---- borrow later used here
+
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/filter_list_outlives_repository.rs:21:10
+   |
+19 |     let repo = Repository::open(c".").unwrap();
+   |         ---- binding `repo` declared here
+20 |     let list = FilterList::load_ext(repo.as_ref(), c"a.txt", ffi::GIT_FILTER_TO_ODB, None);
+   |                                     ---- borrow of `repo` occurs here
+21 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+22 |     drop(list);
+   |          ---- borrow later used here

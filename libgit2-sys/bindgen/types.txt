@@ -11,6 +11,7 @@ git_checkout_options
 git_commit_create_ext_options
 git_commit_header
 git_commitarray
+git_commitbuilder
 git_config
 git_config_level_t
 git_error
@@ -19,7 +20,10 @@ git_error_t
 git_feature_t
 git_filemode_t
 git_filter
+git_filter_flag_t
+git_filter_list
 git_filter_mode_t
+git_filter_options
 git_index
 git_index_entry
 git_index_entry_extended_flag_t

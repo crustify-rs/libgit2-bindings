@@ -1,0 +1,21 @@
+error[E0624]: associated function `from_ptr` is private
+  --> tests/ub_safe/compile_fail/commit_builder_handles.rs:16:40
+   |
+16 |     let _ = unsafe { CommitBuilderMut::from_ptr(core::ptr::from_mut(&mut slot).cast()) };
+   |                                        ^^^^^^^^ private associated function
+   |
+  ::: $FFIBOX/src/macros.rs
+   |
+   |             pub(crate) unsafe fn from_ptr(ptr: *mut $c_type) -> ::core::option::Option<Self> {
+   |             -------------------------------------------------------------------------------- private associated function defined here
+
+error[E0502]: cannot borrow `builder` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/commit_builder_handles.rs:9:21
+   |
+ 8 |     let shared = builder.as_ref();
+   |                  ------- immutable borrow occurs here
+ 9 |     let exclusive = builder.as_mut();
+   |                     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     drop(exclusive);
+11 |     let _ = shared;
+   |             ------ immutable borrow later used here

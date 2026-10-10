@@ -56,6 +56,21 @@
 //! `Default`. libgit2 writes the field as given, without checking it for a space or a
 //! newline, either of which yields a commit git parses differently; a header keeps any
 //! string, as the C struct does.
+//!
+//! # The commit builder
+//!
+//! A [`CommitBuilder`] is a `git_commitbuilder`: the commit a `git_commit_create_*`
+//! routine is in the middle of writing, which it lends to the caller's signing callback
+//! (`git_commit_signature_cb`) so that `git_commitbuilder_add_header` can add the
+//! signature header to it. It is opaque: libgit2 publishes no field. libgit2 never
+//! allocates, frees or copies one: the only builder is a local of the routine writing
+//! the commit (`git_commit__create_internal`), pointing at that routine's commit
+//! buffer, and lives only while the callback runs. So Rust never owns one, and has no
+//! constructor, policy or owner for it: it is only ever reached through a
+//! [`CommitBuilderMut`] the callback's wrapper builds from the pointer libgit2 passes,
+//! for the call alone, and exclusively, since adding a header rewrites the buffer.
+//! Neither handle is `Send` or `Sync`: the buffer belongs to the thread writing the
+//! commit, which runs the callback.
 
 use core::ffi::CStr;
 use core::fmt;
@@ -274,6 +289,68 @@ impl CommitArrayMut<'_> {
         }
     }
 }
+
+define_ctype!(
+    /// A commit being written (`git_commitbuilder`), as libgit2 lends it to a commit
+    /// signing callback: the commit's contents, to which a signature header can be added.
+    ///
+    /// libgit2 neither allocates nor frees one: the routine writing the commit keeps it
+    /// on its stack while the callback runs, so it is never held by value, boxed or
+    /// owned in Rust. It is reached only through the [`CommitBuilderMut`] the callback's
+    /// wrapper lends for the call (see the [module docs](self#the-commit-builder)); there
+    /// is no public way to make one.
+    ///
+    /// ```compile_fail,E0624
+    /// use libgit2::libgit2::object::commit::CommitBuilderMut;
+    ///
+    /// let mut slot = 0u64;
+    /// let _ = unsafe { CommitBuilderMut::from_ptr(core::ptr::from_mut(&mut slot).cast()) };
+    /// ```
+    ///
+    /// The exclusive handle does not alias, as `&mut` does not:
+    ///
+    /// ```compile_fail,E0499
+    /// use libgit2::libgit2::object::commit::CommitBuilderMut;
+    ///
+    /// fn alias(mut builder: CommitBuilderMut<'_>) {
+    ///     let a = builder.as_mut();
+    ///     let b = builder.as_mut();
+    ///     drop((a, b));
+    /// }
+    /// ```
+    ///
+    /// and stays on the thread writing the commit:
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::object::commit::CommitBuilderMut;
+    ///
+    /// fn send<T: Send>(_: T) {}
+    /// fn move_out(builder: CommitBuilderMut<'_>) {
+    ///     send(builder)
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_commitbuilder
+    CommitBuilder, CommitBuilderRef, CommitBuilderMut, ffi::git_commitbuilder
+);
+
+impl fmt::Debug for CommitBuilderRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommitBuilder").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for CommitBuilderMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `CommitBuilder` is a `git_commitbuilder`, and each handle one pointer to it.
+const _: () = assert!(
+    size_of::<CommitBuilder>() == size_of::<ffi::git_commitbuilder>()
+        && size_of::<CommitBuilderMut<'static>>() == size_of::<*mut ffi::git_commitbuilder>()
+);
 
 // A `CommitArray` is a `git_commitarray`, so C reads and writes a value Rust holds in
 // place, and the owner adds nothing to it.
@@ -549,7 +626,7 @@ const _: () = assert!(
 mod unit_tests {
     use super::*;
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::CStr;
+    use core::ffi::{CStr, c_char, c_int, c_void};
     use core::mem::size_of;
 
     /// The fixture repositories: `testrepo.git` (a branch at `a65fedf`), `mergedrepo`
@@ -873,5 +950,179 @@ mod unit_tests {
         unsafe { ffi::git_commitarray_dispose(&mut back) };
         // SAFETY: `repo` is open and freed once.
         unsafe { ffi::git_repository_free(repo) };
+    }
+
+    /// The builder's handles over Rust storage, so Miri checks them: the builder is
+    /// opaque, so they never read through the pointer, only carry it, reborrow and print.
+    #[test]
+    fn commit_builder_handles_without_c() {
+        assert_eq!(
+            size_of::<CommitBuilder>(),
+            size_of::<ffi::git_commitbuilder>()
+        );
+        assert_eq!(
+            size_of::<CommitBuilderRef<'_>>(),
+            size_of::<*const ffi::git_commitbuilder>()
+        );
+        assert_eq!(
+            size_of::<Option<CommitBuilderMut<'_>>>(),
+            size_of::<*mut ffi::git_commitbuilder>()
+        );
+        let mut storage = 0u64;
+        let raw: *mut ffi::git_commitbuilder = ptr::from_mut(&mut storage).cast();
+        // SAFETY: NULL is refused.
+        assert!(unsafe { CommitBuilderMut::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: NULL is refused.
+        assert!(unsafe { CommitBuilderRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: `raw` addresses live storage nothing else reaches while the handle
+        // lives; the opaque builder is never read through it.
+        let mut m = unsafe { CommitBuilderMut::from_ptr(raw) }.unwrap();
+        assert_eq!(m.as_mut_ptr(), raw);
+        assert_eq!(m.as_ref().as_ptr(), raw.cast_const());
+        let mut inner = m.as_mut();
+        assert_eq!(inner.as_mut_ptr(), raw);
+        assert_eq!(format!("{inner:?}"), "CommitBuilder { .. }");
+        let shared = m.as_ref();
+        let copy = shared;
+        assert_eq!(format!("{shared:?}"), format!("{copy:?}"));
+        assert_eq!(format!("{m:?}"), "CommitBuilder { .. }");
+        assert_eq!(storage, 0);
+    }
+
+    /// What the signing callback below saw and did, through its payload.
+    #[derive(Default)]
+    struct Signing {
+        builder: usize,
+        content: String,
+        add_header: Option<c_int>,
+    }
+
+    /// A signing callback that reaches the builder only through a `CommitBuilderMut`,
+    /// as the `git_commit_signature_cb` wrapper will, and adds the signature header
+    /// through the handle's pointer.
+    unsafe extern "C" fn sign(
+        builder: *mut ffi::git_commitbuilder,
+        _repo: *mut ffi::git_repository,
+        content: *const c_char,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: the payload is the test's live `Signing`, reached by nothing else
+        // during the call.
+        let state = unsafe { &mut *payload.cast::<Signing>() };
+        // SAFETY: libgit2 lends the live builder for the call, exclusively; the handle
+        // is dropped before the callback returns.
+        let mut handle = unsafe { CommitBuilderMut::from_ptr(builder) }.unwrap();
+        state.builder = handle.as_mut_ptr() as usize;
+        // SAFETY: the commit's contents, NUL-terminated, live for the call.
+        state.content = unsafe { CStr::from_ptr(content) }
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let mut reborrowed = handle.as_mut();
+        // SAFETY: the builder's pointer from its exclusive handle, and NUL-terminated
+        // field and value, read for the call.
+        let rc = unsafe {
+            ffi::git_commitbuilder_add_header(
+                reborrowed.as_mut_ptr(),
+                c"gpgsig".as_ptr(),
+                c"-----BEGIN SIGNATURE-----\nsigned\n-----END SIGNATURE-----".as_ptr(),
+            )
+        };
+        state.add_header = Some(rc);
+        0
+    }
+
+    /// libgit2 lends its builder to the signing callback, whose handle carries libgit2's
+    /// own pointer back to `git_commitbuilder_add_header`: the signature lands in the
+    /// written commit (ASan flags any access through a wrong pointer).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn commit_builder_lent_to_the_signing_callback() {
+        assert!(runtime_pinned());
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-commitbuilder-unit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+        let mut repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path; bare.
+        let rc = unsafe { ffi::git_repository_init(&mut repo, path.as_ptr(), 1) };
+        assert_eq!(rc, 0);
+
+        // An empty tree, an identity and the signing options.
+        let mut builder = ptr::null_mut();
+        let mut tree_id = ffi::git_oid::default();
+        let mut tree = ptr::null_mut();
+        let mut who = ptr::null_mut();
+        // SAFETY: writable slots, the live repository and NUL-terminated strings; each
+        // object is freed once below.
+        unsafe {
+            assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
+            assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
+            ffi::git_treebuilder_free(builder);
+            assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &tree_id), 0);
+            assert_eq!(
+                ffi::git_signature_new(
+                    &mut who,
+                    c"A U Thor".as_ptr(),
+                    c"a@example.com".as_ptr(),
+                    1_700_000_000,
+                    0
+                ),
+                0
+            );
+        }
+        let mut state = Signing::default();
+        let opts = ffi::git_commit_create_ext_options {
+            version: 1,
+            sign: Some(sign),
+            payload: ptr::from_mut(&mut state).cast(),
+            ..Default::default()
+        };
+        let mut id = ffi::git_oid::default();
+        // SAFETY: a writable id; the live repository, identity and tree (of that
+        // repository); no parents; options whose callback and payload outlive the call.
+        let rc = unsafe {
+            ffi::git_commit_create_ext(
+                &mut id,
+                repo,
+                who,
+                who,
+                c"signed commit\n".as_ptr(),
+                tree,
+                0,
+                ptr::null(),
+                &opts,
+            )
+        };
+        assert_eq!(rc, 0);
+        assert_ne!(state.builder, 0);
+        assert_eq!(state.add_header, Some(0));
+        assert!(state.content.starts_with("tree "));
+        assert!(state.content.ends_with("\nsigned commit\n"));
+
+        let mut commit = ptr::null_mut();
+        let mut field = ffi::git_buf::default();
+        // SAFETY: a writable slot, the live repository and the written id; then the live
+        // commit, a zeroed buffer and a NUL-terminated name; all released once.
+        unsafe {
+            assert_eq!(ffi::git_commit_lookup(&mut commit, repo, &id), 0);
+            assert_eq!(
+                ffi::git_commit_header_field(&mut field, commit, c"gpgsig".as_ptr()),
+                0
+            );
+            let value = CStr::from_ptr(field.ptr).to_str().unwrap().to_owned();
+            assert_eq!(
+                value,
+                "-----BEGIN SIGNATURE-----\nsigned\n-----END SIGNATURE-----"
+            );
+            ffi::git_buf_dispose(&mut field);
+            ffi::git_commit_free(commit);
+            ffi::git_tree_free(tree);
+            ffi::git_signature_free(who);
+            ffi::git_repository_free(repo);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1874,3 +1874,41 @@ pub mod object_and_tree_entry {
         unsafe { libgit2::libgit2::core::common::enable_caching(enabled) }
     }
 }
+
+// --- `git2/filter.h`: `git_filter_list` ---------------------------------------------
+
+use libgit2::libgit2::filter::filter::FilterListBox;
+
+/// `git_filter_list_apply_to_buffer(out, list, data)`, standing in for the filter
+/// list's apply wrapper (a later run), which replaces it: the filtered bytes, or the
+/// code libgit2 failed with. Filters write the list's state while it applies, hence
+/// the exclusive borrow.
+pub fn apply(list: &mut FilterListBox<'_>, data: &[u8]) -> Result<Vec<u8>, c_int> {
+    let mut out = ffi::git_buf::default();
+    // SAFETY: a zeroed buffer libgit2 fills; the live list, borrowed exclusively for the
+    // call, whose repository outlives it by its borrow; `data` live for the call.
+    let rc = unsafe {
+        ffi::git_filter_list_apply_to_buffer(
+            &mut out,
+            list.as_c_ptr(),
+            data.as_ptr().cast(),
+            data.len(),
+        )
+    };
+    let bytes = if rc < 0 || out.ptr.is_null() {
+        Vec::new()
+    } else {
+        // SAFETY: on success `out` holds `size` initialised bytes at `ptr`.
+        unsafe { std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size) }.to_vec()
+    };
+    // SAFETY: the buffer libgit2 filled (or left zeroed), released once.
+    unsafe { ffi::git_buf_dispose(&mut out) };
+    if rc < 0 { Err(rc) } else { Ok(bytes) }
+}
+
+/// The number of filters in `list`: `git_filter_list_length`, standing in for its
+/// wrapper (a later run).
+pub fn filter_count(list: &FilterListBox<'_>) -> usize {
+    // SAFETY: the live list, only read.
+    unsafe { ffi::git_filter_list_length(list.as_c_ptr()) }
+}

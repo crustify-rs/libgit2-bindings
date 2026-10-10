@@ -460,6 +460,30 @@
    ]
   },
   {
+   "name": "git_commitbuilder",
+   "defined_in": "src/libgit2/commit.c",
+   "_comment_agent": "Opaque in include/git2/commit.h. libgit2 never allocates, frees or copies a builder: the one instance lives on git_commit__create_internal's stack and is lent, exclusively, to the commit signing callback (git_commit_signature_cb) for the call. No lifecycle primitive exists; Rust only borrows it (CommitBuilderMut) inside the callback.",
+   "fields": [
+    {
+     "name": "contents",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "The only builder is a stack local of git_commit__create_internal, `{ &buf }`, pointing at that frame's in-progress commit git_str; it is handed to opts->sign for the callback's duration and never stored, allocated or freed. git_commitbuilder_add_header swaps a rebuilt buffer into it (git_str_swap), so it is written through. Never NULL."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config",
    "defined_in": "src/libgit2/config.h",
    "_comment_agent": "Opaque (body in src/libgit2/config.h), heap-allocated, reference-counted: git_config_new git__calloc's it with readers/writers vectors and refcount 1; GIT_REFCOUNT_DEC in git_config_free frees it (config_free: down-refs each backend_instance, disposes vectors, git__free) only when the count reaches 0 AND rc.owner is NULL. No public up-ref. Producers of a sole reference: git_config_new, git_config_open_ondisk / open_default / open_level / open_global, git_config_snapshot, git_repository_config_snapshot. Shared reference: git_repository_config (GIT_REFCOUNT_INC on repo->_config, owner = repo; the repository writes through it, e.g. git_repository_set_workdir/set_bare via __weakptr). git_repository_set_config up-refs the caller's config and sets owner = repo, so a caller's sole reference stops being sole (its wrapper must take the shared owner). git_repository_free -> set_config(NULL) sets owner NULL before its down-ref, so the config may be RELEASED after the repository, but NOT USED: every file backend added with a repository (git_config_add_file_ondisk(.., repo, ..), as load_config does for a repository's config) keeps it uncounted (config_file_backend.repo, config_file.c:110) and reparses its file through it for includeIf conditions (config_file_refresh from get/iterator when the file changed, config_file_refresh_from_buffer after every write): gitdir: reads git_repository__item_path(repo), onbranch: runs git_repository_refdb(repo). Snapshot backends copy the entries and ignore the repository (config_snapshot_open), so a snapshot is bound to none. Hence Config<'r> (review wave 1 batch 1, ASan-confirmed use-after-free through a lent ConfigArc installed elsewhere): 'r is the borrow of the repository the config was loaded for, 'static for one loaded for none; git_repository_config -> ConfigArc<'r>, git_repository_config_snapshot -> ConfigBox<'static>, git_repository_set_config takes &ConfigArc<'static> (the installing repository keeps and reparses through it for its whole life). git_config_set_string reads GIT_REFCOUNT_OWNER(config) and clears the owner's configmap cache: a release of the owning repository on another thread races it (UAF), and nothing synchronises the backend vectors: neither Send nor Sync (docs/threading.md: only snapshots are shareable). git_config_lock's transaction and config iterators borrow the config (no ref). Wrapped (repository wave 0 batch 2, lifetime added in review wave 1 batch 1) in config/config.rs as hand-written Config<'r> / ConfigRef<'a,'r> / ConfigMut<'a,'r> over CCell, ConfigFree (CDrop<Config<'r>> git_config_free + CNew<Config<'static>> git_config_new, pinning the runtime first), ConfigBox<'r> = CBox (sole), ConfigArc<'r> = CArc (shared, no Clone), Config::new() -> Result<ConfigBox<'static>, ErrorBuf>.",
@@ -515,6 +539,45 @@
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Fieldless C enum of octal UNIX modes (UNREADABLE 0, TREE 0040000, BLOB 0100644, BLOB_EXECUTABLE 0100755, LINK 0120000, COMMIT 0160000; bindgen types it c_uint). No storage, pointers or lifecycle: passed and returned by value. Unnamed values flow through it: git_tree_entry_filemode_raw (tree.c:255) returns git_tree_entry.attr (uint16_t) as parsed by parse_mode (tree.c:371, any octal value 0..=0177777, larger -> git_tree_lookup -1 GIT_ERROR_TREE 'failed to parse tree: can't parse filemode'), e.g. old git's 0100664 or 0, which reads as UNREADABLE; git_tree_entry_filemode normalises (normalize_filemode, tree.c:35: type 04 -> TREE, any 0100 exec bit -> BLOB_EXECUTABLE before the 016/012 checks, so 0160755 -> BLOB_EXECUTABLE, else BLOB), always one of the five insertable values. git_treebuilder_insert (and git_tree_create_updated through it) accepts exactly TREE/BLOB/BLOB_EXECUTABLE/LINK/COMMIT (valid_filemode tree.c:26), refusing everything else, UNREADABLE included, with -1 GIT_ERROR_TREE 'failed to insert entry: invalid filemode for file - <name>' before touching the builder; with strict object creation on, TREE must name a tree and BLOB/EXEC/LINK a blob, COMMIT is unchecked. UNREADABLE marks an unreadable workdir file in iterator.c:1444. git_diff_file.mode (uint16_t) and git_index_entry.mode (uint32_t) carry these values untyped. Rust side (core/types.rs FileMode): never transmute; convert fallibly (FileMode::from_raw / TryFrom -> UnnamedFileMode); a tree-entry wrapper should return Result<FileMode, UnnamedFileMode> (or the raw u32) for filemode_raw and may expect a named value from filemode; a treebuilder insert wrapper taking FileMode must still expect UNREADABLE to be refused.",
    "fields": []
+  },
+  {
+   "name": "git_filter_list",
+   "defined_in": "src/libgit2/filter.c",
+   "_comment_agent": "Opaque in include/git2/filter.h. One git__calloc'd allocation (struct plus inline path) owned by its sole holder: built by git_filter_list_new (always, on success), git_filter_list_load / _load_ext (NULL on success when no filter applies), released by git_filter_list_free (NULL-safe), never copied or counted. source.repo is an uncounted borrow of the repository, read by filters during apply (crlf reads its config), so a list must not outlive the repository it was built for; source.path points at the inline path. Filters' check/stream callbacks write entry payloads during apply, so apply needs exclusive access.",
+   "fields": [
+    {
+     "name": "filters.ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git_array_t(git_filter_entry) buffer of inline entries (filter_name, filter, payload), grown by git_array_alloc in __load and push, released by git_array_clear in git_filter_list_free after each entry's filter->cleanup(filter, payload). NULL while empty (calloc). Each entry's `filter` borrows a registry filter; `payload` is owned through that filter's cleanup."
+     }
+    },
+    {
+     "name": "temp_buf",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Copied from git_filter_session.temp_buf by git_filter_list__load; the session (checkout, blob filtering) owns the git_str and outlives the list. NULL from the public constructors (GIT_FILTER_SESSION_INIT, and filter_list_new's calloc). Written (git_str_clear, used as the buffered stream's output) during apply; never freed by the list."
+     }
+    }
+   ]
   },
   {
    "name": "git_index",
@@ -2810,6 +2873,274 @@
       "nullable": false,
       "mutable": false,
       "note": "Copied with git_str_puts into the thread's error buffer during the call; never retained (the header's 'static string' wording is wrong: any string works). NULL is rejected by GIT_ASSERT_ARG: -1 and an 'invalid argument' error in release builds, assert() abort under _DEBUG/GIT_ASSERT_HARD (the coverage build). Returns -1 when the thread state cannot be allocated or the copy runs out of memory (buffer then stuck at git_str__oom, `last` at oom_error), 0 otherwise; unlike git_error_set it never consults errno."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_filter_list_free",
+   "defined_in": "src/libgit2/filter.c",
+   "lifetime": {
+    "for": "fl",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "fl",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Takes the list: runs each entry's filter->cleanup(filter, payload), clears the entry array and git__free's the struct. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_filter_list_load",
+   "defined_in": "src/libgit2/filter.c",
+   "lifetime": {
+    "for": "filters",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Only its id is read (git_blob_id), into the load-local git_filter_source the filters check callbacks see; filter_list_new does not copy src.oid into the list, so neither blob nor id outlives the call."
+     }
+    },
+    {
+     "name": "filters",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filters"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: a fresh list the caller owns and releases with git_filter_list_free, or NULL on success when no filter applies; NULL on failure (left untouched when the registry lock or an allocation fails early, so callers pre-set it)."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied inline into the list (filter_list_new); attribute lookups read it during the call. Must be relative: collect_attr_files GIT_ASSERTs !is_absolute, an error in release builds and an abort under _DEBUG."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Stored uncounted in the list (source.repo) and read by filters while the list is applied, so it must outlive the list. Its attribute/config caches are filled during load."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_filter_list_load_ext",
+   "defined_in": "src/libgit2/filter.c",
+   "lifetime": {
+    "for": "filters",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Only its id is read (git_blob_id), into the load-local git_filter_source the filters check callbacks see; filter_list_new does not copy src.oid into the list, so neither blob nor id outlives the call."
+     }
+    },
+    {
+     "name": "filters",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filters"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: a fresh list the caller owns and releases with git_filter_list_free, or NULL on success when no filter applies; NULL on failure (left untouched when the registry lock or an allocation fails early, so callers pre-set it)."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied by value into the session options; never written or kept. reserved is unread under GIT_DEPRECATE_HARD."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied inline into the list (filter_list_new); attribute lookups read it during the call. Must be relative: collect_attr_files GIT_ASSERTs !is_absolute, an error in release builds and an abort under _DEBUG."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Stored uncounted in the list (source.repo) and read by filters while the list is applied, so it must outlive the list. Its attribute/config caches are filled during load."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_filter_list_new",
+   "defined_in": "src/libgit2/filter.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written once: a fresh list (never NULL on success) the caller owns and releases with git_filter_list_free."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Stored uncounted in the list (source.repo) and read by filters while the list is applied, so it must outlive the list. Its attribute/config caches are filled during load."
      }
     }
    ]
