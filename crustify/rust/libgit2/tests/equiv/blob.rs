@@ -1074,3 +1074,427 @@ mod filter_options {
         }
     }
 }
+
+/// Equivalence of the blob writers with the C routines they wrap:
+/// `git_blob_create_from_buffer`, `git_blob_create_from_workdir`,
+/// `git_blob_create_from_disk`, and `git_blob_create_from_stream` with
+/// `git_blob_create_from_stream_commit`.
+///
+/// Each side builds its own repository, a working directory with the same
+/// `.gitattributes` (CRLF and `ident` filters) and files, and runs one script of writes:
+/// buffers of every shape, working-directory files (filtered, unfiltered, nested, a
+/// symbolic link, a directory, missing ones), files on disk inside and outside the
+/// working directory, and streams written in pieces past their 2 MiB buffer, with and
+/// without a hint path, committed or dropped. C writes through the raw calls, Rust
+/// through the wrappers; after every step the ids, or the codes, error classes and
+/// messages (each side's directory spelled `<dir>`), are compared. A bare repository
+/// and one without paths run the script again on both sides.
+///
+/// Documented divergence, outside these comparisons: an absolute path that would select
+/// filters (`create_from_workdir`'s path, `create_from_stream`'s hint) is refused by
+/// the wrappers with the error a release build of libgit2 reports from its assertion,
+/// where a debug build aborts (the coverage build is one); the unit tests of `blob.rs`
+/// hold the refusal.
+mod writing {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::blob::{
+        create_from_buffer, create_from_disk, create_from_stream, create_from_workdir,
+    };
+    use libgit2::libgit2::oid::oid::Oid;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    use super::init;
+
+    /// A write: its id in hex, or its code, error class and message.
+    type Outcome = Result<String, (c_int, c_int, String)>;
+
+    /// One write of the script.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Buffer(&'static [u8]),
+        Big(usize),
+        Workdir(&'static str),
+        /// A path relative to the working directory, written as an absolute one.
+        DiskInside(&'static str),
+        /// A file outside the working directory, with the bytes given.
+        DiskOutside(&'static [u8]),
+        Stream(Option<&'static str>, &'static [&'static [u8]]),
+        StreamBig(usize),
+        StreamDropped,
+    }
+
+    fn script() -> Vec<Step> {
+        use Step::*;
+        vec![
+            Buffer(b""),
+            Buffer(b"hello\n"),
+            Buffer(b"a\0b\r\n"),
+            Big(65_537),
+            Big(3 << 20),
+            Workdir("a.txt"),
+            Workdir("sub/b.id"),
+            Workdir("c.bin"),
+            Workdir("link"),
+            Workdir("sub"),
+            Workdir("missing.txt"),
+            Workdir("sub/../a.txt"),
+            DiskInside("a.txt"),
+            DiskInside("sub/b.id"),
+            DiskInside("c.bin"),
+            DiskInside("sub"),
+            DiskInside("missing.txt"),
+            DiskOutside(b"one\r\ntwo\r\n"),
+            Stream(None, &[]),
+            Stream(None, &[b"hello", b"\n"]),
+            Stream(Some("a.txt"), &[b"one\r\n", b"two\r\n"]),
+            Stream(Some("x.id"), &[b"$Id: old $\n"]),
+            Stream(Some("missing/dir.txt"), &[b"x\r\n"]),
+            StreamBig(3 << 20),
+            StreamDropped,
+            Buffer(b"hello\n"),
+        ]
+    }
+
+    /// One side's repositories: a working directory, and a file outside it.
+    struct Side {
+        root: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Side {
+        fn new(tag: &str, bare: bool) -> Self {
+            init();
+            let root = std::env::temp_dir()
+                .join(format!("crustify-blob-equiv-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let work = root.join("work");
+            std::fs::create_dir_all(work.join("sub")).unwrap();
+            let repo = Repository::init(&c_path(&work), bare).unwrap();
+            std::fs::write(work.join(".gitattributes"), b"*.txt text\n*.id ident\n").unwrap();
+            std::fs::write(work.join("a.txt"), b"one\r\ntwo\r\n").unwrap();
+            std::fs::write(work.join("sub/b.id"), b"$Id: stale $\nbody\n").unwrap();
+            std::fs::write(work.join("c.bin"), b"one\r\ntwo\r\n").unwrap();
+            std::os::unix::fs::symlink("a.txt", work.join("link")).unwrap();
+            Self {
+                root,
+                repo: Some(repo),
+            }
+        }
+
+        fn pathless() -> Self {
+            init();
+            Self {
+                root: PathBuf::from("/nonexistent/crustify-pathless"),
+                repo: Some(Repository::new().unwrap()),
+            }
+        }
+
+        fn raw(&self) -> *mut ffi::git_repository {
+            self.repo.as_ref().unwrap().as_c_ptr()
+        }
+
+        fn inside(&self, rel: &str) -> CString {
+            c_path(&self.root.join("work").join(rel))
+        }
+
+        fn outside(&self, data: &[u8]) -> CString {
+            let path = self.root.join("outside.txt");
+            if self.root.exists() {
+                std::fs::write(&path, data).unwrap();
+            }
+            c_path(&path)
+        }
+
+        /// `outcome`'s message with this side's directory spelled `<dir>`, and the random
+        /// suffix of a temporary file's name `<random>`.
+        fn normalised(&self, outcome: Outcome) -> Outcome {
+            let root = self.root.to_str().unwrap();
+            outcome.map_err(|(code, class, message)| {
+                let mut message = message.replace(root, "<dir>");
+                if let Some(at) = message.find("streamed_git2_") {
+                    let start = at + "streamed_git2_".len();
+                    let len = message[start..]
+                        .bytes()
+                        .take_while(u8::is_ascii_alphanumeric)
+                        .count();
+                    message.replace_range(start..start + len, "<random>");
+                }
+                (code, class, message)
+            })
+        }
+    }
+
+    impl Drop for Side {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn c_path(path: &Path) -> CString {
+        CString::new(path.to_str().unwrap()).unwrap()
+    }
+
+    fn big(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 241) as u8).collect()
+    }
+
+    fn c_error(code: c_int) -> (c_int, c_int, String) {
+        // SAFETY: after init `git_error_last` never returns NULL, and its message is
+        // NUL-terminated, both live until the next libgit2 call here, after the copy.
+        unsafe {
+            let e = ffi::git_error_last();
+            (
+                code,
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    fn c_done(code: c_int, id: &ffi::git_oid) -> Outcome {
+        if code < 0 {
+            return Err(c_error(code));
+        }
+        let mut out = [0u8; 65];
+        // SAFETY: `id` is live; `out` has 65 writable bytes.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        Ok(CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned())
+    }
+
+    fn rust_done(result: Result<Oid, RepositoryError>) -> Outcome {
+        result
+            .map(|id| id.as_ref().to_hex_string().unwrap())
+            .map_err(|e| {
+                (
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                )
+            })
+    }
+
+    /// C's stream: opened on `side` with `hint`, written `pieces`, then committed.
+    fn c_stream(side: &Side, hint: Option<&str>, pieces: &[&[u8]], commit: bool) -> Outcome {
+        let hint = hint.map(|h| CString::new(h).unwrap());
+        let mut stream = ptr::null_mut();
+        // SAFETY: a writable slot, the live repository and a NULL or NUL-terminated
+        // hint, copied.
+        let rc = unsafe {
+            ffi::git_blob_create_from_stream(
+                &mut stream,
+                side.raw(),
+                hint.as_ref().map_or(ptr::null(), |h| h.as_ptr()),
+            )
+        };
+        if rc < 0 {
+            return Err(c_error(rc));
+        }
+        for piece in pieces {
+            // SAFETY: the open stream's own `write` member, given a live slice.
+            let rc =
+                unsafe { (*stream).write.unwrap()(stream, piece.as_ptr().cast(), piece.len()) };
+            assert_eq!(rc, 0);
+        }
+        if !commit {
+            // SAFETY: the open stream's own `free` member, once.
+            unsafe { (*stream).free.unwrap()(stream) };
+            return Ok(String::new());
+        }
+        let mut id = ffi::git_oid::default();
+        // SAFETY: the open stream, consumed; a writable id.
+        let rc = unsafe { ffi::git_blob_create_from_stream_commit(&mut id, stream) };
+        c_done(rc, &id)
+    }
+
+    fn rust_stream(side: &Side, hint: Option<&str>, pieces: &[&[u8]], commit: bool) -> Outcome {
+        let hint = hint.map(|h| CString::new(h).unwrap());
+        let repo = side.repo.as_ref().unwrap().as_ref();
+        let mut writer = match create_from_stream(repo, hint.as_deref()) {
+            Ok(writer) => writer,
+            Err(e) => return rust_done(Err(e)),
+        };
+        for piece in pieces {
+            writer.write(piece).unwrap();
+        }
+        if !commit {
+            drop(writer);
+            return Ok(String::new());
+        }
+        rust_done(writer.commit())
+    }
+
+    fn c_run(side: &Side, step: Step) -> Outcome {
+        let mut id = ffi::git_oid::default();
+        let repo = side.raw();
+        let outcome = match step {
+            Step::Buffer(data) => {
+                let data = data.to_vec();
+                // SAFETY: a writable id, the live repository and a live buffer.
+                let rc = unsafe {
+                    ffi::git_blob_create_from_buffer(
+                        &mut id,
+                        repo,
+                        data.as_ptr().cast(),
+                        data.len(),
+                    )
+                };
+                c_done(rc, &id)
+            }
+            Step::Big(len) => {
+                let data = big(len);
+                // SAFETY: as above.
+                let rc = unsafe {
+                    ffi::git_blob_create_from_buffer(
+                        &mut id,
+                        repo,
+                        data.as_ptr().cast(),
+                        data.len(),
+                    )
+                };
+                c_done(rc, &id)
+            }
+            Step::Workdir(rel) => {
+                let rel = CString::new(rel).unwrap();
+                // SAFETY: a writable id, the live repository and a relative path.
+                let rc = unsafe { ffi::git_blob_create_from_workdir(&mut id, repo, rel.as_ptr()) };
+                c_done(rc, &id)
+            }
+            Step::DiskInside(rel) => {
+                let path = side.inside(rel);
+                // SAFETY: a writable id, the live repository and a NUL-terminated path.
+                let rc = unsafe { ffi::git_blob_create_from_disk(&mut id, repo, path.as_ptr()) };
+                c_done(rc, &id)
+            }
+            Step::DiskOutside(data) => {
+                let path = side.outside(data);
+                // SAFETY: as above.
+                let rc = unsafe { ffi::git_blob_create_from_disk(&mut id, repo, path.as_ptr()) };
+                c_done(rc, &id)
+            }
+            Step::Stream(hint, pieces) => c_stream(side, hint, pieces, true),
+            Step::StreamBig(len) => c_stream(side, None, &[&big(len)], true),
+            Step::StreamDropped => c_stream(side, Some("a.txt"), &[b"discarded"], false),
+        };
+        side.normalised(outcome)
+    }
+
+    fn rust_run(side: &Side, step: Step) -> Outcome {
+        let repo = side.repo.as_ref().unwrap().as_ref();
+        let outcome = match step {
+            Step::Buffer(data) => rust_done(create_from_buffer(repo, data)),
+            Step::Big(len) => rust_done(create_from_buffer(repo, &big(len))),
+            Step::Workdir(rel) => rust_done(create_from_workdir(repo, &CString::new(rel).unwrap())),
+            Step::DiskInside(rel) => rust_done(create_from_disk(repo, &side.inside(rel))),
+            Step::DiskOutside(data) => rust_done(create_from_disk(repo, &side.outside(data))),
+            Step::Stream(hint, pieces) => rust_stream(side, hint, pieces, true),
+            Step::StreamBig(len) => rust_stream(side, None, &[&big(len)], true),
+            Step::StreamDropped => rust_stream(side, Some("a.txt"), &[b"discarded"], false),
+        };
+        side.normalised(outcome)
+    }
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_BLOB_WRITING_CHILD";
+
+    /// Runs `body` alone in a child process: the C side loads filter lists without the
+    /// wrappers' ordering of libgit2's first, unsynchronised filter initialisation, so
+    /// it must not race another test's first load (TSan).
+    fn isolated(test: &str, body: fn()) {
+        let name = test.strip_prefix("equiv::").unwrap_or(test);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn compare(c: Side, rust: Side) {
+        compare_steps(c, rust, &script());
+    }
+
+    fn compare_steps(c: Side, rust: Side, steps: &[Step]) {
+        let mut failures = 0;
+        for &step in steps {
+            let (c_out, rust_out) = (c_run(&c, step), rust_run(&rust, step));
+            failures += usize::from(c_out.is_err());
+            assert_eq!(rust_out, c_out, "{step:?}");
+        }
+        assert!(failures > 0);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writes_match_c() {
+        isolated(concat!(module_path!(), "::writes_match_c"), || {
+            compare(Side::new("c", false), Side::new("rust", false))
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writes_into_bare_repositories_match_c() {
+        isolated(
+            concat!(module_path!(), "::writes_into_bare_repositories_match_c"),
+            || compare(Side::new("bare-c", true), Side::new("bare-rust", true)),
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writes_without_paths_match_c() {
+        isolated(
+            concat!(module_path!(), "::writes_without_paths_match_c"),
+            || compare(Side::pathless(), Side::pathless()),
+        );
+    }
+
+    /// A bare repository whose `objects` directory is gone: no stream can open its
+    /// temporary file. Only the streams are compared, which fail before loading the
+    /// object database: libgit2 leaks the one it fails to load there
+    /// (`git_repository_odb__weakptr` returns when reading the alternates fails without
+    /// freeing it or its path), on both sides alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writes_without_an_objects_directory_match_c() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::writes_without_an_objects_directory_match_c"
+            ),
+            || {
+                let (c, rust) = (Side::new("gone-c", true), Side::new("gone-rust", true));
+                for side in [&c, &rust] {
+                    std::fs::remove_dir_all(side.root.join("work/objects")).unwrap();
+                }
+                let streams: Vec<Step> = script()
+                    .into_iter()
+                    .filter(|s| {
+                        matches!(
+                            s,
+                            Step::Stream(..) | Step::StreamBig(_) | Step::StreamDropped
+                        )
+                    })
+                    .collect();
+                compare_steps(c, rust, &streams)
+            },
+        );
+    }
+}

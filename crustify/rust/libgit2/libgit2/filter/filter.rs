@@ -300,7 +300,7 @@ pub type FilterListBox<'r> = CBox<FilterList<'r>, FilterListFree>;
 
 /// `Ok` for a relative `path`; for an absolute one, the error a release build of
 /// libgit2 reports from the assertion in `collect_attr_files`, set as the thread's.
-fn relative(path: &CStr) -> Result<(), ErrorBuf> {
+pub(crate) fn relative(path: &CStr) -> Result<(), ErrorBuf> {
     if path.to_bytes().first() == Some(&b'/') {
         set(
             ErrorClass::Internal,
@@ -561,10 +561,11 @@ impl<'r> FilterList<'r> {
 ///
 /// libgit2 initialises a filter, unsynchronised, the first time a list selects it (see
 /// the [module docs](self#threads)). Every constructor calls this, with the runtime
-/// pinned, before it loads a list: the first call does the work, and the others wait for
-/// it, so the flag is written before any of their loads reads it. A failure (an
-/// allocation) leaves the filters to their first load, as libgit2 would.
-fn initialise_builtin_filters() {
+/// pinned, before it loads a list, as do the wrappers of routines that load one
+/// internally (the blob writers of `object::blob`): the first call does the work, and
+/// the others wait for it, so the flag is written before any of their loads reads it. A
+/// failure (an allocation) leaves the filters to their first load, as libgit2 would.
+pub(crate) fn initialise_builtin_filters() {
     static DONE: Once = Once::new();
     DONE.call_once(|| {
         let mut list = ptr::null_mut();

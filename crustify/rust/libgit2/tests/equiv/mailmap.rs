@@ -477,3 +477,168 @@ fn repository_mailmaps_match() {
     assert_eq!(rust_steps(mailmap), c_steps);
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Equivalence of `MailmapMut::add_entry` and `MailmapRef::resolve` with
+/// `git_mailmap_add_entry` and `git_mailmap_resolve`.
+///
+/// Each side builds its own mailmap from the same buffer, then runs one script of
+/// entries: real names and emails present, absent and empty, entries replacing earlier
+/// ones, name-specific entries beside nameless ones, emails differing only in case.
+/// After every step both resolve the same probe identities, and the resolved strings,
+/// or the step's code, error class and message, are compared. Each side also records
+/// whether a resolved string is the probe's own or the mailmap's, by address.
+///
+/// Documented divergence, outside these comparisons: an empty replaced email is refused
+/// by the wrapper with libgit2's own error, before libgit2 allocates an entry it then
+/// leaks; the unit tests of `mailmap.rs` hold the refusal.
+mod entries {
+    use std::ffi::{CStr, c_char, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::mailmap::{Mailmap, MailmapRef};
+
+    use super::{MAILMAP, c_error, init};
+
+    type Entry = (
+        Option<&'static CStr>,
+        Option<&'static CStr>,
+        Option<&'static CStr>,
+        &'static CStr,
+    );
+
+    fn script() -> Vec<Entry> {
+        vec![
+            (
+                Some(c"Real"),
+                Some(c"real@example.com"),
+                None,
+                c"a@example.com",
+            ),
+            (Some(c"Named"), None, Some(c"A Name"), c"a@example.com"),
+            (
+                None,
+                Some(c"only-email@example.com"),
+                None,
+                c"b@example.com",
+            ),
+            (Some(c""), Some(c""), Some(c""), c"c@example.com"),
+            (Some(c"Replaced"), None, None, c"a@example.com"),
+            (Some(c"Case"), None, None, c"A@example.com"),
+            (None, None, None, c"d@example.com"),
+            (
+                Some(c"Other Real"),
+                Some(c"other@example.com"),
+                Some(c"Other Old"),
+                c"other.old@example.com",
+            ),
+            (Some(c"Z"), None, Some(c"z"), c"z@x"),
+        ]
+    }
+
+    fn probes() -> Vec<(&'static CStr, &'static CStr)> {
+        vec![
+            (c"Anyone", c"a@example.com"),
+            (c"A Name", c"a@example.com"),
+            (c"a name", c"a@example.com"),
+            (c"X", c"A@example.com"),
+            (c"X", c"b@example.com"),
+            (c"X", c"c@example.com"),
+            (c"X", c"d@example.com"),
+            (c"Other Old", c"other.old@example.com"),
+            (c"Someone Else", c"other.old@example.com"),
+            (c"X", c"old@example.com"),
+            (c"", c""),
+            (c"z", c"z@x"),
+        ]
+    }
+
+    /// A probe's resolution: the strings, and whether each is the probe's own.
+    type Resolved = (String, String, bool, bool);
+
+    fn record(
+        name: &CStr,
+        email: &CStr,
+        real_name: *const c_char,
+        real_email: *const c_char,
+    ) -> Resolved {
+        // SAFETY: both point at the probe's strings or at the mailmap's, live here.
+        let (n, e) = unsafe { (CStr::from_ptr(real_name), CStr::from_ptr(real_email)) };
+        (
+            n.to_string_lossy().into_owned(),
+            e.to_string_lossy().into_owned(),
+            real_name == name.as_ptr(),
+            real_email == email.as_ptr(),
+        )
+    }
+
+    fn c_resolve(mailmap: *const ffi::git_mailmap) -> Vec<Resolved> {
+        probes()
+            .into_iter()
+            .map(|(name, email)| {
+                let (mut n, mut e) = (ptr::null(), ptr::null());
+                // SAFETY: two writable slots, a live mailmap, NUL-terminated probes.
+                let rc = unsafe {
+                    ffi::git_mailmap_resolve(&mut n, &mut e, mailmap, name.as_ptr(), email.as_ptr())
+                };
+                assert_eq!(rc, 0);
+                record(name, email, n, e)
+            })
+            .collect()
+    }
+
+    fn rust_resolve(mailmap: MailmapRef<'_>) -> Vec<Resolved> {
+        probes()
+            .into_iter()
+            .map(|(name, email)| {
+                let (n, e) = mailmap.resolve(name, email);
+                record(name, email, n.as_ptr(), e.as_ptr())
+            })
+            .collect()
+    }
+
+    type Step = (Result<(), (c_int, String)>, Vec<Resolved>);
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_and_lookups_match_c() {
+        init();
+        let mut c_map = ptr::null_mut();
+        // SAFETY: a writable slot and a live buffer.
+        let rc = unsafe {
+            ffi::git_mailmap_from_buffer(&mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
+        };
+        assert_eq!(rc, 0);
+        let mut rust_map = Mailmap::from_buffer(MAILMAP).unwrap();
+        let mut c_steps: Vec<Step> = vec![(Ok(()), c_resolve(c_map))];
+        let mut rust_steps: Vec<Step> = vec![(Ok(()), rust_resolve(rust_map.as_ref()))];
+        let opt = |s: Option<&CStr>| s.map_or(ptr::null(), CStr::as_ptr);
+        for (real_name, real_email, name, email) in script() {
+            // SAFETY: the live mailmap, NULL or NUL-terminated strings, a non-empty email.
+            let rc = unsafe {
+                ffi::git_mailmap_add_entry(
+                    c_map,
+                    opt(real_name),
+                    opt(real_email),
+                    opt(name),
+                    email.as_ptr(),
+                )
+            };
+            let c_rc = if rc < 0 {
+                Err((rc, c_error().1))
+            } else {
+                Ok(())
+            };
+            c_steps.push((c_rc, c_resolve(c_map)));
+            let r = rust_map
+                .as_mut()
+                .add_entry(real_name, real_email, name, email);
+            let r = r.map_err(|e| (-1, e.message().to_string_lossy().into_owned()));
+            rust_steps.push((r, rust_resolve(rust_map.as_ref())));
+            assert_eq!(rust_steps.last(), c_steps.last(), "{email:?}");
+        }
+        // SAFETY: the C side's mailmap, freed once.
+        unsafe { ffi::git_mailmap_free(c_map) };
+        assert_eq!(rust_steps, c_steps);
+    }
+}

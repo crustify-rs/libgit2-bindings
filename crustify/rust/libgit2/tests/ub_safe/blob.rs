@@ -742,3 +742,366 @@ mod filter_options {
         );
     }
 }
+
+/// UB tests for the blob writers: `create_from_buffer`, `create_from_workdir`,
+/// `create_from_disk`, and `create_from_stream` with its `BlobWriter`.
+///
+/// libgit2 reads each input for the call only: every buffer and path is an exact-length
+/// heap allocation, overwritten and freed right after the call (ASan flags a read past
+/// it, BSan a pointer libgit2 kept). A writer owns libgit2's blob stream, its file buffer
+/// and temporary file, which committing or dropping releases once (ASan: double free;
+/// LSan: leak; the temporary file must be gone either way), whatever was written, past
+/// the stream's 2 MiB buffer included. Repositories without paths, bare ones, missing
+/// files, directories and symbolic links take every failure path. The writers that load
+/// filters order libgit2's first, unsynchronised initialisation of its built-in filters
+/// among themselves, not with raw loads elsewhere in this binary, so each test loading
+/// filters runs alone in a child: one of them writes blobs through filters on several
+/// threads at once (TSan). A writer, like its
+/// repository, stays on one thread, and outlives neither (doctests).
+mod writing {
+    use std::ffi::{CStr, CString};
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::thread;
+
+    use libgit2::libgit2::object::blob::{
+        create_from_buffer, create_from_disk, create_from_stream, create_from_workdir,
+    };
+    use libgit2::libgit2::oid::oid::Oid;
+    use libgit2::libgit2::repository::repository::{
+        Repository, RepositoryBox, RepositoryError, RepositoryRef,
+    };
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::isolated;
+
+    /// `git hash-object` of `hello\n` and of nothing.
+    const HELLO: &str = "ce013625030ba8dba906f756967f9e9ca394464a";
+    const EMPTY: &str = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+
+    /// Attributes selecting the CRLF and `ident` filters.
+    const ATTRIBUTES: &[u8] = b"*.txt text\n*.id ident\n";
+
+    /// A fresh repository in a temporary directory, removed when dropped.
+    struct Work {
+        dir: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Work {
+        fn new(tag: &str, bare: bool) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("crustify-blob-ub-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let repo = Repository::init(&cstring(&dir), bare).unwrap();
+            if !bare {
+                std::fs::write(dir.join(".gitattributes"), ATTRIBUTES).unwrap();
+            }
+            Self {
+                dir,
+                repo: Some(repo),
+            }
+        }
+
+        fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+
+        /// Writes `data` at `rel` in the working directory; its absolute path.
+        fn file(&self, rel: &str, data: &[u8]) -> CString {
+            let path = self.dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, data).unwrap();
+            cstring(&path)
+        }
+
+        /// The temporary files of open blob writers.
+        fn streamed(&self) -> usize {
+            let objects = self.dir.join(".git/objects");
+            let objects = if objects.exists() {
+                objects
+            } else {
+                self.dir.join("objects")
+            };
+            std::fs::read_dir(objects)
+                .unwrap()
+                .filter(|e| {
+                    let name = e.as_ref().unwrap().file_name();
+                    name.to_string_lossy().starts_with("streamed")
+                })
+                .count()
+        }
+    }
+
+    impl Drop for Work {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn cstring(path: &std::path::Path) -> CString {
+        CString::new(path.to_str().unwrap()).unwrap()
+    }
+
+    /// `s` in a heap buffer of exactly its length, NUL included.
+    fn exact(s: &str) -> Box<CStr> {
+        CString::new(s).unwrap().into_boxed_c_str()
+    }
+
+    fn hex(id: &Oid) -> String {
+        id.as_ref().to_hex_string().unwrap()
+    }
+
+    #[track_caller]
+    fn assert_failed<T: std::fmt::Debug>(
+        result: Result<T, RepositoryError>,
+        code: Option<ErrorCode>,
+        class: ErrorClass,
+    ) {
+        let e = result.unwrap_err();
+        assert_eq!((e.code(), e.class()), (code, Some(class)), "{e:?}");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn buffers_are_read_whole_and_only_during_the_call() {
+        let work = Work::new("buffers", true);
+        let repo = work.repo();
+        assert_eq!(hex(&create_from_buffer(repo, &[]).unwrap()), EMPTY);
+        assert_eq!(hex(&create_from_buffer(repo, &Vec::new()).unwrap()), EMPTY);
+        let sizes: &[usize] = if cfg!(bsan) {
+            &[0, 1, 7, 4096]
+        } else {
+            &[0, 1, 7, 4096, 65_537, 3 << 20]
+        };
+        for &len in sizes {
+            let mut data: Box<[u8]> = (0..len).map(|i| (i % 253) as u8).collect();
+            let id = create_from_buffer(repo, &data).unwrap();
+            let again = create_from_buffer(repo, &data.clone()).unwrap();
+            data.fill(0xa5);
+            drop(data);
+            assert_eq!(id, again, "{len}");
+        }
+        let mut hello = b"hello\n".to_vec().into_boxed_slice();
+        let id = create_from_buffer(repo, &hello).unwrap();
+        hello.fill(0);
+        assert_eq!(hex(&id), HELLO);
+        assert_ne!(create_from_buffer(repo, b"a\0b").unwrap(), id);
+    }
+
+    /// Repositories without paths have no object database, working directory or
+    /// `objects` directory; bare ones no working directory: each writer fails cleanly.
+    /// The working-directory and disk writers initialise the built-in filters first, so
+    /// this runs alone in a child too.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn pathless_and_bare_repositories_fail_cleanly() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::pathless_and_bare_repositories_fail_cleanly"
+            ),
+            || {
+                let pathless = Repository::new().unwrap();
+                let bare = Work::new("bare-fail", true);
+                let outside = Work::new("bare-fail-file", false);
+                let file = outside.file("plain.bin", b"data");
+                let repo = pathless.as_ref();
+                assert_failed(
+                    create_from_buffer(repo, b"x"),
+                    Some(ErrorCode::NotFound),
+                    ErrorClass::Invalid,
+                );
+                assert_failed(
+                    create_from_disk(repo, &file),
+                    Some(ErrorCode::Generic),
+                    ErrorClass::Invalid,
+                );
+                for repo in [pathless.as_ref(), bare.repo()] {
+                    let e = create_from_workdir(repo, c"plain.bin").unwrap_err();
+                    assert_eq!(e.message(), c"repository has no working directory");
+                    assert_eq!(e.class(), Some(ErrorClass::Repository));
+                }
+                assert_failed(
+                    create_from_stream(repo, None),
+                    Some(ErrorCode::NotFound),
+                    ErrorClass::Invalid,
+                );
+                assert_failed(
+                    create_from_stream(repo, Some(c"hint.txt")),
+                    Some(ErrorCode::NotFound),
+                    ErrorClass::Invalid,
+                );
+                // A bare repository writes files from anywhere, unfiltered.
+                let id = create_from_disk(bare.repo(), &file).unwrap();
+                assert_eq!(id, create_from_buffer(bare.repo(), b"data").unwrap());
+
+                // Without an `objects` directory a writer has nowhere for its temporary file.
+                let gone = Work::new("objects-gone", true);
+                std::fs::remove_dir_all(gone.dir.join("objects")).unwrap();
+                let e = create_from_stream(gone.repo(), None).unwrap_err();
+                assert_eq!(e.class(), Some(ErrorClass::Os), "{e:?}");
+            },
+        );
+    }
+
+    /// Working-directory files go through the filters their paths select; directories,
+    /// missing files and absolute paths fail; a symbolic link is stored as its target.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn workdir_files_are_read_through_their_filters() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::workdir_files_are_read_through_their_filters"
+            ),
+            || {
+                let work = Work::new("workdir", false);
+                let repo = work.repo();
+                work.file("a.txt", b"one\r\ntwo\r\n");
+                work.file("sub/b.id", b"$Id: stale $\n");
+                work.file("c.bin", b"one\r\ntwo\r\n");
+                let crlf = create_from_workdir(repo, &exact("a.txt")).unwrap();
+                assert_eq!(crlf, create_from_buffer(repo, b"one\ntwo\n").unwrap());
+                let ident = create_from_workdir(repo, &exact("sub/b.id")).unwrap();
+                assert_eq!(ident, create_from_buffer(repo, b"$Id$\n").unwrap());
+                let raw = create_from_workdir(repo, &exact("c.bin")).unwrap();
+                assert_eq!(raw, create_from_buffer(repo, b"one\r\ntwo\r\n").unwrap());
+
+                std::os::unix::fs::symlink("a.txt", work.dir.join("link")).unwrap();
+                let link = create_from_workdir(repo, c"link").unwrap();
+                assert_eq!(link, create_from_buffer(repo, b"a.txt").unwrap());
+
+                assert_failed(
+                    create_from_workdir(repo, c"sub"),
+                    Some(ErrorCode::Directory),
+                    ErrorClass::Odb,
+                );
+                let e = create_from_workdir(repo, c"missing.txt").unwrap_err();
+                assert_eq!(e.code(), Some(ErrorCode::NotFound), "{e:?}");
+                let absolute = work.file("abs.txt", b"x\r\n");
+                assert_failed(
+                    create_from_workdir(repo, &absolute),
+                    Some(ErrorCode::Generic),
+                    ErrorClass::Internal,
+                );
+            },
+        );
+    }
+
+    /// A file inside the working directory goes through its filters, by absolute or
+    /// relative path; one outside it does not.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn disk_files_are_filtered_inside_the_workdir_only() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::disk_files_are_filtered_inside_the_workdir_only"
+            ),
+            || {
+                let work = Work::new("disk", false);
+                let outside = Work::new("disk-outside", true);
+                let repo = work.repo();
+                let inside = work.file("a.txt", b"one\r\n");
+                let elsewhere = outside.file("a.txt", b"one\r\n");
+                let filtered = create_from_buffer(repo, b"one\n").unwrap();
+                assert_eq!(create_from_disk(repo, &inside).unwrap(), filtered);
+                let mut path = inside.into_bytes();
+                let unfiltered = create_from_disk(repo, &elsewhere).unwrap();
+                path.fill(b'/');
+                assert_eq!(unfiltered, create_from_buffer(repo, b"one\r\n").unwrap());
+                assert_failed(
+                    create_from_disk(repo, &cstring(&work.dir)),
+                    Some(ErrorCode::Directory),
+                    ErrorClass::Odb,
+                );
+                let e = create_from_disk(repo, c"/nonexistent/crustify/file").unwrap_err();
+                assert_eq!(e.code(), Some(ErrorCode::NotFound), "{e:?}");
+            },
+        );
+    }
+
+    /// Writers commit what was written, past the 2 MiB buffer too, through the filters
+    /// of their hint path; dropping one discards it. Each temporary file lives exactly as
+    /// long as its writer, and several writers interleave on one repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writers_commit_or_discard_what_was_written() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::writers_commit_or_discard_what_was_written"
+            ),
+            || {
+                let work = Work::new("writers", false);
+                let repo = work.repo();
+                let chunk: Vec<u8> = (0..65_537u32).map(|i| (i % 249) as u8).collect();
+                let rounds = if cfg!(bsan) { 2 } else { 34 };
+                let mut big = create_from_stream(repo, None).unwrap();
+                let mut small = create_from_stream(repo, Some(&exact("a.txt"))).unwrap();
+                let dropped = create_from_stream(repo, Some(c"dropped.txt")).unwrap();
+                assert_eq!(work.streamed(), 3);
+                let mut all = Vec::new();
+                for _ in 0..rounds {
+                    let mut piece = chunk.clone();
+                    big.write(&piece).unwrap();
+                    all.extend_from_slice(&piece);
+                    piece.fill(0);
+                    small.write(b"line\r\n").unwrap();
+                }
+                big.write(&[]).unwrap();
+                drop(dropped);
+                assert_eq!(work.streamed(), 2);
+                let id = big.commit().unwrap();
+                assert_eq!(id, create_from_buffer(repo, &all).unwrap());
+                let lines = small.commit().unwrap();
+                let expected = b"line\n".repeat(rounds);
+                assert_eq!(lines, create_from_buffer(repo, &expected).unwrap());
+                assert_eq!(work.streamed(), 0);
+
+                let mut empty = create_from_stream(repo, None).unwrap();
+                empty.flush().unwrap();
+                assert_eq!(hex(&empty.commit().unwrap()), EMPTY);
+                let mut unwritten = create_from_stream(repo, Some(c"x.txt")).unwrap();
+                writeln!(unwritten, "hello").unwrap();
+                assert_eq!(hex(&unwritten.commit().unwrap()), HELLO);
+                assert_eq!(work.streamed(), 0);
+            },
+        );
+    }
+
+    /// Each thread writes blobs into its own repository through filters at once: the
+    /// built-in filters are initialised once, before any of their loads (TSan). Alone in
+    /// a child, where nothing else loads a filter list first.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filtered_writes_on_many_threads() {
+        isolated(
+            concat!(module_path!(), "::filtered_writes_on_many_threads"),
+            || {
+                thread::scope(|s| {
+                    for t in 0..4 {
+                        s.spawn(move || {
+                            let work = Work::new(&format!("threads-{t}"), false);
+                            let repo = work.repo();
+                            let path = work.file("a.txt", b"x\r\n");
+                            let expected = create_from_buffer(repo, b"x\n").unwrap();
+                            let ids = match t % 3 {
+                                0 => create_from_workdir(repo, c"a.txt"),
+                                1 => create_from_disk(repo, &path),
+                                _ => {
+                                    let mut w = create_from_stream(repo, Some(c"a.txt")).unwrap();
+                                    w.write(b"x\r\n").unwrap();
+                                    w.commit()
+                                }
+                            };
+                            assert_eq!(ids.unwrap(), expected);
+                        });
+                    }
+                });
+            },
+        );
+    }
+}

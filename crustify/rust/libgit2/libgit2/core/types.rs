@@ -1945,7 +1945,7 @@ impl StreamError {
     /// return its code. When libgit2 cannot be initialised the error is not stored, and
     /// when the thread's error buffer is out of memory libgit2 keeps the previous one;
     /// the code is returned either way.
-    fn raise(&self) -> c_int {
+    pub(crate) fn raise(&self) -> c_int {
         if runtime_pinned() {
             // SAFETY: `message` is a live C string, which libgit2 copies; any class is
             // accepted. The runtime is pinned, so the thread state is looked up under

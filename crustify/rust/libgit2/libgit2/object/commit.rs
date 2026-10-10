@@ -110,22 +110,43 @@
 //! build one of their own the same way. So nothing it points at is owned: Rust holds
 //! the struct by value, borrowing the strings and the headers for `'o`.
 //!
-//! The signing callback stays a raw seam, with an `unsafe` setter, until
-//! `git_commit_signature_cb` is wrapped.
+//! The signing callback is a [`SignatureCallback`], which
+//! [`CreateExtOptionsMut::set_signer`] stores with the callback itself as the payload.
+//!
+//! # Signing
+//!
+//! A [`SignatureCallback`] is the closure a `git_commit_signature_cb` runs: it is given
+//! the builder, the repository and the contents of the commit being written, and signs
+//! them by adding a header ([`CommitBuilderMut::add_header`]). Adding a header frees the
+//! buffer the contents were lent in (libgit2 swaps a rewritten copy in), so the closure
+//! is given a copy of the contents, which stays valid whatever it adds.
+//!
+//! A commit can also be signed outside libgit2: [`create_with_signature`] writes
+//! contents built elsewhere (`git_commit_create_buffer`) with a signature added as a
+//! header, and [`extract_signature`] takes a written commit's signature header back
+//! out, with the contents it signs.
 
-use core::ffi::{CStr, c_void};
+use core::any::Any;
+use core::ffi::{CStr, c_char, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CDispose, CDrop, CRefClone, CSlice, CVal, define_ctype};
+use ffibox::{
+    CArc, CBorrowedPtr, CCell, CDispose, CDrop, CRefClone, CSlice, CVal, CZeroable, define_ctype,
+};
 
 use crate::ffi;
+use crate::libgit2::core::buffer::{Buf, BufVal};
+use crate::libgit2::core::types::StreamError;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
 use crate::libgit2::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataVec};
-use crate::libgit2::oid::oid::OidRef;
+use crate::libgit2::oid::oid::{Oid, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::set;
 
 /// A parsed commit (`git_commit`): a commit object read from a repository's object
 /// database.
@@ -991,6 +1012,296 @@ const _: () = assert!(
         && size_of::<CommitBuilderMut<'static>>() == size_of::<*mut ffi::git_commitbuilder>()
 );
 
+impl CommitBuilderMut<'_> {
+    /// Adds the header `<field> <value>` to the commit being written: after its last
+    /// header, before the blank line that opens its message, each newline of `value`
+    /// continued by a space, as a [`Header`] is written. A signing callback adds the
+    /// signature of the contents it was given this way, under `gpgsig` for git's own
+    /// signatures; it may add several headers, each after the previous one.
+    ///
+    /// libgit2 rewrites the commit into a new buffer with the header and frees the old
+    /// one. It writes `field` as given: one holding a space or a newline yields a commit
+    /// git parses differently, and one holding a blank line moves where the next header
+    /// goes.
+    ///
+    /// Fails with `GIT_ERROR_INVALID`, "malformed commit contents", when the contents
+    /// have no blank line (a commit libgit2 writes always has one), and with libgit2's
+    /// out-of-memory error.
+    ///
+    /// Wraps: git_commitbuilder_add_header
+    pub fn add_header(&mut self, field: &CStr, value: &CStr) -> Result<(), ErrorBuf> {
+        let builder = self.as_mut_ptr();
+        // SAFETY: the exclusive handle addresses the live builder libgit2 lent the
+        // signing callback for its call, which nothing else uses meanwhile; libgit2
+        // replaces the commit buffer it points at (only the contents the callback was
+        // given, which the wrapper copied first, pointed into the old one). `field` and
+        // `value` are NUL-terminated, read and copied during the call. libgit2 is
+        // initialised: it is writing the commit.
+        let rc =
+            unsafe { ffi::git_commitbuilder_add_header(builder, field.as_ptr(), value.as_ptr()) };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+}
+
+/// The closure a [`SignatureCallback`] calls: the builder, the repository and a copy of
+/// the contents to sign, each lent for the call.
+type SignFn<'f> =
+    dyn FnMut(CommitBuilderMut<'_>, RepositoryRef<'_>, &CStr) -> Result<(), StreamError> + 'f;
+
+/// A commit signing callback (`git_commit_signature_cb`): the routines writing a commit
+/// with options (`git_commit_create_ext`, `git_commit_create_from_stage`) call it once,
+/// on the calling thread, with the commit's builder, its repository and its contents,
+/// before writing it, so that it can add a signature header.
+///
+/// Built over a closure with [`new`](Self::new). Its `extern "C"` trampoline lends the
+/// closure a [`CommitBuilderMut`] and a [`RepositoryRef`] valid for the call only, and a
+/// copy of the contents: adding a header frees the buffer libgit2 lends them in (see the
+/// [module docs](self#signing)). `Ok` lets libgit2 write the commit, signed or not; an
+/// error stops it before anything is written, and the commit routine returns the
+/// error's code with its class and message as the thread's last libgit2 error. libgit2
+/// reads every negative code as a failure, `GIT_PASSTHROUGH` included, whatever its
+/// header says about that code. A panic in the closure does not cross into C: the
+/// trampoline stops the commit with `GIT_EUSER` and the panic resumes once control is
+/// back in Rust, in the wrapper that wrote the commit, or from
+/// [`resume_panic`](Self::resume_panic) for a callback lent to options with
+/// [`CreateExtOptionsMut::set_signer`].
+///
+/// The handles cannot outlive the call:
+///
+/// ```compile_fail,E0521
+/// use libgit2::libgit2::core::types::StreamError;
+/// use libgit2::libgit2::object::commit::{CommitBuilderMut, SignatureCallback};
+/// use libgit2::libgit2::repository::repository::RepositoryRef;
+///
+/// fn keep<'k>(kept: &mut Option<CommitBuilderMut<'k>>) {
+///     let mut f = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &core::ffi::CStr| {
+///         *kept = Some(builder);
+///         Ok::<(), StreamError>(())
+///     };
+///     let _ = SignatureCallback::new(&mut f);
+/// }
+/// ```
+///
+/// It borrows its closure exclusively and stays on its thread: libgit2 calls it
+/// synchronously, and the closure need not be `Send`.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::core::types::StreamError;
+/// use libgit2::libgit2::object::commit::{CommitBuilderMut, SignatureCallback};
+/// use libgit2::libgit2::repository::repository::RepositoryRef;
+///
+/// fn send<T: Send>(_: T) {}
+/// let mut f = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &core::ffi::CStr| Ok::<(), StreamError>(());
+/// send(SignatureCallback::new(&mut f));
+/// ```
+///
+/// Wraps: git_commit_signature_cb
+/// Handwritten
+pub struct SignatureCallback<'f> {
+    f: &'f mut SignFn<'f>,
+    /// A panic the closure raised inside a C call, resumed once that call returns.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> SignatureCallback<'f> {
+    /// The callback that calls `f` to sign each commit written with it.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(CommitBuilderMut<'_>, RepositoryRef<'_>, &CStr) -> Result<(), StreamError> + 'f,
+    {
+        Self { f, panic: None }
+    }
+
+    /// Resumes a panic the closure raised inside a libgit2 call it was lent to through
+    /// [`CreateExtOptionsMut::set_signer`], if any: that call failed with `GIT_EUSER`,
+    /// and the callback refuses to sign until the panic is resumed. A wrapper that runs
+    /// the call itself resumes it on its own.
+    pub fn resume_panic(&mut self) {
+        if let Some(panic) = self.panic.take() {
+            resume_unwind(panic);
+        }
+    }
+
+    /// Runs `write` with the C callback and its payload, as the wrapper of a routine that
+    /// signs through it (`git_commit_create_ext`, through its options' `sign` and
+    /// `payload`) hands them to it, then resumes a panic the closure raised meanwhile. The
+    /// payload is this callback, which nothing else touches until `write` returns.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn sign_with<R>(
+        &mut self,
+        write: impl FnOnce(ffi::git_commit_signature_cb, *mut c_void) -> R,
+    ) -> R {
+        let result = write(Some(sign_with_closure), ptr::from_mut(self).cast());
+        self.resume_panic();
+        result
+    }
+}
+
+impl fmt::Debug for SignatureCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SignatureCallback")
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_commit_signature_cb` over a [`SignatureCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`SignatureCallback`] that nothing else uses during the
+/// call; `builder` must be NULL or the live builder of the commit being written, lent
+/// for the call and used by nothing else meanwhile; `repo` NULL or a live repository
+/// used on this thread only; `content` NULL or a NUL-terminated string live for the call.
+unsafe extern "C" fn sign_with_closure(
+    builder: *mut ffi::git_commitbuilder,
+    repo: *mut ffi::git_repository,
+    content: *const c_char,
+    payload: *mut c_void,
+) -> c_int {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for
+    // the call alone.
+    let callback = unsafe { &mut *payload.cast::<SignatureCallback<'_>>() };
+    if callback.panic.is_some() {
+        return ErrorCode::User.raw();
+    }
+    // SAFETY: per this function's contract, a non-NULL `builder` is lent exclusively for
+    // the call, and the handle given to the closure is valid for its call only.
+    let builder = unsafe { CommitBuilderMut::from_ptr(builder) };
+    // SAFETY: per this function's contract, a non-NULL `repo` is live and used on this
+    // thread only for the call; the closure's handle is shared, as the routine's caller
+    // holds it.
+    let repo = unsafe { RepositoryRef::from_ptr(repo) };
+    let (Some(builder), Some(repo), false) = (builder, repo, content.is_null()) else {
+        // libgit2 never passes NULL; stop the commit rather than invent an argument.
+        return ErrorCode::User.raw();
+    };
+    // SAFETY: per this function's contract, `content` is NUL-terminated and live for the
+    // call; it is copied at once, before anything can free it.
+    let content = unsafe { CStr::from_ptr(content) }.to_owned();
+    match catch_unwind(AssertUnwindSafe(|| (callback.f)(builder, repo, &content))) {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => error.raise(),
+        Err(panic) => {
+            callback.panic = Some(panic);
+            ErrorCode::User.raw()
+        }
+    }
+}
+
+/// The failure of a routine that returned `rc`, with the thread's last error.
+fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
+    Err(RepositoryError::from_libgit2(rc))
+}
+
+/// Writes a commit into `repo`'s object database whose contents are `content`, as
+/// `git_commit_create_buffer` formats them, signed with `signature` under the header
+/// `field` (`gpgsig` for `None`), and returns its id. The signature is added as
+/// [`CommitBuilderMut::add_header`] adds one: after the last header, each newline
+/// continued by a space. Without a signature the contents are written as they are.
+///
+/// The contents must parse as a commit of the repository's id type (a `tree`, then any
+/// `parent`s, an `author` and a `committer`), and, unless strict object creation is
+/// turned off, the tree and every parent must exist in the repository with those
+/// types; the signature is not checked. libgit2 writes `field` as given.
+///
+/// Fails with `GIT_ERROR_OBJECT`, "failed to parse bad commit object", or the
+/// signature parser's error, for contents that do not parse; with `GIT_ERROR_INVALID`,
+/// "malformed commit contents", for a signed one without a blank line after its headers;
+/// and with libgit2's error when a tree or parent is missing or the object database
+/// cannot be loaded or written.
+///
+/// Wraps: git_commit_create_with_signature
+pub fn create_with_signature(
+    repo: RepositoryRef<'_>,
+    content: &CStr,
+    signature: Option<&CStr>,
+    field: Option<&CStr>,
+) -> Result<Oid, RepositoryError> {
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    let signature = signature.map_or(ptr::null(), CStr::as_ptr);
+    let field = field.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live repository
+    // on this thread, whose object database libgit2 loads and writes through this shared
+    // handle; `content`, `signature` and `field` are NUL-terminated or NULL (the last
+    // two), read for the call only. The contents' ids are parsed with the repository's
+    // id type, so every id libgit2 reads from the object database is of that type.
+    let rc = unsafe {
+        ffi::git_commit_create_with_signature(
+            out,
+            repo.as_ptr().cast_mut(),
+            content.as_ptr(),
+            signature,
+            field,
+        )
+    };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// The signature of the commit `id` names in `repo`, under the header `field` (`gpgsig`
+/// for `None`), and the contents it signs: the commit's raw contents without that
+/// header. A signature spread over several lines is joined with newlines, without the
+/// spaces that continue them. Returned as `(signature, signed_data)`.
+///
+/// The first header whose line starts with `field` and a space is taken. libgit2 matches
+/// `field` as a prefix: a header whose name only starts with `field` (`gpgsig-sha256`
+/// for `gpgsig`), placed before the one taken, loses those bytes from the signed data.
+///
+/// Fails with [`ErrorCode::NotFound`] when the object is not a commit
+/// (`GIT_ERROR_INVALID`) or has no such header (`GIT_ERROR_OBJECT`, "this commit is not
+/// signed"), or when the object database has no such object; with `GIT_ERROR_OBJECT`,
+/// "malformed header", when the header's last line does not end; and with libgit2's error
+/// when the object database cannot be loaded or read.
+///
+/// Refuses, before libgit2 reads anything, an `id` of another type than `repo`'s, as
+/// [`Object::lookup`](crate::libgit2::object::object::Object::lookup) does (libgit2 would
+/// format it out of bounds), and an empty `field`, with `GIT_ERROR_INVALID`, "the
+/// signature header field name is empty": libgit2 would never get past the commit's
+/// first line.
+///
+/// Wraps: git_commit_extract_signature
+pub fn extract_signature(
+    repo: RepositoryRef<'_>,
+    id: OidRef<'_>,
+    field: Option<&CStr>,
+) -> Result<(BufVal, BufVal), RepositoryError> {
+    id_fits(repo, id)?;
+    if field.is_some_and(|f| f.is_empty()) {
+        set(
+            ErrorClass::Invalid,
+            c"the signature header field name is empty",
+        );
+        return failed(ErrorCode::Generic.raw());
+    }
+    let (mut signature, mut signed_data) = (Buf::new(), Buf::new());
+    let field = field.map_or(ptr::null(), CStr::as_ptr);
+    let (sig, data) = (
+        signature.as_mut().as_mut_ptr(),
+        signed_data.as_mut().as_mut_ptr(),
+    );
+    // SAFETY: `sig` and `data` address the fresh, empty buffers held above, which libgit2
+    // fills (`git_buf_fromstr`) or leaves empty; `repo` is a live repository on this
+    // thread, whose object database libgit2 loads through this shared handle; `id` is a
+    // live id of the repository's type (checked above), only read despite the
+    // signature's `git_oid *`; `field` is NULL or a non-empty NUL-terminated string read
+    // for the call only.
+    let rc = unsafe {
+        ffi::git_commit_extract_signature(
+            sig,
+            data,
+            repo.as_ptr().cast_mut(),
+            id.as_ptr().cast_mut(),
+            field,
+        )
+    };
+    if rc < 0 {
+        failed(rc)
+    } else {
+        Ok((signature, signed_data))
+    }
+}
+
 /// One extra header of a commit being created (`git_commit_header`): a field name and
 /// its value, both borrowed for `'h`, as the options of `git_commit_create_ext` take
 /// them in an array.
@@ -1507,14 +1818,23 @@ impl<'a, 'o> CreateExtOptionsRef<'a, 'o> {
         }
     }
 
-    /// The signing callback and its payload; `None` and NULL by default.
-    ///
-    /// Raw seam: the callback is `git_commit_signature_cb`, which this crate does not
-    /// wrap yet.
+    /// Whether a signing callback is set
+    /// ([`set_signer`](CreateExtOptionsMut::set_signer)); `false` by default.
     ///
     /// Field: git_commit_create_ext_options.sign
     /// Field: git_commit_create_ext_options.payload
-    pub fn sign_callback(&self) -> (ffi::git_commit_signature_cb, *mut c_void) {
+    pub fn has_signer(&self) -> bool {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        unsafe { addr_of!((*p).sign).read() }.is_some()
+    }
+
+    /// The signing callback and its payload as libgit2 reads them: `None` and NULL by
+    /// default, otherwise the trampoline of the [`SignatureCallback`] that
+    /// [`set_signer`](CreateExtOptionsMut::set_signer) stored, and that callback. For the
+    /// unit tests, which hand them to libgit2 themselves.
+    #[cfg(test)]
+    pub(crate) fn sign_callback(&self) -> (ffi::git_commit_signature_cb, *mut c_void) {
         let p = self.as_ptr();
         // SAFETY: reads through the shared handle's pointer to live options.
         unsafe { (addr_of!((*p).sign).read(), addr_of!((*p).payload).read()) }
@@ -1523,13 +1843,12 @@ impl<'a, 'o> CreateExtOptionsRef<'a, 'o> {
 
 impl fmt::Debug for CreateExtOptionsRef<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (sign, _) = self.sign_callback();
         f.debug_struct("CreateExtOptions")
             .field("version", &self.version())
             .field("update_ref", &self.update_ref())
             .field("message_encoding", &self.message_encoding())
             .field("extra_headers", &DebugHeaders(self.extra_headers()))
-            .field("sign_callback", &sign.is_some())
+            .field("sign_callback", &self.has_signer())
             .finish()
     }
 }
@@ -1624,35 +1943,44 @@ impl<'a, 'o> CreateExtOptionsMut<'a, 'o> {
         }
     }
 
-    /// Sets the signing callback and the payload it is passed; `None` signs nothing.
-    /// libgit2 calls it once per commit created with these options, after building
-    /// the commit and before writing it, with the builder to add the signature header
-    /// to, the repository, the commit's contents and `payload`: 0 or a positive value
-    /// writes the commit, with whatever headers the callback added, and a negative
-    /// value fails the call with that value, nothing written. That includes
-    /// `GIT_PASSTHROUGH`, which libgit2's header says writes the commit unsigned.
+    /// Sets the signing callback, borrowed exclusively for `'o`; `None` signs nothing.
+    /// libgit2 calls it once per commit created with these options, after building the
+    /// commit and before writing it, with the builder to add the signature header to
+    /// (see [`SignatureCallback`]); an error fails the call, nothing written.
     ///
-    /// Raw seam: the callback is `git_commit_signature_cb`, which this crate does not
-    /// wrap yet.
+    /// The options store the callback's trampoline and, as its payload, the callback
+    /// itself, which they borrow until they are dropped: it cannot be used, moved or
+    /// dropped meanwhile, nor lent to other options, so each libgit2 call reaches it
+    /// alone. A panic of its closure stops the commit with `GIT_EUSER` and is kept in the
+    /// callback, which [`resume_panic`](SignatureCallback::resume_panic) resumes once the
+    /// options are gone.
     ///
-    /// # Safety
+    /// ```compile_fail,E0499
+    /// use libgit2::libgit2::core::types::StreamError;
+    /// use libgit2::libgit2::object::commit::{CommitBuilderMut, CreateExtOptions, SignatureCallback};
+    /// use libgit2::libgit2::repository::repository::RepositoryRef;
     ///
-    /// Until these options are dropped or the callback is replaced, every libgit2 call
-    /// they are passed to may call `callback` on the calling thread, once, with
-    /// arguments valid for that call only (the builder exclusively, the contents
-    /// NUL-terminated) and with `payload`: `callback` must be sound to call that way,
-    /// and `payload` must stay valid for whatever `callback` does with it.
+    /// let mut f = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &core::ffi::CStr| Ok::<(), StreamError>(());
+    /// let mut signer = SignatureCallback::new(&mut f);
+    /// let mut options = CreateExtOptions::new();
+    /// options.as_mut().set_signer(Some(&mut signer));
+    /// let mut other = CreateExtOptions::new();
+    /// other.as_mut().set_signer(Some(&mut signer));
+    /// drop((options, other));
+    /// ```
     ///
     /// Field: git_commit_create_ext_options.sign
     /// Field: git_commit_create_ext_options.payload
-    pub unsafe fn set_sign_callback(
-        &mut self,
-        callback: ffi::git_commit_signature_cb,
-        payload: *mut c_void,
-    ) {
+    pub fn set_signer(&mut self, signer: Option<&'o mut SignatureCallback<'_>>) {
+        let (callback, payload): (ffi::git_commit_signature_cb, *mut c_void) = match signer {
+            Some(signer) => (Some(sign_with_closure), ptr::from_mut(signer).cast()),
+            None => (None, ptr::null_mut()),
+        };
         let p = self.as_mut_ptr();
         // SAFETY: writes through the exclusive handle's pointer to live options; the
-        // fields are plain data, so the old values need no drop.
+        // fields are plain data, so the old values need no drop. The payload is the
+        // callback the options borrow exclusively for `'o`, for which the trampoline is
+        // sound with libgit2's arguments.
         unsafe {
             addr_of_mut!((*p).sign).write(callback);
             addr_of_mut!((*p).payload).write(payload);
@@ -2049,22 +2377,17 @@ mod unit_tests {
         assert_eq!(raw(&CreateExtOptions::default()).version, 1);
     }
 
-    unsafe extern "C" fn never_signs(
-        _: *mut ffi::git_commitbuilder,
-        _: *mut ffi::git_repository,
-        _: *const c_char,
-        _: *mut c_void,
-    ) -> c_int {
-        unreachable!("only stored")
-    }
-
     /// Every setter stores what its getter reads back, the strings' and the run's own
     /// pointers included, and an empty run is stored as C stores none.
     #[test]
     fn options_setters_round_trip() {
         let encoding = std::ffi::CString::new("ISO-8859-1").unwrap();
         let headers = [Header::new(c"a", c"1"), Header::new(c"b", c"2")];
-        let mut payload = 7u8;
+        let mut never = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            unreachable!("only stored: the options reach no libgit2 call")
+        };
+        let mut signer = SignatureCallback::new(&mut never);
+        let signer_at = ptr::from_mut(&mut signer).cast::<c_void>();
         let mut options = template();
         assert_eq!(
             format!("{options:?}"),
@@ -2075,8 +2398,7 @@ mod unit_tests {
         m.set_update_ref(Some(c"refs/heads/main"));
         m.set_message_encoding(Some(&encoding));
         m.set_extra_headers(&headers);
-        // SAFETY: the callback is never called: the options reach no libgit2 call.
-        unsafe { m.set_sign_callback(Some(never_signs), ptr::from_mut(&mut payload).cast()) };
+        m.set_signer(Some(&mut signer));
         {
             let mut inner = m.as_mut();
             inner.set_update_ref(Some(c"HEAD"));
@@ -2091,7 +2413,7 @@ mod unit_tests {
         assert_eq!(run.get(1).unwrap().value(), c"2");
         let (sign, data) = r.sign_callback();
         assert!(sign.is_some());
-        assert_eq!(data, ptr::from_mut(&mut payload).cast());
+        assert_eq!(data, signer_at);
         assert_eq!(
             format!("{m:?}"),
             "CreateExtOptions { version: 1, update_ref: Some(\"HEAD\"), message_encoding: \
@@ -2102,8 +2424,7 @@ mod unit_tests {
         m.set_extra_headers(&headers[..0]);
         m.set_update_ref(None);
         m.set_message_encoding(None);
-        // SAFETY: nothing is stored to call.
-        unsafe { m.set_sign_callback(None, ptr::null_mut()) };
+        m.set_signer(None);
         let back = raw(&options);
         assert!(back.extra_headers.is_null() && back.extra_headers_len == 0);
         assert!(back.update_ref.is_null() && back.message_encoding.is_null());
@@ -2609,5 +2930,427 @@ mod unit_tests {
             ffi::git_repository_free(repo);
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fresh bare repository holding the empty tree, and an identity, for writing
+    /// commits; removed when dropped.
+    struct Writer {
+        dir: std::path::PathBuf,
+        repo: *mut ffi::git_repository,
+        tree: *mut ffi::git_tree,
+        who: *mut ffi::git_signature,
+    }
+
+    impl Writer {
+        fn new(tag: &str) -> Self {
+            assert!(runtime_pinned());
+            let dir = std::env::temp_dir()
+                .join(format!("crustify-commit-sign-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+            let (mut repo, mut builder, mut tree, mut who) = (
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            );
+            let mut tree_id = ffi::git_oid::default();
+            // SAFETY: writable slots, NUL-terminated strings, and the live repository;
+            // the builder is freed once, the rest when the writer drops.
+            unsafe {
+                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
+                assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
+                assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
+                ffi::git_treebuilder_free(builder);
+                assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &tree_id), 0);
+                let rc = ffi::git_signature_new(
+                    &mut who,
+                    c"A U Thor".as_ptr(),
+                    c"a@example.com".as_ptr(),
+                    1_700_000_000,
+                    0,
+                );
+                assert_eq!(rc, 0);
+            }
+            Self {
+                dir,
+                repo,
+                tree,
+                who,
+            }
+        }
+
+        /// `git_commit_create_ext` with `message`, signing through `sign` and
+        /// `payload`: the new commit's id, or the code and the thread's error.
+        fn create(
+            &self,
+            message: &CStr,
+            sign: ffi::git_commit_signature_cb,
+            payload: *mut c_void,
+        ) -> Result<ffi::git_oid, (c_int, ErrorBuf)> {
+            let opts = ffi::git_commit_create_ext_options {
+                version: 1,
+                sign,
+                payload,
+                ..Default::default()
+            };
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id; the live repository, identity and tree (of that
+            // repository); no parents; options whose callback and payload are live for
+            // the call.
+            let rc = unsafe {
+                ffi::git_commit_create_ext(
+                    &mut id,
+                    self.repo,
+                    self.who,
+                    self.who,
+                    message.as_ptr(),
+                    self.tree,
+                    0,
+                    ptr::null(),
+                    &opts,
+                )
+            };
+            if rc < 0 { Err((rc, last())) } else { Ok(id) }
+        }
+
+        /// Writes a commit signing through `callback`, as the wrapper of
+        /// `git_commit_create_ext` will.
+        fn create_signed(
+            &self,
+            message: &CStr,
+            callback: &mut SignatureCallback<'_>,
+        ) -> Result<ffi::git_oid, (c_int, ErrorBuf)> {
+            callback.sign_with(|sign, payload| self.create(message, sign, payload))
+        }
+
+        /// The raw contents of the commit `id`.
+        fn raw(&self, id: &ffi::git_oid) -> Vec<u8> {
+            let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
+            // SAFETY: writable slots and the live repository and id; the object's data
+            // is `size` bytes, copied before the object and the odb are freed once.
+            unsafe {
+                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
+                assert_eq!(ffi::git_odb_read(&mut obj, odb, id), 0);
+                let data = core::slice::from_raw_parts(
+                    ffi::git_odb_object_data(obj).cast::<u8>(),
+                    ffi::git_odb_object_size(obj),
+                )
+                .to_vec();
+                ffi::git_odb_object_free(obj);
+                ffi::git_odb_free(odb);
+                data
+            }
+        }
+
+        /// The loose objects written besides the empty tree: the commits.
+        fn commits(&self) -> usize {
+            let objects = self.dir.join("objects");
+            let loose: usize = std::fs::read_dir(&objects)
+                .unwrap()
+                .map(|e| e.unwrap())
+                .filter(|e| e.file_name().len() == 2)
+                .map(|e| std::fs::read_dir(e.path()).unwrap().count())
+                .sum();
+            loose - 1
+        }
+
+        fn repository(&self) -> RepositoryRef<'_> {
+            // SAFETY: the writer's live repository, used on this thread while the
+            // handle borrows the writer.
+            unsafe { RepositoryRef::from_ptr(self.repo) }.unwrap()
+        }
+    }
+
+    impl Drop for Writer {
+        fn drop(&mut self) {
+            // SAFETY: each is live and freed once, the repository last.
+            unsafe {
+                ffi::git_signature_free(self.who);
+                ffi::git_tree_free(self.tree);
+                ffi::git_repository_free(self.repo);
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    const SIGNATURE: &CStr = c"-----BEGIN SIGNATURE-----\nsigned\n-----END SIGNATURE-----";
+
+    /// The closure is given the builder, the repository and the contents to sign, and
+    /// adds the signature (then a second header) through the builder; reading the
+    /// contents after the first header was added is sound, since they are a copy (ASan
+    /// flags a read of the buffer libgit2 freed). The signature lands in the commit,
+    /// where `extract_signature` finds it with the contents it signs.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signing_callback_adds_headers() {
+        let w = Writer::new("adds");
+        let mut seen = Vec::new();
+        let mut sign =
+            |mut builder: CommitBuilderMut<'_>, repo: RepositoryRef<'_>, content: &CStr| {
+                assert_eq!(repo.as_ptr(), w.repo.cast_const());
+                builder
+                    .add_header(c"gpgsig", SIGNATURE)
+                    .map_err(StreamError::from)?;
+                seen.push(content.to_bytes().to_vec());
+                builder
+                    .as_mut()
+                    .add_header(c"x-second", c"two")
+                    .map_err(StreamError::from)?;
+                seen.push(content.to_bytes().to_vec());
+                Ok(())
+            };
+        let mut callback = SignatureCallback::new(&mut sign);
+        assert!(format!("{callback:?}").starts_with("SignatureCallback { panicked: false"));
+        let id = w.create_signed(c"signed\n", &mut callback).unwrap();
+        drop(callback);
+        let raw = String::from_utf8(w.raw(&id)).unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0], seen[1]);
+        let unsigned = String::from_utf8(seen.pop().unwrap()).unwrap();
+        assert!(unsigned.starts_with("tree ") && unsigned.ends_with("\n\nsigned\n"));
+        let (headers, message) = unsigned.split_once("\n\n").unwrap();
+        assert_eq!(
+            raw,
+            format!(
+                "{headers}\ngpgsig -----BEGIN SIGNATURE-----\n signed\n -----END SIGNATURE-----\nx-second two\n\n{message}"
+            )
+        );
+
+        let oid = Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap();
+        let (signature, signed) = extract_signature(w.repository(), oid.as_ref(), None).unwrap();
+        assert_eq!(signature.as_ref().as_bytes(), SIGNATURE.to_bytes());
+        assert_eq!(
+            signed.as_ref().as_bytes(),
+            format!("{headers}\nx-second two\n\n{message}").as_bytes()
+        );
+    }
+
+    /// The trampoline writes the same commit a C callback adding the same header does.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signing_callback_matches_a_c_callback() {
+        unsafe extern "C" fn c_sign(
+            builder: *mut ffi::git_commitbuilder,
+            _repo: *mut ffi::git_repository,
+            _content: *const c_char,
+            _payload: *mut c_void,
+        ) -> c_int {
+            // SAFETY: the builder libgit2 lends for the call; NUL-terminated strings.
+            unsafe {
+                ffi::git_commitbuilder_add_header(builder, c"gpgsig".as_ptr(), SIGNATURE.as_ptr())
+            }
+        }
+        let (c, rust) = (Writer::new("c-side"), Writer::new("rust-side"));
+        let c_id = c.create(c"same\n", Some(c_sign), ptr::null_mut()).unwrap();
+        let mut sign = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            builder
+                .add_header(c"gpgsig", SIGNATURE)
+                .map_err(StreamError::from)
+        };
+        let rust_id = rust
+            .create_signed(c"same\n", &mut SignatureCallback::new(&mut sign))
+            .unwrap();
+        assert_eq!(c_id.id, rust_id.id);
+        assert_eq!(c.raw(&c_id), rust.raw(&rust_id));
+        // Not signing at all is `Ok` without a header: the unsigned commit.
+        let unsigned = c.create(c"same\n", None, ptr::null_mut()).unwrap();
+        let mut skip = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| Ok(());
+        let skipped = rust
+            .create_signed(c"same\n", &mut SignatureCallback::new(&mut skip))
+            .unwrap();
+        assert_eq!(unsigned.id, skipped.id);
+    }
+
+    /// An error stops the commit before it is written: the routine returns the error's
+    /// code, with its class and message as the thread's error, whatever the code
+    /// (`GIT_PASSTHROUGH` too, which libgit2 reads as a failure).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signing_errors_stop_the_commit() {
+        let w = Writer::new("errors");
+        for code in [ErrorCode::Generic, ErrorCode::User, ErrorCode::Passthrough] {
+            let mut fail = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+                Err(StreamError::new(ErrorClass::Callback, c"no key").with_code(code))
+            };
+            let (rc, error) = w
+                .create_signed(c"refused\n", &mut SignatureCallback::new(&mut fail))
+                .unwrap_err();
+            assert_eq!(rc, code.raw());
+            assert_eq!(error.class(), Some(ErrorClass::Callback));
+            assert_eq!(error.message(), c"no key");
+        }
+        assert_eq!(w.commits(), 0);
+    }
+
+    /// A panic in the closure stops the commit with `GIT_EUSER` and resumes once
+    /// libgit2 has returned, with nothing written; the callback is usable again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signing_panics_resume_after_c() {
+        let w = Writer::new("panics");
+        let mut calls = 0;
+        let mut boom = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            calls += 1;
+            if calls == 1 {
+                panic!("signing failed");
+            }
+            Ok(())
+        };
+        let mut callback = SignatureCallback::new(&mut boom);
+        let mut returned = None;
+        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            callback.sign_with(|sign, payload| {
+                let result = w.create(c"panicked\n", sign, payload);
+                returned = Some(result.as_ref().map_err(|(rc, _)| *rc).err());
+                result
+            })
+        }));
+        let panic = caught.unwrap_err();
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"signing failed"));
+        assert_eq!(returned, Some(Some(ErrorCode::User.raw())));
+        assert_eq!(w.commits(), 0);
+        assert!(w.create_signed(c"again\n", &mut callback).is_ok());
+        assert_eq!(w.commits(), 1);
+    }
+
+    /// An empty header field name is refused before libgit2 reads anything: libgit2's
+    /// scan for it never gets past the commit's first line. A `None` field is `gpgsig`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn empty_signature_fields_are_refused_before_c() {
+        let w = Writer::new("empty-field");
+        let mut sign = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            builder
+                .add_header(c"gpgsig", c"sig")
+                .map_err(StreamError::from)
+        };
+        let id = w
+            .create_signed(c"m\n", &mut SignatureCallback::new(&mut sign))
+            .unwrap();
+        let oid = Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap();
+        let e = extract_signature(w.repository(), oid.as_ref(), Some(c"")).unwrap_err();
+        assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+        assert_eq!(e.message(), c"the signature header field name is empty");
+        let (signature, _) = extract_signature(w.repository(), oid.as_ref(), None).unwrap();
+        assert_eq!(signature.as_ref().as_bytes(), b"sig");
+    }
+
+    /// A closure may write another commit, signed through its own callback, from inside
+    /// the call: each trampoline reaches its own payload, and both commits are written.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signing_callbacks_reenter() {
+        let w = Writer::new("reenter");
+        let mut inner_calls = 0;
+        let mut outer = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            let mut inner = |mut b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+                inner_calls += 1;
+                b.add_header(c"gpgsig", c"inner").map_err(StreamError::from)
+            };
+            let nested = w
+                .create_signed(c"nested\n", &mut SignatureCallback::new(&mut inner))
+                .map_err(|(_, e)| StreamError::from(e))?;
+            let hex: String = nested.id[..20].iter().map(|b| format!("{b:02x}")).collect();
+            let value = std::ffi::CString::new(hex).unwrap();
+            builder
+                .add_header(c"x-nested", &value)
+                .map_err(StreamError::from)
+        };
+        let id = w
+            .create_signed(c"outer\n", &mut SignatureCallback::new(&mut outer))
+            .unwrap();
+        assert_eq!(inner_calls, 1);
+        assert_eq!(w.commits(), 2);
+        let raw = String::from_utf8(w.raw(&id)).unwrap();
+        assert!(raw.contains("\nx-nested "), "{raw}");
+    }
+
+    /// The trampoline driven by hand, as libgit2 never drives it: a NULL argument stops
+    /// the commit without calling the closure, and so does a call after the closure
+    /// panicked, until the panic resumes when the C call returns. The handles the
+    /// closure would get are never read here (Miri runs it).
+    #[test]
+    fn trampoline_refuses_null_arguments_and_calls_after_a_panic() {
+        let mut calls = 0;
+        let mut boom = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            calls += 1;
+            panic!("first call");
+        };
+        let mut callback = SignatureCallback::new(&mut boom);
+        let (mut builder_slot, mut repo_slot) = (0u64, 0u64);
+        let builder = ptr::from_mut(&mut builder_slot).cast::<ffi::git_commitbuilder>();
+        let repo = ptr::from_mut(&mut repo_slot).cast::<ffi::git_repository>();
+        let content = c"tree x\n\nmessage\n".as_ptr();
+        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            callback.sign_with(|sign, payload| {
+                let sign = sign.unwrap();
+                // SAFETY: the payload is the callback; each pointer is NULL or live
+                // storage the closure never reads, and `content` is NUL-terminated.
+                unsafe {
+                    let user = ErrorCode::User.raw();
+                    assert_eq!(sign(ptr::null_mut(), repo, content, payload), user);
+                    assert_eq!(sign(builder, ptr::null_mut(), content, payload), user);
+                    assert_eq!(sign(builder, repo, ptr::null(), payload), user);
+                    assert_eq!(sign(builder, repo, content, payload), user);
+                    assert_eq!(sign(builder, repo, content, payload), user);
+                }
+            })
+        }));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"first call")
+        );
+        assert!(format!("{callback:?}").contains("panicked: false"));
+        drop(callback);
+        assert_eq!(calls, 1);
+    }
+
+    /// A callback stored in options through `set_signer` signs each commit the options
+    /// are passed to; a panic of its closure fails that commit with `GIT_EUSER`, is kept
+    /// until `resume_panic` once the options are gone, and blocks signing until then.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signers_stored_in_options_sign_and_keep_panics() {
+        let w = Writer::new("options-signer");
+        let mut calls = 0;
+        let mut sign = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            calls += 1;
+            if calls == 2 {
+                panic!("second commit");
+            }
+            builder
+                .add_header(c"gpgsig", c"stored")
+                .map_err(StreamError::from)
+        };
+        let mut signer = SignatureCallback::new(&mut sign);
+        {
+            let mut options = CreateExtOptions::new();
+            options.as_mut().set_signer(Some(&mut signer));
+            let (callback, payload) = options.as_ref().sign_callback();
+            let id = w.create(c"one\n", callback, payload).unwrap();
+            assert!(
+                String::from_utf8(w.raw(&id))
+                    .unwrap()
+                    .contains("\ngpgsig stored\n")
+            );
+            let (rc, _) = w.create(c"two\n", callback, payload).unwrap_err();
+            assert_eq!(rc, ErrorCode::User.raw());
+            let (rc, _) = w.create(c"three\n", callback, payload).unwrap_err();
+            assert_eq!(rc, ErrorCode::User.raw());
+        }
+        assert!(format!("{signer:?}").contains("panicked: true"));
+        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| signer.resume_panic()));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"second commit")
+        );
+        signer.resume_panic();
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_signer(Some(&mut signer));
+        let (callback, payload) = options.as_ref().sign_callback();
+        assert!(w.create(c"four\n", callback, payload).is_ok());
+        drop(signer);
+        assert_eq!((calls, w.commits()), (3, 2));
     }
 }

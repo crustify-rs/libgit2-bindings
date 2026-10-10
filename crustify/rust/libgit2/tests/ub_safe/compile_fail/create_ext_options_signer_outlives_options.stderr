@@ -1,0 +1,12 @@
+error[E0505]: cannot move out of `signer` because it is borrowed
+  --> tests/ub_safe/compile_fail/create_ext_options_signer_outlives_options.rs:14:10
+   |
+11 |     let mut signer = SignatureCallback::new(&mut f);
+   |         ---------- binding `signer` declared here
+12 |     let mut options = CreateExtOptions::new();
+13 |     options.as_mut().set_signer(Some(&mut signer));
+   |                                      ----------- borrow of `signer` occurs here
+14 |     drop(signer);
+   |          ^^^^^^ move out of `signer` occurs here
+15 |     let _ = options.as_ref().has_signer();
+   |             ------- borrow later used here

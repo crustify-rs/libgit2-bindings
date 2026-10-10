@@ -238,6 +238,52 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
         unsafe { ObjectArc::from_raw(object.as_ptr()) }.expect("a handle is never NULL")
     }
 
+    /// The object's id, of its repository's id type: the id it was looked up by, or the
+    /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in the
+    /// object, which writes it once, when it is parsed.
+    ///
+    /// Wraps: git_object_id
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live object for `'a`; libgit2 only reads it, and
+        // returns the address of the id cached in it (`&obj->cached.oid`).
+        let id = unsafe { ffi::git_object_id(self.as_ptr()) };
+        // SAFETY: the id is part of the object, so it is non-NULL and lives as long as the
+        // object, past `'a`; nothing writes it once the object is cached or returned.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a live object has an id")
+    }
+
+    /// The repository the object was looked up in, borrowed for `'r`, as the shared
+    /// handle it was looked up through (every [`Object`] is built from a
+    /// [`RepositoryRef<'r>`](RepositoryRef), or derived from such an object).
+    ///
+    /// The result is that handle again, so it lets nothing happen that the object's own
+    /// lookups do not: it outlives the object, but not the repository's borrow.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::object::Object;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let object = Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap();
+    /// let owner = object.as_ref().owner();
+    /// drop(repo);
+    /// let _ = owner.path();
+    /// ```
+    ///
+    /// Wraps: git_object_owner
+    pub fn owner(&self) -> RepositoryRef<'r> {
+        // SAFETY: the handle addresses a live object for `'a`, which libgit2 only reads.
+        let repo = unsafe { ffi::git_object_owner(self.as_ptr()) };
+        // SAFETY: `obj->repo` is the repository the object was looked up in, stored
+        // without a count and never cleared. An `Object<'r>` is only built from a
+        // `RepositoryRef<'r>` (`lookup`, `lookup_prefix`) or from another `Object<'r>`
+        // (`peel`, `lookup_bypath`, `to_object`), so that repository is live and shared,
+        // not exclusively borrowed, for `'r`, on this thread: the handle returned is the
+        // one the object was looked up through.
+        unsafe { RepositoryRef::from_ptr(repo) }.expect("an object always has a repository")
+    }
+
     /// The object this one peels to, of type `kind`: the same object when it is already
     /// of that type (one more reference, as [`to_object`](Self::to_object) takes one); a
     /// tag's target, followed through nested tags, for a tag; a commit's tree for a
@@ -574,7 +620,8 @@ impl<'r> Object<'r> {
 /// `Ok` when `id` is of `repo`'s object id type, the refusal otherwise; see the
 /// [module docs](self#looking-objects-up). The typed lookups (`git_tree_lookup`,
 /// `git_tag_lookup`, `git_blob_lookup`, ...) forward to the same routines, and refuse the
-/// same ids.
+/// same ids; so does every other wrapper handing an id to a routine that reads it from
+/// the object database.
 pub(crate) fn id_fits(repo: RepositoryRef<'_>, id: OidRef<'_>) -> Result<(), RepositoryError> {
     if u32::from(id.raw_kind()) == repo.oid_type().raw() {
         return Ok(());

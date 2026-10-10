@@ -519,3 +519,74 @@ mod allocator {
         );
     }
 }
+
+/// Equivalence of `prettify` with `git_message_prettify`.
+///
+/// Each side cleans up its own copy of every message of a corpus (blank, whitespace-only
+/// and comment-only messages, runs of blank lines, trailing whitespace of every kind,
+/// unterminated last lines, comment characters mid-line and after whitespace, bytes past
+/// `0x7f`), with comments kept and with every comment byte, those past `0x7f` included
+/// (a negative C `char`); the results are compared byte for byte. A buffer is reused on
+/// the C side across messages, as `git_buf` callers do.
+mod prettify {
+    use std::ffi::{CString, c_char};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::message::prettify;
+
+    use super::init;
+
+    fn corpus() -> Vec<Vec<u8>> {
+        let mut out: Vec<Vec<u8>> = [
+            &b""[..],
+            b"\n",
+            b"\n\n\n",
+            b" \t\x0b\x0c\r\n",
+            b"subject",
+            b"subject\n",
+            b"  subject  \n\n\n\n  body\t\r\n\n",
+            b"# comment\nsubject\n# another\n\nbody\n#",
+            b" # indented comment\n;semi\n;\n",
+            b"a\n\n# c\n\nb",
+            b"\xff\xfe\x80\n\n\x80 not ascii\n",
+            b"line one\r\nline two\r\n\r\n\r\n",
+        ]
+        .iter()
+        .map(|m| m.to_vec())
+        .collect();
+        let mut long = vec![b'x'; 5000];
+        long.extend_from_slice(b"  \n\n#c\n");
+        long.extend(vec![b'y'; 5000]);
+        out.push(long);
+        out
+    }
+
+    fn c_prettify(buf: &mut ffi::git_buf, message: &[u8], comment: Option<u8>) -> Vec<u8> {
+        let message = CString::new(message).unwrap();
+        let (strip, c) = comment.map_or((0, 0), |c| (1, c as c_char));
+        // SAFETY: a buffer libgit2 filled before or zeroed; a NUL-terminated message.
+        let rc = unsafe { ffi::git_message_prettify(buf, message.as_ptr(), strip, c) };
+        assert_eq!(rc, 0);
+        if buf.ptr.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: libgit2 filled `size` bytes at `ptr`.
+        unsafe { std::slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size) }.to_vec()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn prettified_messages_match_c() {
+        init();
+        let mut buf = ffi::git_buf::default();
+        for message in corpus() {
+            for comment in std::iter::once(None).chain((0..=u8::MAX).map(Some)) {
+                let c = c_prettify(&mut buf, &message, comment);
+                let rust = prettify(&CString::new(message.clone()).unwrap(), comment).unwrap();
+                assert_eq!(rust.as_ref().as_bytes(), c, "{message:x?} {comment:?}");
+            }
+        }
+        // SAFETY: the buffer libgit2 filled, disposed once.
+        unsafe { ffi::git_buf_dispose(&mut buf) };
+    }
+}
