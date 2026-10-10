@@ -577,3 +577,25 @@ pub fn connect(url: &CStr) -> c_int {
     unsafe { ffi::git_remote_free(remote) };
     rc
 }
+
+// --- `git2/repository.h`: `git_repository_item_t` -----------------------------------
+
+use libgit2::libgit2::repository::repository::Item;
+
+/// `git_repository_item_path(repo, item)`, adopted into a `Buf`: the path, or the
+/// return. Stands in for the `git_repository_item_path` wrapper (`repository`), which
+/// replaces it.
+pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
+    let mut raw = ffi::git_buf::default();
+    // SAFETY: an empty buffer, the fixture's live repository, and a value the safe
+    // `Item` produced, which is the only contract this fixture adds: every `Item` is
+    // below `GIT_REPOSITORY_ITEM__LAST`, the bound of the table libgit2 indexes.
+    let rc = unsafe { ffi::git_repository_item_path(&raw mut raw, repo.repo, item.raw()) };
+    // SAFETY: `raw` is as libgit2 left it: empty, or owning a NUL-terminated allocation
+    // of its allocator.
+    let buf = unsafe { Buf::from_raw(raw) };
+    if rc < 0 {
+        return Err(rc);
+    }
+    Ok(buf.as_ref().to_str().unwrap().to_owned())
+}
