@@ -3572,7 +3572,10 @@ impl RepositoryRef<'_> {
     /// Each line is parsed before its call, so the entries before a malformed line
     /// are seen and the walk then fails with `GIT_ERROR_FETCHHEAD` and the line's
     /// number (an empty line, a bad id, a bad `not-for-merge` marker or description,
-    /// a last line without its newline); ids are read as the repository's type. Fails
+    /// a last line without its newline); ids are read as the repository's type. A line
+    /// of an id and a tab alone has no marker to parse, and libgit2 gives its entry
+    /// the [`is_merge`](FetchheadEntry::is_merge) of the entry before it (`false` for
+    /// the first), where an id alone is always for merge. Fails
     /// with [`ErrorCode::NotFound`] when there is no `FETCH_HEAD`, and for a repository
     /// without paths, whose `FETCH_HEAD` libgit2 would read from the process's working
     /// directory.
@@ -3606,13 +3609,14 @@ impl RepositoryRef<'_> {
         &self,
         callback: &mut FetchheadForeachCallback<'_>,
     ) -> Result<ControlFlow<()>, RepositoryError> {
+        // A walk that makes no call (refused, or of an empty file) stopped nothing.
+        callback.stopped = false;
         if !runtime_pinned() {
             return Err(unpinned());
         }
         if self.path().is_none() {
             return Err(pathless());
         }
-        callback.stopped = false;
         let repo = self.as_ptr().cast_mut();
         let (f, payload) = callback.raw();
         // SAFETY: a live repository with a git directory, used on this thread, which
@@ -5580,7 +5584,8 @@ mod unit_tests {
 
         /// A repository without paths has no `FETCH_HEAD`: libgit2 would read the
         /// process's working directory's. Refused before the call, the callback never
-        /// called.
+        /// called; and the callback's record of a stop is reset by the refused walk as
+        /// by any other, since it made no call.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn for_each_fetchhead_refuses_a_repository_without_paths() {
@@ -5598,6 +5603,22 @@ mod unit_tests {
             assert!(!callback.stopped());
             drop(callback);
             assert_eq!(calls.get(), 0);
+
+            let mut stop = |_: FetchheadEntry<'_>| ControlFlow::Break(());
+            let mut callback = FetchheadForeachCallback::new(&mut stop);
+            let id = Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1)
+                .unwrap();
+            let entry = FetchheadEntry {
+                ref_name: None,
+                remote_url: None,
+                id: id.as_ref(),
+                is_merge: true,
+            };
+            assert_eq!(callback.call(entry), ControlFlow::Break(()));
+            assert!(callback.stopped());
+            let error = repo.as_ref().for_each_fetchhead(&mut callback).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+            assert!(!callback.stopped());
         }
 
         /// A stop is told from libgit2's errors by the callback's own record, which each

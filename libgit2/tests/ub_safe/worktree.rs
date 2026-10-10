@@ -1089,6 +1089,42 @@ mod adding {
         drop((feature, tag, alpha));
     }
 
+    /// A reference of another repository lends its name: the add reads the lent
+    /// reference and the repository's own of that name for the call only (ASan: the
+    /// lender and its reference go first, the worktree still reads its copies), and
+    /// releases the reference it looked up itself whether the add succeeds, fails after
+    /// the lookup (the branch checked out already), or finds no branch of that name in
+    /// the repository (LSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lent_references_are_read_for_the_call_only() {
+        let repo = AddRepo::new("lent-to");
+        let lender = AddRepo::new("lender");
+        fs::write(lender.base.join("repo/.git/refs/heads/only"), {
+            fs::read_to_string(lender.base.join("repo/.git/refs/heads/main")).unwrap()
+        })
+        .unwrap();
+        let feature = lender.reference(c"refs/heads/feature");
+        let only = lender.reference(c"refs/heads/only");
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(feature.as_ref()));
+        let w = repo.add("lent", Some(&opts)).unwrap();
+        let error = repo.add("twice", Some(&opts)).unwrap_err();
+        assert_eq!(
+            error.1,
+            "reference refs/heads/feature is already checked out"
+        );
+        opts.as_mut().set_reference(Some(only.as_ref()));
+        let error = repo.add("none", Some(&opts)).unwrap_err();
+        assert_eq!(error.0, ErrorCode::UnbornBranch.raw());
+        drop((feature, only));
+        drop(lender);
+        assert_eq!(w.as_ref().name(), c"lent");
+        assert_eq!(w.as_ref().validate(), Ok(()));
+        let head = fs::read_to_string(repo.admin("lent").join("HEAD")).unwrap();
+        assert_eq!(head, "ref: refs/heads/feature\n");
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn a_repository_without_paths_is_refused() {
