@@ -238,7 +238,12 @@ fn blank(seen: Seen, dir: Option<&CStr>) -> Seen {
 /// Runs the same steps on both odbs, comparing each pair as it is observed; the ids
 /// the writes produce feed the later steps. `dirs` names the directories each side
 /// opened, which failures blank.
-fn compare_in(c: *mut ffi::git_odb, rust: &OdbArc, dirs: Option<(&CStr, &CStr)>, data: &[&[u8]]) {
+fn compare_in(
+    c: *mut ffi::git_odb,
+    rust: &OdbArc<'_>,
+    dirs: Option<(&CStr, &CStr)>,
+    data: &[&[u8]],
+) {
     let mut ids = vec![(0u8, [0u8; 32])];
     let both = |op: Op<'_>| {
         let seen = blank(step(c, op), dirs.map(|d| d.0));
@@ -276,11 +281,11 @@ fn blobs() -> Vec<Vec<u8>> {
     ]
 }
 
-fn compare_blobs(c: *mut ffi::git_odb, rust: &OdbArc) {
+fn compare_blobs(c: *mut ffi::git_odb, rust: &OdbArc<'_>) {
     compare_blobs_in(c, rust, None);
 }
 
-fn compare_blobs_in(c: *mut ffi::git_odb, rust: &OdbArc, dirs: Option<(&CStr, &CStr)>) {
+fn compare_blobs_in(c: *mut ffi::git_odb, rust: &OdbArc<'_>, dirs: Option<(&CStr, &CStr)>) {
     let blobs = blobs();
     let data: Vec<&[u8]> = blobs.iter().map(Vec::as_slice).collect();
     compare_in(c, rust, dirs, &data);
@@ -474,7 +479,11 @@ impl Drop for Repo {
 }
 
 /// Dropping an `OdbArc` a repository shares leaves the repository the odb, as
-/// `git_odb_free` does; and the odb outlives a repository freed first.
+/// `git_odb_free` does; and the odb outlives a repository freed first. In C the
+/// caller's reference then works on, through the odb's own cache; Rust keeps the
+/// reference tied to the repository (an `OdbArc<'r>`), since a thread still reading
+/// through it would race the free (`odb_cache()` follows the owner pointer without a
+/// reference), so the Rust side releases its reference before the repository.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn a_shared_odb_lives_as_long_as_in_c() {
@@ -501,17 +510,23 @@ fn a_shared_odb_lives_as_long_as_in_c() {
         assert_eq!(step(rust.0, Op::Write(bytes)), step(c.0, Op::Write(bytes)));
     }
     drop((c, rust));
-    // Then the repository goes first, and the caller's reference keeps the odb.
+    // Then the repository goes first: C's reference keeps the odb, and reads through
+    // its own cache from then on. The Rust owner borrows the repository, so it is
+    // released first, and the odb is reopened from disk to compare what C still reads.
     let c = c_repo.odb();
     let rust = {
         let raw = rust_repo.odb();
         let adopted = raw.0;
         core::mem::forget(raw);
         // The test's own reference, handed to the Rust owner the wrapper of
-        // `git_repository_odb` will return.
-        // SAFETY: `adopted` is the one reference `git_repository_odb` just returned.
-        unsafe { OdbArc::from_c(adopted) }.unwrap()
+        // `git_repository_odb` will return, borrowing `rust_repo`.
+        // SAFETY: `adopted` is the one reference `git_repository_odb` just returned, to
+        // an odb `rust_repo` owns, which the result's borrow of `rust_repo` keeps alive.
+        unsafe { OdbArc::<'_>::from_c(adopted) }.unwrap()
     };
+    compare_blobs(c.0, &rust);
+    drop(rust);
     drop((c_repo, rust_repo));
+    let rust = Odb::open(&dirs.rust).unwrap();
     compare_blobs(c.0, &rust);
 }

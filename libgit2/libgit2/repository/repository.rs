@@ -64,8 +64,11 @@ pub enum InitFlag {
     ///
     /// Its bit is `GIT_REPOSITORY_OPEN_FROM_ENV`'s too, and `git_repository_init_ext`
     /// tests that open flag on the same `flags`: with this flag set, init also honours
-    /// `$GIT_COMMON_DIR` when deciding whether the path already holds a repository,
-    /// and reads the global and system configuration from the environment's paths.
+    /// `$GIT_COMMON_DIR` when deciding whether the path already holds a repository
+    /// (`lookup_commondir`). It also passes the flag to its symlink probe, which on
+    /// Windows alone reads `core.symlinks` from the global and system configuration
+    /// at the environment's paths; elsewhere that probe ignores it, and init reads no
+    /// configuration from the environment.
     Mkpath = ffi::GIT_REPOSITORY_INIT_MKPATH,
     /// Initialise from an external template: the options' template path, else the
     /// `init.templatedir` setting, else the system's template directory, rather than

@@ -28,6 +28,7 @@ use libgit2::libgit2::util::errors::ErrorClass;
 use crate::fixture::annotated_commit::{
     CommitRepo, LONG_BRANCH, LONG_URL, hex, read, refuse, refused,
 };
+use crate::fixture::index::isolated_tolerating_leaks;
 use crate::fixture::isolated;
 
 /// `id`'s bytes under the type byte `kind`.
@@ -205,6 +206,34 @@ mod from_ref {
                 // stays open, so its object cache still reaches that commit, and
                 // LeakSanitizer reports only what nothing reaches: the failed call's
                 // annotated commit, had the wrapper not freed it.
+                repo.keep_open();
+            },
+        );
+    }
+
+    /// The copy before the name's, the description's, fails inside libgit2's
+    /// `annotated_commit_init`, which reports the failure with nothing in the out slot
+    /// (and leaks the half-built commit, so LeakSanitizer is off in this child): the
+    /// wrapper adopts nothing and reports the error, and the next call succeeds.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn description_copy_failure_adopts_nothing() {
+        isolated_tolerating_leaks(
+            concat!(module_path!(), "::description_copy_failure_adopts_nothing"),
+            || {
+                let repo = CommitRepo::new("from-ref-description-oom", ffi::GIT_OID_SHA1);
+                let reference = repo.reference(LONG_BRANCH);
+                refuse(LONG_BRANCH.to_bytes_with_nul().len(), 1);
+                let e = AnnotatedCommit::from_ref(repo.repo(), reference.as_ref()).unwrap_err();
+                assert!(refused());
+                assert_eq!(e.class(), Some(ErrorClass::NoMemory));
+                let commit = AnnotatedCommit::from_ref(repo.repo(), reference.as_ref()).unwrap();
+                assert_eq!(
+                    read(&commit),
+                    (hex(&repo.first), LONG_BRANCH.to_str().ok().map(Into::into))
+                );
+                drop(commit);
+                drop(reference);
                 repo.keep_open();
             },
         );

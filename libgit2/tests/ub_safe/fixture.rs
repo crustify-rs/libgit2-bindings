@@ -727,7 +727,7 @@ pub mod odb {
     use libgit2::libgit2::repository::repository::RepositoryBox;
 
     /// `git_odb_write` of a blob; the id, or the error code.
-    pub fn write_blob(odb: &OdbArc, data: &[u8]) -> Result<ffi::git_oid, i32> {
+    pub fn write_blob(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
         let mut id = ffi::git_oid::default();
         // SAFETY: the odb is live while `odb` is borrowed; `id` is writable and `data`
         // live for its length, read for the call only.
@@ -744,7 +744,10 @@ pub mod odb {
     }
 
     /// `git_odb_read_header`: the object's length and type, or the error code.
-    pub fn read_header(odb: &OdbArc, id: &ffi::git_oid) -> Result<(usize, ffi::git_object_t), i32> {
+    pub fn read_header(
+        odb: &OdbArc<'_>,
+        id: &ffi::git_oid,
+    ) -> Result<(usize, ffi::git_object_t), i32> {
         let (mut len, mut kind) = (0, 0);
         // SAFETY: the odb is live while `odb` is borrowed; the out slots are writable
         // and `id` live, read for the call only.
@@ -753,34 +756,40 @@ pub mod odb {
     }
 
     /// `git_odb_num_backends`.
-    pub fn backends(odb: &OdbArc) -> usize {
+    pub fn backends(odb: &OdbArc<'_>) -> usize {
         // SAFETY: the odb is live while `odb` is borrowed; the routine reads the count
         // under the odb's lock.
         unsafe { ffi::git_odb_num_backends(odb.as_c_ptr()) }
     }
 
     /// A repository over an odb (`git_repository_wrap_odb`), which holds a reference of
-    /// its own; freed on drop. Stands in for the `git_repository_wrap_odb` wrapper.
+    /// its own and becomes the odb's owner; freed on drop. Stands in for the
+    /// `git_repository_wrap_odb` wrapper, which consumes an `OdbArc<'static>` (an odb
+    /// no repository owns yet; the repository's own reference keeps it) and lends it
+    /// back through [`odb`](Self::odb), borrowing the repository.
     pub struct Repo(RepositoryBox);
 
     impl Repo {
-        pub fn wrap(odb: &OdbArc) -> Self {
+        pub fn wrap(odb: OdbArc<'static>) -> Self {
             let mut repo = core::ptr::null_mut();
             // SAFETY: `repo` is a writable slot; the odb is live, and the repository
             // takes a reference to it.
             let rc = unsafe { ffi::git_repository_wrap_odb(&mut repo, odb.as_c_ptr()) };
             assert_eq!(rc, 0);
+            drop(odb);
             // SAFETY: the fresh repository the call wrote, owned here alone.
             Self(unsafe { RepositoryBox::from_c(repo) }.unwrap())
         }
 
-        /// A new reference to the repository's odb (`git_repository_odb`).
-        pub fn odb(&self) -> OdbArc {
+        /// A new reference to the repository's odb (`git_repository_odb`), borrowing
+        /// the repository that owns it.
+        pub fn odb(&self) -> OdbArc<'_> {
             let mut odb = core::ptr::null_mut();
             // SAFETY: the box's live repository; the result is a new reference to its odb.
             let rc = unsafe { ffi::git_repository_odb(&mut odb, self.0.as_c_ptr()) };
             assert_eq!(rc, 0);
-            // SAFETY: `odb` is the one reference just returned, adopted once.
+            // SAFETY: `odb` is the one reference just returned, adopted once; its
+            // owner is this repository, which the result borrows.
             unsafe { OdbArc::from_c(odb) }.unwrap()
         }
     }
