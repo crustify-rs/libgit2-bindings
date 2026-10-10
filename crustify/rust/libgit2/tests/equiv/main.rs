@@ -2,6 +2,7 @@
 //! equivalent, independently owned inputs. Each tested TU gets a module here, homed in
 //! `tests/equiv/<tu>.rs`.
 
+mod annotated_commit;
 mod buffer;
 mod checkout;
 mod commit;

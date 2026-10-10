@@ -1,6 +1,13 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C functions names.
 # Add only the items a batch needs; keep entries sorted.
 crustify_GIT_OID_DEFAULT
+git_annotated_commit_free
+git_annotated_commit_from_fetchhead
+git_annotated_commit_from_ref
+git_annotated_commit_from_revspec
+git_annotated_commit_id
+git_annotated_commit_lookup
+git_annotated_commit_ref
 git_blob_create_from_buffer
 git_blob_create_from_stream
 git_blob_create_from_stream_commit

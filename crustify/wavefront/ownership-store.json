@@ -60,6 +60,97 @@
    ]
   },
   {
+   "name": "git_annotated_commit",
+   "defined_in": "src/libgit2/annotated_commit.h",
+   "_comment_agent": "Opaque in the public API (forward-declared in include/git2/types.h); built only by annotated_commit.c's constructors (REAL: git__calloc + git_commit_dup + git__strdup) and merge.c's create_virtual_base (VIRTUAL: index + parents), released only by git_annotated_commit_free, which switches on `type` (REAL frees commit, tree, description, ref_name, remote_url; VIRTUAL frees index and the parents array; anything else aborts). No dup/clone routine exists. merge.c casts `const git_annotated_commit **` heads to mutable and lazily caches `tree` (annotated_commit_tree), so a const pointer does not mean read-only. The embedded commit is a counted reference into the repository's object cache (atomic refcount); freeing it never touches the repository.",
+   "fields": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "REAL only: a counted reference taken by git_commit_dup (git_cached_obj refcount, atomic), released by git_commit_free in git_annotated_commit_free; NULL for VIRTUAL. Read by git_annotated_commit_id (git_commit_id), reset.c, branch.c, merge.c."
+     }
+    },
+    {
+     "name": "description",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "REAL: git__strdup of the lookup description (revspec, reference name, fetchhead branch name, or id_str); never NULL after a successful constructor (strdup failure leaks the half-built object and returns -1 with *out NULL). Freed with git__free. NULL for VIRTUAL. Read by reset.c and branch.c as reflog messages."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "VIRTUAL only (create_virtual_base adopts the merged index); read by iterator_for_annotated_commit; freed by git_index_free in the VIRTUAL branch. NULL for REAL."
+     }
+    },
+    {
+     "name": "ref_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git__strdup of the reference name (from_ref, from_head) or branch name (from_fetchhead); NULL for lookup/from_revspec/VIRTUAL, and NULL when that strdup fails (constructor returns -1 but leaves *out set). git__free'd. Returned borrowed by git_annotated_commit_ref."
+     }
+    },
+    {
+     "name": "remote_url",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "from_fetchhead only: git__strdup of remote_url; NULL otherwise, and NULL when that strdup fails (constructor returns -1 but leaves *out set). git__free'd; read by merge_msg_write_remotes."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL after every public constructor; merge.c's annotated_commit_tree fills it lazily (git_commit_tree) through a casted const head and hands out git_tree_dup copies; freed by git_tree_free in the REAL branch of git_annotated_commit_free."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_branch_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "core wave 0 batch 0 (2026-10-09). Flag-shaped enum: LOCAL = 1, REMOTE = 2, ALL = LOCAL|REMOTE. git_branch_iterator_new stores it as unsigned flags and git_branch_next tests each bit (0 lists nothing, extra bits are ignored) and writes only LOCAL or REMOTE to *out_type; git_branch_lookup switches on it and hits GIT_ASSERT(false) for any other value (-1 'unrecoverable internal error' in release, abort in the Debug/coverage build). Wrapped as the closed Rust enum BranchType, so the asserting values are unrepresentable.",
@@ -1643,6 +1734,342 @@
      "note": "Fresh git__malloc(n+1) storage holding the n bytes at str plus a terminator: a byte-run-to-string cloner. NULL on OOM or when n+1 overflows to 0 only through malloc(0) semantics (no overflow check). Internal; released by git__free (publicly git_odb_backend_data_free)."
     }
    }
+  },
+  {
+   "name": "git_annotated_commit_free",
+   "defined_in": "src/libgit2/annotated_commit.c",
+   "lifetime": {
+    "for": "annotated_commit",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "annotated_commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes the object: NULL is a no-op; REAL frees commit/tree/strings, VIRTUAL frees index/parents, any other type aborts; then git__free of the struct. Never touches the repository."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_annotated_commit_from_fetchhead",
+   "defined_in": "src/libgit2/annotated_commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_cloner": null,
+    "is_disposer": false,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "branch_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string read for the call and copied (git__strdup), never retained"
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "object id, read for the call (git_commit_lookup); any type byte reaches C"
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives a fresh REAL annotated commit (git__calloc'd) owned by the caller, released by git_annotated_commit_free. Written by the lookup on success; then two git__strdup calls (branch_name, remote_url) \u2014 if either fails it returns -1 with *out STILL SET, so the caller must free it. A failed lookup returns -1, not its code."
+     }
+    },
+    {
+     "name": "remote_url",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string read for the call and copied (git__strdup), never retained"
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "repository, borrowed for the call: commit lookup through its odb and object cache; not retained by the annotated commit itself (its commit object keeps an unowned back-pointer)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_annotated_commit_from_ref",
+   "defined_in": "src/libgit2/annotated_commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_cloner": null,
+    "is_disposer": false,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives a fresh REAL annotated commit (git__calloc'd) owned by the caller, released by git_annotated_commit_free. Set to NULL first; on success then git__strdup(ref name) \u2014 if that fails it returns -1 with *out STILL SET (ref_name NULL), so the caller must free it."
+     }
+    },
+    {
+     "name": "ref",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "reference, read for the call (git_reference_peel, git_reference_name); its name is copied"
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "repository, borrowed for the call: commit lookup through its odb and object cache; not retained by the annotated commit itself (its commit object keeps an unowned back-pointer)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_annotated_commit_from_revspec",
+   "defined_in": "src/libgit2/annotated_commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_cloner": null,
+    "is_disposer": false,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives a fresh REAL annotated commit (git__calloc'd) owned by the caller, released by git_annotated_commit_free. Not cleared before git_revparse_single/git_object_peel: on their failure *out is untouched; annotated_commit_init sets it NULL then writes on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "repository, borrowed for the call: commit lookup through its odb and object cache; not retained by the annotated commit itself (its commit object keeps an unowned back-pointer)."
+     }
+    },
+    {
+     "name": "revspec",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string read for the call and copied (git__strdup), never retained"
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_annotated_commit_lookup",
+   "defined_in": "src/libgit2/annotated_commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_cloner": null,
+    "is_disposer": false,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "object id, read for the call (git_commit_lookup); any type byte reaches C"
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives a fresh REAL annotated commit (git__calloc'd) owned by the caller, released by git_annotated_commit_free. Set to NULL first; written only on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "repository, borrowed for the call: commit lookup through its odb and object cache; not retained by the annotated commit itself (its commit object keeps an unowned back-pointer)."
+     }
+    }
+   ]
   },
   {
    "name": "git_blob_create_from_stream",

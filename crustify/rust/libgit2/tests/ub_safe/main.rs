@@ -9,6 +9,7 @@
 //! there; the Rust-only paths (empty buffers, rejected sizes) still run.
 #![deny(unsafe_code)]
 
+mod annotated_commit;
 mod buffer;
 mod checkout;
 mod commit;
