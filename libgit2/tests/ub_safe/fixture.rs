@@ -2018,3 +2018,67 @@ pub mod filter_probe {
         (seen, made - freed)
     }
 }
+
+// --- `git2/blob.h`: `git_blob`, `git_blob_filter_options` ----------------------------
+
+/// Stand-ins for the blob routines a later run wraps (`git_blob_rawcontent`,
+/// `git_blob_rawsize`, `git_blob_filter`), which replaces them, and the blob cache
+/// limit, a process-global option.
+pub mod blob {
+    use std::ffi::{CStr, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::blob::{BlobArc, FilterOptions};
+
+    /// A copy of the content of the blob an owner holds.
+    pub fn content(blob: &BlobArc<'_>) -> Vec<u8> {
+        let p = blob.as_c_ptr();
+        // SAFETY: `p` is the live blob the owner holds; its content lives as long as
+        // it does and is copied at once.
+        unsafe {
+            let size = usize::try_from(ffi::git_blob_rawsize(p)).unwrap();
+            let data = ffi::git_blob_rawcontent(p).cast::<u8>();
+            if size == 0 {
+                return Vec::new();
+            }
+            std::slice::from_raw_parts(data, size).to_vec()
+        }
+    }
+
+    /// Lets the object cache keep blobs of up to `bytes`, in a child process that runs
+    /// nothing else.
+    pub fn set_blob_cache_limit(bytes: usize) {
+        // SAFETY: the isolated children that call it run one thread meanwhile.
+        unsafe { libgit2::libgit2::core::common::set_cache_object_limit(ObjectType::Blob, bytes) }
+    }
+
+    /// `git_blob_filter` of `blob` as `path`, with `opts` read in place (or none): the
+    /// filtered bytes, or the code libgit2 failed with. Filter lists race on their first
+    /// load, so callers run in an isolated child.
+    pub fn filter(
+        blob: &BlobArc<'_>,
+        path: &CStr,
+        opts: Option<&mut FilterOptions>,
+    ) -> Result<Vec<u8>, c_int> {
+        let mut out = ffi::git_buf::default();
+        // `FilterOptions` is `#[repr(transparent)]` over `git_blob_filter_options`.
+        let opts = opts.map_or(ptr::null_mut(), |o| {
+            ptr::from_mut(o).cast::<ffi::git_blob_filter_options>()
+        });
+        // SAFETY: a zeroed buffer libgit2 fills; the live blob the owner holds, whose
+        // repository outlives it by its borrow; `path` NUL-terminated; `opts` NULL or
+        // live, initialised options, which libgit2 copies for the call.
+        let rc = unsafe { ffi::git_blob_filter(&mut out, blob.as_c_ptr(), path.as_ptr(), opts) };
+        let bytes = if rc < 0 || out.ptr.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: on success `out` holds `size` initialised bytes at `ptr`.
+            unsafe { std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size) }.to_vec()
+        };
+        // SAFETY: the buffer libgit2 filled (or left zeroed), released once.
+        unsafe { ffi::git_buf_dispose(&mut out) };
+        if rc < 0 { Err(rc) } else { Ok(bytes) }
+    }
+}

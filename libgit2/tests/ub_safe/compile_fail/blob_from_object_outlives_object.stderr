@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing function parameter `object`
+ --> tests/ub_safe/compile_fail/blob_from_object_outlives_object.rs:6:5
+  |
+6 |     BlobRef::from_object(object.as_ref())
+  |     ^^^^^^^^^^^^^^^^^^^^^------^^^^^^^^^^
+  |     |                    |
+  |     |                    `object` is borrowed here
+  |     returns a value referencing data owned by the current function
