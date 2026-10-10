@@ -1,0 +1,148 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_annotated_commit",
+      "defined_in": "src/libgit2/annotated_commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/annotated_commit.rs"
+    },
+    {
+      "name": "git_checkout_options",
+      "defined_in": "include/git2/checkout.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/workdir/checkout.rs"
+    },
+    {
+      "name": "git_commitarray",
+      "defined_in": "include/git2/commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_config",
+      "defined_in": "src/libgit2/config.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_index",
+      "defined_in": "src/libgit2/index.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_odb",
+      "defined_in": "src/libgit2/odb.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+    },
+    {
+      "name": "git_path_fs",
+      "defined_in": "include/git2/sys/path.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/path.rs"
+    },
+    {
+      "name": "git_path_gitfile",
+      "defined_in": "include/git2/sys/path.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/path.rs"
+    },
+    {
+      "name": "git_refdb",
+      "defined_in": "src/libgit2/refdb.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/refdb.rs"
+    },
+    {
+      "name": "git_refdb_t",
+      "defined_in": "include/git2/refdb.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/refdb.rs"
+    },
+    {
+      "name": "git_reference",
+      "defined_in": "src/libgit2/refs.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/refs.rs"
+    },
+    {
+      "name": "git_repository",
+      "defined_in": "src/libgit2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_init_flag_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_init_mode_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_item_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_open_flag_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_state_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_worktree",
+      "defined_in": "src/libgit2/worktree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_prune_options",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [
+        "flags",
+        "version"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_prune_t",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    }
+  ]
+}
