@@ -17,6 +17,7 @@ mod commit;
 mod common;
 mod config;
 mod errors;
+mod filter;
 mod fixture;
 mod global;
 mod index;

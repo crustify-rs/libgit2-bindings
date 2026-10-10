@@ -10,6 +10,7 @@ mod commit;
 mod common;
 mod config;
 mod errors;
+mod filter;
 mod global;
 mod index;
 mod mailmap;

@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `repo` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/filter_list_blocks_repository_mut.rs:11:5
+   |
+10 |     let list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_WORKTREE, 0).unwrap();
+   |                                ---- immutable borrow occurs here
+11 |     repo.as_mut().set_namespace(None).unwrap();
+   |     ^^^^^^^^^^^^^ mutable borrow occurs here
+12 |     drop(list);
+   |          ---- immutable borrow later used here
