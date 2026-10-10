@@ -9,11 +9,17 @@
 //! will). The config routines have no wrappers yet, so both sides drive their object
 //! through the same raw calls, the Rust side reaching its object through the owner's
 //! `as_c_ptr`: a lookup that misses, a write without a backend, adding a file backend
-//! (each side its own file), writes and reads through it, then a read after the
-//! repository is freed. After every step both record the return code, the value read
-//! or the error left (class and message), and the records are compared; the files
-//! each side wrote are compared at the end. C then frees its config, and Rust drops
-//! its owner.
+//! (each side its own file), writes and reads through it, then (C alone, see below)
+//! a read after the repository is freed. After every step both record the return
+//! code, the value read or the error left (class and message), and the records are
+//! compared; the files each side wrote are compared at the end. C then frees its
+//! config, and Rust drops its owner.
+//!
+//! One documented divergence: C lets the caller's reference to a repository's config
+//! outlive the repository (a read that does not reparse the file goes through; one
+//! that does reads the freed repository, see
+//! `crustify/reviews/.../wave-1/batch-1/ub_safe/repository-config-keeps-freed-repository-for-includeif`),
+//! where a [`ConfigArc<'r>`] borrows the repository and is released first.
 
 use std::ffi::{CStr, CString, c_int};
 use std::path::{Path, PathBuf};
@@ -194,7 +200,8 @@ fn repository_configs_match() {
     let rust_rc = unsafe { ffi::git_repository_config(&mut out, rust_repo) };
     assert_eq!(c_rc, rust_rc);
     // SAFETY: `git_repository_config` hands out one up-ref'd reference to the
-    // repository's config, released by `git_config_free`; the repository holds another.
+    // repository's config, released by `git_config_free`; the repository holds another,
+    // and outlives the arc (freed below, after it): the arc's `'r`.
     let rust_config = unsafe { ConfigArc::from_c(out) }.unwrap();
 
     let reads = |config: *mut ffi::git_config, error: fn() -> (c_int, String)| {
@@ -212,14 +219,17 @@ fn repository_configs_match() {
     };
     let before = reads(c_config, c_error);
     assert_eq!(before, reads(rust_config.as_c_ptr(), rust_error));
+    // Documented divergence: C lets the caller's reference outlive the repository and
+    // read on (the file backends still point at the freed repository, which only a
+    // reparse reaches); a `ConfigArc<'r>` borrows the repository and goes first.
+    drop(rust_config);
     for repo in [c_repo, rust_repo] {
-        // SAFETY: each repository is open and freed once; its config outlives it.
+        // SAFETY: each repository is open and freed once; the C config outlives its
+        // repository, and the Rust arc was released before its own.
         unsafe { ffi::git_repository_free(repo) };
     }
     let after = reads(c_config, c_error);
     assert_eq!(after, before);
-    assert_eq!(after, reads(rust_config.as_c_ptr(), rust_error));
     // SAFETY: the C side's last reference, released once.
     unsafe { ffi::git_config_free(c_config) };
-    drop(rust_config);
 }

@@ -46,7 +46,11 @@
 //!
 //! - a config and an index are shared once installed, so the setters take a
 //!   [`ConfigArc`] / [`IndexArc`] by reference (a sole [`ConfigBox`] or [`IndexBox`]
-//!   converts with `.into()` first);
+//!   converts with `.into()` first). The repository keeps its reference for as long as
+//!   it lives and reparses the config's files through it, so only a config whose
+//!   backends read no repository, a `ConfigArc<'static>`, is installed: one a
+//!   repository lent ([`RepositoryRef::config`]) borrows that repository, which this
+//!   one may outlive;
 //! - an object database reads its owning repository's object cache, so only one no
 //!   repository owns yet, an [`OdbArc<'static>`](OdbArc), is installed, and it is
 //!   consumed: the repository keeps it, and [`RepositoryRef::odb`] lends it back,
@@ -433,11 +437,29 @@ impl RepositoryMut<'_> {
     /// config's owner and writes through it, and its cached configuration values are
     /// dropped.
     ///
+    /// The repository keeps its reference until it is freed or given another config,
+    /// and reparses the config's files through it (writing `core.bare`, say), which
+    /// evaluates their `includeIf` conditions against the repository each file
+    /// backend was loaded for. So only a config loaded for no repository, a
+    /// `ConfigArc<'static>` (see [`Config`](crate::libgit2::config::config::Config)),
+    /// is installed; one another repository lent borrows that repository, which this
+    /// one may outlive, and is refused at compile time:
+    ///
+    /// ```compile_fail,E0597
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let mut target = Repository::new().unwrap();
+    /// let source = Repository::open(c".").unwrap();
+    /// let config = source.as_ref().config().unwrap();
+    /// target.as_mut().set_config(&config);
+    /// ```
+    ///
     /// Wraps: git_repository_set_config
-    pub fn set_config(&mut self, config: &ConfigArc) {
+    pub fn set_config(&mut self, config: &ConfigArc<'static>) {
         // SAFETY: a live repository, written through the exclusive handle; `config` a
-        // live config, which libgit2 up-refs for the repository: the arc's reference
-        // stays the arc's, and a shared owner is what the config now has.
+        // live config whose backends read no repository (`'static`), which libgit2
+        // up-refs for the repository: the arc's reference stays the arc's, and a shared
+        // owner is what the config now has.
         let rc = unsafe { ffi::git_repository_set_config(self.as_mut_ptr(), config.as_c_ptr()) };
         debug_assert_eq!(rc, 0, "git_repository_set_config refused a config");
     }
@@ -764,6 +786,91 @@ mod unit_tests {
         }
     }
 
+    /// libc's allocator, refusing everything while `REFUSING` is set, installed in a
+    /// child process before libgit2 initialises.
+    mod refusing {
+        use core::ffi::{CStr, c_int, c_void};
+        use core::ptr::{self, NonNull};
+        use std::process::Command;
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        use crate::ffi;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        pub(super) fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        pub(super) static REFUSING: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut c_void;
+            fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+            fn free(p: *mut c_void);
+        }
+
+        struct Refusing;
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Refusing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        pub(super) fn install_refusing() {
+            let allocator = Allocator::new::<Refusing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
+            // every member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+    }
+
     mod installed_parts {
         use super::super::*;
 
@@ -785,6 +892,36 @@ mod unit_tests {
                 repo.as_mut().set_odb(odb).unwrap();
                 assert_eq!(repo.as_ref().odb().unwrap().as_c_ptr(), raw);
             }
+        }
+
+        /// `odb_oid_type` reads the type through a scratch repository: when that
+        /// cannot be allocated, `set_odb` fails with libgit2's out-of-memory error,
+        /// leaves the repository without an odb, and releases the caller's reference.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn an_unallocatable_scratch_repository_fails_set_odb() {
+            use super::refusing::{REFUSING, install_refusing, isolated};
+            use std::sync::atomic::Ordering::SeqCst;
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::an_unallocatable_scratch_repository_fails_set_odb"
+                ),
+                || {
+                    install_refusing();
+                    let mut repo = Repository::new().unwrap();
+                    let odb = Odb::new().unwrap();
+                    // A first error allocates the thread's error state, which an
+                    // allocation failure would otherwise report instead.
+                    assert!(repo.as_ref().odb().is_err());
+                    REFUSING.store(true, SeqCst);
+                    let error = repo.as_mut().set_odb(odb).unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert_eq!(error.raw_code(), -1);
+                    assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                    assert_eq!(repo.as_ref().odb().unwrap_err().raw_code(), -1);
+                },
+            );
         }
 
         #[test]

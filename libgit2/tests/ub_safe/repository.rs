@@ -1890,8 +1890,11 @@ mod head_and_lookups {
         assert_eq!(error.code(), Some(ErrorCode::NotFound));
     }
 
-    /// Owned results stay valid after the repository is freed: counted configs and
-    /// indexes, snapshots, commit arrays, buffers, ids and worktree `HEAD` copies.
+    /// Owned results stay valid after the repository is freed: counted indexes,
+    /// config snapshots, commit arrays, buffers, ids and worktree `HEAD` copies. The
+    /// counted config is not one of them: its file backends read the repository
+    /// (`includeIf`), so it borrows it (`compile_fail/config_arc_outlives_repository.rs`)
+    /// and goes first.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn owned_results_outlive_their_repository() {
@@ -1900,6 +1903,7 @@ mod head_and_lookups {
         let merged = sandbox.open("merged");
         let config = main.as_ref().config().unwrap();
         let snapshot = main.as_ref().config_snapshot().unwrap();
+        drop(config);
         let index = main.as_ref().index().unwrap();
         let parents = merged.as_ref().commit_parents().unwrap();
         let gitdir = main.as_ref().item_path(Item::GitDir).unwrap();
@@ -1925,7 +1929,7 @@ mod head_and_lookups {
             view_unattached(&head).name.as_c_str(),
             c"refs/heads/testrepo-worktree"
         );
-        drop((config, snapshot, index, parents, head));
+        drop((snapshot, index, parents, head));
     }
 
     /// The copy of a worktree's `HEAD` reaches no repository: neither the worktree's,
@@ -1988,7 +1992,9 @@ mod head_and_lookups {
     }
 
     /// Cleaning up while counted results are out: they stay valid, the repository
-    /// loads fresh ones, and commits parse again (without grafts).
+    /// loads fresh ones, and commits parse again (without grafts). The counted config
+    /// borrows the repository, so it is released before the exclusive cleanup; the
+    /// config loaded afterwards is a fresh one.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn cleanup_keeps_what_was_handed_out() {
@@ -1997,12 +2003,17 @@ mod head_and_lookups {
         let config = repo.as_ref().config().unwrap();
         let index = repo.as_ref().index().unwrap();
         let parents = repo.as_ref().commit_parents().unwrap();
+        let first_config = config.as_c_ptr();
+        drop(config);
         repo.as_mut().cleanup();
         let fresh = repo.as_ref().index().unwrap();
+        let config = repo.as_ref().config().unwrap();
+        assert_ne!(config.as_c_ptr(), first_config);
         assert_eq!(ids(&repo.as_ref().commit_parents().unwrap()), ids(&parents));
+        drop(config);
         repo.as_mut().cleanup();
         drop(repo);
-        drop((config, index, fresh, parents));
+        drop((index, fresh, parents));
         let mut pathless = Repository::new().unwrap();
         pathless.as_mut().cleanup();
         pathless.as_mut().cleanup();

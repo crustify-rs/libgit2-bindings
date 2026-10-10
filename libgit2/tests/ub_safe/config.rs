@@ -8,16 +8,18 @@
 //! through fixtures over the owners' `as_c_ptr`. Nothing here runs without libgit2, so
 //! Miri runs none of it. Illegal uses are compile-fail doctests on the crate: a
 //! `ConfigArc` clone, an exclusive handle from a shared owner, sending either owner to
-//! another thread, a handle outliving its owner.
+//! another thread, a handle outliving its owner, a repository's config outliving the
+//! repository its file backends read.
 
 use std::sync::Barrier;
 use std::thread;
 
 use libgit2::libgit2::config::config::{Config, ConfigArc, ConfigBox};
+use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::ErrorCode;
 
 use crate::fixture::commit_and_config::{
-    OpenRepo, TESTREPO, config, get_int32, write_through_file,
+    OpenRepo, TESTREPO, config, get_int32, set_int32, write_through_file,
 };
 use crate::fixture::isolated;
 
@@ -82,30 +84,51 @@ fn shared_configs_release_each_reference_once() {
     drop(first);
     // The repository still holds its own reference, and reloads nothing.
     let third = config(&repo);
-    drop(repo);
     assert_eq!(
         get_int32(third.as_c_ptr(), c"core.repositoryformatversion"),
         Ok(0)
     );
     drop(third);
+    drop(repo);
     let _ = std::fs::remove_file(file.to_str().unwrap());
 }
 
-/// A repository's config used and dropped after the repository (the parent first).
+/// A repository's config is used only while the repository lives: its file backends
+/// keep the repository for their `includeIf` conditions, which every reparse of a
+/// file evaluates (`conditional_match_gitdir` reads `git_repository_path`). A write
+/// through a config a repository lent, after that repository was freed, was a use
+/// after free (review wave 1 batch 1); now the arc borrows the repository (a
+/// compile-fail doctest on `ConfigArc` and
+/// `compile_fail/config_arc_outlives_repository.rs`), and the write reparses the file
+/// against the live repository.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
-fn repository_config_outlives_its_repository() {
-    let repo = OpenRepo::open(TESTREPO);
-    let shared = config(&repo);
-    drop(repo);
+fn repository_config_reparses_against_its_live_repository() {
+    let dir = std::env::temp_dir().join(format!(
+        "crustify-ub-config-includeif-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+    let repo = Repository::init(&path, false).unwrap();
+    std::fs::write(
+        dir.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[includeIf \"gitdir:/nowhere/\"]\n\tpath = extra\n",
+    )
+    .unwrap();
+    let shared = repo.as_ref().config().unwrap();
     assert_eq!(
         get_int32(shared.as_c_ptr(), c"core.repositoryformatversion"),
         Ok(0)
     );
-    assert_eq!(
-        get_int32(shared.as_c_ptr(), c"core.missing"),
-        Err(NOT_FOUND)
-    );
+    // The write reparses the file, which evaluates the condition against the
+    // repository: live, as the borrow guarantees.
+    assert_eq!(set_int32(shared.as_c_ptr(), c"a.b", 7), 0);
+    assert_eq!(get_int32(shared.as_c_ptr(), c"a.b"), Ok(7));
+    drop(shared);
+    drop(repo);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The process's first configs, built on several threads at once: each `Config::new`

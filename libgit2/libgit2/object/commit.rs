@@ -30,8 +30,13 @@
 //! commits it owns belong to a repository's object cache, whose thread story is that
 //! run's to settle.
 //!
-//! A commit outlives its repository: `git_commit_free` touches only the commit, so an
-//! array may be dropped after the repository its commits came from.
+//! An array may be dropped after the repository its commits came from:
+//! `git_commit_free` touches only the commit. The commits may not be *used* past it:
+//! each keeps the repository it was parsed from (`git_object.repo`, uncounted, which
+//! `git_repository_free` does not clear), and `git_commit_owner`, `git_commit_tree`,
+//! `git_commit_parent` and every other lookup through a commit read it. So the
+//! `git_commit` run's handle must borrow the repository, as `Reference<'r>` and
+//! `Odb<'r>` do, and the array that holds such handles with it.
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -182,7 +187,10 @@ impl<'a> CommitArrayRef<'a> {
     /// Raw seam: `git_commit` has no wrapper yet; the `object` subsystem's run replaces
     /// this with commit handles. Reading a commit through a pointer is the caller's
     /// `unsafe`, and the commit must not be released through it: the array releases
-    /// its references when disposed.
+    /// its references when disposed. A routine that reaches the commit's repository
+    /// (`git_commit_owner`, `git_commit_tree`, `git_commit_parent`, ...) may be given
+    /// one only while the repository the array came from lives (see the
+    /// [module docs](self)).
     ///
     /// ```compile_fail,E0505
     /// use libgit2::libgit2::object::commit::CommitArray;

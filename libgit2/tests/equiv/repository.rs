@@ -3616,9 +3616,9 @@ mod heads_and_parts {
             c"7b4384978d2493e851f9cca7858815fac9b10980",
         ] {
             let mut c_id = ffi::git_oid::default();
+            let (hex_ptr, sha1) = (hex.as_ptr(), ffi::GIT_OID_SHA1);
             // SAFETY: a writable id and a NUL-terminated hex string.
-            let rc =
-                unsafe { ffi::git_oid_from_string(&mut c_id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+            let rc = unsafe { ffi::git_oid_from_string(&mut c_id, hex_ptr, sha1) };
             assert_eq!(rc, 0);
             // SAFETY: a live repository and a live id of its type.
             let c_rc = unsafe { ffi::git_repository_set_head_detached(c.0, &c_id) };
@@ -3637,9 +3637,9 @@ mod heads_and_parts {
                 ffi::git_annotated_commit_from_revspec(&mut annotated, c.0, spec.as_ptr())
             };
             assert_eq!(rc, 0);
+            let (repo, detach) = (c.0, ffi::git_repository_set_head_detached_from_annotated);
             // SAFETY: a live repository and annotated commit, freed once below.
-            let c_rc =
-                unsafe { ffi::git_repository_set_head_detached_from_annotated(c.0, annotated) };
+            let c_rc = unsafe { detach(repo, annotated) };
             // SAFETY: as above.
             unsafe { ffi::git_annotated_commit_free(annotated) };
             let commit = AnnotatedCommit::from_revspec(rust.as_ref(), spec).unwrap();
@@ -3762,9 +3762,9 @@ mod heads_and_parts {
         ];
         for (dir, gitlink) in steps {
             let (c_wd, rust_wd) = (c_path(&c_root.join(dir)), c_path(&rust_root.join(dir)));
+            let (repo, wd, link) = (c.0, c_wd.as_ptr(), gitlink.into());
             // SAFETY: a live repository with a git directory and a NUL-terminated path.
-            let c_rc =
-                unsafe { ffi::git_repository_set_workdir(c.0, c_wd.as_ptr(), gitlink.into()) };
+            let c_rc = unsafe { ffi::git_repository_set_workdir(repo, wd, link) };
             let c_outcome = c_outcome(c_rc);
             let rust_outcome = rust_outcome(rust.as_mut().set_workdir(&rust_wd, gitlink));
             let mask = |o: Outcome, root: &Path| {
@@ -5660,12 +5660,10 @@ mod head_and_lookups {
         // SAFETY: the payload is the test's live recorder, used by nothing else.
         let recorder = unsafe { &mut *payload.cast::<Recorder>() };
         // SAFETY: a live id.
-        recorder.entries.push((
-            copied(ref_name),
-            copied(remote_url),
-            unsafe { hex(oid) },
-            is_merge != 0,
-        ));
+        let id = unsafe { hex(oid) };
+        recorder
+            .entries
+            .push((copied(ref_name), copied(remote_url), id, is_merge != 0));
         match recorder.answer {
             Answer::StopAt(i) if recorder.entries.len() == i + 1 => recorder.code,
             _ => 0,
@@ -5706,10 +5704,10 @@ mod head_and_lookups {
                 };
                 let mut callback = FetchheadForeachCallback::new(&mut record);
                 let (f, payload) = callback.raw();
+                let raw = repo.as_c_ptr();
                 // SAFETY: a live repository and the callback's own function and payload,
                 // which stays put and unused for the call.
-                let rc =
-                    unsafe { ffi::git_repository_fetchhead_foreach(repo.as_c_ptr(), f, payload) };
+                let rc = unsafe { ffi::git_repository_fetchhead_foreach(raw, f, payload) };
                 callback.resume_panic();
                 assert_eq!(callback.stopped(), rc == ffi::GIT_EUSER);
                 rc

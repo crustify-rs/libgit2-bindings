@@ -645,8 +645,9 @@ pub mod commit_and_config {
             .to_owned()
     }
 
-    /// The repository's config, through the safe wrapper: a shared reference.
-    pub fn config(repo: &OpenRepo) -> ConfigArc {
+    /// The repository's config, through the safe wrapper: a shared reference, which
+    /// borrows the repository (its file backends read it on every reparse).
+    pub fn config(repo: &OpenRepo) -> ConfigArc<'_> {
         repo.0.as_ref().config().unwrap()
     }
 
@@ -657,6 +658,13 @@ pub mod commit_and_config {
         // SAFETY: the tests pass a live owner's pointer; the call only reads it.
         let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
         if rc < 0 { Err(rc) } else { Ok(value) }
+    }
+
+    /// `git_config_set_int32` on the config an owner's `as_c_ptr` gives; the return
+    /// code.
+    pub fn set_int32(config: *mut ffi::git_config, name: &CStr, value: i32) -> c_int {
+        // SAFETY: the tests pass a live owner's pointer; the name is NUL-terminated.
+        unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) }
     }
 
     /// `git_config_add_file_ondisk` then `git_config_set_int32`; the status of each.

@@ -1669,6 +1669,14 @@ mod routines {
         RemoveAdmin(&'static str),
         /// Points the worktree's `commondir` file at a directory that does not exist.
         PointCommondir(&'static str),
+        /// Creates or removes the directory `<root>/<name>`.
+        MakeDir(&'static str),
+        RemoveDir(&'static str),
+        /// `git_repository_set_workdir(repo, <root>/<name>, 0)`: the parent directory
+        /// the next lookups record.
+        SetWorkdir(&'static str),
+        /// Replaces the repository's `worktrees/` directory with a file of that name.
+        WorktreesAsFile,
     }
 
     /// What a step returned: the code, the value read out of it, and the thread's error
@@ -1762,9 +1770,20 @@ mod routines {
                     )
                     .unwrap()
                 }
+                Step::MakeDir(name) => fs::create_dir_all(self.root.join(name)).unwrap(),
+                Step::RemoveDir(name) => fs::remove_dir_all(self.root.join(name)).unwrap(),
+                Step::WorktreesAsFile => {
+                    let worktrees = self.root.join("repo/.git/worktrees");
+                    fs::remove_dir_all(&worktrees).unwrap();
+                    fs::write(&worktrees, "not a directory\n").unwrap();
+                }
                 _ => return None,
             }
             Some(())
+        }
+
+        fn c_dir(&self, name: &str) -> CString {
+            CString::new(self.root.join(name).as_os_str().as_bytes()).unwrap()
         }
 
         fn mask(&self, s: &str) -> String {
@@ -1939,11 +1958,21 @@ mod routines {
                         ffi::git_strarray_dispose(&mut array);
                         (rc, sorted_names(names))
                     }
+                    Step::SetWorkdir(name) => {
+                        let dir = self.layout.c_dir(name);
+                        (
+                            ffi::git_repository_set_workdir(self.repo, dir.as_ptr(), 0),
+                            None,
+                        )
+                    }
                     Step::AddJunk(_)
                     | Step::RemoveWorkdir(_)
                     | Step::LockDir(_)
                     | Step::RemoveAdmin(_)
-                    | Step::PointCommondir(_) => unreachable!(),
+                    | Step::PointCommondir(_)
+                    | Step::MakeDir(_)
+                    | Step::RemoveDir(_)
+                    | Step::WorktreesAsFile => unreachable!(),
                 }
             };
             self.layout
@@ -2086,11 +2115,21 @@ mod routines {
                     }
                     Err(e) => failed(e),
                 },
+                Step::SetWorkdir(name) => {
+                    let dir = self.layout.c_dir(name);
+                    match self.repo.as_mut().set_workdir(&dir, false) {
+                        Ok(()) => (0, None, None, false),
+                        Err(e) => (e.raw_code(), None, None, false),
+                    }
+                }
                 Step::AddJunk(_)
                 | Step::RemoveWorkdir(_)
                 | Step::LockDir(_)
                 | Step::RemoveAdmin(_)
-                | Step::PointCommondir(_) => unreachable!(),
+                | Step::PointCommondir(_)
+                | Step::MakeDir(_)
+                | Step::RemoveDir(_)
+                | Step::WorktreesAsFile => unreachable!(),
             };
             let error = if failure(step, code) { error } else { None };
             (self.layout.record(code, value, error), own)
@@ -2245,6 +2284,33 @@ mod routines {
                 IsPrunable(1, VALID),
                 Prune(1, VALID),
                 List,
+            ],
+        );
+    }
+
+    /// A worktree records the main repository's working directory when it is looked
+    /// up, and `validate` wants it to exist (the one arm of `git_worktree_validate` the
+    /// batches left uncovered); and a `worktrees` entry that is not a directory reads
+    /// as no worktrees at all (`<commondir>/worktrees/` with its trailing slash does
+    /// not exist as a file), so `list` is empty and a lookup is `GIT_ENOTFOUND`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn parent_directory_and_worktrees_entry_match_c() {
+        use Step::*;
+        compare(
+            "parent",
+            &[
+                MakeDir("elsewhere"),
+                SetWorkdir("elsewhere"),
+                Lookup("wt1"),
+                Validate(0),
+                RemoveDir("elsewhere"),
+                Validate(0),
+                IsPrunable(0, 0),
+                WorktreesAsFile,
+                List,
+                Lookup("wt2"),
+                Validate(0),
             ],
         );
     }
