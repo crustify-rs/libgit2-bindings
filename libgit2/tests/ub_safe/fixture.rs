@@ -1171,3 +1171,246 @@ pub mod worktree {
         unsafe { ffi::git_worktree_unlock(w.as_c_ptr()) }
     }
 }
+
+// --- `git2/annotated_commit.h` -----------------------------------------------------
+
+/// Repositories holding commits to annotate, built through raw libgit2 calls (no safe
+/// object writer exists yet), and the C views the tests compare against.
+pub mod annotated_commit {
+    use std::ffi::{CStr, CString, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::ptr::{self, NonNull};
+    use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::SeqCst};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::annotated_commit::AnnotatedCommitBox;
+    use libgit2::libgit2::refs::refs::ReferenceBox;
+    use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
+
+    /// A branch name 99 bytes long, a length no other allocation of these tests asks
+    /// for (100 bytes with its NUL).
+    pub const LONG_BRANCH: &CStr = c"refs/heads/oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo";
+    /// A remote URL 155 bytes long (156 with its NUL).
+    pub const LONG_URL: &CStr = c"https://example.invalid/uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu.git";
+
+    /// The hex form of `id`.
+    pub fn hex(id: &ffi::git_oid) -> String {
+        let mut buf = [0 as std::ffi::c_char; 65];
+        // SAFETY: `buf` holds 65 bytes, which bounds the write; `id` is a live oid.
+        unsafe { ffi::git_oid_tostr(buf.as_mut_ptr(), buf.len(), id) };
+        // SAFETY: `git_oid_tostr` NUL-terminates within `buf`.
+        unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// The commit id `commit` reads, as hex, and its reference name, through
+    /// `git_annotated_commit_id` / `_ref`; replace with the accessors' wrappers.
+    pub fn read(commit: &AnnotatedCommitBox<'_>) -> (String, Option<String>) {
+        // SAFETY: `commit` is a live annotated commit, only read; both results point
+        // into it and are copied while it lives.
+        unsafe {
+            let name = ffi::git_annotated_commit_ref(commit.as_c_ptr());
+            (
+                hex(&*ffi::git_annotated_commit_id(commit.as_c_ptr())),
+                (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned()),
+            )
+        }
+    }
+
+    /// A fresh bare repository of object id type `kind` whose `main` (and `HEAD`) is a
+    /// second commit over a first, with `refs/tags/v1` an annotated tag of it,
+    /// `refs/tags/tree` a tree and [`LONG_BRANCH`] the first commit; freed and removed
+    /// on drop.
+    pub struct CommitRepo {
+        path: PathBuf,
+        repo: Option<RepositoryBox>,
+        pub tree: ffi::git_oid,
+        pub first: ffi::git_oid,
+        pub second: ffi::git_oid,
+        pub tag: ffi::git_oid,
+    }
+
+    impl CommitRepo {
+        pub fn new(tag: &str, kind: ffi::git_oid_t) -> Self {
+            super::init();
+            let path = std::env::temp_dir().join(format!(
+                "crustify-annotated-commit-ub-safe-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+            opts.initial_head = c"main".as_ptr();
+            opts.oid_type = kind;
+            let mut raw = ptr::null_mut();
+            // SAFETY: a live slot, a NUL-terminated path and live options whose
+            // `initial_head` is static, all read for the call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut raw, c_path.as_ptr(), &mut opts) };
+            assert_eq!(rc, 0);
+            let mut odb = ptr::null_mut();
+            // SAFETY: a live slot and the live repository; released below.
+            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, raw) }, 0);
+            let write = |data: &[u8], kind: ffi::git_object_t| {
+                let mut id = ffi::git_oid::default();
+                let rc =
+                    // SAFETY: a live slot, the live odb and `data` readable for its length
+                    // at a non-NULL address.
+                    unsafe { ffi::git_odb_write(&mut id, odb, data.as_ptr().cast(), data.len(), kind) };
+                assert_eq!(rc, 0);
+                id
+            };
+            const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
+            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let first = write(
+                format!(
+                    "tree {}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n",
+                    hex(&tree)
+                )
+                .as_bytes(),
+                ffi::GIT_OBJECT_COMMIT,
+            );
+            let second = write(
+                format!(
+                    "tree {}\nparent {}\nauthor {WHO}\ncommitter {WHO}\n\nsecond\n",
+                    hex(&tree),
+                    hex(&first)
+                )
+                .as_bytes(),
+                ffi::GIT_OBJECT_COMMIT,
+            );
+            let tag = write(
+                format!(
+                    "object {}\ntype commit\ntag v1\ntagger {WHO}\n\nv1\n",
+                    hex(&second)
+                )
+                .as_bytes(),
+                ffi::GIT_OBJECT_TAG,
+            );
+            // SAFETY: the odb reference taken above, released once.
+            unsafe { ffi::git_odb_free(odb) };
+            // References are written as loose files: `git_reference_create` takes a
+            // reflog signature at the current time, whose glibc timezone lookup
+            // ThreadSanitizer reports against other tests'.
+            for (name, id) in [
+                ("refs/heads/main", &second),
+                ("refs/tags/v1", &tag),
+                ("refs/tags/tree", &tree),
+                (LONG_BRANCH.to_str().unwrap(), &first),
+            ] {
+                let file = path.join(name);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, format!("{}\n", hex(id))).unwrap();
+            }
+            Self {
+                path,
+                // SAFETY: the fresh repository `git_repository_init_ext` wrote, owned by
+                // this fixture alone and released by `git_repository_free`, as
+                // `RepositoryFree` does.
+                repo: Some(unsafe { RepositoryBox::from_c(raw) }.unwrap()),
+                tree,
+                first,
+                second,
+                tag,
+            }
+        }
+
+        pub fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+
+        /// `git_reference_lookup(name)`, adopted: stands in for the reference lookup
+        /// wrapper, which replaces it.
+        pub fn reference(&self, name: &CStr) -> ReferenceBox<'_> {
+            let mut out = ptr::null_mut();
+            let raw = self.repo.as_ref().unwrap().as_c_ptr();
+            // SAFETY: a live slot, the live repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, raw, name.as_ptr()) };
+            assert_eq!(rc, 0, "{name:?}");
+            // SAFETY: a fresh attached reference the caller owns, released by
+            // `git_reference_free`; it borrows `self`, which frees the repository last.
+            unsafe { ReferenceBox::from_c(out) }.unwrap()
+        }
+
+        /// Leaves the repository open until the process exits, reachable from a
+        /// static, so LeakSanitizer counts nothing its caches still reach as leaked.
+        pub fn keep_open(mut self) {
+            static KEPT: AtomicPtr<ffi::git_repository> = AtomicPtr::new(ptr::null_mut());
+            KEPT.store(self.repo.take().unwrap().into_c(), SeqCst);
+        }
+    }
+
+    impl Drop for CommitRepo {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut c_void;
+        fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+        fn free(p: *mut c_void);
+    }
+
+    static LEN: AtomicUsize = AtomicUsize::new(0);
+    static NTH: AtomicUsize = AtomicUsize::new(0);
+
+    /// libc's allocator, refusing the `NTH` next request of exactly `LEN` bytes.
+    struct Refusing;
+
+    // SAFETY: forwards to libc's `malloc` family unchanged, or fails, which `Alloc`
+    // allows; the counters are atomics.
+    unsafe impl Alloc for Refusing {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            if len == LEN.load(SeqCst) && NTH.fetch_sub(1, SeqCst) == 1 {
+                LEN.store(0, SeqCst);
+                return None;
+            }
+            // SAFETY: plain libc allocation.
+            NonNull::new(unsafe { malloc(len) }.cast())
+        }
+
+        unsafe fn realloc(
+            p: Option<NonNull<u8>>,
+            len: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+            // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+            NonNull::new(unsafe { realloc(p, len) }.cast())
+        }
+
+        unsafe fn free(p: NonNull<u8>) {
+            // SAFETY: `p` is a live libc block the caller gives up.
+            unsafe { free(p.as_ptr().cast()) }
+        }
+    }
+
+    /// Installs an allocator refusing the `nth` next request of `len` bytes; libgit2's
+    /// own allocator is libc's too, so every live block stays releasable. Call alone
+    /// in a child process ([`isolated`](super::isolated)).
+    pub fn refuse(len: usize, nth: usize) {
+        static ALLOCATOR: Allocator = Allocator::new::<Refusing>();
+        NTH.store(nth, SeqCst);
+        LEN.store(len, SeqCst);
+        super::install(&ALLOCATOR);
+    }
+
+    /// Whether the refusal armed by [`refuse`] was spent.
+    pub fn refused() -> bool {
+        LEN.load(SeqCst) == 0
+    }
+}
