@@ -2082,3 +2082,36 @@ pub mod blob {
         if rc < 0 { Err(rc) } else { Ok(bytes) }
     }
 }
+
+// --- `git2/object.h`: `git_object_id_options` ---------------------------------------
+
+/// `git_object_id_from_buffer(out, data, len, opts)`, standing in for its wrapper (a
+/// later run), which replaces it: the id's hex digits, or the code libgit2 failed with.
+/// Applying the options' filter list writes its filters' state, hence the exclusive
+/// borrow.
+pub fn object_id(
+    opts: &mut libgit2::libgit2::object::object::ObjectIdOptions<'_>,
+    data: &[u8],
+) -> Result<String, c_int> {
+    let mut out = ffi::git_oid::default();
+    // An empty slice's pointer is dangling, and libgit2 hashes from it even for a length
+    // of 0: lend a live byte instead.
+    let bytes = if data.is_empty() { &[0u8][..] } else { data };
+    // `ObjectIdOptions` is transparent over the C struct, which Rust owns inline.
+    let raw = core::ptr::from_mut(opts).cast::<ffi::git_object_id_options>();
+    // SAFETY: a writable id; `data.len()` readable bytes; live options, borrowed
+    // exclusively for the call, whose list (if any) is live and lent to them alone.
+    let rc =
+        unsafe { ffi::git_object_id_from_buffer(&mut out, bytes.as_ptr().cast(), data.len(), raw) };
+    if rc < 0 {
+        return Err(rc);
+    }
+    let mut hex = [0u8; 65];
+    // SAFETY: the id libgit2 wrote; `hex` holds 65 bytes, NUL included.
+    unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+    Ok(CStr::from_bytes_until_nul(&hex)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned())
+}

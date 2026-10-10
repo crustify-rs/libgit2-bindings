@@ -52,17 +52,42 @@
 //! byte no `git_oid_t` names, nothing is written and the buffer is read uninitialised.
 //! So the wrappers refuse an id of another type than the repository's, at any length,
 //! before the call, with libgit2's own wording for the mismatch.
+//!
+//! # Id options
+//!
+//! An [`ObjectIdOptions`] is a `git_object_id_options`: how `git_object_id_from_buffer`
+//! and `git_object_id_from_file` compute an object's id from its raw content — the
+//! object type its header names (`object_type`, a blob when 0), the id type to hash
+//! with (`oid_type`, `GIT_OID_DEFAULT` when 0), and the filters to run a blob's content
+//! through first (`filters`, none when NULL). libgit2 never allocates, keeps or frees
+//! one: the caller builds it with `git_object_id_options_init`, and each routine copies
+//! the fields it needs for the call, refusing (with -1 and a `GIT_ERROR_INVALID`
+//! error) an object type that is not a commit, tree, blob or tag, and an id type that
+//! is neither SHA-1 nor SHA-256. No routine checks `version`.
+//!
+//! So nothing it points at is owned. Rust holds the struct by value as an
+//! [`ObjectIdOptions<'f>`] (filled by [`ObjectIdOptions::new`]), which borrows the
+//! filter list for `'f`, *exclusively*: applying a list writes each filter's state in
+//! it (the stream's payload slot, the list's scratch buffer), so the list is set from
+//! a [`FilterListMut`] and read back as a [`FilterListRef`] no longer than the options'
+//! own shared borrow. The routines taking the options (their own runs) take them
+//! through [`ObjectIdOptionsMut`] for that reason, although C declares them `const`.
+//! The object and id types are set from [`ObjectType`] and [`OidType`], or `None` for
+//! the default, so a stored value is always one libgit2 accepts.
+//! The options are neither `Send` nor `Sync`, as the list they borrow is not.
 
 use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::mem::MaybeUninit;
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone};
 
 use crate::ffi;
 use crate::libgit2::core::types::ObjectType;
-use crate::libgit2::oid::oid::OidRef;
+use crate::libgit2::filter::filter::{FilterListMut, FilterListRef};
+use crate::libgit2::oid::oid::{OidRef, OidType};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
 use crate::libgit2::util::sys::errors::set;
@@ -507,6 +532,377 @@ pub(crate) fn id_fits(repo: RepositoryRef<'_>, id: OidRef<'_>) -> Result<(), Rep
     Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()))
 }
 
+/// Options for computing an object's id from its raw content
+/// (`git_object_id_options`), held by value in Rust storage.
+///
+/// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: the content is
+/// a blob's, hashed with the default id type (SHA-1), unfiltered. Read it through
+/// [`as_ref`](Self::as_ref) and change it through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::core::types::ObjectType;
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+/// use libgit2::libgit2::oid::oid::OidType;
+///
+/// # if cfg!(miri) { return; }
+/// let mut opts = ObjectIdOptions::new();
+/// assert_eq!(opts.as_ref().version(), ObjectIdOptions::VERSION);
+/// assert_eq!(opts.as_ref().object_type(), None);
+/// opts.as_mut().set_object_type(Some(ObjectType::Commit));
+/// opts.as_mut().set_oid_type(Some(OidType::Sha1));
+/// assert_eq!(opts.as_ref().object_type(), Some(ObjectType::Commit));
+/// assert!(opts.as_ref().filters().is_none());
+/// ```
+///
+/// `#[repr(transparent)]` over `git_object_id_options`, so a pointer to it is a pointer
+/// to the C struct, which C reads in place. `'f` is the exclusive borrow of the filter
+/// list it points at (see the [module docs](self#id-options)). The options therefore
+/// outlive neither the list:
+///
+/// ```compile_fail,E0597
+/// use libgit2::ffi;
+/// use libgit2::libgit2::filter::filter::FilterList;
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let repo = Repository::new().unwrap();
+/// let mut opts = ObjectIdOptions::new();
+/// {
+///     let mut list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+///     opts.as_mut().set_filters(Some(list.as_mut()));
+/// }
+/// let _ = opts.as_ref().filters();
+/// ```
+///
+/// nor the repository the list borrows:
+///
+/// ```compile_fail,E0505
+/// use libgit2::ffi;
+/// use libgit2::libgit2::filter::filter::FilterList;
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let repo = Repository::new().unwrap();
+/// let mut list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+/// let mut opts = ObjectIdOptions::new();
+/// opts.as_mut().set_filters(Some(list.as_mut()));
+/// drop(repo);
+/// let _ = opts.as_ref().filters();
+/// ```
+///
+/// and no other handle to the list is used while the options borrow it, shared or
+/// exclusive:
+///
+/// ```compile_fail,E0502
+/// use libgit2::ffi;
+/// use libgit2::libgit2::filter::filter::FilterList;
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let repo = Repository::new().unwrap();
+/// let mut list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+/// let mut opts = ObjectIdOptions::new();
+/// opts.as_mut().set_filters(Some(list.as_mut()));
+/// let _shared = list.as_ref();
+/// let _ = opts.as_ref().filters();
+/// ```
+///
+/// A list read back through the options lives no longer than their shared borrow, so
+/// it cannot be held while they are changed:
+///
+/// ```compile_fail,E0502
+/// use libgit2::ffi;
+/// use libgit2::libgit2::filter::filter::FilterList;
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let repo = Repository::new().unwrap();
+/// let mut list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+/// let mut opts = ObjectIdOptions::new();
+/// opts.as_mut().set_filters(Some(list.as_mut()));
+/// let read = opts.as_ref().filters();
+/// opts.as_mut().set_filters(None);
+/// let _ = read;
+/// ```
+///
+/// The exclusive handle is invariant in `'f`, so one cannot be shrunk to accept a
+/// shorter borrow than its options were built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::object::ObjectIdOptionsMut;
+///
+/// fn shrink<'a, 'f>(m: ObjectIdOptionsMut<'a, 'static>) -> ObjectIdOptionsMut<'a, 'f> {
+///     m
+/// }
+/// ```
+///
+/// Neither `Send` nor `Sync`, as the filter list it borrows is not:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+///
+/// fn send<T: Send>(_: T) {}
+/// send(ObjectIdOptions::new());
+/// ```
+///
+/// Not `Clone`: a copy would alias the exclusive borrow of the list. Build another with
+/// [`new`](Self::new).
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::object::object::ObjectIdOptions;
+///
+/// let opts = ObjectIdOptions::new();
+/// let _copy = opts.clone();
+/// ```
+///
+/// Wraps: git_object_id_options
+/// Handwritten
+#[repr(transparent)]
+pub struct ObjectIdOptions<'f>(
+    ffi::git_object_id_options,
+    PhantomData<(*const (), &'f mut ())>,
+);
+
+/// Shared borrow of an [`ObjectIdOptions`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct ObjectIdOptionsRef<'a, 'f>(CBorrowedPtr<'a, ObjectIdOptions<'f>>);
+
+/// Exclusive borrow of an [`ObjectIdOptions`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct ObjectIdOptionsMut<'a, 'f>(
+    ObjectIdOptionsRef<'a, 'f>,
+    // Invariant in the options, and so in `'f`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut ObjectIdOptions<'f>>,
+);
+
+// SAFETY: `ObjectIdOptions` is `#[repr(transparent)]` over `git_object_id_options` with
+// a zero-sized marker; both handles are `#[repr(transparent)]` over
+// `CBorrowedPtr<'a, ObjectIdOptions<'f>>` (`ObjectIdOptionsMut` through
+// `ObjectIdOptionsRef`) with zero-sized markers and no `Drop`, hand out no reference to
+// the options, and `ObjectIdOptionsRef` has no write operation. `ObjectIdOptionsMut` is
+// invariant in the options through its `PhantomData<&'a mut ObjectIdOptions<'f>>`.
+unsafe impl<'f> CCell for ObjectIdOptions<'f> {
+    type C = ffi::git_object_id_options;
+    type Ref<'a>
+        = ObjectIdOptionsRef<'a, 'f>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = ObjectIdOptionsMut<'a, 'f>
+    where
+        Self: 'a;
+}
+
+impl<'f> ObjectIdOptions<'f> {
+    /// The structure version this crate's header declares
+    /// (`GIT_OBJECT_ID_OPTIONS_VERSION`), the newest `git_object_id_options_init`
+    /// accepts.
+    pub const VERSION: u32 = ffi::GIT_OBJECT_ID_OPTIONS_VERSION;
+
+    /// libgit2's default options, as `git_object_id_options_init` fills them for
+    /// [`VERSION`](Self::VERSION) and `GIT_OBJECT_ID_OPTIONS_INIT` spells them: the
+    /// default object type (blob) and id type (SHA-1), and no filter.
+    ///
+    /// `git_object_id_options_init` only fails for a version it does not know, and with
+    /// its own it reaches no global, no allocator and no thread state, so this needs no
+    /// initialised library.
+    ///
+    /// Wraps: git_object_id_options_init
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_object_id_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_object_id_options`, which the
+        // routine overwrites whole with the template for this version (a memcpy);
+        // nothing else reads it during the call.
+        let rc = unsafe { ffi::git_object_id_options_init(raw.as_mut_ptr(), Self::VERSION) };
+        assert_eq!(rc, 0, "git_object_id_options_init refused its own version");
+        // SAFETY: a 0 return means the template was copied in: every field is
+        // initialised, both types 0 and the filter list NULL.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Shared handle to the options — the getters, and the pointer for C calls that
+    /// read them.
+    pub fn as_ref(&self) -> ObjectIdOptionsRef<'_, 'f> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        ObjectIdOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the options — the setters, and the pointer for C calls that
+    /// apply their filter list.
+    pub fn as_mut(&mut self) -> ObjectIdOptionsMut<'_, 'f> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        ObjectIdOptionsMut(ObjectIdOptionsRef(ptr), PhantomData)
+    }
+}
+
+impl Default for ObjectIdOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for ObjectIdOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_object_id_options *`.
+    #[allow(dead_code)]
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_object_id_options {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The structure's version, `GIT_OBJECT_ID_OPTIONS_VERSION`; fixed by
+    /// [`ObjectIdOptions::new`], and read by no routine taking the options.
+    ///
+    /// Field: git_object_id_options.version
+    pub fn version(&self) -> u32 {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `u32`.
+        unsafe { addr_of!((*p).version).read() }
+    }
+
+    /// The type of the object whose content is hashed, which its header names;
+    /// `None` means the default, a blob.
+    ///
+    /// Field: git_object_id_options.object_type
+    pub fn object_type(&self) -> Option<ObjectType> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `git_object_t`.
+        let kind = unsafe { addr_of!((*p).object_type).read() };
+        // 0, as `new` leaves it and `set_object_type(None)` writes it, or a named type:
+        // the only values the setter stores.
+        ObjectType::from_raw(kind)
+    }
+
+    /// The type of id computed; `None` means the default, `GIT_OID_DEFAULT` (SHA-1).
+    ///
+    /// Field: git_object_id_options.oid_type
+    pub fn oid_type(&self) -> Option<OidType> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `git_oid_t`.
+        let kind = unsafe { addr_of!((*p).oid_type).read() };
+        OidType::from_raw(kind)
+    }
+
+    /// The filters a blob's content is run through before it is hashed, as the
+    /// options borrow them; `None` means none. libgit2 ignores them for any other
+    /// object type, and when the list is empty.
+    ///
+    /// The handle lives no longer than this shared borrow of the options, which keep
+    /// the list exclusively for `'f`.
+    ///
+    /// Field: git_object_id_options.filters
+    pub fn filters(&self) -> Option<FilterListRef<'a, 'f>> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        let list = unsafe { addr_of!((*p).filters).read() };
+        // SAFETY: the field is NULL (as `new` leaves it) or was stored by `set_filters`
+        // from a `FilterListMut<'f, 'r>`: a live list, built for a repository that
+        // outlives `'r`, and so `'f`, lent to the options alone for `'f`, which outlives
+        // `'a`; while the options are shared for `'a` nothing writes it, since every
+        // write goes through `ObjectIdOptionsMut`. `FilterList<'r>` is covariant in
+        // `'r`, so the list is a valid `FilterList<'f>`.
+        unsafe { FilterListRef::from_ptr(list) }
+    }
+}
+
+impl fmt::Debug for ObjectIdOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ObjectIdOptions")
+            .field("version", &self.version())
+            .field("object_type", &self.object_type())
+            .field("oid_type", &self.oid_type())
+            .field("filters", &self.filters())
+            .finish()
+    }
+}
+
+impl<'a, 'f> ObjectIdOptionsMut<'a, 'f> {
+    /// Writable pointer to the C struct, for the setters and for FFI calls that apply
+    /// the options' filter list.
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_object_id_options {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> ObjectIdOptionsRef<'_, 'f> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> ObjectIdOptionsMut<'_, 'f> {
+        ObjectIdOptionsMut(self.0, PhantomData)
+    }
+
+    /// Sets the type of the object whose content is hashed; `None` means the default,
+    /// a blob.
+    ///
+    /// Field: git_object_id_options.object_type
+    pub fn set_object_type(&mut self, kind: Option<ObjectType>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).object_type).write(kind.map_or(0, ObjectType::raw)) }
+    }
+
+    /// Sets the type of id computed; `None` means the default, SHA-1.
+    ///
+    /// Field: git_object_id_options.oid_type
+    pub fn set_oid_type(&mut self, kind: Option<OidType>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).oid_type).write(kind.map_or(0, OidType::raw)) }
+    }
+
+    /// Sets the filters a blob's content is run through before it is hashed; `None`
+    /// means none. The previous list is only borrowed, so nothing is released.
+    ///
+    /// The list is borrowed exclusively for `'f`, and through it the repository it was
+    /// built for, which then both outlive the options; no other handle to it is used
+    /// meanwhile, since applying it writes its filters' state.
+    ///
+    /// Field: git_object_id_options.filters
+    pub fn set_filters<'r>(&mut self, filters: Option<FilterListMut<'f, 'r>>) {
+        let list = filters.map_or(ptr::null_mut(), |mut l| l.as_mut_ptr());
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop. The list is NULL or one a
+        // `FilterListMut<'f, 'r>` (`'r: 'f`) vouches for, moved into the options, as
+        // `filters()` requires.
+        unsafe { addr_of_mut!((*p).filters).write(list) }
+    }
+}
+
+impl fmt::Debug for ObjectIdOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// `ObjectIdOptions` is the C struct itself, and each handle one pointer to it.
+const _: () = assert!(
+    size_of::<ObjectIdOptions<'static>>() == size_of::<ffi::git_object_id_options>()
+        && align_of::<ObjectIdOptions<'static>>() == align_of::<ffi::git_object_id_options>()
+        && size_of::<ObjectIdOptionsMut<'static, 'static>>() == size_of::<*mut ()>()
+);
+
 // An `Object` is a `git_object`, never held by value; the owner is one pointer.
 const _: () = assert!(
     size_of::<Object<'static>>() == size_of::<ffi::git_object>()
@@ -717,5 +1113,117 @@ mod unit_tests {
         assert!(commit.get_mut().is_none());
         let commit = commit.try_into_box().unwrap_err();
         assert_eq!(format!("{:?}", commit.as_ref()), "Object { .. }");
+    }
+
+    /// The options as `GIT_OBJECT_ID_OPTIONS_INIT` spells them, without C, for Miri.
+    fn template() -> ObjectIdOptions<'static> {
+        ObjectIdOptions(
+            ffi::git_object_id_options {
+                version: ObjectIdOptions::VERSION,
+                object_type: 0,
+                oid_type: 0,
+                filters: ptr::null_mut(),
+            },
+            PhantomData,
+        )
+    }
+
+    /// The raw fields of the options.
+    fn fields(opts: ObjectIdOptionsRef<'_, '_>) -> (u32, i32, u32, *mut ffi::git_filter_list) {
+        let p = opts.as_ptr();
+        // SAFETY: a live value the handle borrows, copied out field by field.
+        unsafe { ((*p).version, (*p).object_type, (*p).oid_type, (*p).filters) }
+    }
+
+    #[test]
+    fn options_layout_matches_c() {
+        assert_eq!(
+            size_of::<ObjectIdOptions<'_>>(),
+            size_of::<ffi::git_object_id_options>()
+        );
+        assert_eq!(
+            align_of::<ObjectIdOptions<'_>>(),
+            align_of::<ffi::git_object_id_options>()
+        );
+        assert_eq!(
+            size_of::<ObjectIdOptionsRef<'_, '_>>(),
+            size_of::<*const ()>()
+        );
+        assert_eq!(
+            size_of::<ObjectIdOptionsMut<'_, '_>>(),
+            size_of::<*const ()>()
+        );
+    }
+
+    /// `new` (and `Default`) is `git_object_id_options_init`'s template, which C fills
+    /// the same for every version it accepts and refuses, untouched, past it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_the_template() {
+        let expected = (ObjectIdOptions::VERSION, 0, 0, ptr::null_mut());
+        assert_eq!(fields(ObjectIdOptions::new().as_ref()), expected);
+        assert_eq!(fields(ObjectIdOptions::default().as_ref()), expected);
+        assert_eq!(fields(template().as_ref()), expected);
+        let mut raw = ffi::git_object_id_options {
+            version: 7,
+            object_type: 9,
+            oid_type: 9,
+            filters: ptr::null_mut(),
+        };
+        assert!(runtime_pinned());
+        // SAFETY: writable options; a refused version leaves them alone.
+        let rc = unsafe { ffi::git_object_id_options_init(&mut raw, ObjectIdOptions::VERSION + 1) };
+        assert_eq!((rc, raw.version, raw.object_type), (-1, 7, 9));
+    }
+
+    /// The setters write one field each, `None` writing the C default, and the getters
+    /// read them back; the list stored is the very pointer lent, and only that. A
+    /// dangling list pointer stands in for a list: `git_filter_list` is opaque, so
+    /// nothing reads through it, and Miri runs this.
+    #[test]
+    fn accessors_round_trip_without_c() {
+        let mut opts = template();
+        assert_eq!(opts.as_ref().version(), 1);
+        assert_eq!(opts.as_ref().object_type(), None);
+        assert_eq!(opts.as_ref().oid_type(), None);
+        assert!(opts.as_ref().filters().is_none());
+        assert_eq!(
+            format!("{opts:?}"),
+            "ObjectIdOptions { version: 1, object_type: None, oid_type: None, filters: None }"
+        );
+        for kind in [
+            ObjectType::Commit,
+            ObjectType::Tree,
+            ObjectType::Blob,
+            ObjectType::Tag,
+        ] {
+            opts.as_mut().set_object_type(Some(kind));
+            assert_eq!(opts.as_ref().object_type(), Some(kind));
+            assert_eq!(fields(opts.as_ref()).1, kind.raw());
+        }
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            opts.as_mut().set_oid_type(Some(kind));
+            assert_eq!(opts.as_ref().oid_type(), Some(kind));
+            assert_eq!(fields(opts.as_ref()).2, kind.raw());
+        }
+        let list = NonNull::<ffi::git_filter_list>::dangling().as_ptr();
+        // SAFETY: a zero-sized list at an aligned pointer, never read or written, and
+        // reached through this handle alone for as long as the options live.
+        let handle = unsafe { FilterListMut::from_ptr(list) }.unwrap();
+        {
+            let mut m = opts.as_mut();
+            m.as_mut().set_filters(Some(handle));
+            assert_eq!(m.as_ref().filters().unwrap().as_ptr(), list.cast_const());
+            assert_eq!(m.as_mut().as_mut_ptr().cast_const(), m.as_ref().as_ptr());
+            assert_eq!(
+                format!("{m:?}"),
+                "ObjectIdOptions { version: 1, object_type: Some(Tag), oid_type: Some(Sha256), \
+                 filters: Some(FilterList { .. }) }"
+            );
+            m.set_object_type(None);
+            m.set_oid_type(None);
+            m.set_filters(None);
+        }
+        assert_eq!(fields(opts.as_ref()), (1, 0, 0, ptr::null_mut()));
     }
 }

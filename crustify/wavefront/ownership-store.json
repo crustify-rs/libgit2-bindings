@@ -801,6 +801,41 @@
    ]
   },
   {
+   "name": "git_message_trailer_array",
+   "defined_in": "include/git2/message.h",
+   "_comment_agent": "By-value struct the caller holds (no C allocator of the struct itself): init git_message_trailers, disposer git_message_trailer_array_free (frees both buffers, does not zero). Rust: MessageTrailerArrayVal = CVal<MessageTrailerArray, MessageTrailerArrayFree>; an all-NULL array is disposed without C. C defect: git_message_trailers dereferences git_array_alloc's NULL on allocation failure.",
+   "fields": [
+    {
+     "name": "_trailer_block",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_message_trailers' extract_trailer_block: a git__malloc(trailer_len + 1) copy of the message's trailer block, NUL-terminated at trailer_len, into which the parser then cuts NULs in place (after each key, at the newline ending each value, and after a key followed by whitespace that turned out not to be a trailer), so it reads as several strings and its length is not recoverable. Owned by the struct; freed by git_message_trailer_array_free with git__free. Every trailer's key and value points into it. Never written once stored in the struct. NULL only in a struct the caller zeroed and libgit2 never filled (git_message_trailers leaves the struct untouched on failure); non-NULL after every successful parse, even with no trailers. Wrapped by MessageTrailerArray (object/message.rs): moved, with the trailers, as a whole (take/set), never on its own."
+     }
+    },
+    {
+     "name": "trailers",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "The git_array_t buffer (git__reallocarray) of count git_message_trailer values, detached into the struct; owned and freed by git_message_trailer_array_free with git__free. NULL with count 0 when the message has no trailer (and in a zeroed struct). Elements' key/value are borrowed from field:_trailer_block, so the trailers live no longer than the block. Not written after the parse. Wrapped as MessageTrailerArrayRef::trailers -> CSlice<'a, MessageTrailer<'a>>, no exclusive element handle."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_object",
    "defined_in": "src/libgit2/object.h",
    "_comment_agent": "Shared, counted object: cached.refcount is an atomic32 that git_object_dup (git_cached_obj_incref) bumps and git_object_free (git_cached_obj_decref) drops, freeing through the per-type free at zero. The repository's object cache holds a reference of its own and hands the same pointer to every lookup of one id, so a caller's reference is never provably sole. Parsed objects are not written through the public API after parsing except git_commit's lazily computed summary/body (written through a non-const git_commit*), and they reach a repository that is not thread-safe: no Send/Sync. Rust: CArc<Object<'r>, ObjectFree>, 'r the repository borrow.",
@@ -824,6 +859,30 @@
       "nullable": true,
       "mutable": true,
       "note": "The repository the object was parsed for (git_object__init_from_odb_object), stored without a count; git_repository_free does not clear it. Every object the public API hands out (lookup, lookup_prefix, lookup_bypath, peel, the typed lookups) has one; only git_object__from_raw (indexer-internal) leaves it NULL. Lookups through an object (git_commit_parent, git_tree_entry_bypath, git_object_lookup_bypath, git_object_peel) pass it on and fill its object cache, so the repository must outlive every use of the object; git_object__free never reads it, so freeing does not."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_id_options",
+   "defined_in": "include/git2/object.h",
+   "_comment_agent": "Plain options struct held by value; no resources (filters is borrowed), so no disposer. Constructor git_object_id_options_init (memcpy of {GIT_OBJECT_ID_OPTIONS_VERSION}), version never checked by the id routines. object_type 0 = blob, oid_type 0 = GIT_OID_DEFAULT; normalize_options rejects other invalid values with -1.",
+   "fields": [
+    {
+     "name": "filters",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "A caller's git_filter_list, never freed or kept by libgit2: normalize_options copies the pointer for the call; needs_filter reads git_filter_list_length; git_object_id_from_buffer (and _from_fd through it) hands it, non-const, to git_filter_list__apply_to_buffer, whose filter streams write each entry's payload slot and the list's temp buffer, so applying needs exclusive access. Ignored for a non-blob object_type and by git_object_id_from_symlink. NULL means no filtering. Wrapped as ObjectIdOptions<'f> (object/object.rs): set from a FilterListMut<'f, '_> (exclusive borrow for 'f), read back as FilterListRef."
      }
     }
    ]
@@ -4018,6 +4077,84 @@
    ]
   },
   {
+   "name": "git_message_trailer_array_free",
+   "defined_in": "src/libgit2/trailer.c",
+   "lifetime": {
+    "for": "arr",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "arr",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arr"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git__free(_trailer_block) and git__free(trailers); the struct itself is the caller's and is neither freed nor zeroed (both pointers dangle afterwards, so a second call double-frees). arr is dereferenced without a NULL check. A zeroed struct is accepted (two git__free(NULL), which read git__allocator: the Rust policy skips C then). Wrapped as MessageTrailerArrayFree (object/message.rs)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_message_trailers",
+   "defined_in": "src/libgit2/trailer.c",
+   "lifetime": {
+    "for": "trailer_arr",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only (the trailer block is copied out); not NULL-checked."
+     }
+    },
+    {
+     "name": "trailer_arr",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:trailer_arr"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's storage, written whole (_trailer_block, trailers, count) only on success, without freeing what it held: re-parsing into a filled array leaks it. Left untouched on failure (allocation of the block), so a caller must start from a zeroed struct to free it unconditionally. Not NULL-checked. Wrapped by MessageTrailerArray::parse (object/message.rs), which fills a fresh empty CVal."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_object_dup",
    "defined_in": "src/libgit2/object.c",
    "lifetime": {
@@ -4094,6 +4231,39 @@
       "nullable": true,
       "mutable": true,
       "note": "Gives up one counted reference (git_cached_obj_decref); at zero the per-type free runs, which never reads object->repo. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_id_options_init",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Overwritten whole with {GIT_OBJECT_ID_OPTIONS_VERSION} (memcpy of the template) when version is 1..=GIT_OBJECT_ID_OPTIONS_VERSION; otherwise -1 with GIT_ERROR_INVALID 'invalid version N on git_object_id_options' and opts untouched. No NULL check, no allocation, no global state. Wrapped as ObjectIdOptions::new (object/object.rs)."
      }
     }
    ]

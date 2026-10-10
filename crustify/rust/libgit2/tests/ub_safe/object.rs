@@ -24,13 +24,27 @@
 //! clones cannot outlive the repository, nor can a handle outlive its owner, and no
 //! owner lends an exclusive handle (`compile_fail/` and doctests).
 //!
+//! The id options, `ObjectIdOptions<'f>`, are Rust storage that libgit2 reads in place,
+//! holding a filter list it applies through them: the tests set every object and id
+//! type and a list (empty, or `crlf`) through the safe setters, have C hash content
+//! through the options (the fixture's `object_id`, standing in for the
+//! `git_object_id_from_buffer` wrapper) between Rust's own shared and exclusive
+//! reborrows of them (BorrowSanitizer), and drop the options before the list and the
+//! list before its repository, which the borrows enforce: outliving the list, or
+//! reaching it otherwise while the options hold it, does not compile
+//! (`compile_fail/object_id_options_*` and the doctests on `ObjectIdOptions`). A list
+//! read back through the options is the one lent, and C applies it while it lives
+//! (ASan). Loading a filter list initialises libgit2's filters unsynchronised (see
+//! `filter.rs`), so those tests run alone in a child process.
+//!
 //! Every test calls libgit2, so Miri skips them all.
 
 use std::ffi::CString;
 
 use libgit2::ffi;
 use libgit2::libgit2::core::types::ObjectType;
-use libgit2::libgit2::object::object::{Object, ObjectArc};
+use libgit2::libgit2::filter::filter::FilterList;
+use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectIdOptions, ObjectIdOptionsMut};
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
 use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
@@ -39,7 +53,7 @@ use crate::fixture::object_and_tree_entry::{
     enable_caching, object_owner, object_view, open_testrepo, repository, set_cache_max_size,
     write_raw,
 };
-use crate::fixture::{TempRepo, isolated};
+use crate::fixture::{TempRepo, isolated, object_id};
 
 const COMMIT: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
 const TREE: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
@@ -576,6 +590,112 @@ fn derived_objects_outlive_cache_eviction() {
                 drop(sub);
                 assert_eq!(hex(&from_sub), "1f67fc4386b2d171e0d21be1c447e12660561f9b");
             }
+        },
+    );
+}
+
+/// `a\nb\n` and `a\r\nb\r\n` as blobs, as `git hash-object --no-filters` hashes them.
+const LF: &str = "422c2b7ab3b3c668038da977e4e93a5fc623169c";
+const CRLF: &str = "c30dea8a3641ea99b125d04d599d843712292759";
+
+/// Every object and id type, and the defaults, reach C through the options, which
+/// hashes or refuses each; Rust's reborrows of the options interleave with C's reads
+/// of them (BorrowSanitizer), and the getters read back what the setters wrote.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn id_options_are_read_by_c_between_reborrows() {
+    crate::fixture::init();
+    let mut opts = ObjectIdOptions::new();
+    let blob = object_id(&mut opts, b"hello\n").unwrap();
+    assert_eq!(blob, "ce013625030ba8dba906f756967f9e9ca394464a");
+    assert_eq!(
+        object_id(&mut opts, b"").unwrap(),
+        "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    );
+    let kinds = [
+        None,
+        Some(ObjectType::Commit),
+        Some(ObjectType::Tree),
+        Some(ObjectType::Blob),
+        Some(ObjectType::Tag),
+    ];
+    for kind in kinds {
+        for oid in [None, Some(OidType::Sha1), Some(OidType::Sha256)] {
+            // A shared reborrow before the exclusive one, which ends it.
+            let _ = opts.as_ref().filters();
+            {
+                let mut m: ObjectIdOptionsMut<'_, '_> = opts.as_mut();
+                m.set_object_type(kind);
+                m.as_mut().set_oid_type(oid);
+                assert_eq!(
+                    (m.as_ref().object_type(), m.as_ref().oid_type()),
+                    (kind, oid)
+                );
+            }
+            let result = object_id(&mut opts, b"hello\n");
+            let read = opts.as_ref();
+            assert_eq!((read.object_type(), read.oid_type()), (kind, oid));
+            let id = result.unwrap();
+            let hex_len = if oid == Some(OidType::Sha256) { 64 } else { 40 };
+            assert_eq!(id.len(), hex_len);
+            assert_eq!(
+                id == blob,
+                oid != Some(OidType::Sha256) && matches!(kind, None | Some(ObjectType::Blob))
+            );
+        }
+    }
+    assert!(opts.as_ref().filters().is_none());
+    assert!(!format!("{opts:?}").is_empty());
+}
+
+/// A list lent to the options is applied by C through them (CRLF to LF before the
+/// blob is hashed), read back while they hold it, ignored for other object types and
+/// when empty; the options go before the lists, the lists before their repository,
+/// and a second list may replace the first while both outlive the options (ASan,
+/// LSan).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn id_options_apply_the_list_they_borrow() {
+    isolated(
+        concat!(module_path!(), "::id_options_apply_the_list_they_borrow"),
+        || {
+            crate::fixture::init();
+            let path =
+                std::env::temp_dir().join(format!("crustify-id-options-ub-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let repo = Repository::init(&c_path, false).unwrap();
+            std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
+            let mut crlf = FilterList::load(repo.as_ref(), c"a.txt", ffi::GIT_FILTER_TO_ODB, 0)
+                .unwrap()
+                .unwrap();
+            let mut empty = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+            {
+                let mut opts = ObjectIdOptions::new();
+                assert_eq!(object_id(&mut opts, b"a\r\nb\r\n").unwrap(), CRLF);
+                opts.as_mut().set_filters(Some(crlf.as_mut()));
+                for _ in 0..3 {
+                    assert!(opts.as_ref().filters().is_some());
+                    assert_eq!(object_id(&mut opts, b"a\r\nb\r\n").unwrap(), LF);
+                }
+                opts.as_mut().set_object_type(Some(ObjectType::Commit));
+                let commit = object_id(&mut opts, b"a\r\nb\r\n").unwrap();
+                assert!(commit != LF && commit != CRLF);
+                opts.as_mut().set_object_type(Some(ObjectType::Blob));
+                assert_eq!(object_id(&mut opts, b"a\r\nb\r\n").unwrap(), LF);
+                assert_eq!(object_id(&mut opts, b"").unwrap().len(), 40);
+                opts.as_mut().set_filters(Some(empty.as_mut()));
+                assert_eq!(object_id(&mut opts, b"a\r\nb\r\n").unwrap(), CRLF);
+                opts.as_mut().set_filters(None);
+                assert!(opts.as_ref().filters().is_none());
+            }
+            // The options are gone: the lists are the caller's again.
+            assert_eq!(crate::fixture::filter_count(&crlf), 1);
+            assert_eq!(crate::fixture::filter_count(&empty), 0);
+            drop(crlf);
+            drop(empty);
+            drop(repo);
+            let _ = std::fs::remove_dir_all(&path);
         },
     );
 }
