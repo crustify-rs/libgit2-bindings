@@ -1,0 +1,20 @@
+error[E0502]: cannot borrow `header` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/commit_header_aliased_handles.rs:8:17
+   |
+ 7 |     let shared = header.as_ref();
+   |                  ------ immutable borrow occurs here
+ 8 |     let mut m = header.as_mut();
+   |                 ^^^^^^^^^^^^^^^ mutable borrow occurs here
+ 9 |     m.set_value(c"other");
+10 |     let _ = shared.value();
+   |             ------ immutable borrow later used here
+
+error[E0499]: cannot borrow `header` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/commit_header_aliased_handles.rs:13:17
+   |
+12 |     let mut a = header.as_mut();
+   |                 ------ first mutable borrow occurs here
+13 |     let mut b = header.as_mut();
+   |                 ^^^^^^ second mutable borrow occurs here
+14 |     a.set_field(c"a");
+   |     - first borrow later used here

@@ -144,3 +144,150 @@ fn arrays_on_their_own_threads() {
         }
     });
 }
+
+/// The extra headers: the `Header` value (`git_commit_header`) and its handles.
+///
+/// A header is two borrowed string pointers. Its handles project each field out of a
+/// pointer and rebuild a `&CStr` from it, so these tests exercise every getter and
+/// setter on every holder Rust has for one (a local, a heap slot, an element of a run
+/// that moves when it grows, a copy, a `static`), through reborrows, with strings that
+/// live on the heap and are dropped right after their last read (ASan: a getter
+/// reading past the string or after it), and across threads under the `Send` / `Sync`
+/// the crate asserts (TSan). A misaligned projection or a write through the shared
+/// handle would be flagged by Miri and ASan/UBSan. Headers that outlive their strings,
+/// handles that outlive their header, aliased handles and setters on the shared handle
+/// do not compile (`compile_fail/` and the type's doctests). Nothing here reaches
+/// libgit2, which keeps no pointer to a header past a call, so every test runs under
+/// Miri and there is no foreign write or retained pointer to race (BSan).
+mod header {
+    use std::ffi::{CStr, CString};
+    use std::sync::Mutex;
+    use std::thread;
+
+    use libgit2::libgit2::object::commit::{Header, HeaderMut, HeaderRef};
+
+    static STATIC: Header<'static> = Header::new(c"static", c"header");
+
+    fn read<'h>(r: HeaderRef<'_, 'h>) -> (&'h CStr, &'h CStr) {
+        (r.field(), r.value())
+    }
+
+    fn write<'h>(mut m: HeaderMut<'_, 'h>, field: &'h CStr, value: &'h CStr) {
+        m.set_field(field);
+        m.set_value(value);
+    }
+
+    #[test]
+    fn every_field_round_trips_on_every_holder() {
+        let strings: Vec<CString> = ["a", "", "multi\nline value", "x".repeat(4096).as_str()]
+            .into_iter()
+            .map(|s| CString::new(s).unwrap())
+            .collect();
+        let mut local = Header::new(c"f", c"v");
+        let mut boxed = Box::new(Header::new(c"f", c"v"));
+        let mut run = vec![Header::new(c"f", c"v")];
+        for (i, pair) in strings.windows(2).enumerate() {
+            let (f, v) = (pair[0].as_c_str(), pair[1].as_c_str());
+            write(local.as_mut(), f, v);
+            write(Header::as_mut(&mut boxed), f, v);
+            // Growing the run moves its elements; each handle is taken afresh.
+            run.push(Header::new(f, v));
+            write(run[i].as_mut(), f, v);
+            for r in [
+                local.as_ref(),
+                Header::as_ref(&boxed),
+                run[i].as_ref(),
+                run[i + 1].as_ref(),
+            ] {
+                assert_eq!(read(r), (f, v));
+            }
+            let copy = local;
+            assert_eq!(read(copy.as_ref()), (f, v));
+        }
+        assert_eq!(read(STATIC.as_ref()), (c"static", c"header"));
+    }
+
+    /// Strings on the heap, freed right after the header's last use: every read lands
+    /// inside a live allocation (ASan).
+    #[test]
+    fn reads_stay_inside_heap_strings() {
+        for len in [0, 1, 7, 8, 15, 16, 255] {
+            let field = CString::new("f".repeat(len)).unwrap();
+            let value = CString::new("v".repeat(len + 1)).unwrap();
+            let header = Header::new(&field, &value);
+            assert_eq!(header.as_ref().field().to_bytes().len(), len);
+            assert_eq!(header.as_ref().value().to_bytes().len(), len + 1);
+            assert!(format!("{header:?}").len() > 2 * len);
+            // The header is `Copy`: its last use is above; the strings go now.
+            drop(field);
+            drop(value);
+        }
+    }
+
+    #[test]
+    fn reborrows_keep_one_writer() {
+        let mut header = Header::new(c"a", c"b");
+        let mut m = header.as_mut();
+        {
+            let mut inner = m.as_mut();
+            inner.set_field(c"inner");
+            assert_eq!(inner.as_ref().field(), c"inner");
+        }
+        let shared = m.as_ref();
+        assert_eq!(read(shared), (c"inner", c"b"));
+        m.set_value(c"after");
+        assert_eq!(read(header.as_ref()), (c"inner", c"after"));
+    }
+
+    #[test]
+    fn copies_are_independent() {
+        let a = Header::new(c"a", c"1");
+        let mut b = a;
+        let mut c = a.as_ref().to_header();
+        b.as_mut().set_value(c"2");
+        c.as_mut().set_field(c"c");
+        assert_eq!(read(a.as_ref()), (c"a", c"1"));
+        assert_eq!(read(b.as_ref()), (c"a", c"2"));
+        assert_eq!(read(c.as_ref()), (c"c", c"1"));
+    }
+
+    /// A run of headers read from several threads at once, each element written by
+    /// one thread through its own exclusive handle, and headers moved between threads
+    /// under the asserted `Send` / `Sync` (TSan).
+    #[test]
+    fn headers_cross_threads() {
+        let owned: Vec<CString> = (0..8)
+            .map(|i| CString::new(format!("value {i}")).unwrap())
+            .collect();
+        let mut run: Vec<Header<'_>> = owned.iter().map(|v| Header::new(c"field", v)).collect();
+        thread::scope(|s| {
+            for (i, h) in run.iter_mut().enumerate() {
+                let owned = &owned;
+                s.spawn(move || {
+                    let mut m = h.as_mut();
+                    m.set_field(c"written");
+                    assert_eq!(m.as_ref().value(), owned[i].as_c_str());
+                });
+            }
+        });
+        let run = &run;
+        let seen = Mutex::new(0);
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for h in run {
+                        let r: HeaderRef<'_, '_> = h.as_ref();
+                        assert_eq!(r.field(), c"written");
+                        assert!(r.value().to_bytes().starts_with(b"value "));
+                    }
+                    *seen.lock().unwrap() += 1;
+                });
+            }
+            let one = run[3];
+            s.spawn(move || assert_eq!(one.as_ref().value(), c"value 3"));
+            let handle = run[5].as_ref();
+            s.spawn(move || assert_eq!(handle.value(), c"value 5"));
+        });
+        assert_eq!(*seen.lock().unwrap(), 4);
+    }
+}

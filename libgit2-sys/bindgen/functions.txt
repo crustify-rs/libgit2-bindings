@@ -12,6 +12,10 @@ git_blob_create_from_buffer
 git_blob_create_from_stream
 git_blob_create_from_stream_commit
 git_blob_data_is_binary
+git_blob_filter
+git_blob_filter_options_init
+git_blob_free
+git_blob_lookup
 git_branch_iterator_free
 git_branch_iterator_new
 git_branch_lookup
@@ -21,6 +25,7 @@ git_checkout_index
 git_checkout_options_init
 git_checkout_tree
 git_commit_create_buffer
+git_commit_create_ext
 git_commit_free
 git_commit_id
 git_commit_lookup
@@ -81,8 +86,12 @@ git_odb_free
 git_odb_new
 git_odb_new_ext
 git_odb_num_backends
+git_odb_object_data
+git_odb_object_free
+git_odb_object_size
 git_odb_open
 git_odb_open_ext
+git_odb_read
 git_odb_read_header
 git_odb_write
 git_oid_cmp

@@ -1,6 +1,8 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C vars names.
 # Add only the items a batch needs; keep entries sorted.
+GIT_BLOB_FILTER_OPTIONS_VERSION
 GIT_CHECKOUT_OPTIONS_VERSION
+GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION
 GIT_FILTER_VERSION
 GIT_INDEX_OPTIONS_VERSION
 GIT_ODB_OPTIONS_VERSION

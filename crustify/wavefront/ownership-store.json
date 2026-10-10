@@ -151,6 +151,12 @@
    ]
   },
   {
+   "name": "git_blob_filter_flag_t",
+   "defined_in": "include/git2/blob.h",
+   "_comment_agent": "Flag enum: bits ORed into git_blob_filter_options.flags (uint32_t). git_blob_filter tests each of the four named bits and ignores every other; GIT_BLOB_FILTER_OPTIONS_INIT defaults to CHECK_FOR_BINARY. No lifecycle.",
+   "fields": []
+  },
+  {
    "name": "git_branch_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "core wave 0 batch 0 (2026-10-09). Flag-shaped enum: LOCAL = 1, REMOTE = 2, ALL = LOCAL|REMOTE. git_branch_iterator_new stores it as unsigned flags and git_branch_next tests each bit (0 lists nothing, extra bits are ignored) and writes only LOCAL or REMOTE to *out_type; git_branch_lookup switches on it and hits GIT_ASSERT(false) for any other value (-1 'unrecoverable internal error' in release, abort in the Debug/coverage build). Wrapped as the closed Rust enum BranchType, so the asserting values are unrepresentable.",
@@ -384,6 +390,47 @@
       "mutable": false,
       "note": "Caller's label, borrowed and only read; NULL = \"theirs\". rebase's internal copy owns a git__strdup."
      }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_header",
+   "defined_in": "include/git2/commit.h",
+   "_comment_agent": "Plain borrowed pair of C strings with no lifecycle routine: no constructor, cloner, disposer or releaser exists in libgit2 (lifecycle-ops empty; the only field toucher is git_commit__create_buffer_internal, read-only). Rust holds it by value, Copy, borrowing both strings for one lifetime.",
+   "fields": [
+    {
+     "name": "field",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Header name, a NUL-terminated string the caller owns. libgit2 never allocates, stores past the call, or frees a git_commit_header: callers build arrays of them (tests/libgit2/commit/write.c) for git_commit_create_options / git_commit_create_ext_options.extra_headers; init_ext_options copies the array pointer only, and git_commit__create_buffer_internal reads field with git_str_puts during the create call. NULL is rejected by format_header_field's GIT_ASSERT_ARG (-1, GIT_ERROR_INVALID), so no valid state holds NULL. Not written through."
+     },
+     "refcount": false,
+     "locked_by": null
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Header value, a NUL-terminated string the caller owns, read only during git_commit_create_* by format_header_field (strchr scan for '\\n', each newline emitted as a continuation '\\n '). NULL is rejected by GIT_ASSERT_ARG (-1, GIT_ERROR_INVALID). Never stored, written, or freed by libgit2."
+     },
+     "refcount": false,
+     "locked_by": null
     }
    ]
   },

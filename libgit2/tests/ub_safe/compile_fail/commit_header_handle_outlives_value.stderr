@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing local variable `header`
+ --> tests/ub_safe/compile_fail/commit_header_handle_outlives_value.rs:6:5
+  |
+6 |     header.as_ref()
+  |     ------^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `header` is borrowed here
