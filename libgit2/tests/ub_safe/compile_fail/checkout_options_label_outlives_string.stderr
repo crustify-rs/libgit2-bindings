@@ -1,0 +1,11 @@
+error[E0597]: `label` does not live long enough
+  --> tests/ub_safe/compile_fail/checkout_options_label_outlives_string.rs:10:45
+   |
+ 9 |         let label = CString::new("mine").unwrap();
+   |             ----- binding `label` declared here
+10 |         options.as_mut().set_our_label(Some(&label));
+   |                                             ^^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `label` dropped here while still borrowed
+12 |     let _ = options.as_ref().our_label();
+   |             ------- borrow later used here

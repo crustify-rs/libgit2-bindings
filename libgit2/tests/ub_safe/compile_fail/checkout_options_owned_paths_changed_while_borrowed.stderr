@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `owned` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/checkout_options_owned_paths_changed_while_borrowed.rs:9:5
+   |
+ 8 |     options.as_mut().set_paths(owned.as_ref());
+   |                                ----- immutable borrow occurs here
+ 9 |     owned.as_mut().truncate(0);
+   |     ^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     let _ = options.as_ref().paths().len();
+   |             ------- immutable borrow later used here

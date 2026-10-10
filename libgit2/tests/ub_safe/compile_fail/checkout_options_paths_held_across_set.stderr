@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `options` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/checkout_options_paths_held_across_set.rs:7:5
+  |
+6 |     let paths = options.as_ref().paths();
+  |                 ------- immutable borrow occurs here
+7 |     options.as_mut().clear_paths();
+  |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+8 |     let _ = paths.len();
+  |             ----- immutable borrow later used here

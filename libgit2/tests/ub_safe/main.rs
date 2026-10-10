@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 mod buffer;
+mod checkout;
 mod commit;
 mod common;
 mod config;

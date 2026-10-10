@@ -1,0 +1,24 @@
+error[E0597]: `paths` does not live long enough
+  --> tests/ub_safe/compile_fail/checkout_options_paths_outlive_view.rs:9:38
+   |
+ 8 |         let paths = [c"*.txt"];
+   |             ----- binding `paths` declared here
+ 9 |         let view = StrArrayView::new(&paths);
+   |                                      ^^^^^^ borrowed value does not live long enough
+10 |         options.as_mut().set_paths(view.as_ref());
+11 |     }
+   |     - `paths` dropped here while still borrowed
+12 |     let _ = options.as_ref().paths().len();
+   |             ------- borrow later used here
+
+error[E0597]: `view` does not live long enough
+  --> tests/ub_safe/compile_fail/checkout_options_paths_outlive_view.rs:10:36
+   |
+ 9 |         let view = StrArrayView::new(&paths);
+   |             ---- binding `view` declared here
+10 |         options.as_mut().set_paths(view.as_ref());
+   |                                    ^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `view` dropped here while still borrowed
+12 |     let _ = options.as_ref().paths().len();
+   |             ------- borrow later used here

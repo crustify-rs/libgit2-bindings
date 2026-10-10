@@ -1,6 +1,7 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C functions names.
 # Add only the items a batch needs; keep entries sorted.
 crustify_GIT_OID_DEFAULT
+git_blob_create_from_buffer
 git_blob_create_from_stream
 git_blob_create_from_stream_commit
 git_branch_iterator_free
@@ -8,6 +9,9 @@ git_branch_iterator_new
 git_branch_lookup
 git_branch_next
 git_buf_dispose
+git_checkout_index
+git_checkout_options_init
+git_checkout_tree
 git_commit_create_buffer
 git_commit_free
 git_commit_id
@@ -31,6 +35,8 @@ git_filter_list_stream_buffer
 git_filter_lookup
 git_filter_register
 git_index_add
+git_index_add_bypath
+git_index_conflict_add
 git_index_entrycount
 git_index_free
 git_index_get_byindex
@@ -38,8 +44,10 @@ git_index_new
 git_index_open
 git_index_owner
 git_index_path
+git_index_read_tree
 git_index_set_version
 git_index_write
+git_index_write_tree
 git_libgit2_buildinfo
 git_libgit2_feature_backend
 git_libgit2_features
@@ -154,6 +162,7 @@ git_tree_entry_filemode
 git_tree_entry_filemode_raw
 git_tree_entrycount
 git_tree_free
+git_tree_id
 git_tree_lookup
 git_treebuilder_free
 git_treebuilder_get
