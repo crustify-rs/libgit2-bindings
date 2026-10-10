@@ -29,13 +29,36 @@
 //! The constructors can fail and set the calling thread's libgit2 error, so they pin
 //! libgit2's runtime first (`runtime_pinned`) and return the error, copied out, as an
 //! [`ErrorBuf`].
+//!
+//! # Tree entries
+//!
+//! A [`TreeEntry`] is a `git_tree_entry`: one name in a tree, with the id and file mode
+//! of the object it names. It is opaque: libgit2 publishes no field. An entry comes in
+//! two forms.
+//!
+//! - **Owned.** `git_tree_entry_dup` and `git_tree_entry_bypath` hand the caller an
+//!   entry of its own: one block of libgit2's allocator holding the struct and, right
+//!   past it, its NUL-terminated name, which `git_tree_entry_free` releases at once.
+//!   It holds nothing else, no tree and no repository, so it may outlive both. Rust
+//!   owns one through a [`TreeEntryBox`], whose `Clone` is `git_tree_entry_dup`.
+//! - **Borrowed.** An entry of a tree (`git_tree_entry_byindex`, `_byname`, `_byid`)
+//!   is an element of the tree's entries, its name pointing into the tree's raw data;
+//!   an entry of a tree builder (`git_treebuilder_get`) is the builder's. Either lives
+//!   as long as its parent does, and is never freed on its own: it is a
+//!   [`TreeEntryRef`] borrowing the parent, which
+//!   [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies into an owned one.
+//!
+//! No routine writes an entry through a `const git_tree_entry *`, so a shared handle
+//! reads an entry nobody changes; a builder rewrites the mode and id of one of its
+//! entries in place only through an exclusive borrow of the builder. An entry is
+//! `Send` and `Sync`.
 
 use core::ffi::c_int;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::repository::repository::RepositoryRef;
@@ -493,6 +516,133 @@ fn constructed(
     builder.ok_or_else(last)
 }
 
+define_ctype!(
+    /// One entry of a tree (`git_tree_entry`): a name, and the id and file mode of the
+    /// object it names.
+    ///
+    /// libgit2 allocates and frees it, so it is only ever reached through a
+    /// [`TreeEntryBox`], for an entry of its own, or a [`TreeEntryRef`] that borrows a
+    /// tree or tree builder (see the [module docs](self#tree-entries)). It is opaque:
+    /// no field is published.
+    ///
+    /// A borrowed entry lives no longer than its owner:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::object::tree::{TreeEntryBox, TreeEntryRef};
+    ///
+    /// fn escape(entry: TreeEntryBox) -> TreeEntryRef<'static> {
+    ///     let handle = entry.as_ref();
+    ///     drop(entry);
+    ///     handle
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_tree_entry
+    TreeEntry,
+    TreeEntryRef,
+    TreeEntryMut,
+    ffi::git_tree_entry
+);
+
+// SAFETY: an owned entry is one block of libgit2's process-wide allocator, which frees
+// on any thread, holding the struct and its name and nothing shared with anything else;
+// a borrowed one moves only as a handle, as `&T` does under `Sync` below. No C routine
+// keeps thread-local state about an entry.
+unsafe impl Send for TreeEntry {}
+// SAFETY: libgit2 never writes an entry through a `const git_tree_entry *`, the only
+// access a shared handle grants (`git_tree_entry_dup` and every accessor only read it),
+// and builds its fields before handing it out; the one writer, a tree builder updating
+// its own entry, needs an exclusive borrow of the builder, which a shared handle to the
+// entry excludes.
+unsafe impl Sync for TreeEntry {}
+
+impl fmt::Debug for TreeEntryRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TreeEntry").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for TreeEntryMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Releases an owned entry through `git_tree_entry_free`, which frees its one block,
+/// name included; and copies an entry, owned or borrowed, through
+/// `git_tree_entry_dup`, into a fresh block of its own.
+///
+/// The free only applies to an entry from `git_tree_entry_dup` or
+/// `git_tree_entry_bypath`: an entry borrowed from a tree or builder is part of its
+/// parent's storage, and is reached through a [`TreeEntryRef`] alone.
+///
+/// Wraps: git_tree_entry_free
+/// Wraps: git_tree_entry_dup
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TreeEntryFree;
+
+impl_cdrop!(TreeEntryFree, TreeEntry, ffi::git_tree_entry_free);
+
+// SAFETY: `dup` returns `None` or a fresh block from `git_tree_entry_dup` holding a
+// copy of the entry, its name and id and mode, which `git_tree_entry_free` releases; it
+// only reads `ptr`, leaving it valid.
+unsafe impl CDupClone<TreeEntry> for TreeEntryFree {
+    unsafe fn c_dup(&self, ptr: NonNull<TreeEntry>) -> Option<NonNull<TreeEntry>> {
+        // SAFETY: per `c_dup`'s contract `ptr` addresses a live entry, which nothing
+        // writes during the copy, the handle's only use; `TreeEntry` is transparent over
+        // `git_tree_entry`.
+        let source = unsafe { TreeEntryRef::from_ptr(ptr.as_ptr().cast()) }?;
+        let copy = dup(source)?;
+        NonNull::new(copy.into_c().cast())
+    }
+}
+
+/// An owned [`TreeEntry`], freed by `git_tree_entry_free` on drop and copied by
+/// `git_tree_entry_dup` on `clone` (`try_clone` reports a failed copy as `None`).
+pub type TreeEntryBox = CBox<TreeEntry, TreeEntryFree>;
+
+/// `git_tree_entry_dup(source)`: a fresh copy the caller owns, or `None` when libgit2
+/// cannot allocate it (or be initialised), with the thread's error set.
+fn dup(source: TreeEntryRef<'_>) -> Option<TreeEntryBox> {
+    if !runtime_pinned() {
+        return None;
+    }
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a writable slot, set only on success; `source` addresses a live
+    // entry nothing writes while the shared handle lives, whose NUL-terminated name, id
+    // and mode are read for the call only. The runtime is pinned, so a failure is
+    // reported on live thread-local state.
+    let rc = unsafe { ffi::git_tree_entry_dup(&mut out, source.as_ptr()) };
+    if rc < 0 {
+        return None;
+    }
+    // SAFETY: a fresh entry from `git_tree_entry_dup` the caller owns, released by
+    // `git_tree_entry_free` as `TreeEntryFree` does.
+    unsafe { TreeEntryBox::from_c(out) }
+}
+
+impl TreeEntryRef<'_> {
+    /// A copy of the entry in a block of its own, as `git_tree_entry_dup` makes one:
+    /// the same name, id and file mode, owned by the result and tied to no tree. An
+    /// entry borrowed from a tree or builder becomes owned this way; an owner also
+    /// copies with `Clone`.
+    ///
+    /// Fails with libgit2's error when it runs out of memory, or cannot be initialised.
+    ///
+    /// Wraps: git_tree_entry_dup
+    pub fn to_tree_entry(&self) -> Result<TreeEntryBox, ErrorBuf> {
+        dup(*self).ok_or_else(last)
+    }
+}
+
+// A `TreeEntry` is a `git_tree_entry`, never held by value; the owner is one pointer.
+const _: () = assert!(
+    size_of::<TreeEntry>() == size_of::<ffi::git_tree_entry>()
+        && size_of::<TreeEntryBox>() == size_of::<*mut ffi::git_tree_entry>()
+        && size_of::<Option<TreeEntryBox>>() == size_of::<*mut ffi::git_tree_entry>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -660,5 +810,327 @@ mod unit_tests {
         assert_eq!(back, p);
         // SAFETY: the builder `into_c` gave up, released once here.
         unsafe { TreeBuilderFree.c_drop(NonNull::new(back.cast::<TreeBuilder<'_>>()).unwrap()) };
+    }
+
+    /// `git_tree_entry`'s owner, handles and lifecycle policy.
+    mod tree_entry {
+        use crate::libgit2::object::tree::*;
+        use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
+        use crate::libgit2::util::errors::ErrorClass;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use core::ffi::{CStr, c_char, c_int, c_void};
+        use core::mem::size_of;
+        use ffibox::CDrop;
+        use std::process::Command;
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// `testrepo.git`; commit `763d71a`'s tree holds `README` and the nested
+        /// `ab/de/fgh/1.txt`.
+        const TESTREPO: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git\0"
+        );
+        const TREE: &CStr = c"ae90f12eea699729ed24555e40b9fd669da12a12";
+        const README: &CStr = c"1385f264afb75a56a5bec74243be9b367ba4ca08";
+        const NESTED: &CStr = c"1f67fc4386b2d171e0d21be1c447e12660561f9b";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// Whether [`Refusing`] refuses every request.
+        static REFUSE: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut c_void;
+            fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+            fn free(p: *mut c_void);
+        }
+
+        /// libc's allocator, refusing every request while [`REFUSE`] is set.
+        struct Refusing;
+
+        impl Refusing {
+            fn grant() -> bool {
+                !REFUSE.load(SeqCst)
+            }
+        }
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Refusing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if !Self::grant() {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if !Self::grant() {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+        fn install_refusing() {
+            let allocator = Allocator::new::<Refusing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
+            // member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+
+        /// `testrepo.git` and the tree `TREE` of it, raw; both freed on drop. Stands in for
+        /// the `git_tree` wrapper.
+        struct Tree {
+            repo: *mut ffi::git_repository,
+            tree: *mut ffi::git_tree,
+        }
+
+        impl Tree {
+            fn open() -> Self {
+                assert!(runtime_pinned());
+                let mut repo = ptr::null_mut();
+                // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
+                let rc = unsafe {
+                    ffi::git_repository_open_ext(
+                        &mut repo,
+                        TESTREPO.as_ptr().cast(),
+                        ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                        ptr::null(),
+                    )
+                };
+                assert_eq!(rc, 0);
+                let id = Oid::from_string(TREE, OidType::Sha1).unwrap();
+                let mut tree = ptr::null_mut();
+                // SAFETY: a writable slot, the open repository and a live id of its type.
+                let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo, id.as_ref().as_ptr()) };
+                assert_eq!(rc, 0);
+                Self { repo, tree }
+            }
+
+            /// The tree's own entry `name`, borrowed for as long as the tree is.
+            fn entry(&self, name: &CStr) -> TreeEntryRef<'_> {
+                // SAFETY: the live tree, and a NUL-terminated name read for the call; the
+                // entry is the tree's, unchanged until it is freed, after `'_`.
+                unsafe {
+                    let entry = ffi::git_tree_entry_byname(self.tree, name.as_ptr());
+                    TreeEntryRef::from_ptr(entry.cast_mut()).unwrap()
+                }
+            }
+
+            /// `git_tree_entry_bypath(path)`, adopted.
+            fn bypath(&self, path: &CStr) -> TreeEntryBox {
+                let mut out = ptr::null_mut();
+                // SAFETY: a writable slot, the live tree and a NUL-terminated path.
+                let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, self.tree, path.as_ptr()) };
+                assert_eq!(rc, 0);
+                // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
+                unsafe { TreeEntryBox::from_c(out) }.unwrap()
+            }
+        }
+
+        impl Drop for Tree {
+            fn drop(&mut self) {
+                // SAFETY: both are live and freed once, the tree first; every entry
+                // borrowed from the tree borrowed `self`.
+                unsafe {
+                    ffi::git_tree_free(self.tree);
+                    ffi::git_repository_free(self.repo);
+                }
+            }
+        }
+
+        /// C's name, hex id and raw mode of a live entry.
+        fn view(entry: TreeEntryRef<'_>) -> (String, String, u32) {
+            let p = entry.as_ptr();
+            // SAFETY: `p` is a live entry the handle borrows; its name and id live as long
+            // as it does and are copied at once.
+            unsafe {
+                let name = CStr::from_ptr(ffi::git_tree_entry_name(p));
+                let id = OidRef::from_ptr(ffi::git_tree_entry_id(p).cast_mut()).unwrap();
+                (
+                    name.to_str().unwrap().to_owned(),
+                    id.to_hex_string().unwrap(),
+                    ffi::git_tree_entry_filemode_raw(p),
+                )
+            }
+        }
+
+        fn expected(name: &str, id: &CStr) -> (String, String, u32) {
+            (
+                name.into(),
+                id.to_str().unwrap().into(),
+                ffi::GIT_FILEMODE_BLOB,
+            )
+        }
+
+        /// `src/libgit2/tree.h`'s `struct git_tree_entry`, which the bindings keep opaque:
+        /// an entry Rust builds, for the handles' paths that never reach libgit2.
+        #[repr(C)]
+        struct RawEntry {
+            attr: u16,
+            filename_len: u16,
+            oid: ffi::git_oid,
+            filename: *const c_char,
+        }
+
+        fn raw_entry() -> RawEntry {
+            RawEntry {
+                attr: ffi::GIT_FILEMODE_BLOB as u16,
+                filename_len: 6,
+                oid: ffi::git_oid::default(),
+                filename: c"README".as_ptr(),
+            }
+        }
+
+        #[test]
+        fn layout_matches_c() {
+            assert_eq!(size_of::<TreeEntry>(), size_of::<ffi::git_tree_entry>());
+            assert_eq!(
+                size_of::<TreeEntryBox>(),
+                size_of::<*mut ffi::git_tree_entry>()
+            );
+            assert_eq!(
+                size_of::<TreeEntryRef<'_>>(),
+                size_of::<*const ffi::git_tree_entry>()
+            );
+            assert_eq!(
+                size_of::<TreeEntryMut<'_>>(),
+                size_of::<*const ffi::git_tree_entry>()
+            );
+            assert_eq!(size_of::<TreeEntryFree>(), 0);
+        }
+
+        /// The handles' seams over an entry Rust built, never read, so Miri runs them.
+        #[test]
+        fn handles_without_c() {
+            // SAFETY: NULL is refused without being read.
+            assert!(unsafe { TreeEntryRef::from_ptr(ptr::null_mut()) }.is_none());
+            let mut raw = raw_entry();
+            let p: *mut ffi::git_tree_entry = ptr::from_mut(&mut raw).cast();
+            // SAFETY: `raw` is live for the handle's use and reached by it alone.
+            let mut m = unsafe { TreeEntryMut::from_ptr(p) }.unwrap();
+            assert_eq!(m.as_mut_ptr(), p);
+            assert_eq!(m.as_mut().as_mut_ptr(), p);
+            assert_eq!(m.as_ref().as_ptr(), p.cast_const());
+            assert_eq!(format!("{:?}", m.as_ref()), "TreeEntry { .. }");
+            assert_eq!(format!("{m:?}"), "TreeEntry { .. }");
+        }
+
+        /// An entry borrowed from a tree copies into one of its own, which outlives the
+        /// tree and its repository, as does an entry `bypath` hands out; each owner copies
+        /// again, and the policy releases a copy driven by hand.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn copies_outlive_the_tree() {
+            let tree = Tree::open();
+            let borrowed = tree.entry(c"README");
+            assert_eq!(view(borrowed), expected("README", README));
+            let copy = borrowed.to_tree_entry().unwrap();
+            let nested = tree.bypath(c"ab/de/fgh/1.txt");
+            let nested_copy = nested.as_ref().to_tree_entry().unwrap();
+            drop(tree);
+
+            assert_eq!(view(copy.as_ref()), expected("README", README));
+            let clone = copy.clone();
+            drop(copy);
+            assert_eq!(view(clone.as_ref()), expected("README", README));
+            drop(nested);
+            assert_eq!(view(nested_copy.as_ref()), expected("1.txt", NESTED));
+            let again = nested_copy.try_clone().unwrap();
+            assert_eq!(view(again.as_ref()), expected("1.txt", NESTED));
+
+            let p = NonNull::new(again.as_ptr()).unwrap();
+            // SAFETY: `again` keeps the entry live; nothing writes it.
+            let dup = unsafe { TreeEntryFree.c_dup(p) }.unwrap();
+            // SAFETY: `dup` is a fresh copy this test owns, released once here.
+            unsafe { TreeEntryFree.c_drop(dup) };
+            assert_eq!(view(again.as_ref()), expected("1.txt", NESTED));
+        }
+
+        /// An allocation failure is reported as libgit2's out-of-memory error, and a failed
+        /// copy leaves the original usable.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn allocation_failure_is_reported() {
+            isolated(
+                concat!(module_path!(), "::allocation_failure_is_reported"),
+                || {
+                    install_refusing();
+                    let tree = Tree::open();
+                    let owned = tree.bypath(c"README");
+                    REFUSE.store(true, SeqCst);
+                    let borrowed = tree.entry(c"README").to_tree_entry();
+                    let from_owner = owned.as_ref().to_tree_entry();
+                    let cloned = owned.try_clone();
+                    REFUSE.store(false, SeqCst);
+                    for e in [borrowed.unwrap_err(), from_owner.unwrap_err()] {
+                        assert_eq!(e.class(), Some(ErrorClass::NoMemory));
+                        assert_eq!(e.message(), c"Out of memory");
+                    }
+                    assert!(cloned.is_none());
+                    assert_eq!(view(owned.clone().as_ref()), expected("README", README));
+                },
+            );
+        }
+
+        /// When libgit2 cannot be initialised, a copy reports C's static "not initialized"
+        /// error without calling into it.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn copy_without_runtime_fails_cleanly() {
+            isolated(
+                concat!(module_path!(), "::copy_without_runtime_fails_cleanly"),
+                || {
+                    install_refusing();
+                    REFUSE.store(true, SeqCst);
+                    let mut raw = raw_entry();
+                    // SAFETY: `raw` is live and unchanged for the handle's use.
+                    let entry = unsafe { TreeEntryRef::from_ptr(ptr::from_mut(&mut raw).cast()) };
+                    let e = entry.unwrap().to_tree_entry().unwrap_err();
+                    REFUSE.store(false, SeqCst);
+                    assert!(!runtime_pinned(), "libgit2 could not initialise");
+                    assert_eq!(e.class(), Some(ErrorClass::Invalid));
+                    assert_eq!(e.message(), c"library has not been initialized");
+                },
+            );
+        }
     }
 }

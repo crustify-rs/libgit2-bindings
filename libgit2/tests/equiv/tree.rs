@@ -9,7 +9,8 @@
 //! below is that documentation, compared with `git_tree_walk` over one tree of nested
 //! subtrees, step after step.
 //!
-//! The tree builder's lifecycle and `UpdateAction` are compared in [`builder`].
+//! The tree builder's lifecycle and `UpdateAction` are compared in [`builder`], the
+//! tree entry's lifecycle in [`tree_entry`].
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -1016,5 +1017,204 @@ mod builder {
         }
         free_tree(with_entry);
         free_tree(baseline);
+    }
+}
+
+mod tree_entry {
+    //! Equivalence of `git2/tree.h`'s tree entry owner with the C lifecycle it wraps.
+    //!
+    //! [`TreeEntryBox`]'s `clone` / `try_clone` and [`TreeEntryRef::to_tree_entry`] must
+    //! copy as `git_tree_entry_dup` does, and its drop release as `git_tree_entry_free`
+    //! does. Each side opens `testrepo.git` on its own and takes an owned entry for each
+    //! probe path through `git_tree_entry_bypath` (the Rust side adopting it, as the tree
+    //! wrapper will) from commit `763d71a`'s tree: files and directories at every depth.
+    //! Then each side copies the entry, copies the copy, releases the original, the
+    //! tree and the repository, and copies once more; after every step the sides are
+    //! compared: what C reads out of each live entry (name, id, raw and normalised mode,
+    //! type) and `git_tree_entry_cmp` between the side's live entries.
+    //!
+    //! [`TreeEntryRef::to_tree_entry`]: libgit2::libgit2::object::tree::TreeEntryRef::to_tree_entry
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::Object;
+    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+    const TREE: &CStr = c"ae90f12eea699729ed24555e40b9fd669da12a12";
+    const PATHS: [&CStr; 7] = [
+        c"README",
+        c"new.txt",
+        c"ab",
+        c"ab/de/",
+        c"ab/c/3.txt",
+        c"ab/de/fgh",
+        c"ab/de/fgh/1.txt",
+    ];
+
+    /// What C reads out of a live entry.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct View {
+        name: CString,
+        id: String,
+        raw_mode: u32,
+        mode: u32,
+        kind: ffi::git_object_t,
+    }
+
+    fn view(p: *const ffi::git_tree_entry) -> View {
+        let mut out = [0u8; 65];
+        // SAFETY: `p` is a live entry; its name and id live as long as it does and are
+        // copied at once; `out` has 65 writable bytes.
+        unsafe {
+            ffi::git_oid_tostr(
+                out.as_mut_ptr().cast(),
+                out.len(),
+                ffi::git_tree_entry_id(p),
+            );
+            View {
+                name: CStr::from_ptr(ffi::git_tree_entry_name(p)).to_owned(),
+                id: CStr::from_bytes_until_nul(&out)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                raw_mode: ffi::git_tree_entry_filemode_raw(p),
+                mode: ffi::git_tree_entry_filemode(p),
+                kind: ffi::git_tree_entry_type(p),
+            }
+        }
+    }
+
+    fn cmp(a: *const ffi::git_tree_entry, b: *const ffi::git_tree_entry) -> c_int {
+        // SAFETY: two live entries, read for the call only.
+        unsafe { ffi::git_tree_entry_cmp(a, b) }.signum()
+    }
+
+    /// `git_tree_entry_bypath(tree, path)`: a fresh entry the caller frees.
+    fn bypath(tree: *const ffi::git_tree, path: &CStr) -> *mut ffi::git_tree_entry {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot, a live tree and a NUL-terminated path.
+        let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree, path.as_ptr()) };
+        assert_eq!(rc, 0, "{path:?}");
+        out
+    }
+
+    /// `git_tree_entry_dup(entry)`.
+    fn dup(entry: *const ffi::git_tree_entry) -> *mut ffi::git_tree_entry {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot and a live entry, read for the call.
+        assert_eq!(unsafe { ffi::git_tree_entry_dup(&mut out, entry) }, 0);
+        out
+    }
+
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    #[test]
+    fn copies_match_c() {
+        init();
+        let path = CString::new(TESTREPO).unwrap();
+        let tree_id = Oid::from_string(TREE, OidType::Sha1).unwrap();
+
+        // The C side: its own repository and tree.
+        let mut c_repo = ptr::null_mut();
+        let mut c_tree = ptr::null_mut();
+        let mut c_id = ffi::git_oid::default();
+        // SAFETY: writable slots, a NUL-terminated path and hex id; the repository is open
+        // before the tree is looked up in it.
+        unsafe {
+            let rc = ffi::git_repository_open_ext(
+                &mut c_repo,
+                path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            );
+            assert_eq!(rc, 0);
+            assert_eq!(
+                ffi::git_oid_from_string(&mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                0
+            );
+            assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
+        }
+        // The Rust side: its own repository, and the tree as an object.
+        let rust_repo = Repository::open(&path).unwrap();
+        let rust_tree =
+            Object::lookup(rust_repo.as_ref(), tree_id.as_ref(), Some(ObjectType::Tree)).unwrap();
+
+        // Step 1: an owned entry per path on each side.
+        let c_entries: Vec<_> = PATHS.iter().map(|p| bypath(c_tree, p)).collect();
+        let rust_entries: Vec<TreeEntryBox> = PATHS
+            .iter()
+            .map(|p| {
+                let raw = bypath(rust_tree.as_c_ptr().cast(), p);
+                // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
+                unsafe { TreeEntryBox::from_c(raw) }.unwrap()
+            })
+            .collect();
+        let views = |c: &[*mut ffi::git_tree_entry], r: &[TreeEntryBox]| {
+            let c: Vec<_> = c.iter().map(|&e| view(e)).collect();
+            let r: Vec<_> = r.iter().map(|e| view(e.as_c_ptr())).collect();
+            assert_eq!(c, r);
+            c
+        };
+        let original = views(&c_entries, &rust_entries);
+
+        // Step 2: a copy of each, and a copy of the copy.
+        let c_copies: Vec<_> = c_entries.iter().map(|&e| dup(e)).collect();
+        let rust_copies: Vec<_> = rust_entries.iter().map(TreeEntryBox::clone).collect();
+        let c_copies2: Vec<_> = c_copies.iter().map(|&e| dup(e)).collect();
+        let rust_copies2: Vec<_> = rust_copies
+            .iter()
+            .map(|e| e.as_ref().to_tree_entry().unwrap())
+            .collect();
+        assert_eq!(views(&c_copies, &rust_copies), original);
+        assert_eq!(views(&c_copies2, &rust_copies2), original);
+
+        // Step 3: the originals, the trees and the repositories go.
+        for e in c_entries {
+            // SAFETY: each original is released once; its copies remain.
+            unsafe { ffi::git_tree_entry_free(e) };
+        }
+        drop(rust_entries);
+        // SAFETY: the tree and repository are released once, the tree first.
+        unsafe {
+            ffi::git_tree_free(c_tree);
+            ffi::git_repository_free(c_repo);
+        }
+        drop(rust_tree);
+        drop(rust_repo);
+        assert_eq!(views(&c_copies, &rust_copies), original);
+        assert_eq!(views(&c_copies2, &rust_copies2), original);
+
+        // Step 4: a third generation, and the order the entries sort in.
+        let c_copies3: Vec<_> = c_copies2.iter().map(|&e| dup(e)).collect();
+        let rust_copies3: Vec<_> = rust_copies2
+            .iter()
+            .map(|e| e.try_clone().unwrap())
+            .collect();
+        assert_eq!(views(&c_copies3, &rust_copies3), original);
+        for i in 0..PATHS.len() {
+            for j in 0..PATHS.len() {
+                let c = cmp(c_copies3[i], c_copies[j]);
+                let r = cmp(rust_copies3[i].as_c_ptr(), rust_copies[j].as_c_ptr());
+                assert_eq!(c, r, "{:?} vs {:?}", PATHS[i], PATHS[j]);
+            }
+        }
+
+        for e in c_copies.into_iter().chain(c_copies2).chain(c_copies3) {
+            // SAFETY: each copy is released once.
+            unsafe { ffi::git_tree_entry_free(e) };
+        }
     }
 }

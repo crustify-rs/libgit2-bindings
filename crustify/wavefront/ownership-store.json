@@ -632,6 +632,34 @@
    "fields": []
   },
   {
+   "name": "git_object",
+   "defined_in": "src/libgit2/object.h",
+   "_comment_agent": "Shared, counted object: cached.refcount is an atomic32 that git_object_dup (git_cached_obj_incref) bumps and git_object_free (git_cached_obj_decref) drops, freeing through the per-type free at zero. The repository's object cache holds a reference of its own and hands the same pointer to every lookup of one id, so a caller's reference is never provably sole. Parsed objects are not written through the public API after parsing except git_commit's lazily computed summary/body (written through a non-const git_commit*), and they reach a repository that is not thread-safe: no Send/Sync. Rust: CArc<Object<'r>, ObjectFree>, 'r the repository borrow.",
+   "fields": [
+    {
+     "name": "cached",
+     "refcount": true
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The repository the object was parsed for (git_object__init_from_odb_object), stored without a count; git_repository_free does not clear it. Every object the public API hands out (lookup, lookup_prefix, lookup_bypath, peel, the typed lookups) has one; only git_object__from_raw (indexer-internal) leaves it NULL. Lookups through an object (git_commit_parent, git_tree_entry_bypath, git_object_lookup_bypath, git_object_peel) pass it on and fill its object cache, so the repository must outlive every use of the object; git_object__free never reads it, so freeing does not."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_object_t",
    "defined_in": "include/git2/types.h",
    "_comment_agent": "Fieldless C enum (GIT_OBJECT_ANY = -2, GIT_OBJECT_INVALID = -1, COMMIT 1, TREE 2, BLOB 3, TAG 4; bindgen types it c_int). No storage, no pointers, no lifecycle: passed and returned by value, and through out-params (git_odb_read_header, git_odb_read_prefix-style backend callbacks in sys/odb_backend.h, git_odb_expand_id.type in/out). Only 1..=4 name an object's type: git_object_type_is_valid (object.c:344) accepts exactly those (git_objects_table size > 0); type2string gives '' for any other value; string2type returns INVALID for unknown, NULL or empty names (it prefix-matches, so 'commitx' -> COMMIT). GIT_OBJECT_ANY is a lookup/peel filter only (object_lookup*, git_object_peel, git_reference_peel, tree_entry_to_object, odb expand_ids), never an object's type; INVALID is an error/unset answer (git_object_type(NULL), git_tag_target_type(NULL), git_tree_entry_type(NULL), string2type misses, parse placeholders). The pack-entry types 6/7 are the GIT_PACKFILE_OFS_DELTA/REF_DELTA macros (pack.h:37), packfile-only, never a public out-param; cache.c's per-type limit table still reserves slots 0 and 5..7, so GIT_OPT_SET_CACHE_OBJECT_LIMIT accepts any of 0..=7 and rejects others 'type out of range' (cache.c:36). git_odb_expand_ids reads 0 as ANY and writes 0 back on a miss. HAZARD (probed, plain build): git_odb_write(..., type 0) succeeds - normalize_options (object.c:630) reads object_type 0 as BLOB for the id, but the loose backend formats its header from type2string(0) = '', so it stores an object under a blob id that git_odb_read_header then fails on ('failed to read loose object header'), and a later real write of the same blob is skipped by git_odb__freshen. Every other unnamed value (<0, >=5) is rejected 'invalid object type'. Rust side (core/types.rs): ObjectType {Commit, Tree, Blob, Tag}, #[repr(i32)], non_exhaustive; never transmute: from_raw/TryFrom<git_object_t> -> NotAnObjectType for every other value; filters spell ANY as None through ObjectType::raw_or_any(Option<ObjectType>), so a typed write/hash wrapper cannot pass 0.",
@@ -1320,6 +1348,28 @@
    "defined_in": "include/git2/trace.h",
    "_comment_agent": "C enum, values 0..6 (NONE..TRACE), passed by value. Consumers: git_trace_set stores any value in git_trace__data.level (GIT_ASSERT_ARG level == 0 || callback != NULL, an abort in Debug builds); git_trace() emits when git_trace__data.level >= level, so the integer order is the verbosity order; internal emitters only pass named levels (INFO/DEBUG/TRACE) to git_trace_cb. Wrapped as the fieldless TraceLevel enum (repr u32, Ord over the C values) with a fallible from_raw in core/trace.rs.",
    "fields": []
+  },
+  {
+   "name": "git_tree_entry",
+   "defined_in": "src/libgit2/tree.h",
+   "_comment_agent": "Two ownership forms. Owned: one git__calloc block (struct + name + NUL), from git_tree_entry_dup or git_tree_entry_bypath, released by git_tree_entry_free (git__free) and deep-copied by git_tree_entry_dup; it holds no reference to a tree or repository, so it may outlive both. Borrowed: an element of a git_tree's entries array (git_tree_entry_byindex/byname/byid) or a treebuilder's map (git_treebuilder_get), tied to its parent; git_treebuilder_insert rewrites attr and oid of an existing builder entry in place. No routine writes an entry through const git_tree_entry*. Rust: CBox<TreeEntry, TreeEntryFree> + TreeEntryRef<'a>.",
+   "fields": [
+    {
+     "name": "filename",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "self"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated, filename_len bytes long. In an entry from alloc_entry (git_tree_entry_dup, git_tree_entry_bypath, the treebuilder) it points inline, right past the struct in the same git__calloc block; in an entry of a parsed tree's entries array it points into the tree's odb_obj data, which the tree keeps until git_tree__free frees the array with it. Either way it lives exactly as long as the entry's own storage and is never freed separately."
+     }
+    }
+   ]
   },
   {
    "name": "git_treebuilder",
@@ -3080,6 +3130,227 @@
       "nullable": false,
       "mutable": true,
       "note": "Out-param, written unconditionally with LIBGIT2_VERSION_REVISION; NULL dereferenced. Always returns 0; needs no initialisation."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_dup",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "source",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "dest",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:dest"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives source itself, one more reference counted on it; always 0."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Not NULL-checked: the atomic refcount is incremented in place, so source must be live; the same pointer is handed back through dest."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_free",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "object",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Gives up one counted reference (git_cached_obj_decref); at zero the per-type free runs, which never reads object->repo. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_lookup",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "object_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call. When the effective length reaches the repository's full hex size the id is passed to the odb as is, whose loose backend formats it into a path sized for the repository's oid type: an id of another type overflows or underfills it."
+     }
+    },
+    {
+     "name": "object_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed object (shared with the cache and every other lookup of the id), or a freshly parsed one the cache adopted; it keeps repo uncounted in object->repo, so it must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_lookup_prefix",
+   "defined_in": "src/libgit2/object.c",
+   "lifetime": {
+    "for": "object_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call. When the effective length reaches the repository's full hex size the id is passed to the odb as is, whose loose backend formats it into a path sized for the repository's oid type: an id of another type overflows or underfills it."
+     }
+    },
+    {
+     "name": "object_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached parsed object (shared with the cache and every other lookup of the id), or a freshly parsed one the cache adopted; it keeps repo uncounted in object->repo, so it must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache filled; the result keeps this pointer uncounted."
      }
     }
    ]
@@ -7506,6 +7777,87 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_dup",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "source",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "dest",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:dest"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives a fresh alloc_entry block owned by the caller, freed by git_tree_entry_free; untouched on failure (-1, out of memory)."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call (name, length, oid, attr); may be owned or borrowed from a tree/treebuilder."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_entry_free",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "entry",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git__free of the entry's single block (struct + inline name); only valid for entries from git_tree_entry_dup / git_tree_entry_bypath, never for ones borrowed from a tree or treebuilder. NULL is a no-op."
      }
     }
    ]

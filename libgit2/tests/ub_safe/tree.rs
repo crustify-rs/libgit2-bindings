@@ -7,7 +7,7 @@
 //! owns and points at nothing and none of these tests calls libgit2, so they also run
 //! under Miri; the sweep strides under BSan and Miri.
 //!
-//! The tree builder's tests are in [`builder`].
+//! The tree builder's tests are in [`builder`], the tree entry's in [`tree_entry`].
 
 use std::collections::HashSet;
 use std::hint::black_box;
@@ -313,5 +313,213 @@ mod builder {
             handles.into_iter().map(|h| h.join().unwrap()).collect()
         });
         assert!(ids.windows(2).all(|w| w[0] == w[1]));
+    }
+}
+
+mod tree_entry {
+    //! UB tests for `git2/tree.h`'s tree entries: the owned `TreeEntryBox` and its
+    //! handles.
+    //!
+    //! An owned entry is one block of libgit2's allocator, its name inline right past the
+    //! struct: `git_tree_entry_free` releases it once and `git_tree_entry_dup` copies it
+    //! whole into a new one. A double free, a leaked copy, or a copy that reads or writes
+    //! past the name (an off-by-one in the inline name) is flagged by ASan (LSan included):
+    //! the tests copy entries from the box and from its shared handle, drop chains of
+    //! copies in every order, copy names of every length a tree allows (1 to 65535 bytes),
+    //! and let copies outlive the tree and the repository they came from, which an owned
+    //! entry does not reach.
+    //!
+    //! An entry is `Send` and `Sync`: these tests copy one entry from many threads at once
+    //! and move copies to other threads to drop them (TSan). A handle outliving its owner
+    //! and aliased exclusive handles do not compile (`compile_fail/` and doctests).
+    //!
+    //! Every test calls libgit2, so Miri skips them all.
+
+    use std::ffi::{CStr, CString};
+    use std::sync::Barrier;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::object::tree::TreeEntryBox;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::RepositoryRef;
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::{
+        entry_bypath, entry_view, open_testrepo, repository, write_tree,
+    };
+
+    /// Commit `763d71a`'s tree, which nests `ab/de/fgh/1.txt`.
+    const TREE: &CStr = c"ae90f12eea699729ed24555e40b9fd669da12a12";
+    const PATHS: [&CStr; 6] = [
+        c"README",
+        c"ab",
+        c"ab/",
+        c"ab/c/3.txt",
+        c"ab/de/fgh",
+        c"ab/de/fgh/1.txt",
+    ];
+
+    fn tree<'r>(repo: RepositoryRef<'r>) -> ObjectArc<'r> {
+        let id = Oid::from_string(TREE, OidType::Sha1).unwrap();
+        Object::lookup(repo, id.as_ref(), Some(ObjectType::Tree)).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn copies_outlive_the_tree_and_the_repository() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let entries: Vec<TreeEntryBox> = PATHS
+            .iter()
+            .map(|p| entry_bypath(&root, p).unwrap())
+            .collect();
+        let expected: Vec<_> = entries.iter().map(entry_view).collect();
+        let copies: Vec<_> = entries
+            .iter()
+            .map(|e| e.as_ref().to_tree_entry().unwrap())
+            .collect();
+        let clones: Vec<_> = entries.iter().map(TreeEntryBox::clone).collect();
+        drop(root);
+        drop(repo);
+        drop(entries);
+        for ((copy, clone), view) in copies.iter().zip(&clones).zip(&expected) {
+            assert_eq!(&entry_view(copy), view);
+            assert_eq!(&entry_view(clone), view);
+        }
+        assert_eq!(expected[1].0.as_c_str(), c"ab");
+        assert_eq!(expected[1].2, ffi::GIT_FILEMODE_TREE);
+        assert_eq!(expected[5].0.as_c_str(), c"1.txt");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn copy_chains_release_every_copy_in_any_order() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let original = entry_bypath(&root, c"ab/de/fgh/1.txt").unwrap();
+        let expected = entry_view(&original);
+        for order in 0..3 {
+            let mut chain = vec![original.clone()];
+            for i in 0..16 {
+                let last = chain.last().unwrap();
+                let next = match i % 3 {
+                    0 => last.clone(),
+                    1 => last.try_clone().unwrap(),
+                    _ => last.as_ref().to_tree_entry().unwrap(),
+                };
+                chain.push(next);
+            }
+            match order {
+                0 => chain.reverse(),
+                1 => chain.rotate_left(5),
+                _ => {}
+            }
+            while let Some(entry) = chain.pop() {
+                assert_eq!(entry_view(&entry), expected);
+            }
+        }
+        assert_eq!(entry_view(&original), expected);
+    }
+
+    /// Names of 1 to 65535 bytes, the most a tree entry's 16-bit length holds, and of
+    /// every byte a name may hold, copied whole: an off-by-one in the inline name leaves
+    /// the block (ASan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn names_of_every_length_copy_whole() {
+        let repo = TempRepo::new("tree-entry-names");
+        let lens = [
+            1usize, 2, 7, 8, 9, 15, 16, 17, 255, 256, 4095, 4096, 65534, 65535,
+        ];
+        let mut names: Vec<CString> = lens
+            .iter()
+            .map(|&n| CString::new(vec![b'n'; n]).unwrap())
+            .collect();
+        names.push(CString::new((1u8..=255).filter(|b| *b != b'/').collect::<Vec<_>>()).unwrap());
+        let id = write_tree(&repo, b"payload\n", &names);
+        let root = Object::lookup(repository(&repo), id.as_ref(), Some(ObjectType::Tree)).unwrap();
+        for name in &names {
+            let entry = entry_bypath(&root, name).unwrap();
+            let copy = entry.as_ref().to_tree_entry().unwrap();
+            drop(entry);
+            let clone = copy.clone();
+            drop(copy);
+            assert_eq!(&entry_view(&clone).0, name);
+        }
+    }
+
+    /// Many threads copy one shared entry at once, through the owner and its shared
+    /// handle, and move their copies to other threads that read and drop them (TSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_cross_threads() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let shared = entry_bypath(&root, c"ab/c/3.txt").unwrap();
+        let expected = entry_view(&shared);
+        drop(root);
+        drop(repo);
+
+        const THREADS: usize = 8;
+        let barrier = Barrier::new(THREADS);
+        let copies: Vec<TreeEntryBox> = thread::scope(|s| {
+            let workers: Vec<_> = (0..THREADS)
+                .map(|i| {
+                    let (shared, barrier) = (&shared, &barrier);
+                    s.spawn(move || {
+                        let handle = shared.as_ref();
+                        barrier.wait();
+                        let mut mine = Vec::new();
+                        for j in 0..64 {
+                            let copy = if (i + j) % 2 == 0 {
+                                shared.clone()
+                            } else {
+                                handle.to_tree_entry().unwrap()
+                            };
+                            mine.push(copy);
+                        }
+                        mine.truncate(4);
+                        mine
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|w| w.join().unwrap())
+                .collect()
+        });
+
+        let views: Vec<_> = copies
+            .into_iter()
+            .map(|copy| thread::spawn(move || entry_view(&copy)))
+            .collect();
+        for view in views {
+            assert_eq!(view.join().unwrap(), expected);
+        }
+        let moved = thread::spawn(move || {
+            let view = entry_view(&shared);
+            drop(shared);
+            view
+        });
+        assert_eq!(moved.join().unwrap(), expected);
+    }
+
+    /// The shared handle is `Copy` and outlives no owner; several may coexist.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn shared_handles_coexist() {
+        let repo = open_testrepo();
+        let root = tree(repo.as_ref());
+        let mut entry = entry_bypath(&root, c"README").unwrap();
+        let a = entry.as_ref();
+        let b = a;
+        let (x, y) = (a.to_tree_entry().unwrap(), b.to_tree_entry().unwrap());
+        assert_eq!(entry_view(&x), entry_view(&y));
+        let m = entry.as_mut();
+        assert_eq!(format!("{m:?}"), "TreeEntry { .. }");
+        assert_eq!(format!("{:?}", m.as_ref()), "TreeEntry { .. }");
     }
 }
