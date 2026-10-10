@@ -14,6 +14,9 @@ git_feature_t
 git_filemode_t
 git_filter
 git_filter_mode_t
+git_index
+git_index_entry
+git_index_entry_extended_flag_t
 git_libgit2_opt_t
 git_object_t
 git_odb_options

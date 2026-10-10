@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ub_safe/compile_fail/index_arc_has_no_exclusive_handle.rs:7:27
+  |
+7 |     let _: IndexMut<'_> = index.as_ref();
+  |            ------------   ^^^^^^^^^^^^^^ expected `IndexMut<'_>`, found `IndexRef<'_>`
+  |            |
+  |            expected due to this
