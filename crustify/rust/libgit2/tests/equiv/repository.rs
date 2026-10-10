@@ -1998,3 +1998,556 @@ mod repository_owner {
         );
     }
 }
+
+/// [`InitOptions`] against the `git_repository_init_options` C code builds.
+///
+/// [`InitOptions::new`] must build what `git_repository_init_options_init` and
+/// `GIT_REPOSITORY_INIT_OPTIONS_INIT` do. Then one sequence of option changes runs
+/// twice, under two roots with independently allocated strings: once on a C struct
+/// written field by field, as C code writes one, and once on an [`InitOptions`] through
+/// its setters, each persisting across the steps. After every step the getters must
+/// read what the C struct holds (strings by content, each root masked), and
+/// `git_repository_init_ext` must behave the same with either: its return, the error
+/// of a failure, the flags it leaves in the options, and every file and directory it
+/// creates (kinds, permission bits, contents). The init routine is not wrapped yet, so
+/// the Rust options reach it through their documented `#[repr(transparent)]` layout.
+///
+/// [`InitOptions`]: libgit2::libgit2::repository::repository::InitOptions
+/// [`InitOptions::new`]: libgit2::libgit2::repository::repository::InitOptions::new
+mod init_options {
+    use std::collections::BTreeMap;
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::refs::refdb::RefdbType;
+    use libgit2::libgit2::repository::repository::{
+        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsRef,
+    };
+
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// `git_repository_init_options_init(version)` into a zeroed struct.
+    fn c_options(version: u32) -> (c_int, ffi::git_repository_init_options) {
+        let mut opts = ffi::git_repository_init_options {
+            version: 0,
+            flags: 0,
+            mode: 0,
+            workdir_path: ptr::null(),
+            description: ptr::null(),
+            template_path: ptr::null(),
+            initial_head: ptr::null(),
+            origin_url: ptr::null(),
+            oid_type: 0,
+            refdb_type: 0,
+        };
+        // SAFETY: `opts` is a live options struct the call may overwrite.
+        let rc = unsafe { ffi::git_repository_init_options_init(&mut opts, version) };
+        (rc, opts)
+    }
+
+    /// The C struct's fields: the integers, then the strings with `root` masked.
+    type Fields = ([u32; 5], [Option<String>; 5]);
+
+    /// The string at `s`, NULL as `None`, with `root` masked.
+    fn masked(s: *const std::ffi::c_char, root: &Path) -> Option<String> {
+        (!s.is_null()).then(|| {
+            // SAFETY: a non-NULL field holds a NUL-terminated string a live `CString`
+            // of the test owns.
+            let s = unsafe { CStr::from_ptr(s) }.to_str().unwrap();
+            s.replace(root.to_str().unwrap(), "<root>")
+        })
+    }
+
+    fn c_fields(o: &ffi::git_repository_init_options, root: &Path) -> Fields {
+        (
+            [o.version, o.flags, o.mode, o.oid_type, o.refdb_type],
+            [
+                masked(o.workdir_path, root),
+                masked(o.description, root),
+                masked(o.template_path, root),
+                masked(o.initial_head, root),
+                masked(o.origin_url, root),
+            ],
+        )
+    }
+
+    fn rust_fields(o: InitOptionsRef<'_, '_>, root: &Path) -> Fields {
+        let s = |s: Option<&CStr>| masked(s.map_or(ptr::null(), CStr::as_ptr), root);
+        (
+            [
+                o.version(),
+                o.flags().bits(),
+                o.mode().raw(),
+                o.oid_type().map_or(0, OidType::raw),
+                o.refdb_type().map_or(0, RefdbType::raw),
+            ],
+            [
+                s(o.workdir_path()),
+                s(o.description()),
+                s(o.template_path()),
+                s(o.initial_head()),
+                s(o.origin_url()),
+            ],
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_the_c_initialisers() {
+        let root = Path::new("/");
+        let (rc, c) = c_options(ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION);
+        assert_eq!(rc, 0);
+        let rust = InitOptions::new();
+        assert_eq!(rust_fields(rust.as_ref(), root), c_fields(&c, root));
+        // `GIT_REPOSITORY_INIT_OPTIONS_INIT` is `{VERSION}`: every other field zero.
+        let mut macro_form = c_options(0).1;
+        macro_form.version = ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION;
+        assert_eq!(
+            rust_fields(rust.as_ref(), root),
+            c_fields(&macro_form, root)
+        );
+        assert_eq!(rust.as_ref().version(), InitOptions::VERSION);
+        // C refuses other versions, leaving the struct as it was; `new` has none.
+        for version in [0, 2] {
+            let (rc, c) = c_options(version);
+            assert_eq!((rc, c.version), (-1, 0), "version {version}");
+        }
+    }
+
+    /// A scratch directory, removed on drop.
+    struct Root(PathBuf);
+
+    impl Root {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-init-options-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(path.join("tpl/hooks")).unwrap();
+            fs::write(path.join("tpl/hooks/post-commit"), "#!/bin/sh\n").unwrap();
+            fs::write(path.join("tpl/description"), "from the template\n").unwrap();
+            fs::create_dir_all(path.join("empty-tpl")).unwrap();
+            Self(path)
+        }
+
+        fn c(&self, rel: &str) -> CString {
+            CString::new(self.0.join(rel).as_os_str().as_bytes()).unwrap()
+        }
+    }
+
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// One entry of a created tree: a directory's permission bits, or a file's and its
+    /// contents with the root masked; a reftable stack only by its size, its table
+    /// names being random.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Entry {
+        Dir(u32),
+        File(u32, String),
+        Tables(usize),
+    }
+
+    /// Every entry under `root` but the templates, by relative path.
+    fn snapshot(root: &Path) -> BTreeMap<String, Entry> {
+        let mut out = BTreeMap::new();
+        let mut stack = vec![root.to_path_buf()];
+        let mask = root.to_str().unwrap();
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+                if rel == "tpl" || rel == "empty-tpl" {
+                    continue;
+                }
+                let meta = fs::symlink_metadata(&path).unwrap();
+                let bits = meta.permissions().mode() & 0o7777;
+                if meta.is_dir() && path.file_name().unwrap() == "reftable" {
+                    out.insert(rel, Entry::Tables(fs::read_dir(&path).unwrap().count()));
+                } else if meta.is_dir() {
+                    out.insert(rel, Entry::Dir(bits));
+                    stack.push(path);
+                } else {
+                    let text = fs::read_to_string(&path).unwrap();
+                    out.insert(rel, Entry::File(bits, text.replace(mask, "<root>")));
+                }
+            }
+        }
+        out
+    }
+
+    /// One call's record: the return, the class and message of a failure (root
+    /// masked), and the options' flags afterwards.
+    type Call = (c_int, Option<(c_int, String)>, u32);
+
+    /// `git_repository_init_ext(root/path, opts)`, freeing any repository it leaves.
+    fn init_ext(root: &Path, path: &str, opts: *mut ffi::git_repository_init_options) -> Call {
+        let c_path = CString::new(root.join(path).as_os_str().as_bytes()).unwrap();
+        let mut repo = ptr::null_mut();
+        // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` live options
+        // whose strings outlive the call.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), opts) };
+        // SAFETY: `repo` is NULL or the repository the call left, released once here.
+        unsafe { ffi::git_repository_free(repo) };
+        // A successful open leaves a stale error behind, so only a failure's counts.
+        let error = (rc != 0).then(|| {
+            // SAFETY: after a failure `git_error_last` is this thread's error, live
+            // until the next libgit2 call on this thread; it is copied out first.
+            let e = unsafe { &*ffi::git_error_last() };
+            // SAFETY: a set error's message is a NUL-terminated string.
+            let message = unsafe { CStr::from_ptr(e.message) }.to_string_lossy();
+            (e.klass, message.replace(root.to_str().unwrap(), "<root>"))
+        });
+        // SAFETY: `opts` is live; the flags are plain data the call may have written.
+        (rc, error, unsafe { (*opts).flags })
+    }
+
+    /// The strings one side owns, allocated independently of the other side's.
+    struct Strings {
+        template: CString,
+        empty_template: CString,
+        missing_template: CString,
+        description: CString,
+        head: CString,
+        full_head: CString,
+        url: CString,
+        workdir: CString,
+    }
+
+    impl Strings {
+        fn new(root: &Root) -> Self {
+            Self {
+                template: root.c("tpl"),
+                empty_template: CString::new("").unwrap(),
+                missing_template: root.c("no-such-tpl"),
+                description: CString::new("described\n").unwrap(),
+                head: CString::new("trunk").unwrap(),
+                full_head: CString::new("refs/heads/other").unwrap(),
+                url: CString::new("https://example.com/r.git").unwrap(),
+                workdir: CString::new("../wd").unwrap(),
+            }
+        }
+    }
+
+    /// One change to the options, spelled both ways: through the C struct's fields
+    /// and through the setters.
+    struct Change {
+        c: fn(&mut ffi::git_repository_init_options, &Strings),
+        rust: for<'o> fn(&mut InitOptions<'o>, &'o Strings),
+    }
+
+    /// A step: the change, then an init of this path.
+    struct Step {
+        tag: &'static str,
+        change: Change,
+        path: &'static str,
+    }
+
+    fn steps() -> Vec<Step> {
+        use InitFlag::*;
+        use ffi::{
+            GIT_REPOSITORY_INIT_BARE as BARE, GIT_REPOSITORY_INIT_EXTERNAL_TEMPLATE as EXTERNAL,
+            GIT_REPOSITORY_INIT_MKDIR as MKDIR, GIT_REPOSITORY_INIT_MKPATH as MKPATH,
+            GIT_REPOSITORY_INIT_NO_REINIT as NO_REINIT,
+            GIT_REPOSITORY_INIT_RELATIVE_GITLINK as RELATIVE,
+        };
+        macro_rules! change {
+            (|$c:ident, $cs:ident| $cbody:expr, |$r:ident, $rs:ident| $rbody:expr) => {
+                Change {
+                    c: |$c, $cs| {
+                        let _ = (&$c, &$cs);
+                        $cbody
+                    },
+                    rust: |$r, $rs| {
+                        let _ = &$rs;
+                        let mut $r = $r.as_mut();
+                        let _ = &mut $r;
+                        $rbody
+                    },
+                }
+            };
+        }
+        vec![
+            Step {
+                tag: "a working directory, `.git` appended",
+                change: change!(|c, s| c.flags = MKPATH, |r, s| r.set_flags(Mkpath.into())),
+                path: "plain",
+            },
+            Step {
+                tag: "head, description and origin, into a `.git` path",
+                change: change!(
+                    |c, s| {
+                        c.initial_head = s.head.as_ptr();
+                        c.description = s.description.as_ptr();
+                        c.origin_url = s.url.as_ptr();
+                    },
+                    |r, s| {
+                        r.set_initial_head(Some(&s.head));
+                        r.set_description(Some(&s.description));
+                        r.set_origin_url(Some(&s.url));
+                    }
+                ),
+                path: "named/.git",
+            },
+            Step {
+                tag: "the same options again: a reinit that re-adds origin",
+                change: change!(|c, s| (), |r, s| ()),
+                path: "named/.git",
+            },
+            Step {
+                tag: "a reinit without origin, to a full reference",
+                change: change!(
+                    |c, s| {
+                        c.origin_url = ptr::null();
+                        c.initial_head = s.full_head.as_ptr();
+                    },
+                    |r, s| {
+                        r.set_origin_url(None);
+                        r.set_initial_head(Some(&s.full_head));
+                    }
+                ),
+                path: "named/.git",
+            },
+            Step {
+                tag: "a bare shared SHA-256 repository from an external template",
+                change: change!(
+                    |c, s| {
+                        c.flags = BARE | MKDIR;
+                        c.mode = ffi::GIT_REPOSITORY_INIT_SHARED_GROUP;
+                        c.template_path = s.template.as_ptr();
+                        c.oid_type = ffi::GIT_OID_SHA256;
+                        c.initial_head = ptr::null();
+                        c.description = ptr::null();
+                    },
+                    |r, s| {
+                        r.set_flags(Bare | Mkdir);
+                        r.set_mode(InitMode::SharedGroup);
+                        r.set_template_path(Some(&s.template));
+                        r.set_oid_type(Some(OidType::Sha256));
+                        r.set_initial_head(None);
+                        r.set_description(None);
+                    }
+                ),
+                path: "bare-sha256",
+            },
+            Step {
+                tag: "a bare reftable repository with a custom mode",
+                change: change!(
+                    |c, s| {
+                        c.flags = BARE | MKPATH;
+                        c.mode = 0o750;
+                        c.template_path = ptr::null();
+                        c.oid_type = 0;
+                        c.refdb_type = ffi::GIT_REFDB_REFTABLE;
+                    },
+                    |r, s| {
+                        r.set_flags(Bare | Mkpath);
+                        r.set_mode(InitMode::from_raw(0o750));
+                        r.set_template_path(None);
+                        r.set_oid_type(None);
+                        r.set_refdb_type(Some(RefdbType::Reftable));
+                    }
+                ),
+                path: "deep/rt",
+            },
+            Step {
+                tag: "a relative working directory with a relative gitlink",
+                change: change!(
+                    |c, s| {
+                        c.flags = MKPATH | RELATIVE;
+                        c.mode = ffi::GIT_REPOSITORY_INIT_SHARED_UMASK;
+                        c.refdb_type = ffi::GIT_REFDB_FILES;
+                        c.workdir_path = s.workdir.as_ptr();
+                    },
+                    |r, s| {
+                        r.set_flags(Mkpath | RelativeGitlink);
+                        r.set_mode(InitMode::SharedUmask);
+                        r.set_refdb_type(Some(RefdbType::Files));
+                        r.set_workdir_path(Some(&s.workdir));
+                    }
+                ),
+                path: "sep/repo",
+            },
+            Step {
+                tag: "a shared bare repository from the configured template",
+                change: change!(
+                    |c, s| {
+                        c.flags = BARE | MKPATH | EXTERNAL;
+                        c.mode = ffi::GIT_REPOSITORY_INIT_SHARED_ALL;
+                        c.workdir_path = ptr::null();
+                    },
+                    |r, s| {
+                        r.set_flags(Bare | Mkpath | ExternalTemplate);
+                        r.set_mode(InitMode::SharedAll);
+                        r.set_workdir_path(None);
+                    }
+                ),
+                path: "all",
+            },
+            Step {
+                tag: "a `.git/` path without a working directory",
+                change: change!(
+                    |c, s| {
+                        c.flags = MKPATH;
+                        c.mode = ffi::GIT_REPOSITORY_INIT_SHARED_UMASK;
+                    },
+                    |r, s| {
+                        r.set_flags(Mkpath.into());
+                        r.set_mode(InitMode::SharedUmask);
+                    }
+                ),
+                path: "slash/.git/",
+            },
+            Step {
+                tag: "version 0",
+                change: change!(|c, s| c.version = 0, |r, s| r.set_version(0)),
+                path: "never",
+            },
+            Step {
+                tag: "version 2",
+                change: change!(|c, s| c.version = 2, |r, s| r.set_version(2)),
+                path: "never",
+            },
+            Step {
+                tag: "no reinit over an existing repository",
+                change: change!(
+                    |c, s| {
+                        c.version = 1;
+                        c.workdir_path = ptr::null();
+                        c.flags = MKPATH | NO_REINIT;
+                    },
+                    |r, s| {
+                        r.set_version(1);
+                        r.set_workdir_path(None);
+                        r.set_flags(Mkpath | NoReinit);
+                    }
+                ),
+                path: "plain",
+            },
+            Step {
+                tag: "an empty external template copies nothing",
+                change: change!(
+                    |c, s| {
+                        c.flags = BARE | EXTERNAL | MKDIR;
+                        c.template_path = s.empty_template.as_ptr();
+                        c.description = s.description.as_ptr();
+                    },
+                    |r, s| {
+                        r.set_flags(Bare | ExternalTemplate | Mkdir);
+                        r.set_template_path(Some(&s.empty_template));
+                        r.set_description(Some(&s.description));
+                    }
+                ),
+                path: "empty",
+            },
+            Step {
+                tag: "a missing template falls back to the built-in one",
+                change: change!(
+                    |c, s| c.template_path = s.missing_template.as_ptr(),
+                    |r, s| r.set_template_path(Some(&s.missing_template))
+                ),
+                path: "missing",
+            },
+            Step {
+                tag: "every string cleared, the default types",
+                change: change!(
+                    |c, s| {
+                        c.flags = BARE | MKDIR;
+                        c.template_path = ptr::null();
+                        c.description = ptr::null();
+                        c.oid_type = 0;
+                        c.refdb_type = 0;
+                    },
+                    |r, s| {
+                        r.set_flags(InitFlags::from(Bare) | Mkdir);
+                        r.set_template_path(None);
+                        r.set_description(None);
+                        r.set_oid_type(None);
+                        r.set_refdb_type(None);
+                    }
+                ),
+                path: "cleared",
+            },
+        ]
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_ext_reads_rust_options_as_c_options() {
+        init();
+        let roots = [Root::new("c"), Root::new("rust")];
+        let strings = [Strings::new(&roots[0]), Strings::new(&roots[1])];
+        let mut c = c_options(ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION).1;
+        let mut rust = InitOptions::new();
+        let mut calls = Vec::new();
+        for step in steps() {
+            (step.change.c)(&mut c, &strings[0]);
+            (step.change.rust)(&mut rust, &strings[1]);
+            assert_eq!(
+                rust_fields(rust.as_ref(), &roots[1].0),
+                c_fields(&c, &roots[0].0),
+                "{}: fields",
+                step.tag
+            );
+            let c_call = init_ext(&roots[0].0, step.path, &mut c);
+            let rust_ptr = ptr::from_mut(&mut rust).cast::<ffi::git_repository_init_options>();
+            let rust_call = init_ext(&roots[1].0, step.path, rust_ptr);
+            assert_eq!(rust_call, c_call, "{}", step.tag);
+            assert_eq!(
+                rust_fields(rust.as_ref(), &roots[1].0),
+                c_fields(&c, &roots[0].0),
+                "{}: fields after the call",
+                step.tag
+            );
+            assert_eq!(snapshot(&roots[1].0), snapshot(&roots[0].0), "{}", step.tag);
+            calls.push((step.tag, c_call));
+        }
+        // The sequence reached what it meant to: successes, the re-added origin, the
+        // version refusals and the refused reinit.
+        let rc: Vec<_> = calls.iter().map(|(_, (rc, _, _))| *rc).collect();
+        assert_eq!(
+            rc,
+            [0, 0, -4, 0, 0, 0, 0, 0, 0, -1, -1, -4, 0, 0, 0],
+            "{calls:#?}"
+        );
+        // The internal bits libgit2 ORed into both sides' flags.
+        assert_eq!(calls[1].1.2 & !0xffff, 1 << 16 | 1 << 17);
+        assert_eq!(calls[2].1.2 & !0xffff, 1 << 16 | 1 << 17 | 1 << 18);
+        let snap = snapshot(&roots[0].0);
+        let text = |path: &str| match snap.get(path) {
+            Some(Entry::File(_, text)) => text.clone(),
+            other => panic!("{path}: {other:?}"),
+        };
+        assert_eq!(text("named/.git/HEAD"), "ref: refs/heads/other\n");
+        assert_eq!(text("named/.git/description"), "described\n");
+        assert!(text("named/.git/config").contains("url = https://example.com/r.git"));
+        assert!(text("bare-sha256/config").contains("objectformat = sha256"));
+        assert!(text("deep/rt/config").contains("refstorage = reftable"));
+        assert!(text("all/config").contains("sharedrepository = 2"));
+        assert!(matches!(snap.get("deep/rt/reftable"), Some(Entry::Tables(n)) if *n > 0));
+        assert!(snap.contains_key("bare-sha256/hooks/post-commit"));
+        assert!(!snap.contains_key("empty/description"));
+        assert!(snap.contains_key("missing/description"));
+        assert!(
+            matches!(snap.get("sep/wd/.git"), Some(Entry::File(_, s)) if s == "gitdir: ../repo/\n")
+        );
+    }
+}

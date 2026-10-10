@@ -623,3 +623,474 @@ mod repository_owner {
         );
     }
 }
+
+/// The init options `InitOptions` (`git_repository_init_options`) and its handles.
+///
+/// The options store pointers to the strings their setters borrow and read them back
+/// through the getters; every source here is a `CString`, an allocation of exactly its
+/// length, so ASan flags a read past one, and each is released after the options, once
+/// (ASan, LSan). The getters' strings outlive the handles and the options, since they
+/// point at the sources. Every getter and setter runs on every holder Rust has for the
+/// options (a local, a heap slot, an element of a run that moves when it grows, a
+/// copy), through reborrows, and across threads under the `Send` / `Sync` the crate
+/// asserts (TSan); `new` runs on many threads before anything initialised libgit2
+/// (`git_repository_init_options_init` copies a template, touching no global state).
+/// libgit2 reads the options in `git_repository_init_ext`, standing in for its wrapper
+/// in `fixture`: every string is read in bounds (ASan), the flags it ORs in are written
+/// through the exclusive borrow, and nothing is kept past the call, so the options may
+/// be reused, moved to another thread or dropped right after (BSan: a foreign write
+/// between Rust reborrows, no retained pointer). The object id type and reference
+/// storage only take named values, and a string, the options' handles and borrows that
+/// outlive their sources do not compile (`compile_fail/`, the type's doctests). Every
+/// test builds its options through `git_repository_init_options_init`, so Miri skips
+/// them; the inline unit tests run the accessors under Miri over a Rust-built value.
+mod init_options {
+    use std::ffi::{CStr, CString};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Barrier, Mutex};
+    use std::thread;
+
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::refs::refdb::RefdbType;
+    use libgit2::libgit2::repository::repository::{
+        InitFlag, InitFlags, InitMode, InitOptions, InitOptionsMut, InitOptionsRef,
+    };
+
+    use crate::fixture::repository_options::{init_ext, oid_type};
+    use crate::fixture::{init, isolated};
+
+    /// `n` distinct strings of lengths `base + 1`, `base + 2`, ...
+    fn strings(base: usize, n: usize) -> Vec<CString> {
+        (1..=n)
+            .map(|i| CString::new(vec![b'a' + ((base + i) % 26) as u8; base + i]).unwrap())
+            .collect()
+    }
+
+    /// The five string getters, in field order.
+    fn strs<'o>(o: InitOptionsRef<'_, 'o>) -> [Option<&'o CStr>; 5] {
+        [
+            o.workdir_path(),
+            o.description(),
+            o.template_path(),
+            o.initial_head(),
+            o.origin_url(),
+        ]
+    }
+
+    /// Every value and byte the getters reach.
+    fn read_all(o: InitOptionsRef<'_, '_>) -> (u32, u32, u32, Vec<Vec<u8>>, String) {
+        let s = strs(o)
+            .iter()
+            .map(|s| s.map_or(b"-".to_vec(), |s| s.to_bytes().to_vec()))
+            .collect();
+        let typed = format!("{:?} {:?}", o.oid_type(), o.refdb_type());
+        (
+            o.version(),
+            o.flags().bits(),
+            o.mode().raw(),
+            s,
+            typed + &format!("{o:?}"),
+        )
+    }
+
+    const OIDS: [Option<OidType>; 3] = [None, Some(OidType::Sha1), Some(OidType::Sha256)];
+    const REFDBS: [Option<RefdbType>; 3] =
+        [None, Some(RefdbType::Files), Some(RefdbType::Reftable)];
+
+    /// Writes every field for `round`, the strings from `s` (or none on every fourth
+    /// round).
+    fn write<'o>(mut m: InitOptionsMut<'_, 'o>, s: &'o [CString], round: u32) {
+        let pick = |i: usize| (round % 4 != 3).then(|| s[i].as_c_str());
+        m.set_version(round % 3);
+        m.set_flags(InitFlags::from_bits_retain(round.rotate_left(round)));
+        m.set_mode(InitMode::from_raw(round.wrapping_mul(0o1234567)));
+        m.set_workdir_path(pick(0));
+        m.set_description(pick(1));
+        m.set_template_path(pick(2));
+        m.set_initial_head(pick(3));
+        m.set_origin_url(pick(4));
+        m.set_oid_type(OIDS[round as usize % 3]);
+        m.set_refdb_type(REFDBS[round as usize / 3 % 3]);
+    }
+
+    /// What [`write`] stored, read back independently of the options.
+    fn expected(s: &[CString], round: u32) -> (u32, u32, u32, Vec<Vec<u8>>) {
+        let strs = (0..5)
+            .map(|i| {
+                if round % 4 == 3 {
+                    b"-".to_vec()
+                } else {
+                    s[i].to_bytes().to_vec()
+                }
+            })
+            .collect();
+        (
+            round % 3,
+            round.rotate_left(round),
+            round.wrapping_mul(0o1234567),
+            strs,
+        )
+    }
+
+    fn values(o: InitOptionsRef<'_, '_>) -> (u32, u32, u32, Vec<Vec<u8>>) {
+        let (v, f, m, s, _) = read_all(o);
+        (v, f, m, s)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn defaults_then_every_setter_on_every_holder() {
+        let pool: Vec<Vec<CString>> = (0..64).map(|r| strings(r, 5)).collect();
+        let mut local = InitOptions::new();
+        let o = local.as_ref();
+        assert_eq!(
+            (o.version(), o.flags(), o.mode()),
+            (1, InitFlags::empty(), InitMode::SharedUmask)
+        );
+        assert_eq!(strs(o), [None; 5]);
+        assert_eq!((o.oid_type(), o.refdb_type()), (None, None));
+        let mut boxed = Box::new(InitOptions::new());
+        let mut run = vec![InitOptions::new()];
+        for round in 0..64u32 {
+            let s = &pool[round as usize];
+            write(local.as_mut(), s, round);
+            write(InitOptions::as_mut(&mut boxed), s, round);
+            // Growing the run moves its elements: every handle is taken afresh.
+            run.push(InitOptions::new());
+            let last = run.len() - 1;
+            write(run[last].as_mut(), s, round);
+            for opts in [&local, &*boxed, &run[last]] {
+                assert_eq!(values(opts.as_ref()), expected(s, round), "round {round}");
+                assert_eq!(opts.as_ref().oid_type(), OIDS[round as usize % 3]);
+                assert_eq!(opts.as_ref().refdb_type(), REFDBS[round as usize / 3 % 3]);
+                let copy = opts.as_ref().to_options();
+                assert_eq!(read_all(copy.as_ref()), read_all(opts.as_ref()));
+            }
+        }
+        // Every element of the run still reads what it was given.
+        for (i, opts) in run.iter().enumerate().skip(1) {
+            let round = i as u32 - 1;
+            assert_eq!(
+                values(opts.as_ref()),
+                expected(&pool[round as usize], round)
+            );
+        }
+        drop((local, boxed, run));
+        drop(pool);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_outlive_the_handles_and_the_options() {
+        let s = strings(7, 5);
+        let read = {
+            let mut opts = InitOptions::new();
+            write(opts.as_mut(), &s, 1);
+            let r = opts.as_ref();
+            strs(r)
+        };
+        // The options are gone; what they pointed at is not.
+        let bytes: Vec<_> = read.iter().map(|s| s.unwrap().to_bytes()).collect();
+        let want: Vec<_> = s.iter().map(|s| s.to_bytes()).collect();
+        assert_eq!(bytes, want);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reborrows_keep_one_writer() {
+        let s = strings(3, 5);
+        let mut opts = InitOptions::new();
+        let mut m = opts.as_mut();
+        {
+            let mut inner = m.as_mut();
+            inner.set_initial_head(Some(&s[0]));
+            inner.set_flags(InitFlag::Bare.into());
+            assert_eq!(inner.as_ref().initial_head(), Some(s[0].as_c_str()));
+        }
+        let shared = m.as_ref();
+        let copy = shared;
+        assert_eq!(copy.flags(), InitFlag::Bare.into());
+        assert!(!format!("{m:?}").is_empty());
+        m.set_origin_url(Some(&s[1]));
+        m.set_initial_head(None);
+        let o = opts.as_ref();
+        assert_eq!(
+            (o.initial_head(), o.origin_url()),
+            (None, Some(s[1].as_c_str()))
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn copies_are_independent() {
+        let s = strings(11, 5);
+        let t = strings(13, 5);
+        let mut a = InitOptions::new();
+        write(a.as_mut(), &s, 5);
+        let mut b = a;
+        write(b.as_mut(), &t, 6);
+        assert_eq!(values(a.as_ref()), expected(&s, 5));
+        assert_eq!(values(b.as_ref()), expected(&t, 6));
+        let c = a.as_ref().to_options();
+        write(a.as_mut(), &t, 7);
+        assert_eq!(values(c.as_ref()), expected(&s, 5));
+        assert_eq!(values(a.as_ref()), expected(&t, 7));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn shared_handles_read_across_threads() {
+        let s = strings(2, 5);
+        let mut opts = InitOptions::new();
+        write(opts.as_mut(), &s, 9);
+        let r = opts.as_ref();
+        let (whole, s) = (&opts, &s);
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(move || {
+                    for _ in 0..200 {
+                        assert_eq!(values(r), expected(s, 9));
+                        assert_eq!(values(whole.as_ref()), expected(s, 9));
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn values_and_exclusive_handles_move_across_threads() {
+        let s = strings(4, 5);
+        let mut opts = InitOptions::new();
+        thread::scope(|scope| {
+            let m = opts.as_mut();
+            let s = &s;
+            scope.spawn(move || write(m, s, 10)).join().unwrap();
+        });
+        assert_eq!(values(opts.as_ref()), expected(&s, 10));
+        let moved = thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    let mut opts = opts;
+                    opts.as_mut().set_version(9);
+                    opts
+                })
+                .join()
+                .unwrap()
+        });
+        assert_eq!(moved.as_ref().version(), 9);
+        assert_eq!(moved.as_ref().initial_head(), Some(s[3].as_c_str()));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn locked_options_have_one_writer_at_a_time() {
+        let pool: Vec<Vec<CString>> = (0..4).map(|t| strings(t * 5, 5)).collect();
+        let opts = Mutex::new(InitOptions::new());
+        thread::scope(|scope| {
+            for (t, s) in pool.iter().enumerate() {
+                let opts = &opts;
+                scope.spawn(move || {
+                    for _ in 0..200 {
+                        let mut guard = opts.lock().unwrap();
+                        let n = guard.as_ref().version();
+                        let mut m = guard.as_mut();
+                        write(m.as_mut(), s, t as u32);
+                        m.set_version(n + 1);
+                    }
+                });
+            }
+        });
+        assert_eq!(opts.lock().unwrap().as_ref().version(), 4 * 200 + 1);
+    }
+
+    /// `new` copies libgit2's template into a fresh value on each call: concurrent
+    /// calls share nothing for TSan to flag, and each result is the default.
+    fn new_from_many_threads() {
+        let default = format!("{:?}", InitOptions::default());
+        thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    s.spawn(|| {
+                        (0..100)
+                            .map(|_| format!("{:?}", InitOptions::new()))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            for h in handles {
+                assert!(h.join().unwrap().iter().all(|o| *o == default));
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_races_nothing_across_threads() {
+        new_from_many_threads();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_needs_no_initialised_libgit2() {
+        // Before `git_libgit2_init` libgit2's allocator and error state are unusable
+        // (see `util/sys/errors.rs`): `new` touches neither.
+        isolated(
+            concat!(module_path!(), "::new_needs_no_initialised_libgit2"),
+            new_from_many_threads,
+        );
+    }
+
+    /// A scratch directory, removed on drop.
+    struct Root(PathBuf);
+
+    impl Root {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-init-options-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn c_path(&self, rel: &str) -> CString {
+            CString::new(self.0.join(rel).as_os_str().as_bytes()).unwrap()
+        }
+    }
+
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn read(path: &Path) -> String {
+        fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_ext_reads_the_borrowed_strings_in_bounds() {
+        init();
+        let root = Root::new("strings");
+        let tpl = root.0.join("tpl");
+        fs::create_dir_all(tpl.join("hooks")).unwrap();
+        fs::write(tpl.join("hooks/post-commit"), "#!/bin/sh\n").unwrap();
+        // Each string an allocation of exactly its length, released after the options.
+        let workdir = root.c_path("work");
+        let description = CString::new("the description").unwrap();
+        let template = root.c_path("tpl");
+        let head = CString::new("trunk").unwrap();
+        let url = CString::new("https://example.com/r.git").unwrap();
+        let repo_path = root.c_path("repo.git");
+        let mut opts = InitOptions::new();
+        let mut m = opts.as_mut();
+        m.set_flags(InitFlag::Mkpath.into());
+        m.set_workdir_path(Some(&workdir));
+        m.set_description(Some(&description));
+        m.set_initial_head(Some(&head));
+        m.set_origin_url(Some(&url));
+        let (rc, repo) = init_ext(&repo_path, &mut opts);
+        assert_eq!(rc, 0);
+        drop(repo);
+        assert_eq!(opts.as_ref().initial_head(), Some(head.as_c_str()));
+        assert_eq!(
+            read(&root.0.join("repo.git/description")),
+            "the description"
+        );
+        assert_eq!(
+            read(&root.0.join("repo.git/HEAD")),
+            "ref: refs/heads/trunk\n"
+        );
+        assert!(read(&root.0.join("repo.git/config")).contains("https://example.com/r.git"));
+        assert!(read(&root.0.join("work/.git")).starts_with("gitdir: "));
+
+        // The same options again: a reinitialisation, reading the strings once more.
+        // It fails adding `origin` a second time (`GIT_EEXISTS`), after opening the
+        // repository, which it leaves in the slot: released here, once (LSan, ASan).
+        let (rc, repo) = init_ext(&repo_path, &mut opts);
+        assert_eq!(rc, -4);
+        assert!(repo.is_some());
+        drop(repo);
+        // libgit2 wrote its reinitialisation bit through the exclusive borrow; the
+        // handle taken afresh reads it, and the strings are untouched.
+        assert_eq!(opts.as_ref().flags().unnamed_bits(), 1 << 18);
+        assert_eq!(strs(opts.as_ref())[4], Some(url.as_c_str()));
+
+        // A bare SHA-256 repository from an external template, on another thread.
+        let bare = root.c_path("bare");
+        let mut opts = InitOptions::new();
+        let mut m = opts.as_mut();
+        m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+        m.set_mode(InitMode::SharedGroup);
+        m.set_template_path(Some(&template));
+        m.set_oid_type(Some(OidType::Sha256));
+        let kind = thread::scope(|s| {
+            s.spawn(|| {
+                let (rc, repo) = init_ext(&bare, &mut opts);
+                assert_eq!(rc, 0);
+                oid_type(&repo.unwrap())
+            })
+            .join()
+            .unwrap()
+        });
+        assert_eq!(kind, OidType::Sha256.raw());
+        assert!(root.0.join("bare/hooks/post-commit").exists());
+        assert_eq!(opts.as_ref().template_path(), Some(template.as_c_str()));
+        // The options' last use is above; the strings they borrowed go only now.
+        drop((workdir, description, template, head, url));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_ext_refuses_the_versions_it_does_not_know() {
+        init();
+        let root = Root::new("versions");
+        for version in [0, 2, u32::MAX] {
+            let mut opts = InitOptions::new();
+            opts.as_mut().set_version(version);
+            let (rc, repo) = init_ext(&root.c_path("never"), &mut opts);
+            assert_eq!(rc, -1, "version {version}");
+            assert!(repo.is_none());
+            assert!(!root.0.join("never").exists());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_on_threads_while_libgit2_initialises() {
+        // One thread initialises libgit2 for the first time while others build and
+        // write options: `new` touches no state the initialisation sets up.
+        isolated(
+            concat!(
+                module_path!(),
+                "::options_on_threads_while_libgit2_initialises"
+            ),
+            || {
+                let barrier = Barrier::new(5);
+                let s = strings(1, 5);
+                thread::scope(|scope| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        init();
+                    });
+                    for t in 0..4 {
+                        let (barrier, s) = (&barrier, &s);
+                        scope.spawn(move || {
+                            barrier.wait();
+                            for _ in 0..50 {
+                                let mut opts = InitOptions::new();
+                                write(opts.as_mut(), s, t);
+                                assert_eq!(values(opts.as_ref()), expected(s, t));
+                            }
+                        });
+                    }
+                });
+            },
+        );
+    }
+}

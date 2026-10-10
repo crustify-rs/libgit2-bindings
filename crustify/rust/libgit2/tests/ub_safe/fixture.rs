@@ -1193,9 +1193,12 @@ pub mod annotated_commit {
     use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::SeqCst};
 
     use libgit2::ffi;
+    use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::refs::annotated_commit::AnnotatedCommitBox;
     use libgit2::libgit2::refs::refs::ReferenceBox;
-    use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::repository::repository::{
+        InitFlag, InitOptions, RepositoryBox, RepositoryRef,
+    };
     use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     /// A branch name 99 bytes long, a length no other allocation of these tests asks
@@ -1251,23 +1254,15 @@ pub mod annotated_commit {
             ));
             let _ = std::fs::remove_dir_all(&path);
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            let mut opts = ffi::git_repository_init_options::default();
-            // SAFETY: `opts` is a live options struct, filled with the version's defaults.
-            let rc = unsafe {
-                ffi::git_repository_init_options_init(
-                    &mut opts,
-                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
-                )
-            };
+            let mut opts = InitOptions::new();
+            let mut m = opts.as_mut();
+            m.set_flags(InitFlag::Bare | InitFlag::Mkdir);
+            m.set_initial_head(Some(c"main"));
+            m.set_oid_type(OidType::from_raw(kind));
+            let (rc, repo) = super::repository_options::init_ext(&c_path, &mut opts);
             assert_eq!(rc, 0);
-            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
-            opts.initial_head = c"main".as_ptr();
-            opts.oid_type = kind;
-            let mut raw = ptr::null_mut();
-            // SAFETY: a live slot, a NUL-terminated path and live options whose
-            // `initial_head` is static, all read for the call.
-            let rc = unsafe { ffi::git_repository_init_ext(&mut raw, c_path.as_ptr(), &mut opts) };
-            assert_eq!(rc, 0);
+            let repo = repo.unwrap();
+            let raw = repo.as_c_ptr();
             let mut odb = ptr::null_mut();
             // SAFETY: a live slot and the live repository; released below.
             assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, raw) }, 0);
@@ -1324,10 +1319,7 @@ pub mod annotated_commit {
             }
             Self {
                 path,
-                // SAFETY: the fresh repository `git_repository_init_ext` wrote, owned by
-                // this fixture alone and released by `git_repository_free`, as
-                // `RepositoryFree` does.
-                repo: Some(unsafe { RepositoryBox::from_c(raw) }.unwrap()),
+                repo: Some(repo),
                 tree,
                 first,
                 second,
@@ -1551,5 +1543,52 @@ pub mod worktree_add {
             drop(self.repo.take());
             let _ = std::fs::remove_dir_all(&self.base);
         }
+    }
+}
+
+// --- `git2/repository.h`, `git2/sys/repository.h`: the init and new options -------
+
+/// `git_repository_init_ext` and `git_repository_new_ext` over the safe option types,
+/// standing in for their wrappers (a later batch), which replace them. Each reaches the
+/// C struct through the options' documented `#[repr(transparent)]` layout.
+pub mod repository_options {
+    use std::ffi::{CStr, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{InitOptions, RepositoryBox};
+    use libgit2::libgit2::repository::sys::repository::NewOptions;
+
+    /// `git_repository_init_ext(path, opts)`, which writes the options' flags, so it
+    /// takes them exclusively: the return, and the repository the call left in its
+    /// slot (on success, and after a failure past its inner open).
+    pub fn init_ext(path: &CStr, opts: &mut InitOptions<'_>) -> (c_int, Option<RepositoryBox>) {
+        let opts = ptr::from_mut(opts).cast::<ffi::git_repository_init_options>();
+        let mut out = ptr::null_mut();
+        // SAFETY: a live NULL slot, a NUL-terminated path, and live options whose
+        // strings the `'_` borrow keeps alive for the call, which only reads them and
+        // writes the flags through the exclusive borrow.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), opts) };
+        // SAFETY: the slot is NULL or a fresh repository the caller owns alone,
+        // released by `git_repository_free`, as `RepositoryFree` does.
+        (rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// `git_repository_new_ext(opts)`, which only reads them: the return, and the
+    /// repository on success.
+    pub fn new_ext(opts: &NewOptions) -> (c_int, Option<RepositoryBox>) {
+        let opts = ptr::from_ref(opts).cast::<ffi::git_repository_new_options>();
+        let mut out = ptr::null_mut();
+        // SAFETY: a live NULL slot and live options; `git_repository_new_ext` takes a
+        // non-const pointer but only reads it (version and `oid_type`).
+        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts.cast_mut()) };
+        // SAFETY: the slot is NULL or a fresh repository the caller owns alone.
+        (rc, unsafe { RepositoryBox::from_c(out) })
+    }
+
+    /// `git_repository_oid_type(repo)`, standing in for its wrapper.
+    pub fn oid_type(repo: &RepositoryBox) -> ffi::git_oid_t {
+        // SAFETY: a live repository, only read.
+        unsafe { ffi::git_repository_oid_type(repo.as_c_ptr()) }
     }
 }

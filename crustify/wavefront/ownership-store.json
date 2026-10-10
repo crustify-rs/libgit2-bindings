@@ -1057,9 +1057,97 @@
    "fields": []
   },
   {
+   "name": "git_repository_init_options",
+   "defined_in": "include/git2/repository.h",
+   "_comment_agent": "Plain options value, never allocated or freed by libgit2: callers build it on the stack with git_repository_init_options_init (GIT_REPOSITORY_INIT_OPTIONS_INIT) and pass it by non-const pointer. git_repository_init_ext WRITES opts->flags (ORs internal bits 1<<16 HAS_DOTGIT, 1<<17 NATURAL_WD, 1<<18 IS_REINIT), so the call needs exclusive access; reused options carry those bits into the next call (behavioural, no UB). oid_type/refdb_type 0 = default; unnamed values are not validated by init_ext (written as 'unknown', then the open of the result fails). git_repository_init_options_init has no NULL check (memcpy to NULL). Wrapped as InitOptions<'o> (repository/repository.rs): strings borrowed for 'o as &'o CStr, typed OidType/RefdbType/InitFlags/InitMode setters. Reinitialising with origin_url set fails GIT_EEXISTS ('remote 'origin' already exists') AFTER the inner open, leaving the live repository in *out (caller must free); description is only written from the built-in template on a fresh init (external template / reinit ignore it); template_path \"\" copies nothing and a missing explicit template dir falls back to the built-in one.",
+   "fields": [
+    {
+     "name": "description",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read by repo_init_structure: replaces the template's description file content (strcmp against tpl path). Caller-owned NUL-terminated string, only read during the git_repository_init_ext call the options are passed to (also the internal submodule_repo_init/create, which point it at stack/borrowed strings); libgit2 never stores, frees or writes through it. NULL selects the default."
+     }
+    },
+    {
+     "name": "initial_head",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read by get_initial_head, prefixed with refs/heads/ unless it starts with refs/, and git__strdup'ed before use; on reinit only a non-NULL value resets HEAD. Caller-owned NUL-terminated string, only read during the git_repository_init_ext call the options are passed to (also the internal submodule_repo_init/create, which point it at stack/borrowed strings); libgit2 never stores, frees or writes through it. NULL selects the default."
+     }
+    },
+    {
+     "name": "origin_url",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Passed to git_remote_create (which copies it) after init succeeds. Caller-owned NUL-terminated string, only read during the git_repository_init_ext call the options are passed to (also the internal submodule_repo_init/create, which point it at stack/borrowed strings); libgit2 never stores, frees or writes through it. NULL selects the default."
+     }
+    },
+    {
+     "name": "template_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read by repo_init_structure as the external template dir; non-NULL also forces external template use like GIT_REPOSITORY_INIT_EXTERNAL_TEMPLATE. Caller-owned NUL-terminated string, only read during the git_repository_init_ext call the options are passed to (also the internal submodule_repo_init/create, which point it at stack/borrowed strings); libgit2 never stores, frees or writes through it. NULL selects the default."
+     }
+    },
+    {
+     "name": "workdir_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read by repo_init_directories (git_fs_path_join_unrooted, relative to the repo path) and to decide whether to add .git. Caller-owned NUL-terminated string, only read during the git_repository_init_ext call the options are passed to (also the internal submodule_repo_init/create, which point it at stack/borrowed strings); libgit2 never stores, frees or writes through it. NULL selects the default."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_item_t",
    "defined_in": "include/git2/repository.h",
    "_comment_agent": "Fieldless C enum GITDIR 0 .. WORKTREE_CONFIG 14 plus the sentinel GIT_REPOSITORY_ITEM__LAST 15 (bindgen: c_uint). No storage, pointers or lifecycle: passed by value only. Sole public consumer git_repository_item_path (repository.c:3311 -> git_repository__item_path, :3319) indexes the static items[15] table (repository.c:46, {parent, fallback, name, directory}) with the value UNCHECKED: __LAST and every larger value read out of bounds (UBSan 'index 15 out of bounds for type ...[15]' at repository.c:3323, confirmed with the asan-ubsan build, batch 9 of libgit2/repository wave 0, 2026-10-10). Within bounds, resolved_parent_path maps the parent GITDIR/WORKDIR/COMMONDIR to git_repository_path/workdir/commondir (any other parent value: GIT_ERROR_INVALID 'invalid item directory', unreachable from the table); a NULL parent falls back to the entry's fallback (GITDIR for the commondir-rooted items and WORKTREE_CONFIG), else GIT_ENOTFOUND + GIT_ERROR_INVALID 'path cannot exist in repository' (WORKDIR of a bare repo). Directories get a trailing '/'; the commondir link is resolved (worktree COMMONDIR = main/.git/). Internal callers pass named constants only. Rust: `Item` (#[repr(u32)], #[non_exhaustive], 15 variants, no sentinel) with `ALL` indexed by value, fallible `from_raw`/TryFrom (UnnamedItem) refusing >= __LAST, in repository/repository.rs.",
+   "fields": []
+  },
+  {
+   "name": "git_repository_new_options",
+   "defined_in": "include/git2/sys/repository.h",
+   "_comment_agent": "Pointer-free 8-byte options value (version + git_oid_t), never allocated or freed by libgit2; read-only by git_repository_new_ext (version check, then GIT_ASSERT_ARG(git_oid_type_is_valid) for a non-zero oid_type: an unnamed value aborts the Debug/coverage build and fails -1 otherwise). 0 = GIT_OID_DEFAULT. Wrapped as NewOptions (repository/sys/repository.rs) with an Option<OidType> setter so only 0 or a named type is stored.",
    "fields": []
   },
   {
@@ -4585,6 +4673,39 @@
    ]
   },
   {
+   "name": "git_repository_init_options_init",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage (usually a stack local) overwritten whole with GIT_REPOSITORY_INIT_OPTIONS_INIT (memcpy) after the version check; no NULL check, so NULL crashes. Version != 1 returns -1 with GIT_ERROR_INVALID and leaves the storage untouched. No allocation, no global state."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_new",
    "defined_in": "src/libgit2/repository.c",
    "lifetime": {
@@ -4669,6 +4790,39 @@
       "nullable": false,
       "mutable": true,
       "note": "Out slot; *out = repository_alloc() is written before the allocation check, so NULL on failure. GIT_ASSERT_ARG on an invalid non-zero opts->oid_type."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_new_options_init",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage (usually a stack local) overwritten whole with GIT_REPOSITORY_NEW_OPTIONS_INIT (memcpy) after GIT_ASSERT_ARG(opts) and the version check. Version != 1 returns -1 with GIT_ERROR_INVALID and leaves the storage untouched. No allocation, no global state."
      }
     }
    ]

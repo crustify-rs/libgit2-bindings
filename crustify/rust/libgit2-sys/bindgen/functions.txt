@@ -138,6 +138,7 @@ git_repository_is_bare
 git_repository_item_path
 git_repository_new
 git_repository_new_ext
+git_repository_new_options_init
 git_repository_odb
 git_repository_oid_type
 git_repository_open
