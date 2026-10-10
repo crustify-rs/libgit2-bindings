@@ -1,0 +1,3 @@
+$ cargo run  # at 16d2fcaae (review base; Worktree::add as landed by 9468d5210), CRUSTIFY_BUILD_VARIANT=plain
+DEFECT: a second worktree was added on `feature`; HEADs: "ref: refs/heads/feature" and "ref: refs/heads/feature"
+exit=1
