@@ -71,7 +71,15 @@ git_libgit2_opts
 git_libgit2_prerelease
 git_libgit2_shutdown
 git_libgit2_version
+git_mailmap_add_entry
+git_mailmap_free
+git_mailmap_from_buffer
+git_mailmap_from_repository
+git_mailmap_new
+git_mailmap_resolve
 git_merge_bases
+git_message_trailer_array_free
+git_message_trailers
 git_object_dup
 git_object_free
 git_object_id

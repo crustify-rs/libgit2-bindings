@@ -25,6 +25,9 @@ git_index_entry
 git_index_entry_extended_flag_t
 git_index_options
 git_libgit2_opt_t
+git_mailmap
+git_message_trailer
+git_message_trailer_array
 git_object_t
 git_odb_options
 git_oid

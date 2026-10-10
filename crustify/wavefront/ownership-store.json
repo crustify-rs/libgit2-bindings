@@ -632,6 +632,49 @@
    "fields": []
   },
   {
+   "name": "git_mailmap",
+   "defined_in": "src/libgit2/mailmap.h",
+   "_comment_agent": "Opaque in the public API (include/git2/types.h); its body is one by-value git_vector of git_mailmap_entry pointers it owns (each entry and its four strings git__strdup'd, freed by mailmap_entry_free from git_mailmap_free). Allocated only by git_mailmap_new (git__calloc + git_vector_init with mailmap_entry_cmp, SORTED flag set), which git_mailmap_from_buffer and git_mailmap_from_repository call; released only by git_mailmap_free (NULL-tolerant). No refcount, no copy routine, no back-pointer to a repository (from_repository reads the repo during the call only). Entries are only ever inserted with git_vector_insert_sorted, which keeps the SORTED flag, so every routine taking const git_mailmap* (resolve, resolve_signature, entry_lookup, commit_*_with_mailmap) only reads: git_vector_bsearch's sort is a no-op. Internally, git_blame owns one (blame->mailmap) and frees it in git_blame_free. Rust: CBox<Mailmap, MailmapFree>, Send + Sync.",
+   "fields": []
+  },
+  {
+   "name": "git_message_trailer",
+   "defined_in": "include/git2/message.h",
+   "_comment_agent": "By-value pair of borrowed strings; no lifecycle routine of its own. Its only producer is git_message_trailers, which fills a git_message_trailer_array whose buffer of trailers and string block it owns (git_message_trailer_array_free). Rust: MessageTrailer<'t> layout type carrying the strings' lifetime, Copy/Send/Sync like (&'t CStr, &'t CStr).",
+   "fields": [
+    {
+     "name": "key",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_message_trailers points key into the NUL-separated trailer block it strdup'd (git_message_trailer_array._trailer_block), never NULL for a trailer it emits (set at S_START before S_KEY). The trailer owns nothing: git_message_trailer_array_free frees the block and the trailers buffer, never the strings one by one. No C routine takes a trailer back or writes through key; callers may build their own (tests/libgit2/message/trailer.c uses literals with a {NULL, NULL} terminator, a test-only sentinel)."
+     }
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "As key: a NUL-terminated run of the array's _trailer_block (continuation lines kept, the trailing newline replaced by NUL), set at S_SEP_WS before S_VALUE so never NULL for an emitted trailer; borrowed for the life of the owning git_message_trailer_array, released only with its block."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_object",
    "defined_in": "src/libgit2/object.h",
    "_comment_agent": "Shared, counted object: cached.refcount is an atomic32 that git_object_dup (git_cached_obj_incref) bumps and git_object_free (git_cached_obj_decref) drops, freeing through the per-type free at zero. The repository's object cache holds a reference of its own and hands the same pointer to every lookup of one id, so a caller's reference is never provably sole. Parsed objects are not written through the public API after parsing except git_commit's lazily computed summary/body (written through a non-const git_commit*), and they reach a repository that is not thread-safe: no Send/Sync. Rust: CArc<Object<'r>, ObjectFree>, 'r the repository borrow.",
@@ -3130,6 +3173,176 @@
       "nullable": false,
       "mutable": true,
       "note": "Out-param, written unconditionally with LIBGIT2_VERSION_REVISION; NULL dereferenced. Always returns 0; needs no initialisation."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_mailmap_free",
+   "defined_in": "src/libgit2/mailmap.c",
+   "lifetime": {
+    "for": "mm",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "mm",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "consumed: frees every entry (mailmap_entry_free), the entry vector and the struct; NULL is a no-op"
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_mailmap_from_buffer",
+   "defined_in": "src/libgit2/mailmap.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "len bytes, read during the call only (memchr, then the parser); copied into the entries, not retained; need not be NUL-terminated"
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "caller slot; on success a fresh mailmap holding the parsed entries, owned by the caller; set to NULL on a parse failure (embedded NUL, -1 with no error set), untouched when git_mailmap_new fails"
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_mailmap_from_repository",
+   "defined_in": "src/libgit2/mailmap.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "caller slot; a fresh mailmap the caller owns; only git_mailmap_new can fail, loading errors are swallowed"
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "borrowed for the call: reads its config (git_repository_config, filling the repo's config cache), workdir and HEAD:.mailmap or mailmap.blob through revparse (odb/refdb caches); not retained by the mailmap"
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_mailmap_new",
+   "defined_in": "src/libgit2/mailmap.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "caller slot; on success holds a fresh git__calloc mailmap (empty sorted entry vector) the caller owns alone, released by git_mailmap_free; untouched on failure"
      }
     }
    ]

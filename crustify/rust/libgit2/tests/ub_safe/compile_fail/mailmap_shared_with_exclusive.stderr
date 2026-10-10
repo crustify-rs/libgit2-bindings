@@ -1,0 +1,10 @@
+error[E0502]: cannot borrow `mailmap` as immutable because it is also borrowed as mutable
+ --> tests/ub_safe/compile_fail/mailmap_shared_with_exclusive.rs:7:18
+  |
+6 |     let writer = mailmap.as_mut();
+  |                  ------- mutable borrow occurs here
+7 |     let reader = mailmap.as_ref();
+  |                  ^^^^^^^ immutable borrow occurs here
+8 |     println!("{reader:?}");
+9 |     drop(writer);
+  |          ------ mutable borrow later used here
