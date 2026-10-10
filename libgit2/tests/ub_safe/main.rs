@@ -16,6 +16,7 @@ mod config;
 mod errors;
 mod fixture;
 mod global;
+mod index;
 mod odb;
 mod oid;
 mod oidarray;

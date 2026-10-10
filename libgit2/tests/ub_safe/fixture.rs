@@ -963,3 +963,144 @@ pub mod refs {
         unsafe { UnattachedReferenceBox::from_c(raw) }.unwrap()
     }
 }
+
+// --- `git2/index.h`: `git_index` ---------------------------------------------------
+
+/// Fixtures over `git_index`, standing in for the index and repository symbol
+/// wrappers, which replace them: they observe and change an index through raw calls on
+/// an owner's pointer, which `as_c_ptr` hands out.
+pub mod index {
+    use std::ffi::{CStr, CString, c_int};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::index::index::{IndexArc, IndexBox};
+
+    use super::{CHILD, TempRepo};
+
+    /// As [`isolated`](super::isolated), with LeakSanitizer off in the child: for bodies
+    /// that drive libgit2's index reader down a path on which it leaks (a version 4
+    /// entry cut short leaks its path, `read_entry` in `src/libgit2/index.c`). Every
+    /// other sanitizer check stays on.
+    pub fn isolated_tolerating_leaks(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let inherited = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+        let separator = if inherited.is_empty() { "" } else { ":" };
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .env(
+                "ASAN_OPTIONS",
+                format!("{inherited}{separator}detect_leaks=0"),
+            )
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Either index owner, by its C pointer.
+    pub trait Owner {
+        fn c_ptr(&self) -> *mut ffi::git_index;
+    }
+
+    impl Owner for IndexBox {
+        fn c_ptr(&self) -> *mut ffi::git_index {
+            self.as_c_ptr()
+        }
+    }
+
+    impl Owner for IndexArc {
+        fn c_ptr(&self) -> *mut ffi::git_index {
+            self.as_c_ptr()
+        }
+    }
+
+    /// `git_repository_index` adopted into an `IndexArc`: the one fixture adopting a
+    /// counted reference, standing in for the repository wrapper's index getter, which
+    /// replaces it.
+    pub fn repository_index(repo: &TempRepo) -> IndexArc {
+        let mut out = core::ptr::null_mut();
+        // SAFETY: a live slot and the fixture's live repository.
+        let rc = unsafe { ffi::git_repository_index(&mut out, repo.repo) };
+        assert_eq!(rc, 0);
+        // SAFETY: `git_repository_index` hands out one more counted reference to the
+        // index the repository keeps, released by `git_index_free`; it stays valid after
+        // the repository is freed, which releases only its own reference.
+        unsafe { IndexArc::from_c(out) }.unwrap()
+    }
+
+    /// `git_repository_set_index`, which keeps a reference for the repository: it takes
+    /// an `IndexArc`, as its wrapper must. Stands in for that wrapper.
+    pub fn set_repository_index(repo: &TempRepo, index: &IndexArc) {
+        // SAFETY: the fixture's live repository and a live index; libgit2 counts the
+        // reference it keeps, so the arc's own stays the arc's.
+        let rc = unsafe { ffi::git_repository_set_index(repo.repo, index.as_c_ptr()) };
+        assert_eq!(rc, 0);
+    }
+
+    /// `git_index_entrycount`.
+    pub fn entry_count(index: &impl Owner) -> usize {
+        // SAFETY: a live index, only read.
+        unsafe { ffi::git_index_entrycount(index.c_ptr()) }
+    }
+
+    /// `git_index_path`, copied out.
+    pub fn path(index: &impl Owner) -> Option<CString> {
+        // SAFETY: a live index, only read.
+        let path = unsafe { ffi::git_index_path(index.c_ptr()) };
+        // SAFETY: NULL or the index's own NUL-terminated path, copied before any other
+        // call.
+        (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) }.to_owned())
+    }
+
+    /// Whether `git_index_owner` names a repository.
+    pub fn has_owner(index: &impl Owner) -> bool {
+        // SAFETY: a live index, only read; the repository pointer is not dereferenced.
+        !unsafe { ffi::git_index_owner(index.c_ptr()) }.is_null()
+    }
+
+    /// `git_index_add` of a regular file at `path`; the status.
+    pub fn add(index: &mut IndexBox, path: &CStr) -> c_int {
+        add_flagged(index, path, 0)
+    }
+
+    /// `git_index_add` of a regular file at `path` marked intent-to-add, which needs a
+    /// version 3 entry; the status.
+    pub fn add_intent_to_add(index: &mut IndexBox, path: &CStr) -> c_int {
+        add_flagged(index, path, ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD as u16)
+    }
+
+    /// `git_index_set_version`; the status.
+    pub fn set_version(index: &mut IndexBox, version: u32) -> c_int {
+        // SAFETY: the box's live index, borrowed exclusively.
+        unsafe { ffi::git_index_set_version(index.as_c_ptr(), version) }
+    }
+
+    fn add_flagged(index: &mut IndexBox, path: &CStr, flags_extended: u16) -> c_int {
+        let mut entry = ffi::git_index_entry {
+            mode: 0o100644,
+            path: path.as_ptr(),
+            flags_extended,
+            ..Default::default()
+        };
+        entry.id.id[0] = 1;
+        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        // SAFETY: the box's live index, borrowed exclusively; `entry` and its path are
+        // read and copied for the call.
+        unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }
+    }
+
+    /// `git_index_write`; the status.
+    pub fn write(index: &mut IndexBox) -> c_int {
+        // SAFETY: the box's live index, borrowed exclusively.
+        unsafe { ffi::git_index_write(index.as_c_ptr()) }
+    }
+}

@@ -176,6 +176,115 @@
    "fields": []
   },
   {
+   "name": "git_index",
+   "defined_in": "src/libgit2/index.h",
+   "_comment_agent": "git_index is opaque in the public API (include/git2/types.h forward-declares it; only src/libgit2/index.h defines it), so a wrap publishes no field accessors. It is a refcounted heap object (rc, GIT_REFCOUNT_*): git_index_open / open_ext / new / new_ext calloc it and hand out the one reference (refcount 1, rc.owner NULL); merge/cherrypick/revert/apply results (git_merge_trees, git_merge_commits, git_cherrypick_commit, git_revert_commit, git_apply_to_tree) are such fresh indexes too. git_index_free is the down-ref: GIT_REFCOUNT_DEC frees through index_free once the count reaches 0 while rc.owner is NULL. Further references: git_repository_set_index retains one for the repository (and sets rc.owner = repo until the repository drops it), git_repository_index and git_rebase_inmemory_index hand out an extra counted reference to an index the repository/rebase keeps, and index iterators / indexwriters / git_checkout_index take temporary ones. There is no public up_ref, dup or readable count, so Rust holds a fresh index as CBox<Index, IndexFree> (sole reference: IndexMut available) and a counted reference to a shared index as CArc<Index, IndexFree> without Clone or get_mut (IndexRef only); a box converts into an arc before it is shared (set_index must take the arc, never IndexMut). git_index_owner lends rc.owner, a repository pointer that is NOT counted and is cleared when the repository releases the index. Not thread-safe: libgit2 serialises nothing but the refcount, so no Send/Sync. C notes: open_ext's failure path calls git_index_free on a refcount-0 index (dec to -1, freed: fine); index_free returns early, leaking, if readers > 0, unreachable through counted references since every reader holds one. Index-file reader defects reachable from git_index_open: read_entry leaks tmp_path (a version 4 entry's decompressed path) when the entry runs past the buffer (any truncated v4 file); an empty index_path is accepted and git_index_write on that index memcpys from a NULL path_original (git_filebuf_open_withsize, UBSan) - Index::open refuses ''. git_index_read's `(updated = git_futils_filestamp_check(..) < 0)` returns +1 when the file vanishes between exists and stat, so open then succeeds with an error set (race only).",
+   "fields": [
+    {
+     "name": "entries_cmp_path",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_vector_cmp function pointer: git__strcmp_cb or git__strcasecmp_cb (static functions), chosen by git_index_open_ext and git_index__set_ignore_case. Set before the index is handed out; never NULL on a live index. Not published."
+     }
+    },
+    {
+     "name": "entries_search",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_vector_cmp function pointer: git_index_entry_srch / git_index_entry_isrch, chosen by open_ext and __set_ignore_case; never NULL on a live index. Not published."
+     }
+    },
+    {
+     "name": "entries_search_path",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_vector_cmp function pointer: index_entry_srch_path / index_entry_isrch_path (static), chosen by open_ext and __set_ignore_case; never NULL on a live index. Not published."
+     }
+    },
+    {
+     "name": "index_file_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "The on-disk index path. git_index_open_ext git__strdup's the caller's index_path (never retained) and index_free releases it with git__free. NULL for an in-memory index (git_index_new / new_ext, and every merge/apply/cherrypick/revert result built on them), which git_index_read / write / git_indexwriter_init refuse ('the index is in-memory only'). Never reassigned after construction and never written through; git_index_path lends it (borrowed from the index) and read paths only pass it to the filesystem. Not published: the public header declares git_index opaque. An empty path is stored as given (Index::open refuses it: writing such an index is UB in git_filebuf_open_withsize)."
+     }
+    },
+    {
+     "name": "rc",
+     "refcount": true
+    },
+    {
+     "name": "reuc_search",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_vector_cmp function pointer: reuc_srch / reuc_isrch (static), chosen by open_ext and __set_ignore_case; never NULL on a live index. Not published."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "field:tree_pool"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The TREE extension's root git_tree_cache node. git_tree_cache_read / git_tree_cache_read_tree allocate the whole cache tree from index->tree_pool, so it is borrowed from that pool and never freed individually: every path that clears the pool (git_index_read, git_index_clear, git_index_read_tree, git_index_write_tree's read_tree path) first sets tree = NULL. NULL until a TREE extension is read or a tree is read in, and after any clear. Written through by git_tree_cache_invalidate_path (entry_count = -1 on every touched node) on add/remove/conflict paths. Not published."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_libgit2_opt_t",
    "defined_in": "include/git2/common.h",
    "_comment_agent": "Fieldless C enum of the keys git_libgit2_opts (settings.c:105) dispatches on, dense 0..=47 (GIT_OPT_GET_MWINDOW_SIZE .. GIT_OPT_SET_PACK_MAX_OBJECT_SIZE; bindgen types it c_uint, but git_libgit2_opts takes `int option, ...`). No storage or lifecycle. Every value without a constant (negative included) hits the default arm: -1, GIT_ERROR_INVALID 'invalid option key', and no va_arg is read, so calling with the bare key is sound. Each named key fixes the variadic argument list (documented per variant in core/common.rs LibraryOption). Hazards for the git_libgit2_opts wrapper: SET_SSL_CIPHERS strdups its argument with no NULL check (NULL = crash); SET_ALLOCATOR memcpys a git_allocator (NULL restores stdalloc) and swaps the global allocator under live allocations; GET/SET_WINDOWS_SHAREMODE are no-ops off Windows (the out pointer is left unwritten, rc 0); SET_SSL_CERT_LOCATIONS with OpenSSL fails GIT_ERROR_SSL when neither location loads; ADD_SSL_X509_CERT(NULL) adds nothing and returns 0; SET_SEARCH_PATH/GET_SEARCH_PATH take an int config level, only SYSTEM(2)/XDG(3)/GLOBAL(4) accepted (GIT_ERROR_INVALID 'invalid config path selector %d'); SET_SERVER_(CONNECT_)TIMEOUT refuse negatives (GIT_ERROR_INVALID); SET_OWNER_VALIDATION stores !=0; GET_EXTENSIONS hands out a git_strarray to dispose; GET_* buf options fill a git_buf. Settings are unsynchronised globals (git_sysdir_set etc.). Rust side: LibraryOption::from_raw/from_key/TryFrom -> UnnamedLibraryOption; key() gives the int.",
@@ -1394,6 +1503,242 @@
       "nullable": false,
       "mutable": false,
       "note": "Copied with git_str_puts into the thread's error buffer during the call; never retained (the header's 'static string' wording is wrong: any string works). NULL is rejected by GIT_ASSERT_ARG: -1 and an 'invalid argument' error in release builds, assert() abort under _DEBUG/GIT_ASSERT_HARD (the coverage build). Returns -1 when the thread state cannot be allocated or the copy runs out of memory (buffer then stuck at git_str__oom, `last` at oom_error), 0 otherwise; unlike git_error_set it never consults errno."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "index",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Releases one counted reference: NULL is a no-op; GIT_REFCOUNT_DEC frees through index_free (clears entries, names, reuc, extensions, deleted, the entry map, index_file_path, then git__free on the zeroed struct) once the count reaches 0 while rc.owner is NULL. Every reference handed out by git_index_open/open_ext/new/new_ext, git_repository_index, git_rebase_inmemory_index and the merge/cherrypick/revert/apply index results is released here; the repository releases its own through set_index. Rust: the c_drop of IndexFree for both CBox<Index> (sole reference) and CArc<Index> (shared counted reference)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_new",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot (GIT_ASSERT_ARG non-NULL). On success it receives a fresh calloc-ed in-memory index holding the only reference (refcount 1, no owner, index_file_path NULL), which the caller releases with git_index_free; on failure (OOM) it is left untouched. Rust: Index::new -> IndexBox, and the CNew of IndexFree."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_new_ext",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Options, only read for the call (version checked by GIT_ERROR_CHECK_VERSION; oid_type 0 = GIT_OID_DEFAULT, otherwise GIT_ASSERT_ARG(git_oid_type_is_valid), an abort in Debug builds). NULL = defaults."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As git_index_new: a fresh in-memory index holding the only reference, released with git_index_free; untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_open",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "index_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot (GIT_ASSERT_ARG non-NULL). On success it receives a fresh index backed by index_path, holding the only reference (refcount 1, no owner), read from disk when the file exists; released with git_index_free. Left untouched on failure: the half-built index is freed (git_pool_clear + git_index_free on refcount 0), except that read_entry leaks the decompressed path of a version 4 entry running past the buffer. Rust: Index::open -> IndexBox."
+     }
+    },
+    {
+     "name": "index_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Path of the index file, read for the call and git__strdup-ed, never retained. NULL makes it git_index_new (an in-memory index); a nonexistent path gives an empty index that is not on disk; a directory or an unreadable/corrupt file fails (-1). An empty path is accepted, but git_index_write on that index memcpys from a NULL path_original in git_filebuf_open_withsize (UB); Rust takes &CStr and refuses the empty string."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_open_ext",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "index_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As git_index_open: a fresh index holding the only reference, released with git_index_free; untouched on failure (the half-built index is freed)."
+     }
+    },
+    {
+     "name": "index_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Index file path, read and git__strdup-ed, never retained; NULL = in-memory index; an empty path is accepted but its write is UB (see git_index_open)."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Options, only read for the call (version checked; oid_type 0 = GIT_OID_DEFAULT, otherwise GIT_ASSERT_ARG(git_oid_type_is_valid), an abort in Debug builds). NULL = defaults."
      }
     }
    ]
