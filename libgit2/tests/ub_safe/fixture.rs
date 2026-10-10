@@ -589,7 +589,7 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
 // --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
 
 /// Fixtures over the repositories that hand out commit arrays and configs, and
-/// standing in for the `git_commit` and config-routine wrappers the tests read
+/// standing in for the `git_commit_id` and config-routine wrappers the tests read
 /// through; replace each once its safe counterpart lands.
 pub mod commit_and_config {
     use std::ffi::{CStr, c_int};
@@ -597,7 +597,7 @@ pub mod commit_and_config {
 
     use libgit2::ffi;
     use libgit2::libgit2::config::config::ConfigArc;
-    use libgit2::libgit2::object::commit::CommitArrayVal;
+    use libgit2::libgit2::object::commit::{CommitArrayVal, CommitRef};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// A fixture repository opened read-only, freed on drop.
@@ -622,20 +622,20 @@ pub mod commit_and_config {
     }
 
     /// The commit parents, through the safe wrapper.
-    pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal {
+    pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal<'_> {
         repo.0.as_ref().commit_parents().unwrap()
     }
 
-    /// The hex id of a commit an array holds; stands in for the `git_commit` handle.
-    pub fn commit_id(commit: *mut ffi::git_commit) -> String {
+    /// The hex id of a commit; stands in for the `git_commit_id` wrapper.
+    pub fn commit_id(commit: CommitRef<'_, '_>) -> String {
+        let commit = commit.to_commit();
         let mut out = [0u8; 41];
-        // SAFETY: the tests pass pointers read from a live array, which keeps the
-        // commit alive; 41 writable bytes, NUL included.
+        // SAFETY: the owner keeps the commit alive; 41 writable bytes, NUL included.
         unsafe {
             ffi::git_oid_tostr(
                 out.as_mut_ptr().cast(),
                 out.len(),
-                ffi::git_commit_id(commit),
+                ffi::git_commit_id(commit.as_c_ptr()),
             )
         };
         CStr::from_bytes_until_nul(&out)
@@ -687,6 +687,96 @@ pub mod commit_and_config {
         // SAFETY: as above; the name is NUL-terminated.
         let set = unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) };
         (added, set)
+    }
+}
+
+// --- `git2/commit.h`: `git_commit_create_ext_options` ---------------------------------
+
+/// Commit creation through C, standing in for the `git_commit_create_ext` wrapper (a
+/// later run), which replaces it.
+pub mod create_ext {
+    use std::ffi::{CStr, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::CreateExtOptions;
+
+    use super::TempRepo;
+
+    /// `git_commit_create_ext` of a root commit of the empty tree in `repo`, with a
+    /// fixed signature and message, reading `options` in place: the new commit's raw
+    /// text, or the code libgit2 failed with.
+    pub fn create(repo: &TempRepo, options: &CreateExtOptions<'_>) -> Result<String, c_int> {
+        let raw = repo.raw();
+        let (mut builder, mut tree_id, mut tree, mut sig) = (
+            ptr::null_mut(),
+            ffi::git_oid::default(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+        );
+        // SAFETY: a live repository; each out-parameter receives an object freed below.
+        unsafe {
+            assert_eq!(ffi::git_treebuilder_new(&mut builder, raw, ptr::null()), 0);
+            assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
+            ffi::git_treebuilder_free(builder);
+            assert_eq!(ffi::git_tree_lookup(&mut tree, raw, &tree_id), 0);
+            assert_eq!(
+                ffi::git_signature_new(&mut sig, c"A".as_ptr(), c"a@b".as_ptr(), 1, 0),
+                0
+            );
+        }
+        let mut id = ffi::git_oid::default();
+        // SAFETY: live objects of the repository; the options are a live value Rust
+        // holds (`CreateExtOptions` is transparent over the C struct), whose borrows
+        // outlive the call by their `'o`.
+        let rc = unsafe {
+            ffi::git_commit_create_ext(
+                &mut id,
+                raw,
+                sig,
+                sig,
+                c"msg\n".as_ptr(),
+                tree,
+                0,
+                ptr::null(),
+                ptr::from_ref(options).cast(),
+            )
+        };
+        // SAFETY: each object is released once.
+        unsafe {
+            ffi::git_signature_free(sig);
+            ffi::git_tree_free(tree);
+        }
+        if rc != 0 {
+            return Err(rc);
+        }
+        let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
+        // SAFETY: the commit just written is read back and copied; each object is
+        // released once.
+        unsafe {
+            assert_eq!(ffi::git_repository_odb(&mut odb, raw), 0);
+            assert_eq!(ffi::git_odb_read(&mut obj, odb, &id), 0);
+            let data = std::slice::from_raw_parts(
+                ffi::git_odb_object_data(obj).cast::<u8>(),
+                ffi::git_odb_object_size(obj),
+            );
+            let text = String::from_utf8(data.to_vec()).unwrap();
+            ffi::git_odb_object_free(obj);
+            ffi::git_odb_free(odb);
+            Ok(text)
+        }
+    }
+
+    /// Whether the reference `name` of `repo` exists.
+    pub fn has_reference(repo: &TempRepo, name: &CStr) -> bool {
+        let mut reference = ptr::null_mut();
+        // SAFETY: a live repository and a NUL-terminated name; the reference is
+        // released once.
+        unsafe {
+            let found = ffi::git_reference_lookup(&mut reference, repo.raw(), name.as_ptr()) == 0;
+            ffi::git_reference_free(reference);
+            found
+        }
     }
 }
 

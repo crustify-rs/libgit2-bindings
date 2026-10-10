@@ -457,6 +457,211 @@
    ]
   },
   {
+   "name": "git_commit",
+   "defined_in": "src/libgit2/commit.h",
+   "_comment_agent": "Opaque in the public API (private src/libgit2/commit.h). A git_object subtype (first member), refcounted through object.cached.refcount with the repository's cache holding a reference. Lifecycle: constructed by git_commit_lookup/_lookup_prefix (git_object_lookup with GIT_OBJECT_COMMIT), git_commit_parent, git_commit_nth_gen_ancestor; dropped by git_commit_free (git_object_free down-ref, git_commit__free at zero); cloned by git_commit_dup (upref, same pointer). object.repo is an uncounted back pointer read by owner/tree/parent lookups.",
+   "fields": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git__malloc'd and parsed in git_commit__parse_ext (skipped under GIT_COMMIT_PARSE_QUICK, so NULL then); freed by git_signature_free in git_commit__free."
+     }
+    },
+    {
+     "name": "body",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Lazily computed by git_commit_body like summary; may stay NULL when the message has no body."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Always parsed (quick parse included); freed in git_commit__free."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git__strndup of the encoding header when present; NULL otherwise; git__free in git_commit__free."
+     }
+    },
+    {
+     "name": "parent_ids.ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_array_t(git_oid) of parent ids, grown by git_array_alloc, replaced from grafts; git_array_clear in git_commit__free."
+     }
+    },
+    {
+     "name": "raw_header",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "git__strndup of the header block; freed in git_commit__free."
+     }
+    },
+    {
+     "name": "raw_message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "git__strndup / git__strdup(\"\") after a full parse; freed in git_commit__free. NULL only after a quick parse (internal)."
+     }
+    },
+    {
+     "name": "summary",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Lazily computed and stored by git_commit_summary through a non-const commit pointer AFTER the commit is shared (cache) \u2014 unsynchronised write; NULL until first call; git__free in git_commit__free."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_ext_options",
+   "defined_in": "include/git2/commit.h",
+   "_comment_agent": "Plain options struct held by value by its caller (stack in C), initialised by GIT_COMMIT_CREATE_EXT_OPTIONS_INIT or git_commit_create_ext_options_init (fails only on a wrong version); read through const pointer by git_commit_create_ext and (internally built) by create_from_callback/create_v/create_from_ids/amend; libgit2 never allocates, copies, retains or frees it or anything it points at. No lifecycle beyond init.",
+   "fields": [
+    {
+     "name": "extra_headers",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's array of extra_headers_len git_commit_header values, read in git_commit__create_buffer_internal only when extra_headers_len != 0 (so NULL with len 0 is never read). Each header's field/value must be non-NULL (format_header_field asserts). Never stored or freed."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's string, written as the 'encoding' header by git_commit__create_buffer_internal through format_header_field; never stored or freed. NULL = no encoding header."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque cookie forwarded to sign only; libgit2 never dereferences, stores or frees it."
+     }
+    },
+    {
+     "name": "sign",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "git_commit_signature_cb; called once per create with a stack-local git_commitbuilder, the repo, the commit buffer and payload, before the odb write; <0 aborts. NULL = no signing."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's reference name, read during git_commit__create_internal only (git_reference_lookup_resolved, git_reference__update_for_commit); never stored or freed by libgit2. NULL = update no reference."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commit_header",
    "defined_in": "include/git2/commit.h",
    "_comment_agent": "Plain borrowed pair of C strings with no lifecycle routine: no constructor, cloner, disposer or releaser exists in libgit2 (lifecycle-ops empty; the only field toucher is git_commit__create_buffer_internal, read-only). Rust holds it by value, Copy, borrowing both strings for one lifetime.",
@@ -3009,6 +3214,260 @@
       "nullable": false,
       "mutable": true,
       "note": "The caller's storage, borrowed for the call; written whole (memcpy of GIT_CHECKOUT_OPTIONS_INIT: version 1, every other field zero/NULL) and only when `version` is 1. For version 0 or > 1 it returns -1 with GIT_ERROR_INVALID 'invalid version N on git_checkout_options' and leaves *opts untouched (still uninitialised if it was). Not NULL-checked: NULL with version 1 is a NULL write. With version 1 it reaches no global, allocator or thread state, so it needs no runtime pin."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_ext_options_init",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Overwritten whole with GIT_COMMIT_CREATE_EXT_OPTIONS_INIT when version is GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION; otherwise -1 with a GIT_ERROR_INVALID error and untouched. Touches no global on success."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_dup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Not NULL-checked; atomic refcount incremented in place."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives obj itself, one more reference counted on it (git_object_dup); always 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_free",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Gives back one counted reference via git_object_free (NULL ignored); git_commit__free runs at zero; never reads object.repo."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_lookup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; its type is not checked against the repository's (out-of-bounds formatting in the loose backend for a mismatched type)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached commit (or a fresh parse the cache adopted), via git_object_lookup(GIT_OBJECT_COMMIT); a tag id is NOT peeled (GIT_ENOTFOUND, 'the requested type does not match'). Keeps repo uncounted in object.repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Odb loaded lazily, cache filled; the result keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_lookup_prefix",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; its type is not checked against the repository's (out-of-bounds formatting in the loose backend for a mismatched type)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to the repository's cached commit (or a fresh parse the cache adopted), via git_object_lookup(GIT_OBJECT_COMMIT); a tag id is NOT peeled (GIT_ENOTFOUND, 'the requested type does not match'). Keeps repo uncounted in object.repo. Untouched on failure. len clamped to the repository's hex length; under 4 is GIT_EAMBIGUOUS."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Odb loaded lazily, cache filled; the result keeps this pointer uncounted."
      }
     }
    ]

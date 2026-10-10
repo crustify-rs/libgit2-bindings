@@ -1,0 +1,20 @@
+error[E0502]: cannot borrow `options` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/create_ext_options_aliased_handles.rs:8:25
+   |
+ 7 |     let shared = options.as_ref();
+   |                  ------- immutable borrow occurs here
+ 8 |     let mut exclusive = options.as_mut();
+   |                         ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+ 9 |     exclusive.set_update_ref(Some(c"HEAD"));
+10 |     let _ = shared.update_ref();
+   |             ------ immutable borrow later used here
+
+error[E0502]: cannot borrow `headers[_]` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/create_ext_options_aliased_handles.rs:15:5
+   |
+14 |     options.as_mut().set_extra_headers(&headers);
+   |                                        -------- immutable borrow occurs here
+15 |     headers[0].as_mut().set_value(c"w");
+   |     ^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+16 |     let _ = options.as_ref().extra_headers();
+   |             ------- immutable borrow later used here

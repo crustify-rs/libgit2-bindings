@@ -1,0 +1,17 @@
+error[E0515]: cannot return value referencing function parameter `commit`
+ --> tests/ub_safe/compile_fail/commit_handle_outlives_owner.rs:6:5
+  |
+6 |     commit.as_ref()
+  |     ------^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `commit` is borrowed here
+
+error[E0515]: cannot return value referencing function parameter `array`
+  --> tests/ub_safe/compile_fail/commit_handle_outlives_owner.rs:10:5
+   |
+10 |     array.as_ref().get(0).unwrap()
+   |     -----^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     returns a value referencing data owned by the current function
+   |     `array` is borrowed here
