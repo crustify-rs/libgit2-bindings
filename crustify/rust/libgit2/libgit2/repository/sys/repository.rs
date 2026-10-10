@@ -15,6 +15,19 @@
 //! [`NewOptions::new`] fills one through `git_repository_new_options_init`, as
 //! `GIT_REPOSITORY_NEW_OPTIONS_INIT` does: the current version and the default type.
 //! All-zero is not that default (libgit2 refuses version 0), so there is no `zeroed`.
+//!
+//! # The submodule cache
+//!
+//! A repository can hold a cache of its submodules, which `git_submodule_lookup` (and
+//! a diff, for the submodules it meets) answers from instead of reading
+//! `.gitmodules`, the index, `HEAD` and the working directory again: it reflects the
+//! repository as it was when the cache was loaded, until it is cleared. The cache
+//! holds a counted reference to each submodule, so a submodule looked up through it
+//! outlives a clear.
+//!
+//! Both routines take the exclusive [`RepositoryMut`]: loading replaces the cache and
+//! clearing frees it, and libgit2 routines that read it keep a bare pointer to it while
+//! they run, so no other handle of the repository may be in use meanwhile.
 
 use core::fmt;
 use core::hash::{Hash, Hasher};
@@ -25,6 +38,7 @@ use ffibox::define_ctype;
 
 use crate::ffi;
 use crate::libgit2::oid::oid::{OidType, UnnamedOidType};
+use crate::libgit2::repository::repository::{RepositoryError, RepositoryMut};
 
 define_ctype!(
     /// Options for a repository without backends (`git_repository_new_options`): the
@@ -267,6 +281,65 @@ const _: () = assert!(
         && align_of::<NewOptions>() == align_of::<ffi::git_repository_new_options>()
 );
 
+impl RepositoryMut<'_> {
+    /// Loads every submodule of the repository into its submodule cache: those that
+    /// `.gitmodules` configures, then those the index and `HEAD`'s tree record, then
+    /// what the working directory holds of each. The index and `HEAD` add only
+    /// submodules `.gitmodules` names, so a repository without a working directory
+    /// (bare, or without paths) gets an empty cache.
+    ///
+    /// A cache already loaded is released first, so this reloads it; libgit2 alone
+    /// would leak it. On failure the repository is left without a cache.
+    ///
+    /// Fails with libgit2's error when the submodules cannot be read (a malformed
+    /// `.gitmodules`, say), or memory runs out.
+    ///
+    /// A shared handle can neither load nor clear the cache:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::repository::repository::RepositoryBox;
+    ///
+    /// fn reload(repo: &RepositoryBox) {
+    ///     let _ = repo.as_ref().cache_submodules();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::repository::repository::RepositoryBox;
+    ///
+    /// fn clear(repo: &RepositoryBox) {
+    ///     repo.as_ref().clear_submodule_cache();
+    /// }
+    /// ```
+    ///
+    /// Wraps: git_repository_submodule_cache_all
+    pub fn cache_submodules(&mut self) -> Result<(), RepositoryError> {
+        self.clear_submodule_cache();
+        // SAFETY: a live repository on this thread, exclusively borrowed, whose cache
+        // slot is NULL (cleared above), so the routine stores a fresh cache there, owned
+        // by the repository, without overwriting one. A repository exists only once its
+        // constructor pinned the runtime.
+        let rc = unsafe { ffi::git_repository_submodule_cache_all(self.as_mut_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        Ok(())
+    }
+
+    /// Releases the repository's submodule cache, if it has one: lookups read the
+    /// repository again. Submodules looked up through the cache stay valid; each holds
+    /// its own reference.
+    ///
+    /// Wraps: git_repository_submodule_cache_clear
+    pub fn clear_submodule_cache(&mut self) {
+        // SAFETY: a live repository on this thread, exclusively borrowed, so no libgit2
+        // routine holds its cache while the routine frees it and sets the slot to NULL.
+        let rc = unsafe { ffi::git_repository_submodule_cache_clear(self.as_mut_ptr()) };
+        // `git_submodule_cache_free` returns 0 whatever it frees.
+        debug_assert_eq!(rc, 0);
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -367,5 +440,71 @@ mod unit_tests {
         assert_ne!(m.as_ref(), other.as_ref());
         assert_eq!(m.as_ref(), m.as_ref().to_options().as_ref());
         assert_eq!(options.as_ref().oid_type(), Some(OidType::Sha1));
+    }
+
+    mod submodule_cache {
+        use super::super::*;
+        use std::ffi::CString;
+        use std::fs;
+        use std::os::unix::ffi::OsStrExt;
+
+        use crate::libgit2::repository::repository::Repository;
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn reloading_releases_the_previous_cache() {
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-sys-repository-unit-{}-reload",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            let mut repo =
+                Repository::init(&CString::new(dir.as_os_str().as_bytes()).unwrap(), false)
+                    .unwrap();
+            fs::write(
+                dir.join(".gitmodules"),
+                "[submodule \"sub\"]\n\tpath = sub\n\turl = https://example.com/sub\n",
+            )
+            .unwrap();
+            // `git_repository_submodule_cache_all` alone would leak every cache but the
+            // last, with the submodules in it (LSan, under the asan-ubsan variant).
+            for _ in 0..3 {
+                repo.as_mut().cache_submodules().unwrap();
+            }
+            repo.as_mut().clear_submodule_cache();
+            repo.as_mut().clear_submodule_cache();
+            repo.as_mut().cache_submodules().unwrap();
+            // The repository releases the cache it holds when freed.
+            drop(repo);
+            fs::remove_dir_all(&dir).unwrap();
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn a_failed_load_leaves_no_cache() {
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-sys-repository-unit-{}-failed",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            let mut repo =
+                Repository::init(&CString::new(dir.as_os_str().as_bytes()).unwrap(), false)
+                    .unwrap();
+            repo.as_mut().cache_submodules().unwrap();
+            fs::write(dir.join(".gitmodules"), "[submodule \"sub\"\n").unwrap();
+            let e = repo.as_mut().cache_submodules().unwrap_err();
+            assert_eq!(e.raw_code(), -1);
+            assert_eq!(
+                e.class(),
+                Some(crate::libgit2::util::errors::ErrorClass::Config)
+            );
+            // Lookups read the repository again: the broken `.gitmodules` fails them.
+            let (mut sm, raw) = (core::ptr::null_mut(), repo.as_c_ptr());
+            // SAFETY: a writable slot, the box's live repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_submodule_lookup(&mut sm, raw, c"sub".as_ptr()) };
+            assert!(rc < 0);
+            drop(repo);
+            fs::remove_dir_all(&dir).unwrap();
+        }
     }
 }

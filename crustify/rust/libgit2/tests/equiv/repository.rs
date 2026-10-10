@@ -2551,3 +2551,435 @@ mod init_options {
         );
     }
 }
+
+/// `Repository::wrap_odb`, `RepositoryRef::workdir` and `RepositoryMut::cleanup_state`
+/// against `git_repository_wrap_odb`, `git_repository_workdir` and
+/// `git_repository_state_cleanup`.
+///
+/// Each case builds its inputs twice, independently: a C side through raw calls and a
+/// Rust side through the safe API (the repository or odb constructors, and the routine
+/// under test), under two roots.
+///
+/// - `workdir` must read the same path (the root masked), or none, for a repository
+///   with a working directory, a bare one, one opened at a linked worktree, and one
+///   without paths.
+/// - A repository over an odb must report the odb's object id type, no git directory or
+///   working directory, and the objects the odb holds (`git_repository_odb`, then
+///   `git_odb_exists`), after the caller's odb reference is gone on both sides.
+/// - Cleaning up the state runs over sequences of marker files and references: after
+///   each step the return, the error, `git_repository_state` and the markers left must
+///   agree. A repository without paths is refused by Rust before C, which would clean
+///   up the process's working directory (a unit test), so it is not compared here.
+mod routines {
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::odb::odb::Odb;
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// The thread's last error as C reports it.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
+        // its message is a C string, live until the next libgit2 call on this thread.
+        unsafe {
+            let e = ffi::git_error_last();
+            let message = CStr::from_ptr((*e).message).to_string_lossy().into_owned();
+            ((*e).klass, message)
+        }
+    }
+
+    fn c_path(path: &Path) -> CString {
+        CString::new(path.as_os_str().as_bytes()).unwrap()
+    }
+
+    /// A root of its own under the temp dir, canonical, removed on drop.
+    struct Root(PathBuf);
+
+    impl Root {
+        fn new(tag: &str) -> Self {
+            init();
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-routines-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            Self(path.canonicalize().unwrap())
+        }
+
+        fn mask(&self, s: &str) -> String {
+            s.replace(&self.0.display().to_string(), "<root>")
+        }
+    }
+
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A raw repository, freed on drop.
+    struct CRepo(*mut ffi::git_repository);
+
+    impl CRepo {
+        fn init(path: &Path, bare: bool) -> Self {
+            let mut out = ptr::null_mut();
+            let path = c_path(path);
+            // SAFETY: a writable slot and a NUL-terminated path, read for the call.
+            let rc = unsafe { ffi::git_repository_init(&mut out, path.as_ptr(), bare.into()) };
+            assert_eq!(rc, 0);
+            Self(out)
+        }
+
+        fn open(path: &Path) -> Self {
+            let mut out = ptr::null_mut();
+            let path = c_path(path);
+            // SAFETY: a writable slot and a NUL-terminated path, read for the call.
+            let rc = unsafe { ffi::git_repository_open(&mut out, path.as_ptr()) };
+            assert_eq!(rc, 0);
+            Self(out)
+        }
+
+        fn new() -> Self {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot.
+            assert_eq!(unsafe { ffi::git_repository_new(&mut out) }, 0);
+            Self(out)
+        }
+    }
+
+    impl Drop for CRepo {
+        fn drop(&mut self) {
+            // SAFETY: the repository this value made, released once.
+            unsafe { ffi::git_repository_free(self.0) }
+        }
+    }
+
+    /// Links the worktree `wt` of the non-bare repository at `main`, by hand.
+    fn link_worktree(main: &Path, wt: &Path) {
+        let admin = main.join(".git/worktrees/wt");
+        fs::create_dir_all(&admin).unwrap();
+        fs::create_dir_all(wt).unwrap();
+        fs::write(admin.join("commondir"), "../..\n").unwrap();
+        fs::write(
+            admin.join("gitdir"),
+            format!("{}\n", wt.join(".git").display()),
+        )
+        .unwrap();
+        fs::write(admin.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(wt.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+    }
+
+    /// The working directory C reads, masked.
+    fn c_workdir(root: &Root, repo: &CRepo) -> Option<String> {
+        // SAFETY: a live repository, only read; the result is NULL or its string.
+        let dir = unsafe { ffi::git_repository_workdir(repo.0) };
+        // SAFETY: NULL-checked; the string lives as long as the repository.
+        (!dir.is_null()).then(|| root.mask(&unsafe { CStr::from_ptr(dir) }.to_string_lossy()))
+    }
+
+    fn rust_workdir(root: &Root, repo: &RepositoryBox) -> Option<String> {
+        let dir = repo.as_ref().workdir()?;
+        Some(root.mask(&dir.to_string_lossy()))
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn workdir_matches_c() {
+        let (c_root, rust_root) = (Root::new("workdir-c"), Root::new("workdir-rust"));
+        for (rel, bare) in [("plain", false), ("bare.git", true)] {
+            let c = CRepo::init(&c_root.0.join(rel), bare);
+            let rust = Repository::init(&c_path(&rust_root.0.join(rel)), bare).unwrap();
+            assert_eq!(
+                rust_workdir(&rust_root, &rust),
+                c_workdir(&c_root, &c),
+                "{rel}"
+            );
+        }
+        // Opened again, at the working directory, at the git directory, and at a
+        // linked worktree.
+        for root in [&c_root, &rust_root] {
+            link_worktree(&root.0.join("plain"), &root.0.join("wt"));
+        }
+        for rel in ["plain", "plain/.git", "wt", "bare.git"] {
+            let c = CRepo::open(&c_root.0.join(rel));
+            let rust = Repository::open(&c_path(&rust_root.0.join(rel))).unwrap();
+            assert_eq!(
+                rust_workdir(&rust_root, &rust),
+                c_workdir(&c_root, &c),
+                "{rel}"
+            );
+        }
+        let (c, rust) = (CRepo::new(), Repository::new().unwrap());
+        assert_eq!(rust_workdir(&rust_root, &rust), c_workdir(&c_root, &c));
+    }
+
+    /// What a repository over an odb reports: its object id type, git directory,
+    /// working directory, and which of `ids` its odb holds.
+    fn wrapped_view(
+        repo: *mut ffi::git_repository,
+        ids: &[ffi::git_oid],
+    ) -> (u32, bool, bool, Vec<bool>) {
+        // SAFETY: a live repository and live ids, only read; the odb reference is
+        // released once.
+        unsafe {
+            let mut odb = ptr::null_mut();
+            assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
+            let held = ids
+                .iter()
+                .map(|id| ffi::git_odb_exists(odb, id) == 1)
+                .collect();
+            ffi::git_odb_free(odb);
+            (
+                ffi::git_repository_oid_type(repo),
+                ffi::git_repository_path(repo).is_null(),
+                ffi::git_repository_workdir(repo).is_null(),
+                held,
+            )
+        }
+    }
+
+    /// Writes `data` as a blob into the objects directory `objects`; its id.
+    fn write_blob(objects: &Path, oid_type: OidType, data: &[u8]) -> ffi::git_oid {
+        let odb = Odb::open_with_oid_type(&c_path(objects), oid_type).unwrap();
+        let mut id = ffi::git_oid::default();
+        // SAFETY: a live odb, a writable id and `data` live for its length.
+        let rc = unsafe {
+            ffi::git_odb_write(
+                &mut id,
+                odb.as_c_ptr(),
+                data.as_ptr().cast(),
+                data.len(),
+                ffi::GIT_OBJECT_BLOB,
+            )
+        };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn wrap_odb_matches_c() {
+        let (c_root, rust_root) = (Root::new("wrap-c"), Root::new("wrap-rust"));
+        for (k, oid_type) in [OidType::Sha1, OidType::Sha256].into_iter().enumerate() {
+            let rel = format!("objects-{k}");
+            let (c_dir, rust_dir) = (c_root.0.join(&rel), rust_root.0.join(&rel));
+            fs::create_dir_all(&c_dir).unwrap();
+            fs::create_dir_all(&rust_dir).unwrap();
+            let ids: Vec<_> = [&b"one"[..], b"two"]
+                .iter()
+                .map(|d| {
+                    let id = write_blob(&c_dir, oid_type, d);
+                    assert_eq!(write_blob(&rust_dir, oid_type, d).id, id.id);
+                    id
+                })
+                .collect();
+            let elsewhere = c_root.0.join(format!("elsewhere-{k}"));
+            fs::create_dir_all(&elsewhere).unwrap();
+            let absent = write_blob(&elsewhere, oid_type, b"three");
+            let probe = [ids[0], ids[1], absent];
+
+            let opts = ffi::git_odb_options {
+                version: ffi::GIT_ODB_OPTIONS_VERSION,
+                oid_type: oid_type.raw(),
+            };
+            let mut c_odb = ptr::null_mut();
+            let mut c_repo = ptr::null_mut();
+            let dir = c_path(&c_dir);
+            // SAFETY: writable slots, a NUL-terminated path and live options; the
+            // caller's odb reference is released once the repository holds its own.
+            let c_rc = unsafe {
+                assert_eq!(ffi::git_odb_open_ext(&mut c_odb, dir.as_ptr(), &opts), 0);
+                let rc = ffi::git_repository_wrap_odb(&mut c_repo, c_odb);
+                ffi::git_odb_free(c_odb);
+                rc
+            };
+            let c_repo = CRepo(c_repo);
+
+            let odb = Odb::open_with_oid_type(&c_path(&rust_dir), oid_type).unwrap();
+            let rust_repo = Repository::wrap_odb(odb).unwrap();
+            assert_eq!(c_rc, 0);
+            assert_eq!(
+                wrapped_view(rust_repo.as_c_ptr(), &probe),
+                wrapped_view(c_repo.0, &probe)
+            );
+            assert_eq!(rust_repo.as_ref().workdir(), None);
+        }
+    }
+
+    const MARKERS: [&str; 9] = [
+        "MERGE_HEAD",
+        "MERGE_MODE",
+        "MERGE_MSG",
+        "BISECT_LOG",
+        "rebase-merge",
+        "rebase-apply",
+        "sequencer",
+        "REVERT_HEAD",
+        "CHERRY_PICK_HEAD",
+    ];
+
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        /// Writes the marker file (or, for a directory marker, a file in it).
+        Mark(&'static str),
+        /// Makes the marker a directory holding a file.
+        MarkDir(&'static str),
+        Cleanup,
+    }
+
+    type Outcome = (c_int, Option<(c_int, String)>, u32, Vec<&'static str>);
+
+    fn mark(gitdir: &Path, step: Step) {
+        let id = "0123456789012345678901234567890123456789\n";
+        match step {
+            Step::Mark(m @ ("rebase-merge" | "rebase-apply" | "sequencer")) => {
+                fs::create_dir_all(gitdir.join(m)).unwrap();
+                fs::write(gitdir.join(m).join("todo"), "x\n").unwrap();
+            }
+            Step::Mark(m) => fs::write(gitdir.join(m), id).unwrap(),
+            Step::MarkDir(m) => {
+                fs::create_dir_all(gitdir.join(m)).unwrap();
+                fs::write(gitdir.join(m).join("inner"), id).unwrap();
+            }
+            Step::Cleanup => unreachable!(),
+        }
+    }
+
+    fn outcome(
+        root: &Root,
+        gitdir: &Path,
+        repo: *mut ffi::git_repository,
+        rc: c_int,
+        error: Option<(c_int, String)>,
+    ) -> Outcome {
+        // SAFETY: a live repository on this thread.
+        let state = unsafe { ffi::git_repository_state(repo) } as u32;
+        let left = MARKERS
+            .into_iter()
+            .filter(|m| gitdir.join(m).exists())
+            .collect();
+        (rc, error.map(|(k, m)| (k, root.mask(&m))), state, left)
+    }
+
+    /// Runs `steps` on both sides, comparing after each; the C side's outcomes.
+    fn compare_cleanup(tag: &str, bare: bool, steps: &[Step]) -> Vec<Outcome> {
+        let (c_root, rust_root) = (
+            Root::new(&format!("{tag}-c")),
+            Root::new(&format!("{tag}-rust")),
+        );
+        let rel = if bare { "repo.git" } else { "repo" };
+        let c = CRepo::init(&c_root.0.join(rel), bare);
+        let mut rust = Repository::init(&c_path(&rust_root.0.join(rel)), bare).unwrap();
+        let gitdir = |root: &Root| {
+            if bare {
+                root.0.join(rel)
+            } else {
+                root.0.join(rel).join(".git")
+            }
+        };
+        let mut outcomes = Vec::new();
+        for (k, &step) in steps.iter().enumerate() {
+            let (c_out, rust_out) = match step {
+                Step::Cleanup => {
+                    // SAFETY: no arguments; clears this thread's error state.
+                    unsafe { ffi::git_error_clear() };
+                    // SAFETY: the live repository of the C side.
+                    let rc = unsafe { ffi::git_repository_state_cleanup(c.0) };
+                    let c_error = (rc < 0).then(c_last);
+                    let c_out = outcome(&c_root, &gitdir(&c_root), c.0, rc, c_error);
+                    let (rc, error) = match rust.as_mut().cleanup_state() {
+                        Ok(()) => (0, None),
+                        Err(e) => (
+                            e.raw_code(),
+                            Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                        ),
+                    };
+                    (
+                        c_out,
+                        outcome(&rust_root, &gitdir(&rust_root), rust.as_c_ptr(), rc, error),
+                    )
+                }
+                step => {
+                    mark(&gitdir(&c_root), step);
+                    mark(&gitdir(&rust_root), step);
+                    (
+                        outcome(&c_root, &gitdir(&c_root), c.0, 0, None),
+                        outcome(&rust_root, &gitdir(&rust_root), rust.as_c_ptr(), 0, None),
+                    )
+                }
+            };
+            assert_eq!(rust_out, c_out, "step {k} {step:?}");
+            outcomes.push(c_out);
+        }
+        outcomes
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_state_matches_c() {
+        use Step::*;
+        for bare in [false, true] {
+            let outcomes = compare_cleanup(
+                if bare { "cleanup-bare" } else { "cleanup" },
+                bare,
+                &[
+                    Cleanup,
+                    Mark("MERGE_HEAD"),
+                    Mark("MERGE_MSG"),
+                    Mark("MERGE_MODE"),
+                    Cleanup,
+                    Mark("rebase-merge"),
+                    Mark("BISECT_LOG"),
+                    Cleanup,
+                    Mark("rebase-apply"),
+                    Mark("sequencer"),
+                    Mark("REVERT_HEAD"),
+                    Cleanup,
+                    Mark("CHERRY_PICK_HEAD"),
+                    Mark("sequencer"),
+                    Cleanup,
+                    Cleanup,
+                    MarkDir("MERGE_HEAD"),
+                    MarkDir("BISECT_LOG"),
+                    Cleanup,
+                ],
+            );
+            // Every step succeeds, and the last cleanup leaves nothing behind.
+            assert!(outcomes.iter().all(|o| o.0 == 0), "{outcomes:?}");
+            assert_eq!(outcomes.last().unwrap().2, ffi::GIT_REPOSITORY_STATE_NONE);
+            assert!(outcomes.last().unwrap().3.is_empty());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_state_failures_match_c() {
+        use Step::*;
+        // A reference marker that is a directory: the reference backend cannot remove it.
+        let outcomes = compare_cleanup(
+            "cleanup-fail",
+            false,
+            &[
+                Mark("MERGE_HEAD"),
+                MarkDir("REVERT_HEAD"),
+                Cleanup,
+                Cleanup,
+                MarkDir("CHERRY_PICK_HEAD"),
+                Cleanup,
+            ],
+        );
+        let failed: Vec<_> = outcomes.iter().filter(|o| o.0 < 0).collect();
+        assert!(!failed.is_empty(), "{outcomes:?}");
+    }
+}

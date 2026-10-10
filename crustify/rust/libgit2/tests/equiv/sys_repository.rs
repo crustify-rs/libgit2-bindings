@@ -214,3 +214,227 @@ mod new_options {
         }
     }
 }
+
+/// `RepositoryMut::cache_submodules` and `clear_submodule_cache` against
+/// `git_repository_submodule_cache_all` and `git_repository_submodule_cache_clear`.
+///
+/// Each side owns a repository with a working directory whose `.gitmodules` the steps
+/// rewrite; the C side loads and clears the cache through the raw routines, the Rust
+/// side through the wrappers, and both observe it through `git_submodule_lookup`,
+/// which answers from the cache while there is one. After every step the return, the
+/// error and what a lookup of each submodule gives (its code, or its `ignore` setting)
+/// must agree: a loaded cache keeps answering with what `.gitmodules` said when it was
+/// loaded, a cleared one hands lookups back to the repository.
+///
+/// The wrapper releases a loaded cache before loading another, where libgit2 leaks it
+/// and keeps it when the load fails; those sequences diverge on purpose (the unit tests
+/// of `repository/sys/repository.rs` cover them), so loads here start without a cache.
+mod submodule_cache {
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        /// Rewrites `.gitmodules`: `sub` with this `ignore` setting, and `other` when
+        /// asked.
+        Modules(&'static str, bool),
+        /// Rewrites `.gitmodules` with a syntax error.
+        Break,
+        Cache,
+        Clear,
+    }
+
+    type Lookup = Result<ffi::git_submodule_ignore_t, c_int>;
+    type Outcome = (c_int, Option<(c_int, String)>, Lookup, Lookup);
+
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// The thread's last error as C reports it.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
+        // its message is a C string, live until the next libgit2 call on this thread.
+        unsafe {
+            let e = ffi::git_error_last();
+            let message = CStr::from_ptr((*e).message).to_string_lossy().into_owned();
+            ((*e).klass, message)
+        }
+    }
+
+    /// A working directory of its own, removed on drop.
+    struct Root(PathBuf);
+
+    impl Root {
+        fn new(tag: &str) -> Self {
+            init();
+            let path = std::env::temp_dir().join(format!(
+                "crustify-sys-repository-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            Self(path)
+        }
+
+        fn c_path(&self) -> CString {
+            CString::new(self.0.as_os_str().as_bytes()).unwrap()
+        }
+
+        fn write(&self, step: Step) {
+            let modules = match step {
+                Step::Modules(ignore, other) => {
+                    let mut s = format!(
+                        "[submodule \"sub\"]\n\tpath = sub\n\turl = https://example.com/sub\n\
+                         \tignore = {ignore}\n"
+                    );
+                    if other {
+                        s += "[submodule \"other\"]\n\tpath = other\n\
+                              \turl = https://example.com/other\n\tignore = dirty\n";
+                    }
+                    s
+                }
+                Step::Break => "[submodule \"sub\"\n".to_owned(),
+                Step::Cache | Step::Clear => unreachable!(),
+            };
+            fs::write(self.0.join(".gitmodules"), modules).unwrap();
+        }
+    }
+
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// `git_submodule_lookup(name)`: the submodule's `ignore` setting, or the code.
+    fn lookup(repo: *mut ffi::git_repository, name: &CStr) -> Lookup {
+        let mut sm = ptr::null_mut();
+        // SAFETY: a writable slot, a live repository on this thread and a
+        // NUL-terminated name; the submodule reference is released once.
+        unsafe {
+            let rc = ffi::git_submodule_lookup(&mut sm, repo, name.as_ptr());
+            if rc != 0 {
+                return Err(rc);
+            }
+            let ignore = ffi::git_submodule_ignore(sm);
+            ffi::git_submodule_free(sm);
+            Ok(ignore)
+        }
+    }
+
+    fn observe(
+        root: &Root,
+        repo: *mut ffi::git_repository,
+        rc: c_int,
+        error: Option<(c_int, String)>,
+    ) -> Outcome {
+        let root_str = root.0.display().to_string();
+        let error = error.map(|(k, m)| (k, m.replace(&root_str, "<root>")));
+        (rc, error, lookup(repo, c"sub"), lookup(repo, c"other"))
+    }
+
+    fn compare(tag: &str, steps: &[Step]) {
+        let (c_root, rust_root) = (
+            Root::new(&format!("{tag}-c")),
+            Root::new(&format!("{tag}-rust")),
+        );
+        let mut c = ptr::null_mut();
+        let path = c_root.c_path();
+        // SAFETY: a writable slot and a NUL-terminated path; the repository is freed at
+        // the end.
+        let rc = unsafe { ffi::git_repository_init(&mut c, path.as_ptr(), 0) };
+        assert_eq!(rc, 0);
+        let mut rust: RepositoryBox = Repository::init(&rust_root.c_path(), false).unwrap();
+        for (k, &step) in steps.iter().enumerate() {
+            let (c_out, rust_out) = match step {
+                Step::Cache | Step::Clear => {
+                    // SAFETY: no arguments; clears this thread's error state.
+                    unsafe { ffi::git_error_clear() };
+                    // SAFETY: the C side's live repository, on this thread.
+                    let rc = unsafe {
+                        if matches!(step, Step::Cache) {
+                            ffi::git_repository_submodule_cache_all(c)
+                        } else {
+                            ffi::git_repository_submodule_cache_clear(c)
+                        }
+                    };
+                    let c_out = observe(&c_root, c, rc, (rc < 0).then(c_last));
+                    let (rc, error) = if matches!(step, Step::Cache) {
+                        match rust.as_mut().cache_submodules() {
+                            Ok(()) => (0, None),
+                            Err(e) => (
+                                e.raw_code(),
+                                Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                            ),
+                        }
+                    } else {
+                        rust.as_mut().clear_submodule_cache();
+                        (0, None)
+                    };
+                    (c_out, observe(&rust_root, rust.as_c_ptr(), rc, error))
+                }
+                step => {
+                    c_root.write(step);
+                    rust_root.write(step);
+                    (
+                        observe(&c_root, c, 0, None),
+                        observe(&rust_root, rust.as_c_ptr(), 0, None),
+                    )
+                }
+            };
+            assert_eq!(rust_out, c_out, "step {k} {step:?}");
+        }
+        drop(rust);
+        // SAFETY: the C side's repository, released once (with any cache it holds).
+        unsafe { ffi::git_repository_free(c) };
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cache_sequences_match_c() {
+        use Step::*;
+        compare(
+            "sequence",
+            &[
+                Clear,
+                Cache,
+                Modules("none", false),
+                Clear,
+                Cache,
+                Modules("all", true),
+                Clear,
+                Modules("untracked", true),
+                Cache,
+                Modules("dirty", false),
+                Clear,
+                Clear,
+                Cache,
+            ],
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failed_loads_match_c() {
+        use Step::*;
+        compare(
+            "failed",
+            &[
+                Break,
+                Cache,
+                Modules("all", false),
+                Cache,
+                Break,
+                Clear,
+                Cache,
+            ],
+        );
+    }
+}

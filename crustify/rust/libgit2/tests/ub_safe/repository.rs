@@ -1094,3 +1094,119 @@ mod init_options {
         );
     }
 }
+
+/// The repository routines of `git2/repository.h` this crate wraps beyond the
+/// constructors: `Repository::wrap_odb`, `RepositoryRef::workdir` and
+/// `RepositoryMut::cleanup_state`.
+///
+/// `wrap_odb` consumes the caller's odb reference once the repository holds its own:
+/// the odb must stay live through the repository (ASan: use after free), be freed with
+/// it (LSan) and never twice (ASan: double free), and only an odb no repository owns is
+/// accepted (an odb a repository lent does not compile: doctest on `wrap_odb`). The
+/// working directory `workdir` returns is the repository's string, borrowed for the
+/// handle's lifetime (ASan; outliving the repository does not compile: doctest on
+/// `workdir`). `cleanup_state` removes files through the exclusive handle, and refuses
+/// a repository without a git directory, which libgit2 would resolve against the
+/// process's working directory. A repository is neither `Send` nor `Sync`, so nothing
+/// races (TSan); libgit2 keeps no pointer into Rust storage (BSan). Every test calls
+/// libgit2, so none runs under Miri.
+mod routines {
+    use std::ffi::CString;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use libgit2::libgit2::odb::odb::Odb;
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use crate::fixture::odb::{Repo, backends, write_blob};
+
+    fn scratch(tag: &str) -> PathBuf {
+        crate::fixture::init();
+        let path = std::env::temp_dir().join(format!(
+            "crustify-repository-routines-ub-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        path
+    }
+
+    fn c_path(path: &Path) -> CString {
+        CString::new(path.to_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn wrapped_odb_lives_as_long_as_the_repository() {
+        crate::fixture::init();
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let odb = Odb::with_oid_type(kind).unwrap();
+            let repo = Repo::wrap(odb);
+            // The caller's reference is gone; the repository's keeps the odb.
+            let lent = repo.odb();
+            // No backends: the odb answers, and refuses the write.
+            assert_eq!(backends(&lent), 0);
+            assert!(write_blob(&lent, b"x").is_err());
+            drop(lent);
+            drop(repo);
+        }
+        for _ in 0..16 {
+            let repo = Repository::wrap_odb(Odb::new().unwrap()).unwrap();
+            assert_eq!(repo.as_ref().workdir(), None);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn workdir_is_borrowed_from_the_repository() {
+        let dir = scratch("workdir");
+        let repo = Repository::init(&c_path(&dir), false).unwrap();
+        let workdir = repo.as_ref().workdir().unwrap();
+        let copy = repo.as_ref();
+        assert_eq!(copy.workdir(), Some(workdir));
+        assert_eq!(
+            workdir.to_str().unwrap(),
+            format!("{}/", dir.to_str().unwrap())
+        );
+        drop(repo);
+        let bare = Repository::init(&c_path(&dir.join("bare")), true).unwrap();
+        assert_eq!(bare.as_ref().workdir(), None);
+        drop(bare);
+        assert_eq!(Repository::new().unwrap().as_ref().workdir(), None);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_state_removes_through_the_exclusive_handle() {
+        let dir = scratch("cleanup");
+        let mut repo = Repository::init(&c_path(&dir), true).unwrap();
+        for round in 0..4 {
+            fs::write(dir.join("MERGE_HEAD"), "x\n").unwrap();
+            fs::create_dir_all(dir.join("rebase-merge/sub")).unwrap();
+            fs::write(dir.join("rebase-merge/sub/f"), "x\n").unwrap();
+            fs::write(dir.join("REVERT_HEAD"), "x\n").unwrap();
+            let mut m = repo.as_mut();
+            m.as_mut().cleanup_state().unwrap();
+            assert!(!dir.join("MERGE_HEAD").exists(), "round {round}");
+            assert!(!dir.join("rebase-merge").exists());
+            assert!(!dir.join("REVERT_HEAD").exists());
+        }
+        // Nothing left to remove succeeds too.
+        repo.as_mut().cleanup_state().unwrap();
+        drop(repo);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cleanup_state_refuses_repositories_without_paths() {
+        crate::fixture::init();
+        let mut memory = Repository::new().unwrap();
+        let mut wrapped = Repository::wrap_odb(Odb::new().unwrap()).unwrap();
+        for _ in 0..4 {
+            assert!(memory.as_mut().cleanup_state().is_err());
+            assert!(wrapped.as_mut().cleanup_state().is_err());
+        }
+    }
+}

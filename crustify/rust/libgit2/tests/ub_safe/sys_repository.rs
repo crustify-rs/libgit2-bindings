@@ -295,3 +295,98 @@ mod new_options {
         }
     }
 }
+
+/// The submodule cache, loaded by `RepositoryMut::cache_submodules` and released by
+/// `RepositoryMut::clear_submodule_cache`.
+///
+/// Each cache holds a counted reference to every submodule it loads; a reload must
+/// release the cache it replaces (libgit2 alone leaks it: LSan), a clear must release
+/// it once (ASan: double free), and a submodule looked up through the cache must stay
+/// readable after a clear and after its repository is freed, through its own reference
+/// (ASan: use after free). Both routines take the exclusive handle, so no shared handle
+/// can clear a cache a libgit2 routine is reading (the `compile_fail` doctest on
+/// `cache_submodules`). Neither a repository nor its handles cross threads, so there is
+/// nothing for TSan; libgit2 keeps no pointer into Rust storage (BSan). Every test calls
+/// libgit2, so none runs under Miri.
+mod submodule_cache {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use crate::fixture::submodule::{ModulesRepo, Submodule};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reloads_and_clears_release_every_cache() {
+        let mut m = ModulesRepo::new("reload");
+        for round in 0..8 {
+            m.repo.as_mut().cache_submodules().unwrap();
+            if round % 3 == 0 {
+                m.repo.as_mut().clear_submodule_cache();
+            }
+        }
+        // A clear without a cache, twice, frees nothing.
+        m.repo.as_mut().clear_submodule_cache();
+        m.repo.as_mut().clear_submodule_cache();
+        // The repository releases the cache it still holds.
+        m.repo.as_mut().cache_submodules().unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn cached_submodules_outlive_the_cache_and_the_repository() {
+        let mut m = ModulesRepo::new("outlive");
+        m.repo.as_mut().cache_submodules().unwrap();
+        let cached = Submodule::lookup(&m.repo, c"sub").unwrap();
+        // The cache answers with what it loaded, whatever `.gitmodules` says now.
+        m.set_ignore("all");
+        let again = Submodule::lookup(&m.repo, c"sub").unwrap();
+        assert_eq!(again.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
+        m.repo.as_mut().clear_submodule_cache();
+        assert_eq!(cached.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
+        // Reloading drops the old cache's references, not the ones handed out.
+        m.repo.as_mut().cache_submodules().unwrap();
+        m.repo.as_mut().cache_submodules().unwrap();
+        let fresh = Submodule::lookup(&m.repo, c"sub").unwrap();
+        assert_eq!(fresh.ignore(), ffi::GIT_SUBMODULE_IGNORE_ALL);
+        drop(m);
+        assert_eq!(cached.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
+        assert_eq!(again.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
+        assert_eq!(fresh.ignore(), ffi::GIT_SUBMODULE_IGNORE_ALL);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failed_loads_leave_nothing_behind() {
+        let mut m = ModulesRepo::new("failed");
+        m.repo.as_mut().cache_submodules().unwrap();
+        std::fs::write(m.base.join(".gitmodules"), "[submodule \"sub\"\n").unwrap();
+        for _ in 0..4 {
+            assert!(m.repo.as_mut().cache_submodules().is_err());
+        }
+        m.repo.as_mut().clear_submodule_cache();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn repositories_without_a_working_directory_cache_nothing() {
+        crate::fixture::init();
+        let mut memory = Repository::new().unwrap();
+        memory.as_mut().cache_submodules().unwrap();
+        memory.as_mut().cache_submodules().unwrap();
+        memory.as_mut().clear_submodule_cache();
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-sys-repository-ub-{}-bare",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = CString::new(dir.as_os_str().as_bytes()).unwrap();
+        let mut bare = Repository::init(&path, true).unwrap();
+        bare.as_mut().cache_submodules().unwrap();
+        bare.as_mut().cache_submodules().unwrap();
+        drop(bare);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
