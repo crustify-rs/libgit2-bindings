@@ -1,4 +1,5 @@
-//! UB tests for `git2/sys/path.h`: the enum `GitFile`.
+//! UB tests for `git2/sys/path.h`: the enums `GitFile` and, in `mod filesystem`,
+//! `Filesystem`.
 //!
 //! `GitFile` is a fieldless enum over C's `git_path_gitfile`, whose raw value libgit2
 //! uses as an index into a table of three names. The only safe way in from a raw value
@@ -63,5 +64,41 @@ fn files_cross_threads() {
         .collect();
     for (h, f) in handles.into_iter().zip(files) {
         assert_eq!(h.join().unwrap(), Some(f));
+    }
+}
+
+mod filesystem {
+    //! [`Filesystem`] (`git_path_fs`): its raw conversions yield only valid variants
+    //! (Miri checks the enum's validity), and it crosses threads.
+
+    use libgit2::ffi;
+    use libgit2::libgit2::repository::sys::path::Filesystem;
+
+    #[test]
+    fn every_raw_value_converts_to_a_variant_or_none() {
+        let edges = [u32::MAX, u32::MAX - 1, 0x8000_0000, 0x7fff_ffff];
+        for raw in (0..=300).chain(edges) {
+            match Filesystem::from_raw(raw) {
+                Some(fs) => {
+                    assert_eq!(fs.raw(), raw);
+                    assert!(matches!(
+                        fs,
+                        Filesystem::Generic | Filesystem::Ntfs | Filesystem::Hfs
+                    ));
+                }
+                None => assert!(raw > ffi::GIT_PATH_FS_HFS),
+            }
+            assert_eq!(Filesystem::try_from(raw).ok(), Filesystem::from_raw(raw));
+        }
+    }
+
+    #[test]
+    fn filesystems_cross_threads() {
+        fn send_sync<T: Send + Sync + Copy>() {}
+        send_sync::<Filesystem>();
+        let fs = std::thread::spawn(|| Filesystem::from_raw(1))
+            .join()
+            .unwrap();
+        assert_eq!(fs, Some(Filesystem::Ntfs));
     }
 }

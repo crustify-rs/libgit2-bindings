@@ -188,6 +188,54 @@
    "fields": []
   },
   {
+   "name": "git_odb",
+   "defined_in": "src/libgit2/odb.h",
+   "_comment_agent": "git_odb is opaque in the public API (typedef in git2/types.h, body in src/libgit2/odb.h) and reference counted: rc.refcount is an atomic count, rc.owner an atomically swapped back-pointer to the git_repository that installed it (GIT_REFCOUNT_OWN). Constructors git_odb_new / git_odb_new_ext (git__calloc, count 1, no backends) and git_odb_open / git_odb_open_ext (new + loose and pack backends for objects_dir, its commit-graph and info/alternates, recursively up to depth 5; a missing objects_dir fails GIT_ERROR_ODB \"failed to load object database in '<dir>'\", *out NULL; missing alternates are skipped). Dropper git_odb_free = GIT_REFCOUNT_DEC: atomic decrement, and odb_free (every backend's own free, cgraph, vector, own_cache, mutex, then git__free) only once the count reaches 0 AND no repository owns it. libgit2 exports no up_ref: references are multiplied only by git_repository_odb (+1 to the repo's odb, lazily created by git_repository_odb__weakptr), git_repository_set_odb / git_repository_wrap_odb (repo takes +1 and becomes owner). So a Rust owner is a CArc without Clone (OdbArc = CArc<Odb, OdbFree>), never a CBox: a repository may share it at any time. Thread safety (docs/threading.md: 'git_odb uses locking internally'): backends and cgraph are only touched under db->lock (a non-recursive pthread mutex); own_cache is a git_cache under its own rwlock; options are written only by git_odb_new_ext before publication; do_fsync only by git_odb__set_caps on a repository-private odb before the CAS publishes it; refcount and owner are atomics. Every public routine takes the lock itself, so all of them go on the shared handle (OdbRef); nothing hands out OdbMut. Hazards for the symbol batches: odb_cache() loads rc.owner and then uses &owner->objects without holding a reference to the owner, so freeing the owning repository on another thread while this odb (held through its own reference) is read races a use-after-free of the repo's object cache; git_repository_odb__weakptr leaks the new odb (owner already set, so the free does not release it) and odb_path when git_odb__set_caps or add_default_backends fails, and leaks odb_path when repository_odb_alternates fails; git_odb__add_default_backends leaks the loose (resp. pack) backend when add_backend_internal fails (OOM only); git_repository_wrap_odb GIT_ASSERTs a valid options.oid_type; git_odb_new_ext stores an unnamed non-zero opts->oid_type unvalidated.",
+   "fields": [
+    {
+     "name": "backends",
+     "locked_by": {
+      "lock": "lock",
+      "lock_op": [
+       "git_mutex_lock"
+      ],
+      "unlock_op": [
+       "git_mutex_unlock"
+      ]
+     }
+    },
+    {
+     "name": "cgraph",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The odb's commit-graph, NULL until git_odb__add_default_backends lazily opens one for the first on-disk objects dir (git_commit_graph_new) or git_odb_set_commit_graph installs a caller's (ownership transferred, previous one freed with git_commit_graph_free). Released by odb_free. Read and replaced only under db->lock (git_odb__get_commit_graph_file, set_commit_graph, add_default_backends)."
+     },
+     "locked_by": {
+      "lock": "lock",
+      "lock_op": [
+       "git_mutex_lock"
+      ],
+      "unlock_op": [
+       "git_mutex_unlock"
+      ]
+     }
+    },
+    {
+     "name": "rc",
+     "refcount": true,
+     "locked_by": null
+    }
+   ]
+  },
+  {
    "name": "git_oid",
    "defined_in": "include/git2/oid.h",
    "_comment_agent": "Plain value type with no pointer fields: `type` (unsigned char holding a git_oid_t value, 0 = GIT_OID_NONE/unset) and `id` (32-byte inline array, GIT_OID_MAX_SIZE). Never heap-allocated by libgit2's public API on its own; callers hold it by value or receive `const git_oid *` into a parent object. Nothing to release. Every bit pattern is accepted by oid.c: an unknown `type` makes git_oid_size/hexsize return 0 and the formatters report 'unknown type' (git_oid_nfmt/pathfmt) - BUT git_oid_tostr_s then returns its per-thread buffer without writing it (uninitialised on the thread's first call, no NUL: ASan heap-buffer-overflow in strlen confirmed with a zeroed oid), so its wrapper must reject unknown types. All-zero is libgit2's own GIT_OID_NONE. Constructors (init into caller storage): git_oid_from_string, git_oid_from_prefix, git_oid_from_raw; cloner: git_oid_cpy (memcpy of the whole struct; overlapping out/src would be UB).",
@@ -242,6 +290,12 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_path_fs",
+   "defined_in": "include/git2/sys/path.h",
+   "_comment_agent": "Plain C enum (GENERIC=0, NTFS=1, HFS=2), passed by value; no lifecycle. Its only reader is git_path_is_gitfile (path.c), which switches on it: GENERIC = the NTFS check || the HFS check, NTFS = validate_dotgit_ntfs_generic only, HFS = validate_dotgit_hfs_generic only; any other value fails -1 with GIT_ERROR_OS 'invalid filesystem for path validation' (after the gitfile range check, which fails first with 'invalid gitfile for path validation'). libgit2 itself calls it with HFS and NTFS for .gitmodules (path.c validate_repo_component). Rust: Filesystem enum with from_raw/raw/TryFrom (UnnamedFilesystem). Hazard for the git_path_is_gitfile symbol batch: the NTFS branch ignores pathlen - it reads name[6], name[7], up to name[8] and ntfs_end_of_filename scans to NUL or ':' - so a path slice that is not NUL-terminated within reach is read out of bounds; the HFS branch honours pathlen. A safe wrapper must pass a NUL-terminated copy (&CStr) and its length.",
+   "fields": []
   },
   {
    "name": "git_path_gitfile",
@@ -1522,6 +1576,242 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object, a buffer, or a NUL-terminated string) without reading it; NULL is a no-op. Strings: libgit2 makes its strings with git__strdup/git__strndup/git__substrdup (git__malloc) and releases them with git__free in git_strarray_dispose (each element, then the array), git_signature_free (name, email) and git_buf_dispose (ptr), none of which exports a single-string free, so this is the only exported releaser for one libgit2 string or a char** array of them; Rust OdbDataStrFree / OdbDataStrVec drop through it. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_free",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "db",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "A refcount down-ref (GIT_REFCOUNT_DEC): NULL is a no-op; the atomic count drops by one, and odb_free runs only when it reaches 0 while no repository owns the odb (rc.owner NULL): every backend's own free, the commit-graph, the backend vector, own_cache, the mutex, then git__free. Callable from any thread. libgit2 exports no matching up-ref; git_repository_odb returns a +1 reference to a repository's odb, which this releases."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_new",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success receives a fresh git__calloc'd odb holding one reference (no backends, own cache, mutex), owned by the caller and released by git_odb_free; left untouched on failure (OOM in the calloc, mutex, cache or vector init, each unwound without leaks). Equivalent to git_odb_new_ext(out, NULL): SHA-1 ids."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_new_ext",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL selects the defaults; otherwise version-checked (GIT_ERROR_CHECK_VERSION) and memcpy'd into db->options, never retained. oid_type 0 becomes GIT_OID_DEFAULT; any other value is stored unvalidated (an unnamed one later breaks hashing and git_repository_wrap_odb's GIT_ASSERT)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success receives a fresh git__calloc'd odb holding one reference (no backends, own cache, mutex), owned by the caller and released by git_odb_free; left untouched on failure (OOM in the calloc, mutex, cache or vector init, each unwound without leaks)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_open",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "objects_dir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; stat'ed and copied into the loose/pack backends' paths and the alternates walk, never retained. A path that cannot be stat'ed fails GIT_ERROR_ODB \"failed to load object database in '<dir>'\"; a regular file opens (its backends then fail every write); an unreadable info/alternates fails the open."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: set to NULL first, then receives a fresh odb (one reference) with the loose and pack backends for objects_dir, its commit-graph and alternates (alternates files read at depths 0..5, so directories six levels deep; a directory already open by inode is skipped, a missing alternate ignored); released by git_odb_free. On failure the half-built odb is freed with git_odb_free and the slot stays NULL; a failing add_backend_internal (OOM) leaks the backend just created. Equivalent to git_odb_open_ext(out, objects_dir, NULL)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_open_ext",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "objects_dir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; stat'ed and copied into the loose/pack backends' paths and the alternates walk, never retained. A path that cannot be stat'ed fails GIT_ERROR_ODB \"failed to load object database in '<dir>'\"; a regular file opens (its backends then fail every write); an unreadable info/alternates fails the open."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL selects the defaults; otherwise version-checked (GIT_ERROR_CHECK_VERSION) and memcpy'd into db->options, never retained. oid_type 0 becomes GIT_OID_DEFAULT; any other value is stored unvalidated (an unnamed one later breaks hashing and git_repository_wrap_odb's GIT_ASSERT)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: set to NULL first, then receives a fresh odb (one reference) with the loose and pack backends for objects_dir, its commit-graph and alternates (alternates files read at depths 0..5, so directories six levels deep; a directory already open by inode is skipped, a missing alternate ignored); released by git_odb_free. On failure the half-built odb is freed with git_odb_free and the slot stays NULL; a failing add_backend_internal (OOM) leaks the backend just created."
      }
     }
    ]
