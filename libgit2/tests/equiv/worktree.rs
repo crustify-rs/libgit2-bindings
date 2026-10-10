@@ -1250,7 +1250,7 @@ mod add_options {
     }
 
     /// `git_worktree_add`'s steps: the worktree's name and the options.
-    const STEPS: [(&str, Spec); 9] = [
+    const STEPS: [(&str, Spec); 11] = [
         // An existing branch named after the worktree.
         (
             "alpha",
@@ -1330,6 +1330,25 @@ mod add_options {
                 ..SPEC
             },
         ),
+        // The embedded checkout options fail the checkout (a target directory that
+        // is a file), after the worktree's files are on disk.
+        (
+            "theta",
+            Spec {
+                checkout_existing: true,
+                target: Some("blocked"),
+                ..SPEC
+            },
+        ),
+        // What that left behind holds the branch checked out, so the same worktree
+        // with corrected options is refused.
+        (
+            "theta",
+            Spec {
+                checkout_existing: true,
+                ..SPEC
+            },
+        ),
     ];
 
     const SPEC: Spec = Spec {
@@ -1405,12 +1424,15 @@ mod add_options {
                 "heads/topic",
                 "heads/spare",
                 "heads/spare2",
+                "heads/theta",
                 "tags/v1",
             ] {
                 fs::write(path.join(".git/refs").join(name), format!("{commit}\n")).unwrap();
             }
             fs::write(path.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
             fs::create_dir(base.join("wt")).unwrap();
+            // A checkout target directory that cannot be one.
+            fs::write(base.join("blocked"), "not a directory\n").unwrap();
             Self {
                 base,
                 repo,
@@ -1500,6 +1522,7 @@ mod add_options {
         let rust = Side::new("r-side");
         let mut c_log = Vec::new();
         let mut rust_log = Vec::new();
+        let mut c_messages = Vec::new();
         for (step, (name, spec)) in STEPS.iter().enumerate() {
             // C: the init routine, then raw writes; the reference stays C's until freed.
             let mut raw = c_init();
@@ -1555,10 +1578,35 @@ mod add_options {
             assert_eq!(rust_outcome, c_outcome, "step {step} ({name})");
             c_log.push(c_outcome.0);
             rust_log.push(rust_outcome.0);
+            c_messages.push(c_outcome.1.map(|(_, message)| message));
         }
         // Both sides took every branch the steps aim at.
-        assert_eq!(c_log, [0, 0, -1, -1, -1, 0, -1, 0, ffi::GIT_EEXISTS]);
+        let eexists = ffi::GIT_EEXISTS;
+        assert_eq!(
+            c_log,
+            [0, 0, -1, -1, -1, 0, -1, 0, eexists, eexists, -1],
+            "{c_messages:#?}"
+        );
         assert_eq!(rust_log, c_log);
+        // The failed checkout left a worktree on disk that libgit2 finds by name and
+        // that holds its branch checked out, though nothing was checked out into it:
+        // its administrative directory, `.git` file and `HEAD`.
+        assert_eq!(
+            c_messages[9].as_deref(),
+            Some("failed to make directory '<base>/blocked': directory exists")
+        );
+        assert_eq!(
+            c_messages[10].as_deref(),
+            Some("reference refs/heads/theta is already checked out")
+        );
+        for side in [&c, &rust] {
+            assert_eq!(
+                fs::read_to_string(side.base.join("repo/.git/worktrees/theta/HEAD")).unwrap(),
+                "ref: refs/heads/theta\n"
+            );
+            assert!(side.base.join("wt/theta/.git").is_file());
+            assert!(fs::read_dir(side.base.join("wt/theta")).unwrap().count() == 1);
+        }
     }
 }
 

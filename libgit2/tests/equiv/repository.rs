@@ -2021,6 +2021,7 @@ mod init_options {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+    use std::process::Command;
     use std::ptr;
 
     use libgit2::ffi;
@@ -2225,6 +2226,7 @@ mod init_options {
         template: CString,
         empty_template: CString,
         missing_template: CString,
+        long_template: CString,
         description: CString,
         head: CString,
         full_head: CString,
@@ -2238,6 +2240,7 @@ mod init_options {
                 template: root.c("tpl"),
                 empty_template: CString::new("").unwrap(),
                 missing_template: root.c("no-such-tpl"),
+                long_template: root.c(&"a".repeat(300)),
                 description: CString::new("described\n").unwrap(),
                 head: CString::new("trunk").unwrap(),
                 full_head: CString::new("refs/heads/other").unwrap(),
@@ -2467,6 +2470,18 @@ mod init_options {
                 path: "missing",
             },
             Step {
+                tag: "an over-long template path is an invalid path, not a missing one",
+                change: change!(
+                    |c, s| {
+                        c.template_path = s.long_template.as_ptr();
+                    },
+                    |r, s| {
+                        r.set_template_path(Some(&s.long_template));
+                    }
+                ),
+                path: "long-tpl",
+            },
+            Step {
                 tag: "every string cleared, the default types",
                 change: change!(
                     |c, s| {
@@ -2525,8 +2540,23 @@ mod init_options {
         let rc: Vec<_> = calls.iter().map(|(_, (rc, _, _))| *rc).collect();
         assert_eq!(
             rc,
-            [0, 0, -4, 0, 0, 0, 0, 0, 0, -1, -1, -4, 0, 0, 0],
+            [0, 0, -4, 0, 0, 0, 0, 0, 0, -1, -1, -4, 0, 0, -12, 0],
             "{calls:#?}"
+        );
+        // The over-long path failed the template copy (`GIT_EINVALIDSPEC`) after the
+        // repository directory was created, and before anything was written into it.
+        assert_eq!(
+            calls[14].1.1.as_ref().unwrap().0,
+            ffi::GIT_ERROR_OS as c_int
+        );
+        assert!(
+            calls[14]
+                .1
+                .1
+                .as_ref()
+                .unwrap()
+                .1
+                .starts_with("invalid path for filesystem")
         );
         // The internal bits libgit2 ORed into both sides' flags.
         assert_eq!(calls[1].1.2 & !0xffff, 1 << 16 | 1 << 17);
@@ -2546,8 +2576,143 @@ mod init_options {
         assert!(snap.contains_key("bare-sha256/hooks/post-commit"));
         assert!(!snap.contains_key("empty/description"));
         assert!(snap.contains_key("missing/description"));
+        assert!(matches!(snap.get("long-tpl"), Some(Entry::Dir(_))));
+        assert!(!snap.keys().any(|k| k.starts_with("long-tpl/")));
         assert!(
             matches!(snap.get("sep/wd/.git"), Some(Entry::File(_, s)) if s == "gitdir: ../repo/\n")
+        );
+    }
+
+    const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+    const ROOT: &str = "CRUSTIFY_EQUIV_INIT_OPTIONS_ROOT";
+
+    /// `initial_head` and `template_path` left `None` stand for the `init.defaultbranch`
+    /// and `init.templatedir` settings, which libgit2 reads from the global
+    /// configuration under `$HOME` (the branch on every fresh init, the template only
+    /// with [`InitFlag::ExternalTemplate`] or a path); a value set on either side
+    /// overrides the setting. Both spellings of the options must create the same
+    /// repositories, step by step, with the settings in force. `$HOME` is only set on a
+    /// child process, which no other test shares.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn defaults_read_the_global_configuration_as_c() {
+        let module = module_path!().split_once("::").unwrap().1;
+        let name = format!("{module}::defaults_read_the_global_configuration_as_c");
+        if std::env::var(CHILD).as_deref() == Ok(name.as_str()) {
+            init();
+            // The parent owns the directory and removes it.
+            let root = PathBuf::from(std::env::var(ROOT).unwrap());
+            let roots = [root.join("c"), root.join("rust")];
+            let head = CString::new("explicit").unwrap();
+            let template =
+                CString::new(root.join("home/other-tpl").as_os_str().as_bytes()).unwrap();
+            let mut c = c_options(ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION).1;
+            let mut rust = InitOptions::new();
+            let mut calls = Vec::new();
+            for (tag, c_flags, rust_flags, path) in [
+                (
+                    "the configured branch and template",
+                    ffi::GIT_REPOSITORY_INIT_BARE
+                        | ffi::GIT_REPOSITORY_INIT_MKDIR
+                        | ffi::GIT_REPOSITORY_INIT_EXTERNAL_TEMPLATE,
+                    InitFlag::Bare | InitFlag::Mkdir | InitFlag::ExternalTemplate,
+                    "configured",
+                ),
+                (
+                    "the configured branch, the built-in template",
+                    ffi::GIT_REPOSITORY_INIT_MKPATH,
+                    InitFlags::from(InitFlag::Mkpath),
+                    "builtin",
+                ),
+                (
+                    "an explicit branch and template override the settings",
+                    ffi::GIT_REPOSITORY_INIT_BARE
+                        | ffi::GIT_REPOSITORY_INIT_MKDIR
+                        | ffi::GIT_REPOSITORY_INIT_EXTERNAL_TEMPLATE,
+                    InitFlag::Bare | InitFlag::Mkdir | InitFlag::ExternalTemplate,
+                    "explicit",
+                ),
+                (
+                    "a reinitialisation keeps its HEAD",
+                    ffi::GIT_REPOSITORY_INIT_BARE,
+                    InitFlags::from(InitFlag::Bare),
+                    "explicit",
+                ),
+            ] {
+                let explicit = path == "explicit";
+                c.flags = c_flags;
+                c.initial_head = if explicit { head.as_ptr() } else { ptr::null() };
+                c.template_path = if explicit {
+                    template.as_ptr()
+                } else {
+                    ptr::null()
+                };
+                let mut m = rust.as_mut();
+                m.set_flags(rust_flags);
+                m.set_initial_head(explicit.then_some(head.as_c_str()));
+                m.set_template_path(explicit.then_some(template.as_c_str()));
+                // Both sides mask their own root; the template's path (the shared
+                // `$HOME`) only appears in configuration neither side writes.
+                assert_eq!(
+                    rust_fields(rust.as_ref(), &roots[1]),
+                    c_fields(&c, &roots[0]),
+                    "{tag}"
+                );
+                let c_call = init_ext(&roots[0], path, &mut c);
+                let rust_ptr = ptr::from_mut(&mut rust).cast::<ffi::git_repository_init_options>();
+                let rust_call = init_ext(&roots[1], path, rust_ptr);
+                assert_eq!(rust_call, c_call, "{tag}");
+                assert_eq!(snapshot(&roots[1]), snapshot(&roots[0]), "{tag}");
+                calls.push(c_call.0);
+            }
+            assert_eq!(calls, [0, 0, 0, 0]);
+            let snap = snapshot(&roots[0]);
+            let text = |path: &str| match snap.get(path) {
+                Some(Entry::File(_, text)) => text.clone(),
+                other => panic!("{path}: {other:?}"),
+            };
+            assert_eq!(text("configured/HEAD"), "ref: refs/heads/trunk\n");
+            assert_eq!(text("configured/hooks/from-home"), "configured\n");
+            assert!(!snap.contains_key("configured/description"));
+            assert_eq!(text("builtin/.git/HEAD"), "ref: refs/heads/trunk\n");
+            assert!(!snap.contains_key("builtin/.git/hooks/from-home"));
+            assert!(snap.contains_key("builtin/.git/description"));
+            assert_eq!(text("explicit/HEAD"), "ref: refs/heads/explicit\n");
+            assert_eq!(text("explicit/hooks/from-other"), "other\n");
+            assert!(!snap.contains_key("explicit/hooks/from-home"));
+            return;
+        }
+
+        let root = Root::new("global-config");
+        let home = root.0.join("home");
+        fs::create_dir_all(home.join("tpl/hooks")).unwrap();
+        fs::write(home.join("tpl/hooks/from-home"), "configured\n").unwrap();
+        fs::create_dir_all(home.join("other-tpl/hooks")).unwrap();
+        fs::write(home.join("other-tpl/hooks/from-other"), "other\n").unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            format!(
+                "[init]\n\tdefaultbranch = trunk\n\ttemplatedir = {}\n",
+                home.join("tpl").display()
+            ),
+        )
+        .unwrap();
+        for side in ["c", "rust"] {
+            fs::create_dir(root.0.join(side)).unwrap();
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([&name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, &name)
+            .env(ROOT, &root.0)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }
