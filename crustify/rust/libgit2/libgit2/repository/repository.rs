@@ -57,9 +57,11 @@
 //!
 //! A string a getter lends ([`commondir`](RepositoryRef::commondir),
 //! [`namespace`](RepositoryRef::namespace), [`ident`](RepositoryRef::ident)) lives as
-//! long as the shared borrow. Counted sub-objects ([`ConfigArc`], [`IndexArc`]) and the
-//! commits of [`commit_parents`](RepositoryRef::commit_parents) outlive the repository;
-//! references ([`ReferenceBox`]) borrow it. [`discover`] finds a repository without
+//! long as the shared borrow. The counted index ([`IndexArc`]), a config snapshot and
+//! the commits of [`commit_parents`](RepositoryRef::commit_parents) outlive the
+//! repository; the counted config ([`ConfigArc`], whose file backends keep the
+//! repository for their `includeIf` conditions) and references ([`ReferenceBox`])
+//! borrow it. [`discover`] finds a repository without
 //! opening it, and a [`FetchheadForeachCallback`] is the closure
 //! `git_repository_fetchhead_foreach` calls with each [`FetchheadEntry`].
 //!
@@ -2865,12 +2867,25 @@ impl<'a> RepositoryRef<'a> {
     /// system ones, loaded on first use and then shared, as one more counted reference
     /// to the config the repository keeps.
     ///
-    /// The config outlives the repository, which disowns it when freed.
+    /// The config's file backends keep the repository for their `includeIf`
+    /// conditions, which every reparse of a file evaluates (see
+    /// [`Config`](crate::libgit2::config::config::Config)'s repository), so the
+    /// reference borrows the repository, and shares the config with any other holder
+    /// as long as the repository lives:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let repo = Repository::open(c".").unwrap();
+    /// let config = repo.as_ref().config().unwrap();
+    /// drop(repo);
+    /// drop(config);
+    /// ```
     ///
     /// Fails with libgit2's error (code `-1`) when a configuration file cannot be read.
     ///
     /// Wraps: git_repository_config
-    pub fn config(&self) -> Result<ConfigArc, RepositoryError> {
+    pub fn config(&self) -> Result<ConfigArc<'a>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose config cache libgit2
         // fills through this shared handle: the repository is used on this thread only.
@@ -2880,18 +2895,20 @@ impl<'a> RepositoryRef<'a> {
             return failed(rc);
         }
         // SAFETY: on success, one more counted reference to the repository's config,
-        // released by `git_config_free`; the repository holds its own.
+        // released by `git_config_free`; the repository holds its own, and its file
+        // backends read this repository, live for `'a`, which the arc carries.
         unsafe { ConfigArc::from_c(out) }.ok_or_else(|| RepositoryError::from_libgit2(-1))
     }
 
     /// A read-only snapshot of the repository's configuration, as
     /// [`config`](Self::config) loads it: its values do not change when the files do.
-    /// A config of its own, which no repository owns.
+    /// A config of its own, which no repository owns and whose backends read no
+    /// repository (they copied the entries), so it outlives this one.
     ///
     /// Fails with libgit2's error when a configuration file cannot be read.
     ///
     /// Wraps: git_repository_config_snapshot
-    pub fn config_snapshot(&self) -> Result<ConfigBox, RepositoryError> {
+    pub fn config_snapshot(&self) -> Result<ConfigBox<'static>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose config cache libgit2
         // fills through this shared handle: the repository is used on this thread only.
@@ -2901,7 +2918,8 @@ impl<'a> RepositoryRef<'a> {
         }
         // SAFETY: on success, a fresh config (`git_config_new`) holding snapshots of the
         // repository config's backends, owned by no repository and referenced by the
-        // caller alone.
+        // caller alone; a snapshot backend copies the entries and keeps no repository
+        // (`config_snapshot_open` ignores the one it is given), so `'static`.
         unsafe { ConfigBox::from_c(out) }.ok_or_else(|| RepositoryError::from_libgit2(-1))
     }
 
@@ -3125,7 +3143,13 @@ impl<'a> RepositoryRef<'a> {
     /// each commit `MERGE_HEAD` names, during a merge. Empty when `HEAD` names an
     /// unborn branch, or there is no `HEAD`.
     ///
-    /// The commits outlive the repository.
+    /// The array may be released after the repository (`git_commit_free` touches only
+    /// the commit), but each commit keeps the repository it was parsed from
+    /// (`object.repo`, uncounted), which `git_commit_owner`, `git_commit_tree`,
+    /// `git_commit_parent` and the other lookups through it read: the raw commit
+    /// pointers of [`CommitArrayRef::commit_ptrs`](crate::libgit2::object::commit::CommitArrayRef::commit_ptrs)
+    /// may be given to those only while this repository lives, and the commit handle
+    /// the `git_commit` run adds must borrow it.
     ///
     /// Fails with libgit2's error when `HEAD` cannot be resolved to a commit, or
     /// `MERGE_HEAD` cannot be read or names something other than a commit.
@@ -4505,6 +4529,7 @@ mod unit_tests {
         use std::process::Command;
 
         use crate::libgit2::oid::oid::Oid;
+        use crate::libgit2::repository::worktree::WorktreeBox;
 
         /// A scratch directory of its own under the temp dir, removed when dropped.
         struct Scratch(PathBuf);
@@ -4751,8 +4776,7 @@ mod unit_tests {
             let rc = unsafe { ffi::git_worktree_lookup(&mut wt, main.as_c_ptr(), c"wt".as_ptr()) };
             assert_eq!(rc, 0, "{:?}", c_last());
             // SAFETY: the fresh worktree, owned here.
-            let wt =
-                unsafe { crate::libgit2::repository::worktree::WorktreeBox::from_c(wt) }.unwrap();
+            let wt = unsafe { WorktreeBox::from_c(wt) }.unwrap();
 
             clear();
             let mut out = ptr::null_mut();
