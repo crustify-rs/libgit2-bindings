@@ -1,0 +1,29 @@
+error[E0515]: cannot return value referencing local variable `update`
+ --> tests/ub_safe/compile_fail/tree_update_handle_outlives_value.rs:8:5
+  |
+8 |     update.as_ref()
+  |     ------^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `update` is borrowed here
+
+error[E0515]: cannot return value referencing local variable `update`
+  --> tests/ub_safe/compile_fail/tree_update_handle_outlives_value.rs:13:5
+   |
+13 |     update.as_ref().id()
+   |     ------^^^^^^^^^^^^^^
+   |     |
+   |     returns a value referencing data owned by the current function
+   |     `update` is borrowed here
+
+error[E0505]: cannot move out of `m` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_update_handle_outlives_value.rs:20:10
+   |
+18 |     let mut m = update.as_mut();
+   |         ----- binding `m` declared here
+19 |     let id = m.id_mut();
+   |              - borrow of `m` occurs here
+20 |     drop(m);
+   |          ^ move out of `m` occurs here
+21 |     drop(id);
+   |          -- borrow later used here

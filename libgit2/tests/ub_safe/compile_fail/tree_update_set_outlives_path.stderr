@@ -1,0 +1,11 @@
+error[E0597]: `path` does not live long enough
+  --> tests/ub_safe/compile_fail/tree_update_set_outlives_path.rs:10:34
+   |
+ 9 |         let path = CString::new("short-lived").unwrap();
+   |             ---- binding `path` declared here
+10 |         update.as_mut().set_path(&path);
+   |                                  ^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `path` dropped here while still borrowed
+12 |     let _ = update.as_ref().path();
+   |             ------ borrow later used here

@@ -7,7 +7,8 @@
 //! owns and points at nothing and none of these tests calls libgit2, so they also run
 //! under Miri; the sweep strides under BSan and Miri.
 //!
-//! The tree builder's tests are in [`builder`], the tree entry's in [`tree_entry`].
+//! The tree builder's tests are in [`builder`], the tree entry's in [`tree_entry`], the
+//! tree update's in [`tree_update`].
 
 use std::collections::HashSet;
 use std::hint::black_box;
@@ -779,5 +780,240 @@ mod tree_entry {
         let a = TreeEntry::bypath(root.as_ref(), c"ab/c/3.txt").unwrap();
         let b = TreeEntry::bypath(peeled.as_ref(), c"ab/c/3.txt").unwrap();
         assert_eq!(entry_view(&a), entry_view(&b));
+    }
+}
+
+mod tree_update {
+    //! UB tests for `git2/tree.h`: the `TreeUpdate` value (`git_tree_update`), its
+    //! handles and accessors. An update is plain Rust-owned storage with a borrowed path,
+    //! so the dangers are a path read after its string is gone or past its end, an id
+    //! handle that outlives or aliases the update, and races on shared updates; none of
+    //! these tests calls libgit2, so they run under Miri as well as ASan, UBSan, TSan and
+    //! BSan.
+    //!
+    //! Paths of every length up to a few hundred bytes are heap strings, stored and read
+    //! back whole through every write path (ASan: bounds; Miri: provenance of the stored
+    //! pointer). The exclusive id handle writes the struct in place while the update is
+    //! reborrowed around it (Miri, BSan: reborrows). Updates are shared across threads,
+    //! read concurrently and copied out to threads that keep their copies (TSan).
+    //! Illegal uses are compile-fail doctests on the crate and files under
+    //! `compile_fail/`: an update outliving its path, a stored path outliving the update's
+    //! use, aliased handles, a handle or id handle outliving its update.
+
+    use std::ffi::{CStr, CString};
+    use std::hint::black_box;
+    use std::sync::Barrier;
+    use std::thread;
+
+    use ffibox::CZeroable;
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::object::tree::{TreeUpdate, TreeUpdateMut, UpdateAction};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    const MODES: [FileMode; 6] = [
+        FileMode::Unreadable,
+        FileMode::Tree,
+        FileMode::Blob,
+        FileMode::BlobExecutable,
+        FileMode::Link,
+        FileMode::Commit,
+    ];
+
+    /// A path of `len` bytes, `/`-separated components of letters.
+    fn path(len: usize) -> CString {
+        let bytes = (0..len)
+            .map(|i| {
+                if i % 7 == 6 {
+                    b'/'
+                } else {
+                    b'a' + (i % 26) as u8
+                }
+            })
+            .collect::<Vec<_>>();
+        CString::new(bytes).unwrap()
+    }
+
+    /// An id of type `kind` whose bytes count up from `seed`.
+    fn id(kind: OidType, seed: u8) -> Oid {
+        let mut id = Oid::zero(kind);
+        id.as_mut()
+            .set_id(core::array::from_fn(|i| seed.wrapping_add(i as u8)));
+        id
+    }
+
+    /// Every path length, stored through each constructor and setter, reads back whole,
+    /// and a shorter path stored over a longer one is read to its own end.
+    #[test]
+    fn paths_of_every_length_read_back_whole() {
+        let stride = if cfg!(bsan) || cfg!(miri) { 31 } else { 1 };
+        let longest = 300;
+        let paths: Vec<CString> = (0..=longest).step_by(stride).map(path).collect();
+        let short = CString::new("x").unwrap();
+        for (i, p) in paths.iter().enumerate() {
+            let mode = MODES[i % MODES.len()];
+            let mut up = TreeUpdate::upsert(p, id(OidType::Sha1, i as u8).as_ref(), mode);
+            assert_eq!(black_box(up.as_ref().path()), p.as_c_str());
+            assert_eq!(up.as_ref().filemode(), mode);
+            let mut gone = TreeUpdate::remove(p);
+            assert_eq!(
+                black_box(gone.as_ref().path()).to_bytes().len(),
+                p.as_bytes().len()
+            );
+            assert!(!format!("{gone:?}").is_empty());
+
+            let other = &paths[paths.len() - 1 - i];
+            up.as_mut().set_path(other);
+            assert_eq!(up.as_ref().path(), other.as_c_str());
+            gone.as_mut().set_path(&short);
+            assert_eq!(gone.as_ref().path(), c"x");
+            gone.as_mut().set_path(p);
+            assert_eq!(gone.as_ref().to_tree_update().as_ref().path(), p.as_c_str());
+        }
+    }
+
+    /// The exclusive id handle rewrites the update's id in place, every type byte
+    /// included, while the update is reborrowed around it; the shared id handle reads
+    /// what it wrote, and the other fields are untouched.
+    #[test]
+    fn id_handles_rewrite_in_place() {
+        let mut update = TreeUpdate::upsert(c"dir/f", Oid::zeroed().as_ref(), FileMode::Blob);
+        let kinds = if cfg!(miri) {
+            vec![0, 1, 2, 3, 255]
+        } else {
+            (0..=255).collect()
+        };
+        for kind in kinds {
+            let mut m: TreeUpdateMut<'_, '_> = update.as_mut();
+            {
+                let mut again = m.as_mut();
+                let mut oid = again.id_mut();
+                oid.set_raw_kind(kind);
+                oid.set_id([kind; 32]);
+                assert!(oid.id_mut().set_elem(31, !kind));
+            }
+            let shared = m.as_ref();
+            let oid = shared.id();
+            assert_eq!(oid.raw_kind(), kind);
+            assert_eq!(oid.id()[..31], [kind; 31]);
+            assert_eq!(oid.id()[31], !kind);
+            assert_eq!(oid.kind(), OidType::from_raw(kind.into()));
+            assert_eq!(shared.path(), c"dir/f");
+            assert_eq!(shared.filemode(), FileMode::Blob);
+            m.set_id(id(OidType::Sha256, kind).as_ref());
+            assert_eq!(
+                update.as_ref().id().id(),
+                id(OidType::Sha256, kind).as_ref().id()
+            );
+        }
+    }
+
+    /// Copies, by `Copy` and through a handle, are values of their own: changing one
+    /// changes no other, and each keeps reading its borrowed path.
+    #[test]
+    fn copies_are_independent() {
+        let a = CString::new("a/b/c").unwrap();
+        let b = CString::new("d").unwrap();
+        let original = TreeUpdate::upsert(&a, id(OidType::Sha1, 9).as_ref(), FileMode::Link);
+        let mut copies = vec![original; 4];
+        copies.push(original.as_ref().to_tree_update());
+        for (i, copy) in copies.iter_mut().enumerate() {
+            let mut m = copy.as_mut();
+            match i % 4 {
+                0 => m.set_path(&b),
+                1 => m.set_action(UpdateAction::Remove),
+                2 => m.set_filemode(FileMode::Commit),
+                _ => m.id_mut().set_raw_kind(0),
+            }
+            assert_ne!(*copy, original);
+        }
+        assert_eq!(original.as_ref().path(), a.as_c_str());
+        assert_eq!(original.as_ref().action(), UpdateAction::Upsert);
+        assert_eq!(copies[0].as_ref().path(), c"d");
+        assert_eq!(copies[1].as_ref().path(), c"a/b/c");
+        assert_eq!(copies[4].as_ref().path(), c"d");
+    }
+
+    /// A slice of updates, the array C reads, is read through shared handles of every
+    /// element at once and rewritten element by element.
+    #[test]
+    fn slices_of_updates() {
+        let paths: Vec<CString> = (1..=16).map(path).collect();
+        let mut updates: Vec<TreeUpdate<'_>> =
+            paths.iter().map(|p| TreeUpdate::remove(p)).collect();
+        let handles: Vec<_> = updates.iter().map(TreeUpdate::as_ref).collect();
+        for (h, p) in handles.iter().zip(&paths) {
+            assert_eq!(h.path(), p.as_c_str());
+            assert_eq!(h.action(), UpdateAction::Remove);
+        }
+        for (i, update) in updates.iter_mut().enumerate() {
+            let mut m = update.as_mut();
+            m.set_action(UpdateAction::Upsert);
+            m.set_filemode(MODES[i % MODES.len()]);
+            m.set_id(id(OidType::Sha1, i as u8).as_ref());
+        }
+        for (i, update) in updates.iter().enumerate() {
+            assert_eq!(update.as_ref().filemode(), MODES[i % MODES.len()]);
+            assert_eq!(update.as_ref().id().id()[0], i as u8);
+        }
+    }
+
+    /// Updates are shared by many threads that read them at once and copy them out to
+    /// threads of their own, which read and change their copies; the originals stay as
+    /// they were (TSan).
+    #[test]
+    fn updates_cross_threads() {
+        const THREADS: usize = 8;
+        let paths: Vec<CString> = (1..=THREADS).map(|n| path(n * 9)).collect();
+        let updates: Vec<TreeUpdate<'_>> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                TreeUpdate::upsert(p, id(OidType::Sha1, i as u8).as_ref(), FileMode::Blob)
+            })
+            .collect();
+        let barrier = Barrier::new(THREADS);
+        let rounds = if cfg!(miri) { 2 } else { 64 };
+        thread::scope(|s| {
+            let readers: Vec<_> = (0..THREADS)
+                .map(|t| {
+                    let (updates, paths, barrier) = (&updates[..], &paths, &barrier);
+                    s.spawn(move || {
+                        barrier.wait();
+                        let mut mine = Vec::new();
+                        for r in 0..rounds {
+                            let i = (t + r) % THREADS;
+                            let handle = updates[i].as_ref();
+                            assert_eq!(handle.path(), paths[i].as_c_str());
+                            assert_eq!(handle.id().id()[0], i as u8);
+                            mine.push(handle.to_tree_update());
+                        }
+                        mine
+                    })
+                })
+                .collect();
+            let copies: Vec<Vec<TreeUpdate<'_>>> =
+                readers.into_iter().map(|r| r.join().unwrap()).collect();
+            let writers: Vec<_> = copies
+                .into_iter()
+                .map(|mut mine| {
+                    s.spawn(move || {
+                        for copy in &mut mine {
+                            let mut m = copy.as_mut();
+                            m.set_action(UpdateAction::Remove);
+                            m.set_path(c"elsewhere");
+                        }
+                        mine.iter()
+                            .all(|c| c.as_ref().path() == c"elsewhere" as &CStr)
+                    })
+                })
+                .collect();
+            for w in writers {
+                assert!(w.join().unwrap());
+            }
+        });
+        for (i, update) in updates.iter().enumerate() {
+            assert_eq!(update.as_ref().action(), UpdateAction::Upsert);
+            assert_eq!(update.as_ref().path(), paths[i].as_c_str());
+        }
     }
 }

@@ -1,0 +1,31 @@
+error[E0502]: cannot borrow `update` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_update_aliased_handles.rs:9:17
+   |
+ 8 |     let shared = update.as_ref();
+   |                  ------ immutable borrow occurs here
+ 9 |     let mut m = update.as_mut();
+   |                 ^^^^^^^^^^^^^^^ mutable borrow occurs here
+10 |     m.set_filemode(FileMode::Blob);
+11 |     let _ = shared.path();
+   |             ------ immutable borrow later used here
+
+error[E0502]: cannot borrow `update` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_update_aliased_handles.rs:14:17
+   |
+13 |     let id = update.as_ref().id();
+   |              ------ immutable borrow occurs here
+14 |     let mut m = update.as_mut();
+   |                 ^^^^^^^^^^^^^^^ mutable borrow occurs here
+15 |     m.id_mut().set_raw_kind(1);
+16 |     let _ = id.raw_kind();
+   |             -- immutable borrow later used here
+
+error[E0499]: cannot borrow `update` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/tree_update_aliased_handles.rs:19:17
+   |
+18 |     let mut a = update.as_mut();
+   |                 ------ first mutable borrow occurs here
+19 |     let mut b = update.as_mut();
+   |                 ^^^^^^ second mutable borrow occurs here
+20 |     a.set_path(c"a");
+   |     - first borrow later used here

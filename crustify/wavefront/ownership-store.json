@@ -1478,6 +1478,28 @@
    ]
   },
   {
+   "name": "git_tree_update",
+   "defined_in": "include/git2/tree.h",
+   "_comment_agent": "git_tree_update is a plain caller-built value: libgit2 never allocates, copies or frees one and has no init/new/free routine for it (no lifecycle primitives). git_tree_create_updated reads a caller array of nupdates of them through a const pointer, sorting pointers to the elements (git_vector of &updates[i]) without copying or writing them. action is read in a switch (unnamed values -> GIT_ERROR_TREE 'unknown action for update'); id is copied into a tree builder entry (upsert only); filemode is checked against the existing entry's type and by git_treebuilder_insert (upsert only); for a removal only path is read. Wrapped as a Rust-owned, Copy, layout-transparent TreeUpdate<'p> whose slice is the C array.",
+   "fields": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Caller-owned NUL-terminated path ('/'-separated, from the root tree). Only git_tree_create_updated and its qsort comparator compare_entries read it (strcmp, git_fs_path_common_dirlen, count_slashes, strchr in next_component, git_fs_path_basename, error formatting), for the duration of that call; nothing stores, writes, duplicates or frees it. NULL is never checked: strcmp/strchr/basename dereference it, so it must be non-NULL. In Rust it is a &'p CStr carried by TreeUpdate<'p>."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_treebuilder",
    "defined_in": "src/libgit2/tree.h",
    "_comment_agent": "Opaque in the public API (forward-declared in git2/types.h): no field is published. Heap-only, allocated by git_treebuilder_new (git__calloc), released by git_treebuilder_free; git_treebuilder_clear frees the entries but keeps the builder usable. No copy routine, no refcount, no lock. map owns its git_tree_entry values (alloc_entry, freed by clear/remove/filter); write_cache is a git_str scratch buffer disposed by free. Rust: TreeBuilder<'r> in object/tree.rs, owned by TreeBuilderBox<'r> = CBox<TreeBuilder<'r>, TreeBuilderFree>; neither Send nor Sync, since it reaches the repository (not Sync) through repo.",
