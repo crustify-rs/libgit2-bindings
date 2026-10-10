@@ -226,6 +226,14 @@ impl<'a> StrArrayRef<'a> {
         StrArray::from_strs(&copies)
     }
 
+    /// Whether the array has a buffer (`strings` is not NULL), even an empty one: the
+    /// mark of a result libgit2 handed over, where a failing producer leaves NULL.
+    pub(crate) fn has_buffer(&self) -> bool {
+        // SAFETY: a read through the shared handle's pointer to a live `git_strarray`.
+        let strings = unsafe { addr_of!((*self.as_ptr()).strings).read() };
+        !strings.is_null()
+    }
+
     /// The string at `index`, which must be below [`len`](Self::len).
     fn at(&self, index: usize) -> &'a CStr {
         debug_assert!(index < self.len());
@@ -679,6 +687,8 @@ mod unit_tests {
         // SAFETY: as above.
         let r = unsafe { StrArrayRef::from_ptr(&mut raw) }.unwrap();
         assert!(r.is_empty() && r.get(0).is_none());
+        assert!(r.has_buffer());
+        assert!(!StrArray::new().as_ref().has_buffer());
     }
 
     /// The iterator walks both ends, skips, reports its exact length and stays done,

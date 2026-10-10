@@ -75,6 +75,14 @@
 //! The object and id types are set from [`ObjectType`] and [`OidType`], or `None` for
 //! the default, so a stored value is always one libgit2 accepts.
 //! The options are neither `Send` nor `Sync`, as the list they borrow is not.
+//!
+//! # Types and contents
+//!
+//! An object's type is one of the four [`ObjectType`]s, which [`ObjectType::name`] and
+//! [`ObjectType::from_name`] spell as libgit2's object headers do (`commit`, `tree`,
+//! `blob`, `tag`); [`type_is_valid`] tells those types from the other values a raw
+//! `git_object_t` may hold. [`content_is_valid`] parses an object's raw content, as its
+//! type would be parsed from the object database, without a repository.
 
 use core::ffi::CStr;
 use core::fmt;
@@ -85,12 +93,13 @@ use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone};
 
 use crate::ffi;
+use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::ObjectType;
 use crate::libgit2::filter::filter::{FilterListMut, FilterListRef};
 use crate::libgit2::oid::oid::{OidRef, OidType};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
-use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
-use crate::libgit2::util::sys::errors::set;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 /// A parsed git object (`git_object`): a commit, tree, blob or tag read from a
 /// repository's object database.
@@ -315,6 +324,49 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
         // repository, given to the result.
         let object = unsafe { ObjectArc::from_c(out) };
         Ok(object.expect("a lookup succeeded without an object"))
+    }
+
+    /// The object's type: what it was parsed as when it was looked up, which never
+    /// changes.
+    ///
+    /// Wraps: git_object_type
+    pub fn kind(&self) -> ObjectType {
+        // SAFETY: the handle addresses a live object for `'a`; `git_object_type` reads
+        // the type cached in it when it was parsed, which nothing writes afterwards.
+        let raw = unsafe { ffi::git_object_type(self.as_ptr()) };
+        ObjectType::from_raw(raw).expect("a parsed object always has a named type")
+    }
+
+    /// The shortest abbreviation of the object's id, in hex, that names it alone in its
+    /// repository's object database, and is at least the repository's `core.abbrev`
+    /// long (7 digits by default and for `auto`; `no`, `false` or `off`, or a length past
+    /// the id's, asks for the full id).
+    ///
+    /// libgit2 starts at that length and adds a digit while the prefix names several
+    /// objects, so the abbreviation is unambiguous until objects sharing it are added.
+    /// It reads the repository's configuration and loads its object database, through
+    /// the repository the object was looked up in.
+    ///
+    /// Fails with `-1` and a `GIT_ERROR_CONFIG` error when `core.abbrev` is under 4
+    /// ("invalid oid abbreviation setting: '…'") or none of the above ("failed to map
+    /// '…'", `true` included), and with libgit2's error when the
+    /// configuration or the object database cannot be read.
+    ///
+    /// The result is a fresh buffer: libgit2 overwrites the `git_buf` it is given
+    /// without releasing what it held, which a fresh one does not hold.
+    ///
+    /// Wraps: git_object_short_id
+    pub fn short_id(&self) -> Result<BufVal, RepositoryError> {
+        let mut out = Buf::new();
+        // SAFETY: `out` is an empty buffer libgit2 fills; the handle addresses a live
+        // object for `'a`, whose repository, borrowed for `'r`, is live and used on this
+        // thread only, as `RepositoryRef` allows: libgit2 reads its configuration and
+        // loads its object database through it, cache fills, and only reads the object.
+        let rc = unsafe { ffi::git_object_short_id(out.as_mut().as_mut_ptr(), self.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        Ok(out)
     }
 }
 
@@ -905,6 +957,115 @@ const _: () = assert!(
         && size_of::<ObjectIdOptionsMut<'static, 'static>>() == size_of::<*mut ()>()
 );
 
+impl ObjectType {
+    /// The type's name, as object headers spell it: `"commit"`, `"tree"`, `"blob"` or
+    /// `"tag"`. The string is libgit2's, static.
+    ///
+    /// ```
+    /// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+    /// use libgit2::libgit2::core::types::ObjectType;
+    ///
+    /// assert_eq!(ObjectType::Commit.name(), "commit");
+    /// assert_eq!(ObjectType::from_name(c"tag"), Some(ObjectType::Tag));
+    /// ```
+    ///
+    /// Wraps: git_object_type2string
+    pub fn name(self) -> &'static str {
+        // SAFETY: no pointer argument; libgit2 returns a string of its static table of
+        // object types, NUL-terminated, never freed or written.
+        let name = unsafe { CStr::from_ptr(ffi::git_object_type2string(self.raw())) };
+        name.to_str()
+            .expect("libgit2's object type names are ASCII")
+    }
+
+    /// The type whose [`name`](Self::name) `name` starts with, as libgit2 matches it:
+    /// `"commit"`, and anything longer that starts with it such as `"commits"`, is
+    /// [`Commit`](Self::Commit). The match is case-sensitive; `None` for any other
+    /// name, the empty one included.
+    ///
+    /// Wraps: git_object_string2type
+    pub fn from_name(name: &CStr) -> Option<Self> {
+        // SAFETY: `name` is a NUL-terminated string, read up to its NUL for the call
+        // only; the routine touches nothing else.
+        let raw = unsafe { ffi::git_object_string2type(name.as_ptr()) };
+        Self::from_raw(raw)
+    }
+}
+
+/// Whether `raw` is the C value of an object's type: one of the four
+/// [`ObjectType`]s. Every other value is not, `GIT_OBJECT_ANY` and
+/// `GIT_OBJECT_INVALID` included; a valid value converts with [`ObjectType::from_raw`].
+///
+/// Wraps: git_object_type_is_valid
+pub fn type_is_valid(raw: ffi::git_object_t) -> bool {
+    // SAFETY: a plain value, checked against libgit2's static table of object types.
+    unsafe { ffi::git_object_type_is_valid(raw) != 0 }
+}
+
+/// Whether `content` is the well-formed raw content (no `<type> <size>` header) of an
+/// object of type `kind`, whose object ids are of type `oid_type`: a commit, tree or
+/// tag is parsed as libgit2 parses one read from an object database, and every blob is
+/// valid. No repository is involved: the ids `content` names need not exist anywhere.
+///
+/// libgit2 reports malformed content as `Ok(false)`, and leaves the parser's error, which
+/// says what is wrong, as the calling thread's last error ([`last`] reads it), as the
+/// header documents; a blob, and well-formed content, leave the last error alone.
+///
+/// Fails, with libgit2's error, when libgit2 runs out of memory parsing, or cannot be
+/// initialised.
+///
+/// ```
+/// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+/// use libgit2::libgit2::core::types::ObjectType;
+/// use libgit2::libgit2::object::object::content_is_valid;
+/// use libgit2::libgit2::oid::oid::OidType;
+///
+/// let tag = b"object a65fedf39aefe402d3bb6e24df4d4f5fe4547750\ntype commit\ntag v1\n";
+/// assert_eq!(content_is_valid(tag, ObjectType::Tag, OidType::Sha1), Ok(true));
+/// assert_eq!(content_is_valid(tag, ObjectType::Tag, OidType::Sha256), Ok(false));
+/// assert_eq!(content_is_valid(b"", ObjectType::Commit, OidType::Sha1), Ok(false));
+/// assert_eq!(content_is_valid(b"", ObjectType::Tree, OidType::Sha1), Ok(true));
+/// assert_eq!(content_is_valid(b"\xff", ObjectType::Blob, OidType::Sha1), Ok(true));
+/// ```
+///
+/// Wraps: git_object_rawcontent_is_valid
+pub fn content_is_valid(
+    content: &[u8],
+    kind: ObjectType,
+    oid_type: OidType,
+) -> Result<bool, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    // libgit2 refuses a NULL buffer whatever the length; an empty slice's dangling
+    // pointer would pass, but nothing is to be read from it, so lend a real byte.
+    let buf = if content.is_empty() {
+        c"".as_ptr()
+    } else {
+        content.as_ptr().cast()
+    };
+    let mut valid = 0;
+    // SAFETY: `valid` is a writable `int`, written on success; `buf` addresses
+    // `content.len()` readable bytes (or one, for no content), which libgit2 hashes and
+    // parses for the call only: the object it parses them into, whose tree entries
+    // point into them, is freed before it returns. `kind` and `oid_type` are named
+    // types. The runtime is pinned, so the object's allocation reads a settled
+    // allocator and a failure is reported on live thread-local state.
+    let rc = unsafe {
+        ffi::git_object_rawcontent_is_valid(
+            &mut valid,
+            buf,
+            content.len(),
+            kind.raw(),
+            oid_type.raw(),
+        )
+    };
+    if rc < 0 {
+        return Err(last());
+    }
+    Ok(valid != 0)
+}
+
 // An `Object` is a `git_object`, never held by value; the owner is one pointer.
 const _: () = assert!(
     size_of::<Object<'static>>() == size_of::<ffi::git_object>()
@@ -1105,6 +1266,192 @@ mod unit_tests {
         assert_eq!(view(readme.as_ref()).1, ffi::GIT_OBJECT_BLOB);
     }
 
+    /// Every type's name is libgit2's and reads back as the type; a name is matched as a
+    /// prefix, case-sensitively; only the four types' values are valid, as `from_raw`
+    /// agrees.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn type_names_round_trip() {
+        for (kind, name) in [
+            (ObjectType::Commit, "commit"),
+            (ObjectType::Tree, "tree"),
+            (ObjectType::Blob, "blob"),
+            (ObjectType::Tag, "tag"),
+        ] {
+            assert_eq!(kind.name(), name);
+            let c_name = std::ffi::CString::new(name).unwrap();
+            assert_eq!(ObjectType::from_name(&c_name), Some(kind));
+            let longer = std::ffi::CString::new(format!("{name}s")).unwrap();
+            assert_eq!(ObjectType::from_name(&longer), Some(kind));
+            let upper = std::ffi::CString::new(name.to_uppercase()).unwrap();
+            assert_eq!(ObjectType::from_name(&upper), None);
+        }
+        for name in [c"", c"tre", c"ofs-delta", c" commit", c"any"] {
+            assert_eq!(ObjectType::from_name(name), None, "{name:?}");
+        }
+        for raw in [i32::MIN, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, i32::MAX] {
+            assert_eq!(
+                type_is_valid(raw),
+                ObjectType::from_raw(raw).is_some(),
+                "{raw}"
+            );
+        }
+    }
+
+    /// An object's type is the one it was parsed as, through every owner and handle.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn kinds_are_the_parsed_types() {
+        let repo = open();
+        for (hex, kind) in [
+            (COMMIT, ObjectType::Commit),
+            (TREE, ObjectType::Tree),
+            (
+                c"a8233120f6ad708f843d861ce2b7228ec4e3dec6",
+                ObjectType::Blob,
+            ),
+            (c"b25fa35b38051e4ae45d4222e795f9df2e43f1d1", ObjectType::Tag),
+        ] {
+            let object = Object::lookup(repo.as_ref(), sha1(hex).as_ref(), None).unwrap();
+            assert_eq!(object.as_ref().kind(), kind);
+            assert_eq!(object.clone().as_ref().kind(), kind);
+            assert_eq!(view(object.as_ref()).1, kind.raw());
+        }
+    }
+
+    /// Copies `from` into `to`, recursively.
+    fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A copy of `testrepo.git` whose configuration sets `core.abbrev` to `abbrev`
+    /// (none for `None`), removed on drop.
+    struct Abbreviating(std::path::PathBuf);
+
+    impl Abbreviating {
+        fn new(tag: &str, abbrev: Option<&str>) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("crustify-object-unit-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let source = TESTREPO.trim_end_matches('\0');
+            copy_dir(std::path::Path::new(source), &path);
+            if let Some(abbrev) = abbrev {
+                let config = path.join("config");
+                let mut text = std::fs::read_to_string(&config).unwrap();
+                text.push_str(&format!("[core]\n\tabbrev = {abbrev}\n"));
+                std::fs::write(&config, text).unwrap();
+            }
+            Self(path)
+        }
+
+        fn open(&self) -> RepositoryBox {
+            assert!(runtime_pinned());
+            let path = std::ffi::CString::new(self.0.to_str().unwrap()).unwrap();
+            Repository::open(&path).unwrap()
+        }
+    }
+
+    impl Drop for Abbreviating {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The short id starts at `core.abbrev` digits (7 by default), grows past an
+    /// ambiguous prefix (`498bc` names a commit and a blob), is the full id for
+    /// `core.abbrev=no`, and fails for a setting under 4.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn short_ids_follow_core_abbrev() {
+        const AMBIGUOUS: &CStr = c"498bc0906810bd43c6fbc73385fecb7f2d04be3a";
+        let short = |repo: &RepositoryBox, hex: &CStr| {
+            let object = Object::lookup(repo.as_ref(), sha1(hex).as_ref(), None).unwrap();
+            let id = object.as_ref().short_id().unwrap();
+            id.as_ref().to_str().unwrap().to_owned()
+        };
+
+        let repo = open();
+        assert_eq!(short(&repo, COMMIT), "a65fedf");
+        assert_eq!(short(&repo, AMBIGUOUS), "498bc09");
+
+        let four = Abbreviating::new("abbrev-4", Some("4"));
+        let repo = four.open();
+        assert_eq!(short(&repo, COMMIT), "a65f");
+        assert_eq!(short(&repo, AMBIGUOUS), "498bc0");
+
+        let full = Abbreviating::new("abbrev-no", Some("no"));
+        let repo = full.open();
+        assert_eq!(short(&repo, COMMIT), COMMIT.to_str().unwrap());
+
+        let three = Abbreviating::new("abbrev-3", Some("3"));
+        let repo = three.open();
+        let object = Object::lookup(repo.as_ref(), sha1(COMMIT).as_ref(), None).unwrap();
+        let e = object.as_ref().short_id().unwrap_err();
+        assert_eq!(e.raw_code(), -1);
+        assert_eq!(e.class(), Some(ErrorClass::Config));
+        assert_eq!(e.message(), c"invalid oid abbreviation setting: '3'");
+    }
+
+    /// Blobs are valid without a parse and leave the last error alone; malformed
+    /// content is `Ok(false)` with the parser's error; no content is read through a real
+    /// byte, and is a valid (empty) tree but no valid commit or tag.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn content_validity_is_the_parsers() {
+        assert!(runtime_pinned());
+        let tag = b"object a65fedf39aefe402d3bb6e24df4d4f5fe4547750\ntype commit\ntag v1\n";
+        set(ErrorClass::Invalid, c"untouched");
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            assert_eq!(content_is_valid(b"", ObjectType::Blob, kind), Ok(true));
+            assert_eq!(
+                content_is_valid(b"\0\xff", ObjectType::Blob, kind),
+                Ok(true)
+            );
+        }
+        assert_eq!(
+            content_is_valid(tag, ObjectType::Tag, OidType::Sha1),
+            Ok(true)
+        );
+        assert_eq!(
+            content_is_valid(b"", ObjectType::Tree, OidType::Sha1),
+            Ok(true)
+        );
+        assert_eq!(last().message(), c"untouched");
+
+        assert_eq!(
+            content_is_valid(tag, ObjectType::Tag, OidType::Sha256),
+            Ok(false)
+        );
+        let e = last();
+        assert_eq!(e.class(), Some(ErrorClass::Tag));
+        assert_eq!(e.message(), c"failed to parse tag: object field invalid");
+        assert_eq!(
+            content_is_valid(b"", ObjectType::Commit, OidType::Sha1),
+            Ok(false)
+        );
+        assert_eq!(
+            content_is_valid(b"", ObjectType::Tag, OidType::Sha1),
+            Ok(false)
+        );
+        assert_eq!(
+            content_is_valid(tag, ObjectType::Commit, OidType::Sha1),
+            Ok(false)
+        );
+        assert_eq!(
+            content_is_valid(&tag[..tag.len() - 1], ObjectType::Tag, OidType::Sha1),
+            Ok(false)
+        );
+    }
+
     /// The cache's reference is never visible, so an owner never proves itself sole:
     /// no exclusive handle, no box.
     #[test]
@@ -1227,5 +1574,148 @@ mod unit_tests {
             m.set_filters(None);
         }
         assert_eq!(fields(opts.as_ref()), (1, 0, 0, ptr::null_mut()));
+    }
+
+    /// libgit2's allocator for the tests below, which refuse it.
+    mod refused {
+        use super::super::*;
+        use crate::libgit2::util::errors::ErrorClass;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use core::ffi::{c_int, c_void};
+        use std::process::Command;
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// Whether [`Refusing`] refuses every request.
+        static REFUSE: AtomicBool = AtomicBool::new(false);
+
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut c_void;
+            fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+            fn free(p: *mut c_void);
+        }
+
+        /// libc's allocator, refusing every request while [`REFUSE`] is set.
+        struct Refusing;
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Refusing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if REFUSE.load(SeqCst) {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if REFUSE.load(SeqCst) {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+        fn install_refusing() {
+            let allocator = Allocator::new::<Refusing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
+            // member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+
+        const COMMIT: &[u8] = b"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\n\
+            author A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\nm\n";
+
+        /// A parse whose object cannot be allocated is libgit2's out-of-memory error, not
+        /// invalid content; with the allocation granted the same content is valid. A blob
+        /// needs no allocation.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn out_of_memory_is_an_error() {
+            isolated(
+                concat!(module_path!(), "::out_of_memory_is_an_error"),
+                || {
+                    install_refusing();
+                    // The thread's error state, allocated now, so a refusal reports out
+                    // of memory rather than a thread state it could not allocate.
+                    set(ErrorClass::Invalid, c"error state allocated");
+                    REFUSE.store(true, SeqCst);
+                    let refused = content_is_valid(COMMIT, ObjectType::Commit, OidType::Sha1);
+                    let blob = content_is_valid(COMMIT, ObjectType::Blob, OidType::Sha1);
+                    REFUSE.store(false, SeqCst);
+                    let e = refused.unwrap_err();
+                    assert_eq!(
+                        (e.class(), e.message()),
+                        (Some(ErrorClass::NoMemory), c"Out of memory")
+                    );
+                    assert_eq!(blob, Ok(true));
+                    assert_eq!(
+                        content_is_valid(COMMIT, ObjectType::Commit, OidType::Sha1),
+                        Ok(true)
+                    );
+                },
+            );
+        }
+
+        /// When libgit2 cannot be initialised, the check reports it without calling
+        /// `git_object_rawcontent_is_valid`.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn uninitialisable_library_is_reported() {
+            isolated(
+                concat!(module_path!(), "::uninitialisable_library_is_reported"),
+                || {
+                    install_refusing();
+                    REFUSE.store(true, SeqCst);
+                    let e = content_is_valid(b"", ObjectType::Blob, OidType::Sha1).unwrap_err();
+                    REFUSE.store(false, SeqCst);
+                    assert_eq!(
+                        (e.class(), e.message()),
+                        (
+                            Some(ErrorClass::Invalid),
+                            c"library has not been initialized"
+                        )
+                    );
+                },
+            );
+        }
     }
 }

@@ -699,3 +699,190 @@ fn id_options_apply_the_list_they_borrow() {
         },
     );
 }
+
+mod kinds_short_ids_and_contents {
+    //! UB tests for `ObjectRef::kind` (`git_object_type`), `ObjectRef::short_id`
+    //! (`git_object_short_id`), `ObjectType::name` / `from_name`
+    //! (`git_object_type2string` / `_string2type`), `type_is_valid` and
+    //! `content_is_valid` (`git_object_rawcontent_is_valid`).
+    //!
+    //! A short id is a fresh `git_buf` of libgit2's allocator, which the returned owner
+    //! releases once (ASan: double free; LSan: leak), and which outlives the object, the
+    //! repository and the object database libgit2 loaded for it. A content check hashes
+    //! and parses exactly the bytes it is lent: each content sits in an exact-length
+    //! heap allocation (ASan: a read past it), every prefix of well-formed contents is
+    //! checked, and the bytes are rewritten between checks (BSan: libgit2 retains no
+    //! pointer into them); the object it parses them into is freed before it returns
+    //! (LSan). The first checks of a process race to initialise libgit2 (TSan). A name
+    //! is read up to its NUL, from an exact-length allocation too.
+    //!
+    //! Objects are neither `Send` nor `Sync`, so `kind` and `short_id` stay on one
+    //! thread; `ObjectType` is plain data.
+
+    use std::ffi::CString;
+    use std::thread;
+
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc, content_is_valid, type_is_valid};
+    use libgit2::libgit2::oid::oid::OidType;
+
+    use super::{BLOB, COMMIT, MANY, TAG, TREE, id};
+    use crate::fixture::isolated;
+    use crate::fixture::object_and_tree_entry::open_testrepo;
+
+    /// Short ids of many objects, each looked up twice, outlive the objects and the
+    /// repository, and are dropped in an order unrelated to their objects'.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn short_ids_outlive_their_objects() {
+        let repo = open_testrepo();
+        let mut ids = Vec::new();
+        let mut objects: Vec<ObjectArc<'_>> = Vec::new();
+        for hex in MANY.iter().chain(&[COMMIT, TREE, BLOB, TAG]) {
+            for _ in 0..2 {
+                let object = Object::lookup(repo.as_ref(), id(hex).as_ref(), None).unwrap();
+                let short = object.as_ref().short_id().unwrap();
+                assert!(hex.starts_with(short.as_ref().to_str().unwrap()));
+                assert!(short.as_ref().len() >= 7);
+                ids.push(short);
+                objects.push(object);
+            }
+        }
+        let kinds: Vec<_> = objects.iter().map(|o| o.as_ref().kind()).collect();
+        assert!(kinds.contains(&ObjectType::Tag) && kinds.contains(&ObjectType::Blob));
+        drop(objects);
+        drop(repo);
+        for (i, short) in ids.into_iter().enumerate().rev() {
+            if i % 3 == 0 {
+                assert_eq!(short.as_ref().to_str().unwrap().len(), short.as_ref().len());
+            }
+        }
+    }
+
+    /// A tag of each id type, its prefixes, and a long tree.
+    fn contents() -> Vec<(Vec<u8>, ObjectType, OidType)> {
+        let mut contents = Vec::new();
+        for (hex, oid_type) in [
+            (COMMIT.to_owned(), OidType::Sha1),
+            ("ab".repeat(32), OidType::Sha256),
+        ] {
+            let tag = format!("object {hex}\ntype commit\ntag v1\ntagger T <t@x> 0 +0000\n\nm\n");
+            let commit =
+                format!("tree {hex}\nauthor A <a@x> 0 +0000\ncommitter C <c@x> 0 +0000\n\nm\n");
+            for (sample, kind) in [(tag, ObjectType::Tag), (commit, ObjectType::Commit)] {
+                for len in 0..=sample.len() {
+                    contents.push((sample.as_bytes()[..len].to_vec(), kind, oid_type));
+                }
+            }
+        }
+        let mut tree = Vec::new();
+        for i in 0..2000 {
+            tree.extend_from_slice(format!("100644 file-{i:04}\0").as_bytes());
+            tree.extend_from_slice(&[0x5a; 20]);
+        }
+        contents.push((tree, ObjectType::Tree, OidType::Sha1));
+        contents
+    }
+
+    /// Every content in an exact-length allocation, checked as each type; then
+    /// rewritten in place and checked again.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn content_checks_read_only_their_bytes() {
+        crate::fixture::init();
+        let mut valid = 0;
+        for (content, kind, oid_type) in contents() {
+            let mut exact: Box<[u8]> = content.into_boxed_slice();
+            for as_kind in [
+                ObjectType::Commit,
+                ObjectType::Tree,
+                ObjectType::Blob,
+                ObjectType::Tag,
+            ] {
+                let verdict = content_is_valid(&exact, as_kind, oid_type).unwrap();
+                valid += usize::from(verdict && as_kind == kind);
+            }
+            if let Some(first) = exact.first_mut() {
+                *first ^= 0x20;
+                let _ = content_is_valid(&exact, kind, oid_type).unwrap();
+            }
+        }
+        assert!(valid >= 5, "{valid}");
+    }
+
+    /// Small contents, checked twice with the bytes rewritten between: libgit2 keeps no
+    /// pointer into them (BSan), and gives the same verdicts.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn content_checks_retain_no_pointer() {
+        crate::fixture::init();
+        let mut buf = format!("object {COMMIT}\ntype commit\ntag v1\n").into_bytes();
+        assert_eq!(
+            content_is_valid(&buf, ObjectType::Tag, OidType::Sha1),
+            Ok(true)
+        );
+        buf[0] = b'O';
+        assert_eq!(
+            content_is_valid(&buf, ObjectType::Tag, OidType::Sha1),
+            Ok(false)
+        );
+        buf[0] = b'o';
+        assert_eq!(
+            content_is_valid(&buf, ObjectType::Tag, OidType::Sha1),
+            Ok(true)
+        );
+        assert_eq!(
+            content_is_valid(&[], ObjectType::Tree, OidType::Sha1),
+            Ok(true)
+        );
+    }
+
+    /// Many threads make the first calls at once, in a process where nothing has
+    /// initialised libgit2, and keep checking contents and names (TSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn first_checks_race_initialisation() {
+        isolated(
+            concat!(module_path!(), "::first_checks_race_initialisation"),
+            || {
+                thread::scope(|s| {
+                    for i in 0..8 {
+                        s.spawn(move || {
+                            let tag = format!("object {COMMIT}\ntype commit\ntag v{i}\n");
+                            for _ in 0..50 {
+                                let kind = ObjectType::Tag;
+                                assert_eq!(
+                                    content_is_valid(tag.as_bytes(), kind, OidType::Sha1),
+                                    Ok(true)
+                                );
+                                assert_eq!(content_is_valid(b"x", kind, OidType::Sha1), Ok(false));
+                                assert_eq!(ObjectType::from_name(c"tag"), Some(kind));
+                                assert_eq!(kind.name(), "tag");
+                                assert!(type_is_valid(kind.raw()) && !type_is_valid(0));
+                            }
+                        });
+                    }
+                });
+            },
+        );
+    }
+
+    /// Names of every length up to a few KiB, in exact-length allocations: libgit2
+    /// stops at the NUL.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn names_are_read_up_to_their_nul() {
+        for len in (0..64).chain([1000, 4096]) {
+            for seed in ["commit", "tree", "blob", "tag", "x"] {
+                let name: String = seed.chars().cycle().take(len).collect();
+                let name = CString::new(name).unwrap();
+                let found = ObjectType::from_name(&name);
+                assert_eq!(
+                    found.is_some(),
+                    len >= seed.len() && seed != "x",
+                    "{name:?}"
+                );
+            }
+        }
+    }
+}

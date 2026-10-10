@@ -932,3 +932,405 @@ mod id_options {
         });
     }
 }
+
+mod types_and_contents {
+    //! Equivalence of [`ObjectType::name`] with `git_object_type2string`,
+    //! [`ObjectType::from_name`] with `git_object_string2type`, [`type_is_valid`] with
+    //! `git_object_type_is_valid`, and [`content_is_valid`] with
+    //! `git_object_rawcontent_is_valid`.
+    //!
+    //! The names are compared over every `git_object_t` value around the named ones (a
+    //! value without a variant is the empty name in C, and no [`ObjectType`] in Rust),
+    //! and over a corpus of names: the four, their prefixes and extensions, case
+    //! changes, and the empty one. The content check runs C and Rust on independent
+    //! copies of each content, for every object type and both id types, and compares
+    //! the return code, the verdict and the calling thread's last error after each
+    //! call, without clearing it in between: a commit, a tree and a tag of each id type,
+    //! every prefix of each, and single-byte corruptions.
+    //!
+    //! Outside these comparisons: C also takes a NULL buffer (refused), an out-of-range
+    //! type (refused as not found) and an unnamed id type; the wrapper's arguments
+    //! cannot carry them. Out-of-memory failures are compared in `object.rs`'s unit
+    //! tests.
+    //!
+    //! [`ObjectType::name`]: libgit2::libgit2::core::types::ObjectType::name
+    //! [`ObjectType::from_name`]: libgit2::libgit2::core::types::ObjectType::from_name
+
+    use std::ffi::{CStr, CString, c_int};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{content_is_valid, type_is_valid};
+    use libgit2::libgit2::oid::oid::OidType;
+
+    use super::{c_last, init};
+
+    const KINDS: [ObjectType; 4] = [
+        ObjectType::Commit,
+        ObjectType::Tree,
+        ObjectType::Blob,
+        ObjectType::Tag,
+    ];
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn names_match_c() {
+        init();
+        for raw in (-5..12).chain([i32::MIN, i32::MAX]) {
+            // SAFETY: a plain value; the result is a static string.
+            let c_name = unsafe { CStr::from_ptr(ffi::git_object_type2string(raw)) };
+            let rust_name = ObjectType::from_raw(raw).map_or("", ObjectType::name);
+            assert_eq!(c_name.to_str().unwrap(), rust_name, "{raw}");
+            // SAFETY: a plain value.
+            let c_valid = unsafe { ffi::git_object_type_is_valid(raw) } != 0;
+            assert_eq!(type_is_valid(raw), c_valid, "{raw}");
+        }
+        let mut names: Vec<String> = ["", " ", "any", "invalid", "ofs_delta", "ref_delta"]
+            .map(String::from)
+            .to_vec();
+        for name in ["commit", "tree", "blob", "tag"] {
+            for len in 0..=name.len() {
+                names.push(name[..len].to_owned());
+            }
+            names.push(format!("{name}s"));
+            names.push(format!("{name}\t"));
+            names.push(format!(" {name}"));
+            names.push(name.to_uppercase());
+            names.push(format!("{}{}", name[..1].to_uppercase(), &name[1..]));
+        }
+        names.push("\u{e9}".into());
+        for name in names {
+            let c_copy = CString::new(name.clone()).unwrap();
+            let rust_copy = CString::new(name.clone()).unwrap();
+            // SAFETY: a NUL-terminated string, read for the call.
+            let c = unsafe { ffi::git_object_string2type(c_copy.as_ptr()) };
+            let rust =
+                ObjectType::from_name(&rust_copy).map_or(ffi::GIT_OBJECT_INVALID, ObjectType::raw);
+            assert_eq!(rust, c, "{name:?}");
+        }
+    }
+
+    /// A commit, a tree and a tag whose ids are of `kind`.
+    fn samples(kind: OidType) -> Vec<Vec<u8>> {
+        let (hex, raw) = match kind {
+            OidType::Sha1 => ("a65fedf39aefe402d3bb6e24df4d4f5fe4547750", vec![0xa6; 20]),
+            _ => (
+                "f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736",
+                vec![0xf2; 32],
+            ),
+        };
+        let commit = format!(
+            "tree {hex}\nparent {hex}\nauthor A U Thor <a@example.com> 1 +0100\n\
+             committer C <c@example.com> 2 -0030\nencoding UTF-8\n\nsubject\n\nbody\n"
+        );
+        let tag =
+            format!("object {hex}\ntype commit\ntag v1.0\ntagger T <t@example.com> 3 +0000\n\nm\n");
+        let mut tree = Vec::new();
+        for (mode, name) in [("100644", "README"), ("40000", "ab"), ("160000", "sub")] {
+            tree.extend_from_slice(format!("{mode} {name}\0").as_bytes());
+            tree.extend_from_slice(&raw);
+        }
+        vec![commit.into_bytes(), tree, tag.into_bytes()]
+    }
+
+    /// The corpus: every sample of either id type, every prefix of each, and each with
+    /// one byte flipped at a few places.
+    fn corpus() -> Vec<Vec<u8>> {
+        let mut corpus = vec![Vec::new(), b"\n".to_vec(), b"\0".to_vec()];
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            for sample in samples(kind) {
+                for len in 0..sample.len() {
+                    corpus.push(sample[..len].to_vec());
+                }
+                for at in [0, 5, sample.len() / 2, sample.len() - 1] {
+                    for byte in *b"\n\0 x" {
+                        let mut flipped = sample.clone();
+                        flipped[at] = byte;
+                        corpus.push(flipped);
+                    }
+                }
+                corpus.push(sample);
+            }
+        }
+        corpus
+    }
+
+    /// What a check gave: the verdict or the code, and the last error after it.
+    type Seen = (Result<bool, c_int>, (c_int, String));
+
+    fn c_check(content: &[u8], kind: ObjectType, oid_type: OidType) -> Seen {
+        let copy = content.to_vec();
+        // C refuses a NULL buffer; lend a byte for no content, as the wrapper does.
+        let buf = if copy.is_empty() {
+            c"".as_ptr()
+        } else {
+            copy.as_ptr().cast()
+        };
+        let mut valid: c_int = -1;
+        // SAFETY: `valid` is writable; `buf` addresses `copy.len()` readable bytes (one
+        // for none), read for the call; named types.
+        let rc = unsafe {
+            ffi::git_object_rawcontent_is_valid(
+                &mut valid,
+                buf,
+                copy.len(),
+                kind.raw(),
+                oid_type.raw(),
+            )
+        };
+        let verdict = if rc < 0 {
+            Err(rc)
+        } else {
+            assert!(valid == 0 || valid == 1, "C wrote valid = {valid}");
+            Ok(valid == 1)
+        };
+        (verdict, c_last())
+    }
+
+    fn rust_check(content: &[u8], kind: ObjectType, oid_type: OidType) -> Seen {
+        let copy = content.to_vec();
+        let verdict = content_is_valid(&copy, kind, oid_type).map_err(|e| e.raw_class());
+        (verdict, c_last())
+    }
+
+    /// The whole corpus, for every type and id type, in one sequence per side without
+    /// clearing the error, compared step by step.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn content_checks_match_c() {
+        init();
+        let corpus = corpus();
+        let mut probes = Vec::new();
+        for content in &corpus {
+            for kind in KINDS {
+                for oid_type in [OidType::Sha1, OidType::Sha256] {
+                    probes.push((content, kind, oid_type));
+                }
+            }
+        }
+        // SAFETY: no arguments; libgit2 is initialised.
+        unsafe { ffi::git_error_clear() };
+        let c: Vec<Seen> = probes.iter().map(|&(b, k, o)| c_check(b, k, o)).collect();
+        // SAFETY: as above.
+        unsafe { ffi::git_error_clear() };
+        let rust: Vec<Seen> = probes
+            .iter()
+            .map(|&(b, k, o)| rust_check(b, k, o))
+            .collect();
+        let mut valid = 0;
+        for ((probe, c), rust) in probes.iter().zip(&c).zip(&rust) {
+            assert_eq!(
+                rust,
+                c,
+                "{:?} as {:?} with {:?} ids",
+                String::from_utf8_lossy(probe.0),
+                probe.1,
+                probe.2
+            );
+            valid += usize::from(c.0 == Ok(true));
+        }
+        // Both verdicts occur for every type but blobs.
+        assert!(valid > corpus.len() * 2 && valid < probes.len(), "{valid}");
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            for (sample, object) in
+                samples(kind)
+                    .iter()
+                    .zip([ObjectType::Commit, ObjectType::Tree, ObjectType::Tag])
+            {
+                assert_eq!(rust_check(sample, object, kind).0, Ok(true), "{object:?}");
+            }
+        }
+    }
+}
+
+mod kind_and_short_id {
+    //! Equivalence of [`ObjectRef::kind`] with `git_object_type` and of
+    //! [`ObjectRef::short_id`] with `git_object_short_id`.
+    //!
+    //! Each `core.abbrev` setting gets a copy of `testrepo.git` whose configuration sets
+    //! it (none, 4, 5, 40, 41, `no`, `auto`, and the refused 3, `true` and `x`). Each side opens
+    //! the copy on its own, looks up the same objects (one of each type, and pairs whose
+    //! ids share 4 or 5 digits, so the abbreviation must grow), and compares, for each in
+    //! turn, the type, and the short id or the failure (code, error class and message).
+    //! Each side then asks again after releasing every other object, and compares again.
+    //!
+    //! [`ObjectRef::kind`]: libgit2::libgit2::object::object::ObjectRef::kind
+    //! [`ObjectRef::short_id`]: libgit2::libgit2::object::object::ObjectRef::short_id
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use super::{BLOB, COMMIT, CSide, TAG, TESTREPO, TREE, c_last, init};
+
+    /// Objects to abbreviate: one of each type, then pairs sharing 5 and 4 digits.
+    const IDS: [&str; 10] = [
+        COMMIT,
+        TREE,
+        BLOB,
+        TAG,
+        "498bc0906810bd43c6fbc73385fecb7f2d04be3a",
+        "498bccdfec1fc223c27c0d84030ff419058e452d",
+        "4260699b37a7a0cc6be231d232d424a858a7d111",
+        "42608eb49e4be32002462b51e86065368b342c05",
+        "763d71aadf09a7951596c9746c024e7eece7c7af",
+        "763dd65d1e7ca14658649d7c4d1cc1e4bfd2c671",
+    ];
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A copy of `testrepo.git` whose configuration sets `core.abbrev` to `abbrev`,
+    /// removed on drop.
+    struct Copy(PathBuf);
+
+    impl Copy {
+        fn new(abbrev: Option<&str>) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-object-equiv-{}-abbrev-{}",
+                std::process::id(),
+                abbrev.unwrap_or("default")
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            copy_dir(Path::new(TESTREPO), &path);
+            if let Some(abbrev) = abbrev {
+                let config = path.join("config");
+                let mut text = std::fs::read_to_string(&config).unwrap();
+                text.push_str(&format!("[core]\n\tabbrev = {abbrev}\n"));
+                std::fs::write(&config, text).unwrap();
+            }
+            Self(path)
+        }
+    }
+
+    impl Drop for Copy {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// What one object gave: its type, and its short id or the failure.
+    type Seen = (ffi::git_object_t, Result<String, (c_int, c_int, String)>);
+
+    fn c_seen(object: *mut ffi::git_object) -> Seen {
+        let mut buf = ffi::git_buf {
+            ptr: ptr::null_mut(),
+            reserved: 0,
+            size: 0,
+        };
+        // SAFETY: a live object of a live repository; `buf` an empty buffer, disposed
+        // once read.
+        unsafe {
+            let kind = ffi::git_object_type(object);
+            let rc = ffi::git_object_short_id(&mut buf, object);
+            let short = if rc < 0 {
+                let (class, message) = c_last();
+                Err((rc, class, message))
+            } else {
+                let short = CStr::from_ptr(buf.ptr).to_str().unwrap().to_owned();
+                assert_eq!(short.len(), buf.size);
+                Ok(short)
+            };
+            if buf.reserved > 0 {
+                ffi::git_buf_dispose(&mut buf);
+            }
+            (kind, short)
+        }
+    }
+
+    fn rust_seen(object: &ObjectArc<'_>) -> Seen {
+        let short = match object.as_ref().short_id() {
+            Ok(buf) => Ok(buf.as_ref().to_str().unwrap().to_owned()),
+            Err(e) => Err((
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            )),
+        };
+        (object.as_ref().kind().raw(), short)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn kinds_and_short_ids_match_c() {
+        init();
+        let settings = [
+            None,
+            Some("4"),
+            Some("5"),
+            Some("40"),
+            Some("41"),
+            Some("no"),
+            Some("auto"),
+            Some("true"),
+            Some("3"),
+            Some("x"),
+        ];
+        for abbrev in settings {
+            let copy = Copy::new(abbrev);
+            let path = copy.0.to_str().unwrap();
+            let mut c = CSide::open(path);
+            let rust_repo = Repository::open(&CString::new(path).unwrap()).unwrap();
+            let mut rust = Vec::new();
+            let mut c_first = Vec::new();
+            let mut rust_first = Vec::new();
+            for hex in IDS {
+                let mut id = ffi::git_oid::default();
+                let c_hex = CString::new(hex).unwrap();
+                let mut out = ptr::null_mut();
+                // SAFETY: writable slots, the side's live repository and a live id.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_oid_from_string(&mut id, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
+                        0
+                    );
+                    assert_eq!(
+                        ffi::git_object_lookup(&mut out, c.repo, &id, ffi::GIT_OBJECT_ANY),
+                        0
+                    );
+                }
+                c.held.push(out);
+                let rust_id = Oid::from_string(&c_hex, OidType::Sha1).unwrap();
+                rust.push(Object::lookup(rust_repo.as_ref(), rust_id.as_ref(), None).unwrap());
+                let (cs, rs) = (c_seen(out), rust_seen(rust.last().unwrap()));
+                assert_eq!(rs, cs, "{abbrev:?} {hex}");
+                c_first.push(cs);
+                rust_first.push(rs);
+            }
+            // Every other object goes; the first one is asked again.
+            for o in c.held.drain(1..) {
+                // SAFETY: each reference is released once.
+                unsafe { ffi::git_object_free(o) };
+            }
+            rust.truncate(1);
+            let (cs, rs) = (c_seen(c.held[0]), rust_seen(&rust[0]));
+            assert_eq!(rs, cs, "{abbrev:?} again");
+            assert_eq!(cs, c_first[0]);
+            match abbrev {
+                Some("3") | Some("x") | Some("true") => {
+                    assert!(c_first.iter().all(|s| s.1.is_err()))
+                }
+                Some("4") => assert_eq!(c_first[4].1.as_deref(), Ok("498bc0")),
+                _ => assert!(
+                    c_first.iter().all(|s| s.1.is_ok()),
+                    "{abbrev:?}: {c_first:?}"
+                ),
+            }
+        }
+    }
+}

@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing function parameter `repo`
+ --> tests/ub_safe/compile_fail/tree_entry_object_outlives_repository.rs:8:5
+  |
+8 |     entry.as_ref().to_object(repo.as_ref()).unwrap()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^----^^^^^^^^^^^^^^^^^^^
+  |     |                        |
+  |     |                        `repo` is borrowed here
+  |     returns a value referencing data owned by the current function

@@ -73,6 +73,7 @@ use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::core::types::ObjectType;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
 use crate::libgit2::oid::oid::{OidMut, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
@@ -486,12 +487,10 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// The blob `object` is, borrowed as long as `object` is; `None` for an object of
     /// another type.
     pub fn from_object(object: ObjectRef<'a, 'r>) -> Option<Self> {
-        let p = object.as_ptr();
-        // SAFETY: the handle addresses a live object; `git_object_type` reads the type
-        // it was parsed as, which never changes.
-        if unsafe { ffi::git_object_type(p) } != ffi::GIT_OBJECT_BLOB {
+        if object.kind() != ObjectType::Blob {
             return None;
         }
+        let p = object.as_ptr();
         // SAFETY: an object of type blob was allocated and parsed as a `git_blob`,
         // whose first member is that `git_object`, so the pointer addresses the whole
         // blob; the object handle keeps it live and unwritten for `'a`, and its

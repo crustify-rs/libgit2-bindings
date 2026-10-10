@@ -106,6 +106,8 @@ git_object_lookup_prefix
 git_object_lookup_bypath
 git_object_owner
 git_object_peel
+git_object_rawcontent_is_valid
+git_object_short_id
 git_object_string2type
 git_object_type
 git_object_type2string
@@ -119,6 +121,7 @@ git_odb_new_ext
 git_odb_num_backends
 git_odb_object_data
 git_odb_object_free
+git_odb_object_type
 git_odb_object_size
 git_odb_open
 git_odb_open_ext
@@ -245,8 +248,14 @@ git_submodule_set_fetch_recurse_submodules
 git_submodule_set_ignore
 git_submodule_set_update
 git_submodule_update_strategy
+git_tag_create_from_buffer
+git_tag_create_lightweight
+git_tag_delete
 git_tag_dup
+git_tag_foreach
 git_tag_free
+git_tag_list
+git_tag_list_match
 git_tag_lookup
 git_tag_lookup_prefix
 git_tag_name_is_valid
@@ -263,6 +272,7 @@ git_tree_entry_filemode_raw
 git_tree_entry_free
 git_tree_entry_id
 git_tree_entry_name
+git_tree_entry_to_object
 git_tree_entry_type
 git_tree_entrycount
 git_tree_free
@@ -272,6 +282,7 @@ git_tree_lookup_prefix
 git_tree_walk
 git_treebuilder_clear
 git_treebuilder_entrycount
+git_treebuilder_filter
 git_treebuilder_free
 git_treebuilder_get
 git_treebuilder_insert

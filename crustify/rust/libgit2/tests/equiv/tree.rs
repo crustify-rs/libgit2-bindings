@@ -418,10 +418,13 @@ mod builder {
     //!   fixture repository it opened itself; after every step the builder's state is
     //!   recorded (its entry count, the file mode of every name either side ever held, and
     //!   the id `git_treebuilder_write` gives, or the error it reports) and compared. The
-    //!   C side runs `git_treebuilder_insert`, `_get` and `_write` raw, the Rust side their
-    //!   wrappers; `_entrycount` and the entry's file mode, not wrapped yet, run raw on
-    //!   both sides, the Rust side's through `as_c_ptr`. The builder routines' failures
-    //!   and the walk callback are compared in [`routines`].
+    //!   C side runs `git_treebuilder_insert`, `_get`, `_write`, `_entrycount` and
+    //!   `git_tree_entry_filemode_raw` raw, the Rust side their wrappers
+    //!   ([`TreeBuilderRef::len`] for the count, `TreeEntryRef::filemode_raw` for an
+    //!   entry's mode). The builder routines' failures and the walk callback are compared
+    //!   in [`routines`].
+    //!
+    //!   [`TreeBuilderRef::len`]: libgit2::libgit2::object::tree::TreeBuilderRef::len
     //! - Allocation failures: libgit2's allocator is made to fail its `k`-th allocation
     //!   inside the constructor, for each `k` until the constructor succeeds; both sides
     //!   must fail at the same `k` with the same error class and message, and then build
@@ -628,16 +631,12 @@ mod builder {
     /// [`write`](libgit2::libgit2::object::tree::TreeBuilderMut::write); the entry count
     /// raw.
     fn rust_state(builder: &mut TreeBuilderBox<'_>, names: &BTreeSet<CString>) -> State {
-        // SAFETY: the box's live builder, only read.
-        let count = unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) };
+        let count = builder.as_ref().len();
         let modes = names
             .iter()
             .map(|name| {
                 let entry = builder.as_ref().get(name);
-                (
-                    name.clone(),
-                    entry.map(|e| mode_of(&e.to_tree_entry().unwrap())),
-                )
+                (name.clone(), entry.map(|e| e.filemode_raw()))
             })
             .collect();
         let written = match builder.as_mut().write() {
@@ -649,12 +648,6 @@ mod builder {
             modes,
             written,
         }
-    }
-
-    /// C's raw file mode of an owned entry.
-    fn mode_of(entry: &TreeEntryBox) -> ffi::git_filemode_t {
-        // SAFETY: the owner's live entry, only read.
-        unsafe { ffi::git_tree_entry_filemode_raw(entry.as_c_ptr()) }
     }
 
     /// `git_treebuilder_insert` of a submodule entry `name` naming `id(byte)`; its return
@@ -1043,10 +1036,7 @@ mod builder {
                 .iter()
                 .map(|name| {
                     let entry = builder.as_ref().get(name);
-                    (
-                        name.clone(),
-                        entry.map(|e| mode_of(&e.to_tree_entry().unwrap())),
-                    )
+                    (name.clone(), entry.map(|e| e.filemode_raw()))
                 })
                 .collect();
             let written = match builder.as_mut().write() {
@@ -1057,8 +1047,7 @@ mod builder {
                 }
             };
             Snapshot {
-                // SAFETY: the box's live builder, only read.
-                count: unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) },
+                count: builder.as_ref().len(),
                 modes,
                 written,
             }
@@ -1643,15 +1632,11 @@ mod builder {
                 .iter()
                 .map(|name| {
                     let entry = builder.as_ref().get(name);
-                    (
-                        name.clone(),
-                        entry.map(|e| mode_of(&e.to_tree_entry().unwrap())),
-                    )
+                    (name.clone(), entry.map(|e| e.filemode_raw()))
                 })
                 .collect();
             Snapshot {
-                // SAFETY: the box's live builder, only read.
-                count: unsafe { ffi::git_treebuilder_entrycount(builder.as_c_ptr()) },
+                count: builder.as_ref().len(),
                 modes,
                 written: Ok(String::new()),
             }
@@ -2166,16 +2151,31 @@ mod tree_entry {
     //! divergence, outside that comparison: an object that is not a tree has no
     //! [`TreeRef`] to look into, where the C routine reads it as a tree.
     //!
+    //! [`getters_match_c`] compares the getters ([`TreeEntryRef::name`], `id`,
+    //! `filemode`, `filemode_raw`, `kind`), [`TreeEntryRef::cmp_in_tree`] and
+    //! [`TreeEntryRef::to_object`] with `git_tree_entry_name`, `_id`, `_filemode`,
+    //! `_filemode_raw`, `_type`, `_cmp` and `_to_object`: on every entry of three trees
+    //! (C's borrowed from its tree, Rust's owned through [`TreeEntry::bypath`]), each
+    //! entry against every other, and each object looked up in a fixture repository
+    //! and in a bare one lacking it; then again after each side released its trees and
+    //! repositories, the lookups going to a repository opened afresh. Documented
+    //! divergence, outside that comparison: an entry whose id is of another type than
+    //! the repository's is refused by `to_object`, where C formats the id out of
+    //! bounds; `tree.rs`'s unit tests hold the refusal.
+    //!
     //! [`TreeEntryRef::to_tree_entry`]: libgit2::libgit2::object::tree::TreeEntryRef::to_tree_entry
+    //! [`TreeEntryRef::name`]: libgit2::libgit2::object::tree::TreeEntryRef::name
+    //! [`TreeEntryRef::cmp_in_tree`]: libgit2::libgit2::object::tree::TreeEntryRef::cmp_in_tree
+    //! [`TreeEntryRef::to_object`]: libgit2::libgit2::object::tree::TreeEntryRef::to_object
 
     use std::ffi::{CStr, CString, c_int};
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::object::Object;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tree::{Tree, TreeEntry, TreeEntryBox, TreeRef};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
-    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryError, RepositoryRef};
 
     const TESTREPO: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -2461,6 +2461,219 @@ mod tree_entry {
         for e in c_entries {
             // SAFETY: each entry is released once.
             unsafe { ffi::git_tree_entry_free(e) };
+        }
+    }
+
+    /// What a lookup of an entry's object gave: the object's id and type, or the failure.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Looked {
+        Object(String, ffi::git_object_t),
+        Failed(c_int, c_int, String),
+    }
+
+    fn looked(p: *const ffi::git_object) -> Looked {
+        let mut out = [0u8; 65];
+        // SAFETY: a live object; its id is formatted into 65 writable bytes.
+        unsafe {
+            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
+            Looked::Object(
+                CStr::from_bytes_until_nul(&out)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                ffi::git_object_type(p),
+            )
+        }
+    }
+
+    /// C's `git_tree_entry_to_object`, the object released once viewed.
+    fn c_to_object(repo: *mut ffi::git_repository, entry: *const ffi::git_tree_entry) -> Looked {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot, a live repository and a live entry of its id type.
+        let rc = unsafe { ffi::git_tree_entry_to_object(&mut out, repo, entry) };
+        if rc < 0 {
+            let (class, message) = c_last();
+            return Looked::Failed(rc, class, message);
+        }
+        let seen = looked(out);
+        // SAFETY: the reference the lookup handed out, released once.
+        unsafe { ffi::git_object_free(out) };
+        seen
+    }
+
+    fn rust_looked(result: Result<ObjectArc<'_>, RepositoryError>) -> Looked {
+        match result {
+            Ok(object) => looked(object.as_c_ptr()),
+            Err(e) => Looked::Failed(
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            ),
+        }
+    }
+
+    /// The Rust getters' view of an entry, as [`view`] reads C's.
+    fn rust_view(entry: &TreeEntryBox) -> View {
+        let entry = entry.as_ref();
+        View {
+            name: entry.name().to_owned(),
+            id: entry.id().to_hex_string().unwrap(),
+            raw_mode: entry.filemode_raw(),
+            mode: entry.filemode().raw(),
+            kind: entry.kind().raw(),
+        }
+    }
+
+    /// `testrepo.git` trees: commit `763d71a`'s (`README`, `ab`, two files), `ab`
+    /// itself, and `HEAD`'s.
+    const TREES: [&CStr; 3] = [
+        TREE,
+        c"f1425cef211cc08caa31e7b545ffb232acb098c3",
+        c"944c0f6e4dfa41595e6eb3ceecdb14f50fe18162",
+    ];
+
+    fn open_raw(path: &CStr) -> *mut ffi::git_repository {
+        let mut repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
+        let rc = unsafe {
+            ffi::git_repository_open_ext(
+                &mut repo,
+                path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            )
+        };
+        assert_eq!(rc, 0);
+        repo
+    }
+
+    /// A bare repository of each side's own, holding nothing.
+    struct Empty(std::path::PathBuf);
+
+    impl Empty {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-tree-entry-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            Self(path)
+        }
+
+        fn c_path(&self) -> CString {
+            CString::new(self.0.to_str().unwrap()).unwrap()
+        }
+    }
+
+    impl Drop for Empty {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_match_c() {
+        init();
+        let path = CString::new(TESTREPO).unwrap();
+        let (c_empty_dir, rust_empty_dir) = (Empty::new("c"), Empty::new("rust"));
+
+        // The C side: its repositories and trees, and the entries they lend.
+        let c_repo = open_raw(&path);
+        let mut c_empty = ptr::null_mut();
+        let c_empty_path = c_empty_dir.c_path();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_init(&mut c_empty, c_empty_path.as_ptr(), 1) };
+        assert_eq!(rc, 0);
+        let mut c_trees = Vec::new();
+        let mut c_entries = Vec::new();
+        // Each entry's tree and name, which the Rust side looks up on its own.
+        let mut paths: Vec<(&CStr, CString)> = Vec::new();
+        for hex in TREES {
+            let mut id = ffi::git_oid::default();
+            let mut tree = ptr::null_mut();
+            // SAFETY: writable slots, a hex id and the live repository; each entry lives
+            // as long as its tree, which is freed after the last read below, and its name
+            // is copied at once.
+            unsafe {
+                assert_eq!(
+                    ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1),
+                    0
+                );
+                assert_eq!(ffi::git_tree_lookup(&mut tree, c_repo, &id), 0);
+                for i in 0..ffi::git_tree_entrycount(tree) {
+                    let entry = ffi::git_tree_entry_byindex(tree, i);
+                    paths.push((
+                        hex,
+                        CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned(),
+                    ));
+                    c_entries.push(entry);
+                }
+            }
+            c_trees.push(tree);
+        }
+
+        // The Rust side: its repositories, and an owned entry for each of C's names.
+        let rust_repo = Repository::open(&path).unwrap();
+        let rust_empty = Repository::init(&rust_empty_dir.c_path(), true).unwrap();
+        let rust_entries: Vec<TreeEntryBox> = paths
+            .iter()
+            .map(|(hex, name)| {
+                let id = Oid::from_string(hex, OidType::Sha1).unwrap();
+                let tree = Tree::lookup(rust_repo.as_ref(), id.as_ref()).unwrap();
+                TreeEntry::bypath(tree.as_ref(), name).unwrap()
+            })
+            .collect();
+        assert_eq!(c_entries.len(), rust_entries.len());
+        assert!(c_entries.len() >= 10, "{}", c_entries.len());
+
+        let compare = |c_entries: &[*const ffi::git_tree_entry],
+                       c_repos: [*mut ffi::git_repository; 2],
+                       rust_repos: [RepositoryRef<'_>; 2]| {
+            for (i, (&c, rust)) in c_entries.iter().zip(&rust_entries).enumerate() {
+                assert_eq!(rust_view(rust), view(c), "entry {i}");
+                for (&c_other, rust_other) in c_entries.iter().zip(&rust_entries) {
+                    let r = rust.as_ref().cmp_in_tree(rust_other.as_ref());
+                    assert_eq!(r as c_int, cmp(c, c_other), "entry {i}");
+                }
+                for (&c_repo, rust_repo) in c_repos.iter().zip(rust_repos) {
+                    let c_seen = c_to_object(c_repo, c);
+                    let rust_seen = rust_looked(rust.as_ref().to_object(rust_repo));
+                    assert_eq!(rust_seen, c_seen, "entry {i}");
+                }
+            }
+        };
+        compare(
+            &c_entries,
+            [c_repo, c_empty],
+            [rust_repo.as_ref(), rust_empty.as_ref()],
+        );
+
+        // Each side keeps copies of its entries only, and opens the fixture afresh.
+        let c_copies: Vec<_> = c_entries.iter().map(|&e| dup(e).cast_const()).collect();
+        // SAFETY: the trees and repositories are released once, the trees first; the
+        // copies hold nothing of them.
+        unsafe {
+            c_trees.into_iter().for_each(|t| ffi::git_tree_free(t));
+            ffi::git_repository_free(c_repo);
+        }
+        drop(rust_repo);
+        let c_repo = open_raw(&path);
+        let rust_repo = Repository::open(&path).unwrap();
+        compare(
+            &c_copies,
+            [c_repo, c_empty],
+            [rust_repo.as_ref(), rust_empty.as_ref()],
+        );
+
+        // SAFETY: each copy and repository is released once.
+        unsafe {
+            for e in c_copies {
+                ffi::git_tree_entry_free(e.cast_mut());
+            }
+            ffi::git_repository_free(c_repo);
+            ffi::git_repository_free(c_empty);
         }
     }
 }

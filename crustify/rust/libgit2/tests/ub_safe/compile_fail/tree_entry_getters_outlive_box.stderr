@@ -1,0 +1,51 @@
+error[E0505]: cannot move out of `entry` because it is borrowed
+ --> tests/ub_safe/compile_fail/tree_entry_getters_outlive_box.rs:8:10
+  |
+6 | fn name(entry: TreeEntryBox) -> &'static CStr {
+  |         ----- binding `entry` declared here
+7 |     let name = entry.as_ref().name();
+  |                ----- borrow of `entry` occurs here
+8 |     drop(entry);
+  |          ^^^^^ move out of `entry` occurs here
+9 |     name
+  |     ---- returning this value requires that `entry` is borrowed for `'static`
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+7 |     let name = entry.clone().as_ref().name();
+  |                     ++++++++
+
+error[E0515]: cannot return value referencing function parameter `entry`
+ --> tests/ub_safe/compile_fail/tree_entry_getters_outlive_box.rs:9:5
+  |
+7 |     let name = entry.as_ref().name();
+  |                ----- `entry` is borrowed here
+8 |     drop(entry);
+9 |     name
+  |     ^^^^ returns a value referencing data owned by the current function
+
+error[E0505]: cannot move out of `entry` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_entry_getters_outlive_box.rs:14:10
+   |
+12 | fn id(entry: TreeEntryBox) -> OidRef<'static> {
+   |       ----- binding `entry` declared here
+13 |     let id = entry.as_ref().id();
+   |              ----- borrow of `entry` occurs here
+14 |     drop(entry);
+   |          ^^^^^ move out of `entry` occurs here
+15 |     id
+   |     -- returning this value requires that `entry` is borrowed for `'static`
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+13 |     let id = entry.clone().as_ref().id();
+   |                   ++++++++
+
+error[E0515]: cannot return value referencing function parameter `entry`
+  --> tests/ub_safe/compile_fail/tree_entry_getters_outlive_box.rs:15:5
+   |
+13 |     let id = entry.as_ref().id();
+   |              ----- `entry` is borrowed here
+14 |     drop(entry);
+15 |     id
+   |     ^^ returns a value referencing data owned by the current function
