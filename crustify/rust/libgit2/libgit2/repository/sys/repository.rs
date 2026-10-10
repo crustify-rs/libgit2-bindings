@@ -28,18 +28,57 @@
 //! Both routines take the exclusive [`RepositoryMut`]: loading replaces the cache and
 //! clearing frees it, and libgit2 routines that read it keep a bare pointer to it while
 //! they run, so no other handle of the repository may be in use meanwhile.
+//!
+//! # Installed parts
+//!
+//! `git_repository_new` is [`Repository::new`] (and [`RepositoryFree`]'s constructor),
+//! next to the repository's other constructors.
+//!
+//! The setters below hand the repository one counted reference of its own to a config,
+//! index, object database or reference database, and make the repository that object's
+//! owner (`rc.owner`); the object the repository held before is disowned and released.
+//! The caller's reference stays the caller's. They write the repository's fields, so
+//! they take the exclusive [`RepositoryMut`]: no handle that borrowed the repository's
+//! previous part (an [`OdbArc`] from [`RepositoryRef::odb`]) is live across the swap.
+//! The reference database is the exception (below).
+//!
+//! Each part's own contract decides how it is passed:
+//!
+//! - a config and an index are shared once installed, so the setters take a
+//!   [`ConfigArc`] / [`IndexArc`] by reference (a sole [`ConfigBox`] or [`IndexBox`]
+//!   converts with `.into()` first);
+//! - an object database reads its owning repository's object cache, so only one no
+//!   repository owns yet, an [`OdbArc<'static>`](OdbArc), is installed, and it is
+//!   consumed: the repository keeps it, and [`RepositoryRef::odb`] lends it back,
+//!   borrowing the repository;
+//! - a reference database points back at the repository it was opened for, which
+//!   libgit2 does not update when another repository installs it, so
+//!   [`set_refdb`](RepositoryRef::set_refdb) is `unsafe`; and a refdb built for the
+//!   repository itself borrows it, so it takes the shared [`RepositoryRef`].
+//!
+//! [`Repository::new`]: crate::libgit2::repository::repository::Repository::new
+//! [`RepositoryFree`]: crate::libgit2::repository::repository::RepositoryFree
+//! [`ConfigBox`]: crate::libgit2::config::config::ConfigBox
+//! [`IndexBox`]: crate::libgit2::index::index::IndexBox
 
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::{self, addr_of, addr_of_mut};
 
 use ffibox::define_ctype;
 
 use crate::ffi;
+use crate::libgit2::config::config::ConfigArc;
+use crate::libgit2::index::index::IndexArc;
+use crate::libgit2::odb::odb::OdbArc;
 use crate::libgit2::oid::oid::{OidType, UnnamedOidType};
-use crate::libgit2::repository::repository::{RepositoryError, RepositoryMut};
-
+use crate::libgit2::refs::refdb::RefdbArc;
+use crate::libgit2::repository::repository::{
+    RepositoryBox, RepositoryError, RepositoryMut, RepositoryRef, pathless, status,
+};
+use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
+use crate::libgit2::util::sys::errors::set;
 define_ctype!(
     /// Options for a repository without backends (`git_repository_new_options`): the
     /// structure version, and the type of the object ids the repository holds.
@@ -340,6 +379,185 @@ impl RepositoryMut<'_> {
     }
 }
 
+/// The object id type `odb` hashes with, as `git_repository_wrap_odb` reads it into a
+/// scratch repository; libgit2 publishes no accessor of its own.
+///
+/// The scratch repository owns the odb while it lives and disowns it when it is freed,
+/// before this returns: `odb` is a reference no repository owns, which no other Rust
+/// handle reaches (it was moved here), so nothing observes the transient owner.
+fn odb_oid_type(odb: &OdbArc<'static>) -> Result<OidType, RepositoryError> {
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a writable slot; `odb` a live odb no repository owns, which the
+    // scratch repository takes a counted reference to. Every repository's runtime was
+    // pinned when it was built, and so was the odb's.
+    let rc = unsafe { ffi::git_repository_wrap_odb(&mut out, odb.as_c_ptr()) };
+    // SAFETY: `git_repository_wrap_odb` leaves `out` NULL on failure, or writes a fresh
+    // repository the caller owns alone; it is freed at the end of this function, which
+    // releases its reference to the odb and clears the odb's owner.
+    let scratch = unsafe { RepositoryBox::from_c(out) };
+    match scratch {
+        Some(scratch) if rc >= 0 => Ok(scratch.as_ref().oid_type()),
+        scratch => {
+            let error = RepositoryError::from_libgit2(rc);
+            drop(scratch);
+            Err(error)
+        }
+    }
+}
+
+impl RepositoryMut<'_> {
+    /// Makes the repository bare: records `core.bare = true` and removes
+    /// `core.worktree` in its configuration, then forgets its working directory. A
+    /// bare repository is left as it is.
+    ///
+    /// Fails with libgit2's error when the configuration cannot be loaded or written
+    /// (`GIT_EREADONLY` for a repository without a configuration file of its own),
+    /// leaving the working directory in place.
+    ///
+    /// Wraps: git_repository_set_bare
+    pub fn set_bare(&mut self) -> Result<(), RepositoryError> {
+        // SAFETY: a live repository, written through the exclusive handle: libgit2
+        // frees its working directory string, which no handle lends past this borrow.
+        let rc = unsafe { ffi::git_repository_set_bare(self.as_mut_ptr()) };
+        status(rc)
+    }
+
+    /// Installs `config` as the repository's configuration, in place of the one it
+    /// loaded or was given; the repository keeps a reference of its own, becomes the
+    /// config's owner and writes through it, and its cached configuration values are
+    /// dropped.
+    ///
+    /// Wraps: git_repository_set_config
+    pub fn set_config(&mut self, config: &ConfigArc) {
+        // SAFETY: a live repository, written through the exclusive handle; `config` a
+        // live config, which libgit2 up-refs for the repository: the arc's reference
+        // stays the arc's, and a shared owner is what the config now has.
+        let rc = unsafe { ffi::git_repository_set_config(self.as_mut_ptr(), config.as_c_ptr()) };
+        debug_assert_eq!(rc, 0, "git_repository_set_config refused a config");
+    }
+
+    /// Installs `index` as the repository's index, in place of the one it loaded or
+    /// was given; the repository keeps a reference of its own and becomes the index's
+    /// owner. `None` removes the repository's index, which is then loaded from its
+    /// index file on next use.
+    ///
+    /// libgit2 does not compare the index's object id type with the repository's.
+    ///
+    /// Wraps: git_repository_set_index
+    pub fn set_index(&mut self, index: Option<&IndexArc>) {
+        let index = index.map_or(ptr::null_mut(), IndexArc::as_c_ptr);
+        // SAFETY: a live repository, written through the exclusive handle; `index` NULL
+        // or a live index, which libgit2 up-refs for the repository: the arc's reference
+        // stays the arc's.
+        let rc = unsafe { ffi::git_repository_set_index(self.as_mut_ptr(), index) };
+        debug_assert_eq!(rc, 0, "git_repository_set_index refused an index");
+    }
+
+    /// Installs `odb` as the repository's object database, in place of the one it
+    /// loaded or was given; the repository keeps it, becomes its owner and from then
+    /// on caches its objects. [`RepositoryRef::odb`] lends it back.
+    ///
+    /// The odb must be one no repository owns, which is what `OdbArc<'static>` is; an
+    /// arc a repository lent borrows that repository and is refused at compile time:
+    ///
+    /// ```compile_fail,E0597
+    /// use libgit2::libgit2::repository::repository::Repository;
+    ///
+    /// let mut target = Repository::new().unwrap();
+    /// let source = Repository::new().unwrap();
+    /// let odb = source.as_ref().odb().unwrap();
+    /// target.as_mut().set_odb(odb).unwrap();
+    /// ```
+    ///
+    /// Fails, leaving the repository unchanged, when the odb's object id type is not
+    /// the repository's (GIT_ERROR_INVALID, "specified object ID type does not match
+    /// repository object ID type"): libgit2 does not check it, and the repository's
+    /// ids would then be formatted into paths of the odb's length. Reading the odb's
+    /// type allocates a scratch repository, which can fail with `-1` when libgit2 runs
+    /// out of memory.
+    ///
+    /// Wraps: git_repository_set_odb
+    pub fn set_odb(&mut self, odb: OdbArc<'static>) -> Result<(), RepositoryError> {
+        if odb_oid_type(&odb)? != self.as_ref().oid_type() {
+            set(
+                ErrorClass::Invalid,
+                c"specified object ID type does not match repository object ID type",
+            );
+            return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+        }
+        // SAFETY: a live repository, written through the exclusive handle; `odb` a live
+        // odb of the repository's type that no repository owns, which libgit2 up-refs
+        // and makes this repository's.
+        let rc = unsafe { ffi::git_repository_set_odb(self.as_mut_ptr(), odb.as_c_ptr()) };
+        debug_assert_eq!(rc, 0, "git_repository_set_odb refused an odb");
+        // The repository holds its own reference now.
+        drop(odb);
+        Ok(())
+    }
+
+    /// Rewrites the file system settings `git_repository_init` records in the
+    /// repository's configuration (`core.filemode`, `core.symlinks`,
+    /// `core.ignorecase`, `core.precomposeunicode`...), probing the file system again,
+    /// as after the repository was copied elsewhere; with `recurse`, does the same in
+    /// its submodules, whose failures are ignored.
+    ///
+    /// Fails with libgit2's error when the configuration cannot be read or written. A
+    /// repository without a git directory is refused with [`ErrorCode::NotFound`]
+    /// (GIT_ERROR_INVALID, "path cannot exist in repository"): libgit2 would write a
+    /// `config` file in the current directory.
+    ///
+    /// Wraps: git_repository_reinit_filesystem
+    pub fn reinit_filesystem(&mut self, recurse: bool) -> Result<(), RepositoryError> {
+        if self.as_ref().path().is_none() {
+            return Err(pathless());
+        }
+        let repo = self.as_mut_ptr();
+        // SAFETY: a live repository with a git directory, written through the exclusive
+        // handle (libgit2 clears its cached configuration values).
+        let rc = unsafe { ffi::git_repository_reinit_filesystem(repo, recurse.into()) };
+        status(rc)
+    }
+}
+
+impl RepositoryRef<'_> {
+    /// Installs `refdb` as the repository's reference database, in place of the one
+    /// it opened or was given; the repository keeps a reference of its own and becomes
+    /// the refdb's owner. The arc's reference stays the arc's.
+    ///
+    /// A repository opens its own reference database on first use; this replaces it,
+    /// typically with one over a custom backend
+    /// ([`Refdb::new`](crate::libgit2::refs::refdb::Refdb::new)). Such a refdb borrows
+    /// the repository it is built for, so this takes the shared handle: the repository
+    /// cannot be borrowed exclusively while the refdb's arc lives.
+    ///
+    /// # Safety
+    ///
+    /// - `refdb` must have been opened for a repository that outlives every reference
+    ///   operation this repository runs through it, and whose object id type is this
+    ///   repository's: this repository itself always qualifies. libgit2 keeps the
+    ///   refdb's pointer to the repository it was opened for, uncounted, and its
+    ///   backends read that repository on every operation; object ids the refdb parses
+    ///   with that repository's type are then looked up in this one, where an id of
+    ///   another type is formatted into a loose object's path of the wrong length.
+    ///   Neither follows from `'r`, which bounds only the arc: the repository keeps its
+    ///   reference until it is freed or given another refdb.
+    /// - No libgit2 routine may be running on this repository, as when this is called
+    ///   from one of its callbacks: such a routine may hold the previous refdb without a
+    ///   reference of its own, which the swap releases.
+    ///
+    /// Wraps: git_repository_set_refdb
+    pub unsafe fn set_refdb(&self, refdb: &RefdbArc<'_>) {
+        let repo = self.as_ptr().cast_mut();
+        // SAFETY: a live repository, on this thread, which no libgit2 routine is using
+        // per this function's contract, so swapping its refdb is unobserved; `refdb` a
+        // live refdb, which libgit2 up-refs for the repository, of a repository that
+        // per this function's contract outlives this one's reference operations and
+        // shares its object id type.
+        let rc = unsafe { ffi::git_repository_set_refdb(repo, refdb.as_c_ptr()) };
+        debug_assert_eq!(rc, 0, "git_repository_set_refdb refused a refdb");
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -505,6 +723,46 @@ mod unit_tests {
             assert!(rc < 0);
             drop(repo);
             fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    mod installed_parts {
+        use super::super::*;
+
+        use crate::libgit2::odb::odb::Odb;
+        use crate::libgit2::repository::repository::Repository;
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn odb_oid_type_reads_each_type_and_leaves_the_odb_unowned() {
+            for kind in [OidType::Sha1, OidType::Sha256] {
+                let odb = Odb::with_oid_type(kind).unwrap();
+                assert_eq!(odb_oid_type(&odb).unwrap(), kind);
+                // Read again: the scratch repository released its reference.
+                assert_eq!(odb_oid_type(&odb).unwrap(), kind);
+                // Unowned still, so a repository of the type takes it, and the odb
+                // outlives the scratch repositories.
+                let raw = odb.as_c_ptr();
+                let mut repo = Repository::with_oid_type(kind).unwrap();
+                repo.as_mut().set_odb(odb).unwrap();
+                assert_eq!(repo.as_ref().odb().unwrap().as_c_ptr(), raw);
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn a_mismatched_odb_is_refused_and_released() {
+            let mut repo = Repository::new().unwrap();
+            let odb = Odb::with_oid_type(OidType::Sha256).unwrap();
+            let error = repo.as_mut().set_odb(odb).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(
+                error.message().to_str(),
+                Ok("specified object ID type does not match repository object ID type")
+            );
+            // The repository kept no odb: it has no path to load one from either.
+            assert_eq!(repo.as_ref().odb().unwrap_err().raw_code(), -1);
         }
     }
 }

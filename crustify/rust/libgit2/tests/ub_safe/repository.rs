@@ -1210,3 +1210,581 @@ mod routines {
         }
     }
 }
+
+/// The routines on a repository and its handles: paths and types, the odb and refdb
+/// it lends, the parts it is given, its HEAD, message and state, the open variants
+/// and the `MERGE_HEAD` callback.
+///
+/// Every reference a repository lends or is given is a counted one, released exactly
+/// once whichever of the repository and the reference goes first (ASan: use after
+/// free, double free; LSan: leak); every string a setter replaces is freed while no
+/// handle lends it (the borrow checker: `compile_fail` doctests on `RepositoryRef::path`,
+/// `RepositoryRef::odb` and `RepositoryMut::set_odb`). An object id of another type than
+/// the repository's never reaches libgit2's loose-object path formatter (ASan:
+/// heap-buffer-overflow), a repository without a git directory never reaches the routines
+/// that would dereference or misplace its path (SIGSEGV, files in the current directory)
+/// nor the state assertion a debug build aborts on, and a panic in the callback never
+/// unwinds through C. An odb a repository lends is read from several threads while the
+/// repository lives (TSan). Every test calls libgit2, so nothing here runs under Miri.
+mod heads_and_parts {
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::ops::ControlFlow;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::thread;
+
+    use libgit2::libgit2::config::config::{Config, ConfigArc};
+    use libgit2::libgit2::index::index::{Index, IndexArc};
+    use libgit2::libgit2::odb::odb::{Odb, OdbArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
+    use libgit2::libgit2::refs::annotated_commit::AnnotatedCommit;
+    use libgit2::libgit2::repository::repository::{
+        MergeheadCallback, OpenFlag, OpenFlags, Repository, RepositoryBox, RepositoryError,
+        RepositoryState,
+    };
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::worktree::WorktreeRepo;
+    use crate::fixture::{commit_and_config, index, isolated, odb};
+
+    fn resource(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/resources")
+            .join(name)
+    }
+
+    fn c_path(path: &Path) -> CString {
+        CString::new(path.as_os_str().as_bytes()).unwrap()
+    }
+
+    /// A scratch directory of its own under the temp dir, removed when dropped.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-routines-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            Self(path.canonicalize().unwrap())
+        }
+
+        fn join(&self, rel: &str) -> PathBuf {
+            self.0.join(rel)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+
+    /// A writable copy of libgit2's bare `testrepo.git` (`HEAD` at `a65fedf`).
+    fn testrepo(scratch: &Scratch, name: &str) -> RepositoryBox {
+        let path = scratch.join(name);
+        copy_dir(&resource("testrepo.git"), &path);
+        Repository::open(&c_path(&path)).unwrap()
+    }
+
+    fn sha1(hex: &CStr) -> Oid {
+        Oid::from_string(hex, OidType::Sha1).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn paths_and_types_read_live_repositories() {
+        let scratch = Scratch::new("paths");
+        let repo = testrepo(&scratch, "repo");
+        let path = repo.as_ref().path().unwrap().to_owned();
+        assert!(path.to_bytes().ends_with(b"/repo/"), "{path:?}");
+        assert_eq!(repo.as_ref().oid_type(), OidType::Sha1);
+        // A borrow of the path lives as long as the repository's borrow.
+        let borrowed = repo.as_ref().path().unwrap();
+        let _second = Repository::open(borrowed).unwrap();
+        assert_eq!(borrowed, &*path);
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let repo = Repository::with_oid_type(kind).unwrap();
+            assert_eq!(
+                (repo.as_ref().path(), repo.as_ref().oid_type()),
+                (None, kind)
+            );
+        }
+        let repo256 = Repository::open(&c_path(&resource("testrepo_256/.gitted"))).unwrap();
+        assert_eq!(repo256.as_ref().oid_type(), OidType::Sha256);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn lent_odbs_and_refdbs_are_counted_references() {
+        let scratch = Scratch::new("lent");
+        let repo = testrepo(&scratch, "repo");
+        let first = repo.as_ref().odb().unwrap();
+        let second = repo.as_ref().odb().unwrap();
+        assert_eq!(first.as_c_ptr(), second.as_c_ptr());
+        // Readers on several threads while the repository lives; each drops its own.
+        thread::scope(|s| {
+            for odb in [first, second] {
+                s.spawn(move || {
+                    for _ in 0..50 {
+                        assert!(odb::backends(&odb) > 0);
+                    }
+                    drop(odb);
+                });
+            }
+        });
+        let dbs: Vec<_> = (0..3).map(|_| repo.as_ref().refdb().unwrap()).collect();
+        assert!(dbs.windows(2).all(|w| w[0].as_c_ptr() == w[1].as_c_ptr()));
+        let late = repo.as_ref().odb().unwrap();
+        drop(dbs);
+        drop(late);
+        drop(repo);
+
+        // A repository without a git directory lends no odb, and a refdb that resolves
+        // nothing until used.
+        let pathless = Repository::new().unwrap();
+        let error = pathless.as_ref().odb().unwrap_err();
+        assert_eq!(
+            (error.raw_code(), error.class()),
+            (-1, Some(ErrorClass::Invalid))
+        );
+        let refdb = pathless.as_ref().refdb().unwrap();
+        drop(pathless.as_ref().refdb().unwrap());
+        drop(refdb);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn installed_odbs_are_kept_and_replaced_once() {
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            let mut repo = Repository::with_oid_type(kind).unwrap();
+            for _ in 0..3 {
+                // Each one replaces (and releases) the last.
+                repo.as_mut()
+                    .set_odb(Odb::with_oid_type(kind).unwrap())
+                    .unwrap();
+                let lent = repo.as_ref().odb().unwrap();
+                assert_eq!(odb::backends(&lent), 0);
+            }
+            let other = if kind == OidType::Sha1 {
+                OidType::Sha256
+            } else {
+                OidType::Sha1
+            };
+            let error = repo
+                .as_mut()
+                .set_odb(Odb::with_oid_type(other).unwrap())
+                .unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            // The refused odb was released; the installed one stays.
+            assert_eq!(odb::backends(&repo.as_ref().odb().unwrap()), 0);
+        }
+        // An opened odb, installed in a repository that then writes through it.
+        let scratch = Scratch::new("set-odb");
+        let objects = scratch.join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let opened = Odb::open(&c_path(&objects)).unwrap();
+        let mut repo = Repository::new().unwrap();
+        repo.as_mut().set_odb(opened).unwrap();
+        let lent: OdbArc<'_> = repo.as_ref().odb().unwrap();
+        let id = odb::write_blob(&lent, b"kept").unwrap();
+        assert_eq!(odb::read_header(&lent, &id), Ok((4, 3)));
+        // The lent reference goes before the repository that owns the odb.
+        drop(lent);
+        drop(repo);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn installed_indexes_and_configs_outlive_or_predecease_the_repository() {
+        let scratch = Scratch::new("parts");
+        for repo_first in [true, false] {
+            let mut repo = testrepo(&scratch, &format!("repo-{repo_first}"));
+            let index: IndexArc = Index::new().unwrap().into();
+            let config: ConfigArc = Config::new().unwrap().into();
+            repo.as_mut().set_index(Some(&index));
+            repo.as_mut().set_config(&config);
+            assert!(index::has_owner(&index));
+            if repo_first {
+                drop(repo);
+                assert!(!index::has_owner(&index));
+                assert_eq!(index::entry_count(&index), 0);
+                assert_eq!(
+                    commit_and_config::get_int32(config.as_c_ptr(), c"core.missing"),
+                    Err(ErrorCode::NotFound.raw())
+                );
+                drop((index, config));
+            } else {
+                drop((index, config));
+                repo.as_mut().set_index(None);
+                repo.as_mut().set_config(&Config::new().unwrap().into());
+                drop(repo);
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn setters_free_the_strings_they_replace() {
+        let scratch = Scratch::new("strings");
+        let mut repo = testrepo(&scratch, "repo");
+        let workdirs = [scratch.join("w1"), scratch.join("w2")];
+        for w in &workdirs {
+            fs::create_dir_all(w).unwrap();
+        }
+        for round in 0..4 {
+            let some = |s: &'static CStr| (round % 2 == 0).then_some(s);
+            repo.as_mut()
+                .set_ident(some(c"Name"), some(c"name@example.com"))
+                .unwrap();
+            repo.as_mut().set_ident(Some(c"Other"), None).unwrap();
+            repo.as_mut().set_namespace(some(c"space")).unwrap();
+            repo.as_mut().set_namespace(Some(c"other")).unwrap();
+            let w = c_path(&workdirs[round % 2]);
+            repo.as_mut().set_workdir(&w, false).unwrap();
+            repo.as_mut().set_workdir(&w, round % 2 == 1).unwrap();
+            repo.as_mut().set_bare().unwrap();
+            repo.as_mut().set_bare().unwrap();
+        }
+        let missing = repo
+            .as_mut()
+            .set_workdir(c"/nonexistent/crustify", false)
+            .unwrap_err();
+        assert_eq!(missing.raw_code(), -1);
+        // A directory where the gitlink goes.
+        fs::create_dir_all(workdirs[0].join(".git")).unwrap();
+        let blocked = repo
+            .as_mut()
+            .set_workdir(&c_path(&workdirs[0]), true)
+            .unwrap_err();
+        assert_eq!(blocked.code(), Some(ErrorCode::Exists));
+        repo.as_mut().reinit_filesystem(false).unwrap();
+        repo.as_mut().reinit_filesystem(true).unwrap();
+    }
+
+    fn assert_refused(error: RepositoryError) {
+        assert_eq!(error.code(), Some(ErrorCode::NotFound), "{error:?}");
+        assert_eq!(error.class(), Some(ErrorClass::Invalid));
+    }
+
+    /// Every routine that would build a path from a pathless repository's missing git
+    /// directory is refused; none crashes, aborts (the coverage build's assertions) or
+    /// touches the current directory.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn pathless_repositories_are_refused() {
+        let mut repo = Repository::new().unwrap();
+        assert_refused(repo.as_ref().message().unwrap_err());
+        assert_refused(repo.as_ref().remove_message().unwrap_err());
+        assert_refused(repo.as_mut().reinit_filesystem(true).unwrap_err());
+        assert_refused(repo.as_mut().set_workdir(c"/", true).unwrap_err());
+        let state = repo.as_ref().state().unwrap_err();
+        assert_eq!(
+            (state.raw_code(), state.class()),
+            (-1, Some(ErrorClass::Invalid))
+        );
+        // Without the gitlink, a pathless repository takes a working directory, and
+        // gives it up again through its read-only configuration.
+        repo.as_mut().set_workdir(c"/", false).unwrap();
+        let bare = repo.as_mut().set_bare().unwrap_err();
+        assert_eq!(bare.code(), Some(ErrorCode::ReadOnly));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn messages_are_read_and_removed_through_owned_buffers() {
+        let scratch = Scratch::new("message");
+        let repo = testrepo(&scratch, "repo");
+        assert_eq!(
+            repo.as_ref().message().unwrap_err().code(),
+            Some(ErrorCode::NotFound)
+        );
+        for contents in [
+            &b""[..],
+            b"merge\n",
+            b"with\0nul\0bytes",
+            &[b'x'; 70000][..],
+        ] {
+            fs::write(scratch.join("repo/MERGE_MSG"), contents).unwrap();
+            let first = repo.as_ref().message().unwrap();
+            let second = repo.as_ref().message().unwrap();
+            assert_eq!(first.as_ref().as_bytes(), contents);
+            drop(first);
+            assert_eq!(second.as_ref().as_bytes(), contents);
+            repo.as_ref().remove_message().unwrap();
+            let gone = repo.as_ref().remove_message().unwrap_err();
+            assert_eq!(gone.class(), Some(ErrorClass::Os));
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn states_follow_marker_files() {
+        let scratch = Scratch::new("state");
+        let repo = testrepo(&scratch, "repo");
+        assert_eq!(repo.as_ref().state(), Ok(RepositoryState::Clean));
+        let markers = [
+            ("MERGE_HEAD", RepositoryState::Merge),
+            ("BISECT_LOG", RepositoryState::Bisect),
+            (
+                "rebase-merge/interactive",
+                RepositoryState::RebaseInteractive,
+            ),
+        ];
+        for (file, state) in markers {
+            let path = scratch.join("repo").join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "x\n").unwrap();
+            assert_eq!(repo.as_ref().state(), Ok(state), "{file}");
+            fs::remove_file(&path).unwrap();
+        }
+    }
+
+    /// Ids of another type than the repository's are refused before libgit2 formats
+    /// them into a loose object path sized for the repository's (ASan would report the
+    /// overflow of a SHA256 id into a SHA1 path).
+    /// Alone in a child process: libgit2 writes the reflog through
+    /// `git_signature_now`, whose glibc `tzset` TSan reports against any concurrent
+    /// caller in the process.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn heads_move_only_to_ids_of_the_repository_type() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::heads_move_only_to_ids_of_the_repository_type"
+            ),
+            heads_move_only_to_ids_of_the_repository_type_alone,
+        );
+    }
+
+    fn heads_move_only_to_ids_of_the_repository_type_alone() {
+        let scratch = Scratch::new("heads");
+        let repo = testrepo(&scratch, "repo");
+        let head = || fs::read_to_string(scratch.join("repo/HEAD")).unwrap();
+        repo.as_ref().set_head(c"refs/heads/br2").unwrap();
+        assert_eq!(head(), "ref: refs/heads/br2\n");
+        repo.as_ref().set_head(c"refs/tags/test").unwrap();
+        assert!(!head().starts_with("ref:"));
+        repo.as_ref().set_head(c"refs/heads/unborn").unwrap();
+        let missing = repo.as_ref().set_head(c"refs/tags/missing").unwrap_err();
+        assert_eq!(missing.code(), Some(ErrorCode::NotFound));
+
+        let id = sha1(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750");
+        repo.as_ref().set_head_detached(id.as_ref()).unwrap();
+        assert_eq!(head(), "a65fedf39aefe402d3bb6e24df4d4f5fe4547750\n");
+        let long = Oid::from_string(
+            c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750a65fedf39aefe402d3bb6e24",
+            OidType::Sha256,
+        )
+        .unwrap();
+        let refused = repo.as_ref().set_head_detached(long.as_ref()).unwrap_err();
+        assert_eq!(refused.class(), Some(ErrorClass::Invalid));
+
+        let commit = AnnotatedCommit::from_revspec(repo.as_ref(), c"br2").unwrap();
+        repo.as_ref()
+            .set_head_detached_from_annotated(commit.as_ref())
+            .unwrap();
+        drop(commit);
+        let detached = head();
+        assert_eq!(detached, "a4a7dce85cf63874e984719f4fdd239f5145052f\n");
+        // A commit of a SHA256 repository is refused in this SHA1 one.
+        let repo256 = Repository::open(&c_path(&resource("testrepo_256/.gitted"))).unwrap();
+        let foreign = AnnotatedCommit::from_revspec(repo256.as_ref(), c"HEAD").unwrap();
+        let refused = repo
+            .as_ref()
+            .set_head_detached_from_annotated(foreign.as_ref())
+            .unwrap_err();
+        assert_eq!(refused.class(), Some(ErrorClass::Invalid));
+        assert_eq!(head(), detached);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn the_callback_contains_panics_and_reentry() {
+        let ids = [
+            sha1(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750"),
+            sha1(c"be3563ae3f795b2b4353bcce3a527ad0a4f7f644"),
+        ];
+        let mut seen = Vec::new();
+        let mut inner_calls = 0;
+        let mut outer = |id: OidRef<'_>| {
+            // Reentry: another callback, called from inside this one's call.
+            let mut inner = |_: OidRef<'_>| {
+                inner_calls += 1;
+                ControlFlow::Continue(())
+            };
+            let mut nested = MergeheadCallback::new(&mut inner);
+            assert_eq!(nested.call(id), ControlFlow::Continue(()));
+            seen.push(id.to_hex_string().unwrap());
+            if seen.len() == 2 {
+                ControlFlow::Break(std::num::NonZero::new(-30).unwrap())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+        let mut callback = MergeheadCallback::new(&mut outer);
+        assert_eq!(callback.call(ids[0].as_ref()), ControlFlow::Continue(()));
+        let code = callback.call(ids[1].as_ref());
+        assert_eq!(
+            code,
+            ControlFlow::Break(std::num::NonZero::new(-30).unwrap())
+        );
+        drop(callback);
+        assert_eq!((seen.len(), inner_calls), (2, 2));
+
+        let mut panicking = |_: OidRef<'_>| -> ControlFlow<std::num::NonZero<c_int>> {
+            panic!("inside the callback");
+        };
+        let mut callback = MergeheadCallback::new(&mut panicking);
+        for _ in 0..2 {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                callback.call(ids[0].as_ref())
+            }));
+            assert!(caught.is_err());
+        }
+        assert!(format!("{callback:?}").contains("panicked: false"));
+    }
+
+    /// The callback's own plumbing, without libgit2: ids lent for the call, breaks,
+    /// panics contained and resumed, a callback dropped mid-way. Runs under Miri, which
+    /// checks the trampoline's reborrow of the payload and the lent id's lifetime.
+    #[test]
+    fn the_callback_lends_ids_for_the_call_only() {
+        let ids = [Oid::zero(OidType::Sha1), Oid::zero(OidType::Sha256)];
+        let mut kinds = Vec::new();
+        let mut f = |id: OidRef<'_>| {
+            kinds.push(id.kind());
+            assert_eq!(id.id(), [0; 32]);
+            match kinds.len() {
+                2 => ControlFlow::Break(std::num::NonZero::new(i32::MIN).unwrap()),
+                _ => ControlFlow::Continue(()),
+            }
+        };
+        let mut callback = MergeheadCallback::new(&mut f);
+        assert_eq!(callback.call(ids[0].as_ref()), ControlFlow::Continue(()));
+        let code = callback.call(ids[1].as_ref());
+        assert_eq!(
+            code,
+            ControlFlow::Break(std::num::NonZero::new(i32::MIN).unwrap())
+        );
+        drop(callback);
+        assert_eq!(kinds, [Some(OidType::Sha1), Some(OidType::Sha256)]);
+
+        type Boxed = Box<dyn FnMut(OidRef<'_>) -> ControlFlow<std::num::NonZero<c_int>>>;
+        let mut boxed: Boxed = Box::new(|_| panic!("boxed"));
+        let mut callback = MergeheadCallback::new(&mut boxed);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            callback.call(ids[0].as_ref())
+        }));
+        assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boxed");
+        drop(callback);
+        drop(boxed);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn open_variants_free_what_they_build() {
+        let scratch = Scratch::new("open");
+        let path = scratch.join("repo");
+        copy_dir(&resource("testrepo.git"), &path);
+        fs::create_dir_all(path.join("refs/sub")).unwrap();
+        let start = c_path(&path.join("refs/sub"));
+        let ceiling = c_path(&scratch.0);
+        for flags in [
+            OpenFlags::empty(),
+            OpenFlag::NoSearch.into(),
+            OpenFlag::Bare.into(),
+        ] {
+            let opened = Repository::open_ext(Some(&start), flags, Some(&ceiling));
+            let exists = Repository::exists_ext(Some(&start), flags, Some(&ceiling)).unwrap();
+            assert_eq!(opened.is_ok(), exists, "{flags:?}");
+        }
+        assert!(!Repository::exists_ext(Some(c"/nonexistent"), OpenFlags::empty(), None).unwrap());
+        let missing = Repository::open_ext(Some(c"/nonexistent"), OpenFlags::empty(), None);
+        assert_eq!(missing.unwrap_err().code(), Some(ErrorCode::NotFound));
+        // A NULL start without `FROM_ENV` is refused before libgit2 asserts on it.
+        for flags in [OpenFlags::empty(), OpenFlag::NoSearch.into()] {
+            let refused = Repository::open_ext(None, flags, None).unwrap_err();
+            assert_eq!(refused.class(), Some(ErrorClass::Invalid));
+            assert!(Repository::exists_ext(None, flags, None).is_err());
+        }
+    }
+
+    const CHILD: &str = "CRUSTIFY_UB_SAFE_CHILD";
+
+    /// Runs `body` in a child process with `vars` set, as `FROM_ENV` reads them.
+    fn with_env(test: &str, vars: &[(&str, &Path)], body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .envs(vars.iter().copied())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn from_env_opens_git_dir_for_a_null_start() {
+        let repo = resource("testrepo.git");
+        with_env(
+            concat!(module_path!(), "::from_env_opens_git_dir_for_a_null_start"),
+            &[("GIT_DIR", &repo)],
+            || {
+                let flags = OpenFlags::from(OpenFlag::FromEnv);
+                let opened = Repository::open_ext(None, flags, None).unwrap();
+                assert!(
+                    opened
+                        .as_ref()
+                        .path()
+                        .unwrap()
+                        .to_bytes()
+                        .ends_with(b"testrepo.git/")
+                );
+                assert!(Repository::exists_ext(None, flags, None).unwrap());
+            },
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn worktree_repositories_outlive_their_worktree() {
+        let main = WorktreeRepo::new("routines-open");
+        main.add("wt");
+        let worktree = main.lookup(c"wt");
+        let repo = Repository::open_from_worktree(worktree.as_ref()).unwrap();
+        drop(worktree);
+        main.close();
+        let path = repo.as_ref().path().unwrap();
+        assert!(path.to_bytes().ends_with(b"/worktrees/wt/"), "{path:?}");
+        drop(repo);
+    }
+}

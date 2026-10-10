@@ -376,11 +376,11 @@ fn repository_outlives_its_shared_index() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn index_shared_with_a_repository_is_released_once() {
     for arc_first in [true, false] {
-        let repo = TempRepo::new(&format!("set-index-{arc_first}"));
+        let mut repo = TempRepo::new(&format!("set-index-{arc_first}"));
         let mut index = Index::new().unwrap();
         assert_eq!(add(&mut index, c"kept"), 0);
         let index: IndexArc = index.into();
-        set_repository_index(&repo, &index);
+        set_repository_index(&mut repo, &index);
         assert!(has_owner(&index));
         let from_repo = repository_index(&repo);
         assert!(CArc::ptr_eq(&index, &from_repo));
@@ -402,10 +402,10 @@ fn index_shared_with_a_repository_is_released_once() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn replaced_repository_index_stays_with_its_arc() {
-    let repo = TempRepo::new("replaced");
+    let mut repo = TempRepo::new("replaced");
     let old = repository_index(&repo);
     let new: IndexArc = Index::new().unwrap().into();
-    set_repository_index(&repo, &new);
+    set_repository_index(&mut repo, &new);
     assert!(!has_owner(&old));
     assert!(has_owner(&new));
     drop(repo);
