@@ -1637,11 +1637,32 @@ pub mod head_and_lookups {
 /// `_entrycount`, `_write`) and the `git_tree` lookup the tests drive a builder with;
 /// replace each once its safe counterpart lands.
 pub mod tree {
-    use std::ffi::{CStr, c_int};
+    use std::ffi::{CStr, CString, c_int};
     use std::ptr;
 
     use libgit2::ffi;
+    use libgit2::libgit2::object::object::ObjectArc;
     use libgit2::libgit2::object::tree::TreeBuilderBox;
+
+    /// `git_tree_entrycount` and each entry's name and raw file mode, of `tree`, an
+    /// object of type tree; stands in for the `git_tree` getters.
+    pub fn entries(tree: &ObjectArc<'_>) -> Vec<(CString, ffi::git_filemode_t)> {
+        let tree: *const ffi::git_tree = tree.as_c_ptr().cast();
+        // SAFETY: the owner's live object, of type tree per the caller, only read; each
+        // entry lives with it and is copied out.
+        unsafe {
+            assert_eq!(ffi::git_object_type(tree.cast()), ffi::GIT_OBJECT_TREE);
+            (0..ffi::git_tree_entrycount(tree))
+                .map(|i| {
+                    let entry = ffi::git_tree_entry_byindex(tree, i);
+                    (
+                        CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned(),
+                        ffi::git_tree_entry_filemode_raw(entry),
+                    )
+                })
+                .collect()
+        }
+    }
 
     /// A SHA1 object id of `byte` repeated, for entries libgit2 does not check.
     pub fn id(byte: u8) -> ffi::git_oid {
@@ -1713,15 +1734,14 @@ pub mod tree {
 // --- `git2/object.h`: `git_object`; `git2/tree.h`: `git_tree_entry` -----------------
 
 /// Fixtures over `git_object` and `git_tree_entry`: C's view of an owner, through the
-/// pointer `as_c_ptr` hands out, standing in for the object and entry getters; and the
-/// one adoption of an owned entry, standing in for the `git_tree` wrapper's
-/// `git_tree_entry_bypath`, which replaces it.
+/// pointer `as_c_ptr` hands out, standing in for the object and entry getters.
 pub mod object_and_tree_entry {
-    use std::ffi::{CStr, CString, c_int};
+    use std::ffi::{CStr, CString};
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::object::ObjectArc;
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tree::TreeEntryBox;
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
@@ -1763,21 +1783,23 @@ pub mod object_and_tree_entry {
         unsafe { ffi::git_object_owner(object.as_c_ptr()) }
     }
 
-    /// `git_tree_entry_bypath(tree, path)`, adopted, or its return code; `tree` must
-    /// be a tree.
-    pub fn entry_bypath(tree: &ObjectArc<'_>, path: &CStr) -> Result<TreeEntryBox, c_int> {
-        assert_eq!(object_view(tree).1, ffi::GIT_OBJECT_TREE);
-        let mut out = ptr::null_mut();
-        // SAFETY: a writable slot; a live object of type tree, so a `git_tree`, which
-        // the owner keeps alive, and whose repository outlives it; a NUL-terminated
-        // path read for the call.
-        let rc =
-            unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_c_ptr().cast(), path.as_ptr()) };
-        if rc < 0 {
-            return Err(rc);
-        }
-        // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
-        Ok(unsafe { TreeEntryBox::from_c(out) }.unwrap())
+    /// A new blob of `content` in `repo`, looked up as an object; its hex id is read
+    /// through [`object_view`].
+    pub fn write_blob<'r>(repo: &'r RepositoryBox, content: &[u8]) -> ObjectArc<'r> {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: a writable id, the box's live repository and `content`, read for the
+        // call.
+        let rc = unsafe {
+            ffi::git_blob_create_from_buffer(
+                &mut id,
+                repo.as_c_ptr(),
+                content.as_ptr().cast(),
+                content.len(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let id = Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap();
+        Object::lookup(repo.as_ref(), id.as_ref(), Some(ObjectType::Blob)).unwrap()
     }
 
     /// C's name, hex id and raw file mode of the entry an owner holds.
@@ -1911,4 +1933,88 @@ pub fn apply(list: &mut FilterListBox<'_>, data: &[u8]) -> Result<Vec<u8>, c_int
 pub fn filter_count(list: &FilterListBox<'_>) -> usize {
     // SAFETY: the live list, only read.
     unsafe { ffi::git_filter_list_length(list.as_c_ptr()) }
+}
+
+/// A probe filter for the blob-taking filter list constructors: registered once as
+/// `crustify-probe` and selected where the `crustify-probe` attribute is set, its
+/// `check` records the id the filter source carries (the blob's) and keeps a payload of
+/// its own in the list, which its `cleanup` frees when the list is. Stands in for a
+/// filter written through the `git2/sys/filter.h` wrappers (a later run).
+pub mod filter_probe {
+    use std::cell::RefCell;
+    use std::ffi::{CStr, c_char, c_int, c_void};
+    use std::sync::OnceLock;
+
+    use libgit2::ffi;
+
+    thread_local! {
+        /// What the probe's `check` saw on this thread: the source's id, hex, if any.
+        static SEEN: RefCell<Vec<Option<String>>> = const { RefCell::new(Vec::new()) };
+        /// Payloads the probe's `check` made and its `cleanup` freed on this thread.
+        static PAYLOADS: RefCell<(usize, usize)> = const { RefCell::new((0, 0)) };
+    }
+
+    fn hex(id: *const ffi::git_oid) -> String {
+        let mut out = [0u8; 41];
+        // SAFETY: a live id; `out` holds 41 bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// `git_filter.check` of the probe: records the source's id and keeps a payload.
+    unsafe extern "C" fn probe_check(
+        _filter: *mut ffi::git_filter,
+        payload: *mut *mut c_void,
+        src: *const ffi::git_filter_source,
+        _values: *mut *const c_char,
+    ) -> c_int {
+        // SAFETY: libgit2's live source, read for the call.
+        let id = unsafe { ffi::git_filter_source_id(src) };
+        SEEN.with_borrow_mut(|seen| seen.push((!id.is_null()).then(|| hex(id))));
+        PAYLOADS.with_borrow_mut(|p| p.0 += 1);
+        // SAFETY: libgit2's live payload slot; the list hands it back to `probe_cleanup`.
+        unsafe { payload.write(Box::into_raw(Box::new(0x5eed_u64)).cast()) };
+        0
+    }
+
+    /// `git_filter.cleanup` of the probe: frees the payload `probe_check` made.
+    unsafe extern "C" fn probe_cleanup(_filter: *mut ffi::git_filter, payload: *mut c_void) {
+        // SAFETY: the payload `probe_check` boxed, handed back once by the list's free.
+        let value = unsafe { Box::from_raw(payload.cast::<u64>()) };
+        assert_eq!(*value, 0x5eed);
+        PAYLOADS.with_borrow_mut(|p| p.1 += 1);
+    }
+
+    /// Registers the probe once; it is never unregistered, so outlives every list. The
+    /// caller then loads a list selecting it before any test loads its own: libgit2
+    /// marks a registered filter initialised, unsynchronised, the first time a list
+    /// selects it (the crate does so for the built-in ones only).
+    pub fn register() {
+        static PROBE: OnceLock<()> = OnceLock::new();
+        PROBE.get_or_init(|| {
+            super::init();
+            let filter = Box::leak(Box::new(ffi::git_filter::default()));
+            // SAFETY: a live filter struct, filled with the version's defaults.
+            let rc = unsafe { ffi::git_filter_init(filter, ffi::GIT_FILTER_VERSION) };
+            assert_eq!(rc, 0);
+            filter.attributes = c"+crustify-probe".as_ptr();
+            filter.check = Some(probe_check);
+            filter.cleanup = Some(probe_cleanup);
+            // SAFETY: a NUL-terminated name and a filter that lives for the process.
+            let rc = unsafe { ffi::git_filter_register(c"crustify-probe".as_ptr(), filter, 0) };
+            assert_eq!(rc, 0);
+        });
+    }
+
+    /// The ids the probe saw on this thread since the last call, and the payloads
+    /// still unfreed.
+    pub fn seen() -> (Vec<Option<String>>, usize) {
+        let seen = SEEN.with_borrow_mut(std::mem::take);
+        let (made, freed) = PAYLOADS.with_borrow(|p| *p);
+        (seen, made - freed)
+    }
 }

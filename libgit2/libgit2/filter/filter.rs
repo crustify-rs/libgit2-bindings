@@ -59,8 +59,9 @@
 //! set, until those are wrapped: libgit2 only compares the one and tests bits of the
 //! other, so every value is accepted. [`FilterList::load_ext`] takes the options as the
 //! raw `git_filter_options`, which it only copies. The blob the forms ending in
-//! `_with_blob` take is a raw `git_blob` pointer, until the `object` subsystem's run
-//! wraps `git_blob` and replaces them.
+//! `_with_blob` take is an object handle of type blob (an
+//! [`ObjectRef`](crate::libgit2::object::object::ObjectRef), which a blob is); an object
+//! of another type is refused before libgit2 reads it as a blob.
 //!
 //! ## Paths
 //!
@@ -83,6 +84,7 @@ use std::sync::Once;
 use ffibox::{CBorrowedPtr, CBox, CCell, CDrop};
 
 use crate::ffi;
+use crate::libgit2::object::object::ObjectRef;
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
@@ -322,12 +324,28 @@ fn loaded<'r>(
     Ok(list)
 }
 
-/// A blob some caller promised is live for `'b`: what the `_with_blob` raw seams build
-/// from their argument, under their `# Safety` contract, and nothing else does.
+/// The `git_blob` an object of type blob is, live for `'b`, the handle's borrow: what
+/// the `_with_blob` forms build from their object, and nothing else does.
 #[derive(Clone, Copy)]
 struct LiveBlob<'b>(NonNull<ffi::git_blob>, PhantomData<&'b ffi::git_blob>);
 
-impl LiveBlob<'_> {
+impl<'b> LiveBlob<'b> {
+    /// The blob `object` is; for an object of any other type, which libgit2 would read
+    /// as a blob, a `GIT_ERROR_FILTER` error "the object is not a blob", set as the
+    /// thread's.
+    fn of(object: ObjectRef<'b, '_>) -> Result<Self, ErrorBuf> {
+        // SAFETY: the handle addresses a live object; `git_object_type` reads its cached
+        // type.
+        if unsafe { ffi::git_object_type(object.as_ptr()) } != ffi::GIT_OBJECT_BLOB {
+            set(ErrorClass::Filter, c"the object is not a blob");
+            return Err(last());
+        }
+        // A blob object is a `git_blob`, whose first member is the `git_object`; the
+        // handle keeps it alive for `'b`.
+        let blob = NonNull::new(object.as_ptr().cast_mut().cast());
+        Ok(Self(blob.expect("a handle is never NULL"), PhantomData))
+    }
+
     /// The pointer libgit2 takes: the blob, or NULL for none.
     fn as_ptr(blob: Option<Self>) -> *mut ffi::git_blob {
         blob.map_or(ptr::null_mut(), |b| b.0.as_ptr())
@@ -427,35 +445,29 @@ impl<'r> FilterList<'r> {
         Self::load_from(repo, None, path, mode, flags)
     }
 
-    /// [`load`](Self::load) for the content of `blob`: each filter's `check` sees the
-    /// blob's id (`git_filter_source_id`) while it decides whether to apply. The list
-    /// keeps neither the blob nor its id, and libgit2's built-in filters do not read it.
+    /// [`load`](Self::load) for the content of `blob`, an object of type blob (of any
+    /// repository): each filter's `check` sees the blob's id (`git_filter_source_id`)
+    /// while it decides whether to apply. The list keeps neither the blob nor its id,
+    /// and libgit2's built-in filters do not read it.
     ///
-    /// Raw seam: `git_blob` is not wrapped yet; the run wrapping it replaces `blob`
-    /// with a blob handle.
-    ///
-    /// # Safety
-    ///
-    /// `blob` must address a live `git_blob` for the duration of the call; libgit2
-    /// only reads its id, during the call.
+    /// Refuses, with a `GIT_ERROR_FILTER` error "the object is not a blob", an object
+    /// of another type, which libgit2 would read as a blob.
     ///
     /// Wraps: git_filter_list_load
-    pub unsafe fn load_with_blob(
+    pub fn load_with_blob(
         repo: RepositoryRef<'r>,
-        blob: NonNull<ffi::git_blob>,
+        blob: ObjectRef<'_, '_>,
         path: &CStr,
         mode: ffi::git_filter_mode_t,
         flags: u32,
     ) -> Result<Option<FilterListBox<'r>>, ErrorBuf> {
-        // The caller promises `blob` is live for the call, per this function's contract.
-        let blob = LiveBlob(blob, PhantomData);
         Self::load_from(repo, Some(blob), path, mode, flags)
     }
 
-    /// `git_filter_list_load`, with no blob or one live for the call.
+    /// `git_filter_list_load`, with no blob or an object that must be one.
     fn load_from(
         repo: RepositoryRef<'r>,
-        blob: Option<LiveBlob<'_>>,
+        blob: Option<ObjectRef<'_, '_>>,
         path: &CStr,
         mode: ffi::git_filter_mode_t,
         flags: u32,
@@ -464,6 +476,7 @@ impl<'r> FilterList<'r> {
             return Err(last());
         }
         relative(path)?;
+        let blob = blob.map(LiveBlob::of).transpose()?;
         initialise_builtin_filters();
         let mut out = ptr::null_mut();
         let (repo, path) = (repo.as_ptr().cast_mut(), path.as_ptr());
@@ -500,32 +513,24 @@ impl<'r> FilterList<'r> {
     }
 
     /// [`load_ext`](Self::load_ext) for the content of `blob`, as
-    /// [`load_with_blob`](Self::load_with_blob) is for [`load`](Self::load).
-    ///
-    /// Raw seam: as for [`load_with_blob`](Self::load_with_blob).
-    ///
-    /// # Safety
-    ///
-    /// As for [`load_with_blob`](Self::load_with_blob): `blob` must address a live
-    /// `git_blob` for the duration of the call.
+    /// [`load_with_blob`](Self::load_with_blob) is for [`load`](Self::load): an object
+    /// of type blob, refused otherwise.
     ///
     /// Wraps: git_filter_list_load_ext
-    pub unsafe fn load_ext_with_blob(
+    pub fn load_ext_with_blob(
         repo: RepositoryRef<'r>,
-        blob: NonNull<ffi::git_blob>,
+        blob: ObjectRef<'_, '_>,
         path: &CStr,
         mode: ffi::git_filter_mode_t,
         opts: Option<&ffi::git_filter_options>,
     ) -> Result<Option<FilterListBox<'r>>, ErrorBuf> {
-        // The caller promises `blob` is live for the call, per this function's contract.
-        let blob = LiveBlob(blob, PhantomData);
         Self::load_ext_from(repo, Some(blob), path, mode, opts)
     }
 
-    /// `git_filter_list_load_ext`, with no blob or one live for the call.
+    /// `git_filter_list_load_ext`, with no blob or an object that must be one.
     fn load_ext_from(
         repo: RepositoryRef<'r>,
-        blob: Option<LiveBlob<'_>>,
+        blob: Option<ObjectRef<'_, '_>>,
         path: &CStr,
         mode: ffi::git_filter_mode_t,
         opts: Option<&ffi::git_filter_options>,
@@ -534,6 +539,7 @@ impl<'r> FilterList<'r> {
             return Err(last());
         }
         relative(path)?;
+        let blob = blob.map(LiveBlob::of).transpose()?;
         initialise_builtin_filters();
         let mut out = ptr::null_mut();
         let (repo, path) = (repo.as_ptr().cast_mut(), path.as_ptr());

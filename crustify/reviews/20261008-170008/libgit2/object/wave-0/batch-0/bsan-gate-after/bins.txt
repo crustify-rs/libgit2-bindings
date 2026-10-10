@@ -1,0 +1,5 @@
+/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/object/wave-0/batch-0/crustify/rust/target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2-sys/f36692337d518c73/out/libgit2_sys-f36692337d518c73
+/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/object/wave-0/batch-0/crustify/rust/target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/4e6bf93dce848249/out/libgit2-4e6bf93dce848249
+/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/object/wave-0/batch-0/crustify/rust/target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/16ae9b8797456113/out/ub_safe-16ae9b8797456113
+/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/object/wave-0/batch-0/crustify/rust/target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/e52529d9ce12fe6f/out/ub_unsafe-e52529d9ce12fe6f
+/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/object/wave-0/batch-0/crustify/rust/target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/513596211f61704a/out/equiv-513596211f61704a

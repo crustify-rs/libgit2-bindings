@@ -1,0 +1,7 @@
+
+running 448 tests
+test libgit2::object::blob::unit_tests::oversized_slices_are_counted_in_rust ... ignored, scans 2 GiB; run with --ignored
+test libgit2::util::sys::alloc::unit_tests::panic_in_the_implementation_aborts ... ignored, the child's abort path spins under BorrowSanitizer
+
+test result: ok. 446 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 42.06s
+

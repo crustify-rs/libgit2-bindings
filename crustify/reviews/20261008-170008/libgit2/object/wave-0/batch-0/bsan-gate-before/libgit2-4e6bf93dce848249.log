@@ -1,0 +1,5 @@
+
+running 443 tests
+test libgit2::object::blob::unit_tests::oversized_slices_are_counted_in_rust ... ignored, scans 2 GiB; run with --ignored
+test libgit2::util::sys::alloc::unit_tests::panic_in_the_implementation_aborts ... ignored, the child's abort path spins under BorrowSanitizer
+test libgit2::object::mailmap::unit_tests::classifier_agrees_with_libgit2 has been running for over 60 seconds

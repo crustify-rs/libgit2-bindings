@@ -272,9 +272,12 @@ fn buffers_match() {
         MAILMAP.repeat(3),
         b"Real <r@x> <a@x>\nOther <o@x> <a@x>\n".to_vec(),
     ];
+    // BorrowSanitizer makes each parse slow: a sparser sample of prefixes and of the
+    // generated buffers under it.
+    let stride = if cfg!(bsan) { 11 } else { 1 };
     buffers.extend(
         (0..MAILMAP.len())
-            .step_by(7)
+            .step_by(7 * stride)
             .map(|end| MAILMAP[..end].to_vec()),
     );
     let generated = generated_buffers();
@@ -283,7 +286,7 @@ fn buffers_match() {
         "{} generated buffers",
         generated.len()
     );
-    buffers.extend(generated);
+    buffers.extend(generated.into_iter().step_by(stride));
     let (_, _, reference) = c_from_buffer(MAILMAP);
     assert!(mapped(&reference) > 10);
     for buf in &buffers {

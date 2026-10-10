@@ -1,5 +1,6 @@
 //! UB tests for `git2/object.h`: the `git_object` owner, `ObjectArc<'r>`, its
-//! constructors `Object::lookup` and `Object::lookup_prefix`, and its handles.
+//! constructors `Object::lookup`, `Object::lookup_prefix`, `ObjectRef::peel` and
+//! `ObjectRef::lookup_bypath`, and its handles.
 //!
 //! An object is counted, and shared with its repository's cache, which hands the same
 //! object to every lookup of one id (blobs aside, which it does not keep): every owner
@@ -12,7 +13,11 @@
 //! reads each survivor back. Every failing lookup must leave nothing behind, and an id
 //! of another type than the repository's, which libgit2 would format out of bounds,
 //! must be refused before it reaches C. libgit2 copies the id it is given: the tests
-//! overwrite and free each id right after its lookup (BSan).
+//! overwrite and free each id right after its lookup (BSan). A peel or a lookup by
+//! path derives one object from another through the repository: the derived object
+//! owns one reference of its own, whether it is a fresh object, a cached one or the
+//! very object it was derived from, and outlives the object it came from, the trees
+//! read on the way, and cache eviction.
 //!
 //! An object is neither `Send` nor `Sync`, so there is no thread test (its owner and
 //! shared handle staying on their thread is a doctest each); it, its handles and its
@@ -389,4 +394,188 @@ fn type_mismatch_message() {
         c"the requested type does not match the type in the ODB"
     );
     assert_eq!(e.code(), Some(ErrorCode::NotFound));
+}
+
+/// Nested tag `b25fa35` (`refs/tags/test`), of tag `7b43849`, of commit `e90810b`.
+const NESTED_TAG: &str = "b25fa35b38051e4ae45d4222e795f9df2e43f1d1";
+const INNER_TAG: &str = "7b4384978d2493e851f9cca7858815fac9b10980";
+/// Commit `763d71a` (`refs/heads/subtrees`), whose tree nests `ab/de/fgh/1.txt`.
+const SUBTREES: &str = "763d71aadf09a7951596c9746c024e7eece7c7af";
+
+/// Peels and lookups by path count one reference each on what they find, which may
+/// be the object they started from (a peel to its own type), a cached object another
+/// owner holds, or a fresh one: every chain is released in every order, after the
+/// object it was derived from, and C reads each survivor back.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn derived_objects_count_their_own_reference() {
+    let repo = open_testrepo();
+    let tag = Object::lookup(repo.as_ref(), id(NESTED_TAG).as_ref(), None).unwrap();
+    let same = tag.as_ref().peel(Some(ObjectType::Tag)).unwrap();
+    assert!(ObjectArc::ptr_eq(&same, &tag));
+    // `None` peels through the whole tag chain, to the commit.
+    let commit = tag.as_ref().peel(None).unwrap();
+    assert!(!ObjectArc::ptr_eq(&commit, &tag));
+    assert_eq!(object_view(&commit).1, ffi::GIT_OBJECT_COMMIT);
+    let inner = Object::lookup(repo.as_ref(), id(INNER_TAG).as_ref(), None).unwrap();
+    let commit_again = inner.as_ref().peel(Some(ObjectType::Commit)).unwrap();
+    assert!(ObjectArc::ptr_eq(&commit, &commit_again));
+    assert!(ObjectArc::ptr_eq(
+        &commit,
+        &tag.as_ref().peel(Some(ObjectType::Commit)).unwrap()
+    ));
+    let tree = commit.as_ref().peel(None).unwrap();
+    let tree_direct = tag.as_ref().peel(Some(ObjectType::Tree)).unwrap();
+    assert!(ObjectArc::ptr_eq(&tree, &tree_direct));
+    let looked_up = Object::lookup(repo.as_ref(), id(&hex(&tree)).as_ref(), None).unwrap();
+    assert!(ObjectArc::ptr_eq(&tree, &looked_up));
+    let readme = tag.as_ref().lookup_bypath(c"readme.txt", None).unwrap();
+    let readme_blob = tree
+        .as_ref()
+        .lookup_bypath(c"readme.txt", Some(ObjectType::Blob))
+        .unwrap();
+    assert_eq!(object_view(&readme), object_view(&readme_blob));
+    assert_eq!(object_view(&readme).1, ffi::GIT_OBJECT_BLOB);
+    // Blobs are not cached: each lookup by path parses a fresh one.
+    assert!(!ObjectArc::ptr_eq(&readme, &readme_blob));
+
+    let mut chain = vec![
+        tag,
+        same,
+        inner,
+        commit,
+        commit_again,
+        tree,
+        tree_direct,
+        looked_up,
+        readme,
+        readme_blob,
+    ];
+    let views: Vec<_> = chain.iter().map(object_view).collect();
+    for order in 0..3 {
+        let copies: Vec<_> = chain.iter().map(|o| o.as_ref().to_object()).collect();
+        match order {
+            0 => chain.reverse(),
+            1 => chain.rotate_left(3),
+            _ => {}
+        }
+        while let Some(object) = chain.pop() {
+            let _ = object_view(&object);
+        }
+        chain = copies;
+        assert_eq!(chain.iter().map(object_view).collect::<Vec<_>>(), views);
+    }
+    drop(chain);
+    drop(repo);
+}
+
+/// Every refused peel and lookup by path leaves nothing behind (LSan), the trees and
+/// tags read on the way included; the error is libgit2's, with its code.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn refused_derivations_leave_nothing_behind() {
+    let repo = open_testrepo();
+    let blob = Object::lookup(repo.as_ref(), id(BLOB).as_ref(), None).unwrap();
+    let tree = Object::lookup(repo.as_ref(), id(TREE).as_ref(), None).unwrap();
+    let commit = Object::lookup(repo.as_ref(), id(SUBTREES).as_ref(), None).unwrap();
+    let tag = Object::lookup(repo.as_ref(), id(NESTED_TAG).as_ref(), None).unwrap();
+    let kinds = [
+        None,
+        Some(ObjectType::Commit),
+        Some(ObjectType::Tree),
+        Some(ObjectType::Blob),
+        Some(ObjectType::Tag),
+    ];
+    for kind in kinds {
+        if kind != Some(ObjectType::Blob) {
+            assert_failed(blob.as_ref().peel(kind), -12, ErrorClass::Object);
+        }
+        if kind != Some(ObjectType::Tree) {
+            assert_failed(tree.as_ref().peel(kind), -12, ErrorClass::Object);
+        }
+        if matches!(kind, Some(ObjectType::Blob | ObjectType::Tag)) {
+            assert_failed(commit.as_ref().peel(kind), -12, ErrorClass::Object);
+        }
+    }
+    assert_failed(
+        tag.as_ref().peel(Some(ObjectType::Blob)),
+        -19,
+        ErrorClass::Object,
+    );
+    for path in [
+        c"",
+        c"/",
+        c"nope",
+        c"ab/nope",
+        c"ab/de/fgh/nope",
+        c"README/",
+        c"ab//de",
+    ] {
+        for kind in kinds {
+            assert_failed(
+                commit.as_ref().lookup_bypath(path, kind),
+                -3,
+                ErrorClass::Tree,
+            );
+            assert_failed(tag.as_ref().lookup_bypath(path, kind), -3, ErrorClass::Tree);
+            assert_failed(
+                blob.as_ref().lookup_bypath(path, kind),
+                -12,
+                ErrorClass::Object,
+            );
+        }
+    }
+    for (path, kind) in [
+        (c"README", ObjectType::Tree),
+        (c"ab", ObjectType::Blob),
+        (c"ab/de/fgh/1.txt", ObjectType::Commit),
+    ] {
+        let e = commit.as_ref().lookup_bypath(path, Some(kind)).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec), "{e:?}");
+        assert_eq!(e.class(), Some(ErrorClass::Object));
+    }
+    let deep = commit
+        .as_ref()
+        .lookup_bypath(c"ab/de/fgh/1.txt", Some(ObjectType::Blob))
+        .unwrap();
+    assert_eq!(object_view(&deep).1, ffi::GIT_OBJECT_BLOB);
+    drop((blob, tree, commit, tag));
+    assert_eq!(hex(&deep), "1f67fc4386b2d171e0d21be1c447e12660561f9b");
+    drop(deep);
+    drop(repo);
+}
+
+/// Derived objects outlive the eviction of what they came from and of the subtrees
+/// read on the way: with a one-byte cache, every peel step and path component is a
+/// fresh parse, which the result alone keeps alive.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn derived_objects_outlive_cache_eviction() {
+    isolated(
+        concat!(module_path!(), "::derived_objects_outlive_cache_eviction"),
+        || {
+            let repo = open_testrepo();
+            set_cache_max_size(1);
+            for round in 0..3 {
+                let tag = Object::lookup(repo.as_ref(), id(NESTED_TAG).as_ref(), None).unwrap();
+                let tree = tag.as_ref().peel(Some(ObjectType::Tree)).unwrap();
+                let commit = Object::lookup(repo.as_ref(), id(SUBTREES).as_ref(), None).unwrap();
+                let deep = commit
+                    .as_ref()
+                    .lookup_bypath(c"ab/de/fgh/1.txt", None)
+                    .unwrap();
+                let sub = commit
+                    .as_ref()
+                    .lookup_bypath(c"ab/de", Some(ObjectType::Tree))
+                    .unwrap();
+                let from_sub = sub.as_ref().lookup_bypath(c"fgh/1.txt", None).unwrap();
+                drop(tag);
+                drop(commit);
+                assert_eq!(object_view(&tree).1, ffi::GIT_OBJECT_TREE, "round {round}");
+                assert_eq!(hex(&deep), hex(&from_sub));
+                drop(sub);
+                assert_eq!(hex(&from_sub), "1f67fc4386b2d171e0d21be1c447e12660561f9b");
+            }
+        },
+    );
 }

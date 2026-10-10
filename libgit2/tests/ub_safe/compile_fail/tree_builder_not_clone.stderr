@@ -1,0 +1,19 @@
+error[E0599]: the method `clone` exists for struct `ffibox::refs::CBox<TreeBuilder<'_>, TreeBuilderFree>`, but its trait bounds were not satisfied
+  --> tests/ub_safe/compile_fail/tree_builder_not_clone.rs:10:25
+   |
+10 |     let _copy = builder.clone();
+   |                         ^^^^^ method cannot be called due to unsatisfied trait bounds
+   |
+  ::: libgit2/object/tree.rs
+   |
+   | pub struct TreeBuilderFree;
+   | -------------------------- doesn't satisfy `_: CDupClone<TreeBuilder<'_>>`
+   |
+  ::: $FFIBOX/src/refs.rs
+   |
+   | pub struct CBox<T, D: CDrop<T>> {
+   | ------------------------------- doesn't satisfy `_: Clone`
+   |
+   = note: the following trait bounds were not satisfied:
+           `TreeBuilderFree: ffibox::traits::CDupClone<TreeBuilder<'_>>`
+           which is required by `ffibox::refs::CBox<TreeBuilder<'_>, TreeBuilderFree>: Clone`

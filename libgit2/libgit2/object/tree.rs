@@ -40,7 +40,8 @@
 //!   entry of its own: one block of libgit2's allocator holding the struct and, right
 //!   past it, its NUL-terminated name, which `git_tree_entry_free` releases at once.
 //!   It holds nothing else, no tree and no repository, so it may outlive both. Rust
-//!   owns one through a [`TreeEntryBox`], whose `Clone` is `git_tree_entry_dup`.
+//!   owns one through a [`TreeEntryBox`], whose `Clone` is `git_tree_entry_dup` and
+//!   which [`TreeEntry::bypath`] builds from a tree object and a path.
 //! - **Borrowed.** An entry of a tree (`git_tree_entry_byindex`, `_byname`, `_byid`)
 //!   is an element of the tree's entries, its name pointing into the tree's raw data;
 //!   an entry of a tree builder (`git_treebuilder_get`) is the builder's. Either lives
@@ -53,7 +54,7 @@
 //! entries in place only through an exclusive borrow of the builder. An entry is
 //! `Send` and `Sync`.
 
-use core::ffi::c_int;
+use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
@@ -61,9 +62,10 @@ use core::ptr::{self, NonNull};
 use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, define_ctype, impl_cdrop};
 
 use crate::ffi;
-use crate::libgit2::repository::repository::RepositoryRef;
-use crate::libgit2::util::errors::{ErrorBuf, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::object::object::ObjectRef;
+use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 /// The order in which `git_tree_walk` calls back for a tree's entries and those of the
 /// subtrees it loads on the way: either way, once per entry it reaches, each tree's entries in
@@ -464,43 +466,54 @@ impl<'r> TreeBuilder<'r> {
         constructed(rc, unsafe { TreeBuilderBox::from_c(out) })
     }
 
-    /// A builder for `repo` holding a copy of each of `source`'s entries: their names,
-    /// ids and file modes as the tree spells them, unchecked. The builder keeps nothing
-    /// of `source`, which may be freed as soon as this returns.
+    /// A builder for `repo` holding a copy of each entry of `source`, an object of type
+    /// tree: their names, ids and file modes as the tree spells them, unchecked. The
+    /// builder keeps nothing of `source`, which may be dropped as soon as this returns.
     ///
     /// `source` may come from any repository. Its ids are copied as they are, so a tree
     /// of a repository of another object id type gives a builder that writes a malformed
     /// tree, as libgit2 does.
     ///
-    /// Fails, with libgit2's error, only when it runs out of memory, having freed the
-    /// entries it copied.
-    ///
-    /// Raw seam: this crate does not wrap `git_tree` yet.
-    ///
-    /// # Safety
-    ///
-    /// `source` must address a live `git_tree` (its caller holds a reference to it) that
-    /// no one frees during the call.
+    /// Refuses, with a `GIT_ERROR_TREE` error "the object is not a tree", an object of
+    /// another type, which libgit2 would read as a tree. Fails, with libgit2's error,
+    /// when it runs out of memory, having freed the entries it copied.
     ///
     /// Wraps: git_treebuilder_new
-    pub unsafe fn from_tree(
+    pub fn from_tree(
         repo: RepositoryRef<'r>,
-        source: NonNull<ffi::git_tree>,
+        source: ObjectRef<'_, '_>,
     ) -> Result<TreeBuilderBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
         }
+        let Some(source) = as_tree(source) else {
+            return Err(last());
+        };
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
         // the builder only records (no entry is checked while seeding); `source` a live
-        // tree for the call, per this function's contract, only read. The runtime is
-        // pinned.
+        // tree for the call, which the handle it came from keeps alive, only read. The
+        // runtime is pinned.
         let rc = unsafe {
             ffi::git_treebuilder_new(&mut out, repo.as_ptr().cast_mut(), source.as_ptr())
         };
         // SAFETY: as in `new`: a fresh builder for `repo` the caller owns alone, or NULL.
         constructed(rc, unsafe { TreeBuilderBox::from_c(out) })
     }
+}
+
+/// The `git_tree` an object of type tree is, live for as long as the handle; for an
+/// object of any other type, `None`, with a `GIT_ERROR_TREE` error "the object is not a
+/// tree" set as the thread's.
+fn as_tree(object: ObjectRef<'_, '_>) -> Option<NonNull<ffi::git_tree>> {
+    // SAFETY: the handle addresses a live object; `git_object_type` reads its cached
+    // type.
+    if unsafe { ffi::git_object_type(object.as_ptr()) } != ffi::GIT_OBJECT_TREE {
+        set(ErrorClass::Tree, c"the object is not a tree");
+        return None;
+    }
+    // A tree object is a `git_tree`, whose first member is the `git_object`.
+    NonNull::new(object.as_ptr().cast_mut().cast())
 }
 
 /// The builder a `git_treebuilder_new` returning `rc` left in its out slot (adopted as
@@ -521,9 +534,9 @@ define_ctype!(
     /// object it names.
     ///
     /// libgit2 allocates and frees it, so it is only ever reached through a
-    /// [`TreeEntryBox`], for an entry of its own, or a [`TreeEntryRef`] that borrows a
-    /// tree or tree builder (see the [module docs](self#tree-entries)). It is opaque:
-    /// no field is published.
+    /// [`TreeEntryBox`], for an entry of its own ([`bypath`](Self::bypath), or a copy
+    /// of a borrowed one), or a [`TreeEntryRef`] that borrows a tree or tree builder
+    /// (see the [module docs](self#tree-entries)). It is opaque: no field is published.
     ///
     /// A borrowed entry lives no longer than its owner:
     ///
@@ -620,6 +633,47 @@ fn dup(source: TreeEntryRef<'_>) -> Option<TreeEntryBox> {
     // SAFETY: a fresh entry from `git_tree_entry_dup` the caller owns, released by
     // `git_tree_entry_free` as `TreeEntryFree` does.
     unsafe { TreeEntryBox::from_c(out) }
+}
+
+impl TreeEntry {
+    /// The entry at `path` under `tree`, an object of type tree, as a copy of its own:
+    /// each `/`-separated component of `path` is looked up in turn, the subtrees it
+    /// names read from `tree`'s repository, and the last component's entry is copied
+    /// out, as `git_tree_entry_dup` copies one. The result holds nothing of `tree` or
+    /// its repository, and outlives both.
+    ///
+    /// The components are matched as the tree spells them: `.` and `..` name nothing,
+    /// a trailing `/` is accepted only after a tree, and an empty component (an empty
+    /// `path`, or a leading or doubled `/`) is an invalid path.
+    ///
+    /// Refuses, with [`ErrorCode::InvalidSpec`] and a `GIT_ERROR_TREE` error "the
+    /// object is not a tree", an object of another type, which libgit2 would read as a
+    /// tree (a commit or tag is peeled to its tree by
+    /// [`ObjectRef::lookup_bypath`]). Fails with [`ErrorCode::NotFound`] (class
+    /// `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a `/`
+    /// after an entry that is not a tree; and with libgit2's error when a subtree
+    /// cannot be read, or the copy cannot be allocated.
+    ///
+    /// Wraps: git_tree_entry_bypath
+    pub fn bypath(tree: ObjectRef<'_, '_>, path: &CStr) -> Result<TreeEntryBox, RepositoryError> {
+        let Some(tree) = as_tree(tree) else {
+            return Err(RepositoryError::from_libgit2(ErrorCode::InvalidSpec.raw()));
+        };
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; `tree` is a live tree
+        // for the call, which the handle it came from keeps alive, whose repository is
+        // live for that handle's `'r` and used on this thread only, as `RepositoryRef`
+        // allows, where libgit2 looks the subtrees up; `path` is NUL-terminated and
+        // read for the call only.
+        let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_ptr(), path.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` is a fresh entry from `git_tree_entry_dup` the
+        // caller owns, released by `git_tree_entry_free` as `TreeEntryFree` does.
+        let entry = unsafe { TreeEntryBox::from_c(out) };
+        Ok(entry.expect("a lookup succeeded without an entry"))
+    }
 }
 
 impl TreeEntryRef<'_> {
@@ -1107,6 +1161,69 @@ mod unit_tests {
                     }
                     assert!(cloned.is_none());
                     assert_eq!(view(owned.clone().as_ref()), expected("README", README));
+                },
+            );
+        }
+
+        /// `bypath` looks into a tree object at every depth and hands out an owned copy;
+        /// an object of any other type is refused in Rust, with the error set on the
+        /// thread, before libgit2 reads it as a tree (the corrected divergence); and a
+        /// refused allocation for the copy is libgit2's out-of-memory error.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn bypath_looks_only_into_trees() {
+            isolated(
+                concat!(module_path!(), "::bypath_looks_only_into_trees"),
+                || {
+                    use crate::libgit2::object::object::Object;
+                    use crate::libgit2::repository::repository::Repository;
+                    use crate::libgit2::util::errors::ErrorCode;
+                    install_refusing();
+                    let repo =
+                        Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap())
+                            .unwrap();
+                    let lookup = |hex: &CStr| {
+                        let id = Oid::from_string(hex, OidType::Sha1).unwrap();
+                        Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap()
+                    };
+                    let tree = lookup(TREE);
+                    let entry = TreeEntry::bypath(tree.as_ref(), c"ab/de/fgh/1.txt").unwrap();
+                    assert_eq!(view(entry.as_ref()), expected("1.txt", NESTED));
+                    assert_eq!(
+                        view(
+                            TreeEntry::bypath(tree.as_ref(), c"README")
+                                .unwrap()
+                                .as_ref()
+                        ),
+                        expected("README", README)
+                    );
+                    let e = TreeEntry::bypath(tree.as_ref(), c"ab/nope").unwrap_err();
+                    assert_eq!(e.code(), Some(ErrorCode::NotFound));
+                    assert_eq!(e.class(), Some(ErrorClass::Tree));
+
+                    // Not trees: the commit of `TREE`, a blob and a tag.
+                    for hex in [
+                        c"763d71aadf09a7951596c9746c024e7eece7c7af",
+                        README,
+                        c"b25fa35b38051e4ae45d4222e795f9df2e43f1d1",
+                    ] {
+                        let other = lookup(hex);
+                        let e = TreeEntry::bypath(other.as_ref(), c"README").unwrap_err();
+                        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec), "{hex:?}");
+                        assert_eq!(e.class(), Some(ErrorClass::Tree));
+                        assert_eq!(e.message(), c"the object is not a tree");
+                        assert_eq!(last().message(), c"the object is not a tree");
+                    }
+
+                    REFUSE.store(true, SeqCst);
+                    let refused = TreeEntry::bypath(tree.as_ref(), c"README");
+                    REFUSE.store(false, SeqCst);
+                    let e = refused.unwrap_err();
+                    assert_eq!(e.code(), Some(ErrorCode::Generic));
+                    assert_eq!(e.class(), Some(ErrorClass::NoMemory));
+                    drop(tree);
+                    drop(repo);
+                    assert_eq!(view(entry.as_ref()), expected("1.txt", NESTED));
                 },
             );
         }

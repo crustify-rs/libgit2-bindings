@@ -43,7 +43,10 @@ use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 
 use libgit2::ffi;
+use libgit2::libgit2::core::types::ObjectType;
 use libgit2::libgit2::filter::filter::{FilterList, FilterListBox};
+use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectRef};
+use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 use libgit2::libgit2::util::errors::ErrorBuf;
 
@@ -294,22 +297,37 @@ impl Workdir {
         self.box_().as_c_ptr()
     }
 
-    /// A new blob of `content`, looked up: the caller frees it.
-    fn blob(&self, content: &[u8]) -> NonNull<ffi::git_blob> {
+    /// Writes a blob of `content`; its id.
+    fn write_blob(&self, content: &[u8]) -> ffi::git_oid {
         let mut id = ffi::git_oid::default();
-        let mut blob = ptr::null_mut();
-        // SAFETY: writable slots, the live repository and `content`, read for the call.
-        unsafe {
-            let rc = ffi::git_blob_create_from_buffer(
+        // SAFETY: a writable id, the live repository and `content`, read for the call.
+        let rc = unsafe {
+            ffi::git_blob_create_from_buffer(
                 &mut id,
                 self.raw(),
                 content.as_ptr().cast(),
                 content.len(),
-            );
-            assert_eq!(rc, 0);
-            assert_eq!(ffi::git_blob_lookup(&mut blob, self.raw(), &id), 0);
-        }
+            )
+        };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    /// A new blob of `content`, looked up raw for the C side: the caller frees it.
+    fn blob(&self, content: &[u8]) -> NonNull<ffi::git_blob> {
+        let id = self.write_blob(content);
+        let mut blob = ptr::null_mut();
+        // SAFETY: a writable slot, the live repository and a live id of its type.
+        let rc = unsafe { ffi::git_blob_lookup(&mut blob, self.raw(), &id) };
+        assert_eq!(rc, 0);
         NonNull::new(blob).unwrap()
+    }
+
+    /// A new blob of `content`, looked up as an object for the Rust side.
+    fn blob_object(&self, content: &[u8]) -> ObjectArc<'_> {
+        let id = self.write_blob(content);
+        let id = Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap();
+        Object::lookup(self.box_().as_ref(), id.as_ref(), Some(ObjectType::Blob)).unwrap()
     }
 }
 
@@ -423,22 +441,19 @@ fn c_load(
 /// The Rust side, as `c_load`.
 fn rust_load<'r>(
     wd: &'r Workdir,
-    blob: Option<NonNull<ffi::git_blob>>,
+    blob: Option<ObjectRef<'_, '_>>,
     path: &CStr,
     mode: ffi::git_filter_mode_t,
     opts: Opts<'_>,
 ) -> (Option<FilterListBox<'r>>, Built) {
     let repo = wd.box_().as_ref();
-    // SAFETY: the blob, if any, is live for the call.
-    let result = unsafe {
-        match (opts, blob) {
-            (Opts::Flags(flags), None) => FilterList::load(repo, path, mode, flags),
-            (Opts::Flags(flags), Some(blob)) => {
-                FilterList::load_with_blob(repo, blob, path, mode, flags)
-            }
-            (Opts::Ext(o), None) => FilterList::load_ext(repo, path, mode, o),
-            (Opts::Ext(o), Some(blob)) => FilterList::load_ext_with_blob(repo, blob, path, mode, o),
+    let result = match (opts, blob) {
+        (Opts::Flags(flags), None) => FilterList::load(repo, path, mode, flags),
+        (Opts::Flags(flags), Some(blob)) => {
+            FilterList::load_with_blob(repo, blob, path, mode, flags)
         }
+        (Opts::Ext(o), None) => FilterList::load_ext(repo, path, mode, o),
+        (Opts::Ext(o), Some(blob)) => FilterList::load_ext_with_blob(repo, blob, path, mode, o),
     };
     match result {
         Err(e) => (None, Built::Failed(rust_error(e))),
@@ -461,15 +476,16 @@ fn compare(
 ) {
     let case = format!("{path:?} mode {mode} blob {with_blob}");
     let (c_blob, r_blob) = if with_blob {
-        (Some(c.blob(b"blob\n")), Some(r.blob(b"blob\n")))
+        (Some(c.blob(b"blob\n")), Some(r.blob_object(b"blob\n")))
     } else {
         (None, None)
     };
     let (c_list, c_built) = c_load(c.raw(), c_blob, path, mode, opts);
     let c_seen = take_seen();
-    let (mut r_list, r_built) = rust_load(r, r_blob, path, mode, opts);
+    let (mut r_list, r_built) = rust_load(r, r_blob.as_ref().map(|b| b.as_ref()), path, mode, opts);
     let r_seen = take_seen();
-    c_blob.into_iter().chain(r_blob).for_each(free_blob);
+    c_blob.into_iter().for_each(free_blob);
+    drop(r_blob);
     assert_eq!(c_built, r_built, "{case}");
     assert_eq!(c_seen, r_seen, "{case}");
     assert_eq!(c_list.is_null(), r_list.is_none(), "{case}");

@@ -39,7 +39,11 @@
 //! # Looking objects up
 //!
 //! [`Object::lookup`] and [`Object::lookup_prefix`] build an owner from a repository
-//! and an id, whose type libgit2 never checks against the repository's. A full-length
+//! and an id; [`ObjectRef::peel`] and [`ObjectRef::lookup_bypath`] derive one from an
+//! object, through its repository: a tag's target or a commit's tree, and the object
+//! at a path under a tree, each one more counted reference of the repository's cache
+//! or a fresh parse. The lookups by id take an id whose type libgit2 never checks
+//! against the repository's. A full-length
 //! id goes to the object database as is, whose loose backend formats it into a path
 //! sized for the repository's id type: an id of another type overflows that path (a
 //! SHA-256 id in a SHA-1 repository) or leaves part of it unwritten (the converse). A
@@ -49,6 +53,7 @@
 //! So the wrappers refuse an id of another type than the repository's, at any length,
 //! before the call, with libgit2's own wording for the mismatch.
 
+use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
@@ -67,7 +72,9 @@ use crate::libgit2::util::sys::errors::set;
 ///
 /// libgit2 allocates, counts and frees it, so it is only ever reached through an
 /// [`ObjectArc`] and its handles, built by [`lookup`](Self::lookup) and
-/// [`lookup_prefix`](Self::lookup_prefix). It is opaque: no field is published.
+/// [`lookup_prefix`](Self::lookup_prefix), or derived from another object by
+/// [`ObjectRef::peel`] and [`ObjectRef::lookup_bypath`]. It is opaque: no field is
+/// published.
 ///
 /// `'r` is the borrow of the repository the object was looked up in: routines that
 /// look further objects up through it reach that repository, so it lives no longer
@@ -195,6 +202,94 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
         // SAFETY: the reference just counted, given to the result, which `git_object_free`
         // releases; the object's repository outlives `'r`, which the result carries.
         unsafe { ObjectArc::from_raw(object.as_ptr()) }.expect("a handle is never NULL")
+    }
+
+    /// The object this one peels to, of type `kind`: the same object when it is already
+    /// of that type (one more reference, as [`to_object`](Self::to_object) takes one); a
+    /// tag's target, followed through nested tags, for a tag; a commit's tree for a
+    /// commit. For `None`, the first object of another type than this one: what a
+    /// tag's chain of tags ends in, or a commit's tree.
+    ///
+    /// Each step looks the next object up in the repository, through the cache it
+    /// shares with every lookup, so the result lives no longer than the repository's
+    /// borrow `'r`, as this object does.
+    ///
+    /// Fails with [`ErrorCode::InvalidSpec`] (class `GIT_ERROR_OBJECT`, "the
+    /// git_object of id '…' can not be successfully peeled into a …") when the types
+    /// cannot be combined: a blob or tree peeled to any other type, `None` included;
+    /// a commit peeled to a commit's parent types; and with [`ErrorCode::Peel`] (same
+    /// message) when a tag's chain ends in an object of another type than `kind`, such
+    /// as a tag of a commit peeled to a blob. Fails with libgit2's error when a target
+    /// cannot be read from the object database.
+    ///
+    /// Wraps: git_object_peel
+    pub fn peel(&self, kind: Option<ObjectType>) -> Result<ObjectArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
+        // live object for `'a`, whose repository, borrowed for `'r`, is live and used
+        // on this thread only, as `RepositoryRef` allows: libgit2 counts one more
+        // reference on this object, or looks its targets up through the repository,
+        // filling the cache; the target type is a named one or `GIT_OBJECT_ANY`, which
+        // the routine's argument check accepts.
+        let rc =
+            unsafe { ffi::git_object_peel(&mut out, self.as_ptr(), ObjectType::raw_or_any(kind)) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` holds one counted reference to a live object of the
+        // same repository, borrowed for `'r`, given to the result and released by
+        // `git_object_free`.
+        let object = unsafe { ObjectArc::from_c(out) };
+        Ok(object.expect("a peel succeeded without an object"))
+    }
+
+    /// The object at `path` under this one, of type `kind`, or of any type for `None`.
+    /// This object is first peeled to a tree ([`peel`](Self::peel) with
+    /// [`ObjectType::Tree`]: itself, a commit's tree, or what a tag chain ends in),
+    /// then each `/`-separated component of `path` is looked up in turn, the last
+    /// naming the entry whose object is looked up in the repository.
+    ///
+    /// The components are matched as the tree spells them: `.` and `..` name nothing,
+    /// a trailing `/` is accepted only after a tree, and an empty component (an empty
+    /// `path`, or a leading or doubled `/`) is an invalid path.
+    ///
+    /// Fails as [`peel`](Self::peel) does when this object cannot be peeled to a tree
+    /// (a blob, or a tag of one); with [`ErrorCode::NotFound`] (class
+    /// `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a `/` after
+    /// an entry that is not a tree; with [`ErrorCode::InvalidSpec`] (class
+    /// `GIT_ERROR_OBJECT`, "object at path '…' is not of the asked-for type …") when
+    /// the entry's object is not of type `kind`; and with libgit2's error when a tree
+    /// or the object cannot be read.
+    ///
+    /// The result lives no longer than the repository's borrow `'r`, as this object
+    /// does.
+    ///
+    /// Wraps: git_object_lookup_bypath
+    pub fn lookup_bypath(
+        &self,
+        path: &CStr,
+        kind: Option<ObjectType>,
+    ) -> Result<ObjectArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `peel`: `out` is a writable slot, the handle addresses a live
+        // object whose repository is live for `'r` and used on this thread only, where
+        // libgit2 looks the trees and the entry's object up; `path` is NUL-terminated
+        // and read for the call only; the type is a named one or `GIT_OBJECT_ANY`.
+        let rc = unsafe {
+            ffi::git_object_lookup_bypath(
+                &mut out,
+                self.as_ptr(),
+                path.as_ptr(),
+                ObjectType::raw_or_any(kind),
+            )
+        };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: as in `peel`: one counted reference to a live object of the
+        // repository, given to the result.
+        let object = unsafe { ObjectArc::from_c(out) };
+        Ok(object.expect("a lookup succeeded without an object"))
     }
 }
 
@@ -568,6 +663,48 @@ mod unit_tests {
             view(copy.as_ref()),
             (TREE.to_str().unwrap().into(), ffi::GIT_OBJECT_TREE)
         );
+    }
+
+    /// A peel and a lookup by path derive an owned reference from a borrowed handle:
+    /// the same object for a peel to its own type, otherwise one looked up through the
+    /// repository; the policy settles each.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn peels_and_path_lookups_derive_owned_references() {
+        let repo = open();
+        let commit = Object::lookup(repo.as_ref(), sha1(COMMIT).as_ref(), None).unwrap();
+        let same = commit.as_ref().peel(Some(ObjectType::Commit)).unwrap();
+        assert!(ObjectArc::ptr_eq(&same, &commit));
+        let tree = commit.as_ref().peel(None).unwrap();
+        assert_eq!(
+            view(tree.as_ref()),
+            (TREE.to_str().unwrap().into(), ffi::GIT_OBJECT_TREE)
+        );
+        assert!(ObjectArc::ptr_eq(
+            &tree,
+            &Object::lookup(repo.as_ref(), sha1(TREE).as_ref(), None).unwrap()
+        ));
+        let e = tree.as_ref().peel(Some(ObjectType::Commit)).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec));
+        assert_eq!(e.class(), Some(ErrorClass::Object));
+
+        let readme = commit.as_ref().lookup_bypath(c"README", None).unwrap();
+        let from_tree = tree
+            .as_ref()
+            .lookup_bypath(c"README", Some(ObjectType::Blob))
+            .unwrap();
+        assert_eq!(view(readme.as_ref()), view(from_tree.as_ref()));
+        assert_eq!(view(readme.as_ref()).1, ffi::GIT_OBJECT_BLOB);
+        let e = commit
+            .as_ref()
+            .lookup_bypath(c"README", Some(ObjectType::Tree))
+            .unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::InvalidSpec));
+        let e = commit.as_ref().lookup_bypath(c"nope", None).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+        assert_eq!(e.class(), Some(ErrorClass::Tree));
+        drop((commit, same, tree));
+        assert_eq!(view(readme.as_ref()).1, ffi::GIT_OBJECT_BLOB);
     }
 
     /// The cache's reference is never visible, so an owner never proves itself sole:

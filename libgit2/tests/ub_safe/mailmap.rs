@@ -134,7 +134,9 @@ fn every_constructor_builds_an_owner_freed_once() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn adversarial_buffers_parse_without_ub() {
-    let long_name = "N".repeat(1 << 16);
+    // BorrowSanitizer makes libgit2's byte-by-byte parse of a long name, and each
+    // entry's allocations, slow: smaller inputs under it.
+    let long_name = "N".repeat(if cfg!(bsan) { 1 << 10 } else { 1 << 16 });
     let buffers: Vec<Vec<u8>> = vec![
         b"<".to_vec(),
         b">".to_vec(),
@@ -148,15 +150,17 @@ fn adversarial_buffers_parse_without_ub() {
         b"A <a@x> B <b@x> C <c@x>\n".to_vec(),
         b"\xff\xfe <\xc3\xa9@x> \x80 <\x81@x>\r\n".to_vec(),
         format!("{long_name} <long@x> {long_name} <old@x>").into_bytes(),
-        MAILMAP.repeat(64),
+        MAILMAP.repeat(if cfg!(bsan) { 4 } else { 64 }),
         MAILMAP[..MAILMAP.len() - 3].to_vec(),
     ];
     let mut kept = Vec::new();
     for buf in &buffers {
         kept.push(Mailmap::from_buffer(buf).unwrap());
     }
-    // Every prefix of the reference file, each cut mid-line or mid-email.
-    for end in 0..MAILMAP.len() {
+    // Every prefix of the reference file, each cut mid-line or mid-email (a sample of
+    // them under BorrowSanitizer).
+    let stride = if cfg!(bsan) { 37 } else { 1 };
+    for end in (0..MAILMAP.len()).step_by(stride) {
         drop(Mailmap::from_buffer(&MAILMAP[..end]).unwrap());
     }
     drop(buffers);
