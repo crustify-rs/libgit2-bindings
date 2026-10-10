@@ -1,0 +1,35 @@
+error[E0597]: `headers` does not live long enough
+  --> tests/ub_safe/compile_fail/create_ext_options_borrows_outlive_owner.rs:10:44
+   |
+ 9 |         let headers = vec![Header::new(c"f", c"v")];
+   |             ------- binding `headers` declared here
+10 |         options.as_mut().set_extra_headers(&headers);
+   |                                            ^^^^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `headers` dropped here while still borrowed
+12 |     let _ = options.as_ref().extra_headers();
+   |             ------- borrow later used here
+
+error[E0597]: `name` does not live long enough
+  --> tests/ub_safe/compile_fail/create_ext_options_borrows_outlive_owner.rs:17:46
+   |
+16 |         let name = CString::new("refs/heads/main").unwrap();
+   |             ---- binding `name` declared here
+17 |         options.as_mut().set_update_ref(Some(&name));
+   |                                              ^^^^^ borrowed value does not live long enough
+18 |     }
+   |     - `name` dropped here while still borrowed
+19 |     let _ = options.as_ref().update_ref();
+   |             ------- borrow later used here
+
+error[E0597]: `value` does not live long enough
+  --> tests/ub_safe/compile_fail/create_ext_options_borrows_outlive_owner.rs:25:38
+   |
+24 |         let value = CString::new("v").unwrap();
+   |             ----- binding `value` declared here
+25 |         headers = [Header::new(c"f", &value)];
+   |                                      ^^^^^^ borrowed value does not live long enough
+26 |     }
+   |     - `value` dropped here while still borrowed
+27 |     options.as_mut().set_extra_headers(&headers);
+   |                                        -------- borrow later used here

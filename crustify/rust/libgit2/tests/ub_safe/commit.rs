@@ -1,27 +1,31 @@
-//! UB tests for `git2/commit.h`: the `CommitArray` value held by its `CommitArrayVal`
-//! owner, its handles and their accessors, and the `git_commitarray_dispose` policy.
+//! UB tests for `git2/commit.h`: the `Commit` owner, `CommitArc<'r>`, its lookups,
+//! handles and object conversions; the `CommitArray` value held by its `CommitArrayVal`
+//! owner, its handles, the commits it lends and moves in and out, and the
+//! `git_commitarray_dispose` policy; the `Header` value; and the `CreateExtOptions`
+//! value and its handles.
 //!
 //! Each filled array's buffer is exactly `len` commit pointers long (libgit2 detaches
-//! a `git_vector` sized to them), so ASan flags a read past them; every commit
-//! reference and buffer must be released exactly once, whether the array is cleared,
-//! dropped, or dropped after its repository (ASan: double free, use after free; LSan:
-//! leak). Only the empty array is built without libgit2, so little runs under Miri.
-//! Illegal uses are compile-fail doctests on the crate: `commit_ptrs` outliving its
-//! array, a `clone`, sending an array to another thread.
+//! a `git_vector` sized to them, `set_commits` allocates that many), so ASan flags a
+//! read past them; every commit reference and buffer must be released exactly once,
+//! whether the array is cleared, emptied by `take`, refilled or dropped (ASan: double
+//! free, use after free; LSan: leak). Only the empty array is built without libgit2,
+//! so little runs under Miri. Illegal uses are compile-fail cases and doctests on the
+//! crate: a commit or an array outliving its repository, a lent commit outliving its
+//! array, a `clone`, sending an array or a commit to another thread.
 
 use std::sync::Barrier;
 use std::thread;
 
 use libgit2::libgit2::config::config::Config;
-use libgit2::libgit2::object::commit::{CommitArray, CommitArrayRef};
+use libgit2::libgit2::object::commit::{CommitArray, CommitArrayRef, CommitArrayVal};
 
 use crate::fixture::commit_and_config::{
     EMPTY, MERGEDREPO, OpenRepo, TESTREPO, commit_id, commit_parents,
 };
 use crate::fixture::isolated;
 
-fn ids(array: CommitArrayRef<'_>) -> Vec<String> {
-    array.commit_ptrs().elems().map(commit_id).collect()
+fn ids(array: CommitArrayRef<'_, '_>) -> Vec<String> {
+    array.iter().map(commit_id).collect()
 }
 
 const HEAD: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
@@ -30,23 +34,31 @@ const MERGED: [&str; 2] = [
     "e2809157a7766f272e4cfe26e61ef2678a5357ff",
 ];
 
-/// The empty array, built, read, cleared and dropped without libgit2.
+/// The empty array, built, read, cleared, emptied and dropped without libgit2.
 #[test]
 fn empty_arrays_never_reach_libgit2() {
-    let mut array = CommitArray::new();
+    let mut array: CommitArrayVal<'static> = CommitArray::new();
     assert!(array.as_ref().is_empty());
     assert_eq!(array.as_ref().len(), 0);
-    let run = array.as_ref().commit_ptrs();
-    assert!(run.is_empty() && run.elem(0).is_none() && run.slice(1..).is_none());
+    assert!(array.as_ref().get(0).is_none() && array.as_ref().get(usize::MAX).is_none());
+    assert_eq!(array.as_ref().iter().next_back().map(commit_id), None);
     array.as_mut().clear();
     array.as_mut().clear();
+    assert!(array.as_mut().take().is_empty());
+    assert!(array.as_mut().set_commits(Vec::new()).is_ok());
     assert_eq!(format!("{:?}", array.as_ref()), "[]");
     assert_eq!(format!("{:?}", array.as_mut()), "[]");
     let bare = array.into_inner();
     assert!(bare.as_ref().is_empty());
+    assert!(
+        CommitArray::from_commits(Vec::new())
+            .unwrap()
+            .as_ref()
+            .is_empty()
+    );
 }
 
-/// Filled arrays read every commit in bounds, and release each reference once, through
+/// Filled arrays lend every commit in bounds, and release each reference once, through
 /// `clear` and through the drop, reads after a clear included.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -56,20 +68,16 @@ fn filled_arrays_read_clear_and_release() {
     let r = array.as_ref();
     assert_eq!(r.len(), 2);
     assert_eq!(ids(r), MERGED);
-    let run = r.commit_ptrs();
-    assert!(run.elem(2).is_none() && run.slice(..3).is_none());
+    assert!(r.get(2).is_none());
+    assert_eq!(commit_id(r.get(1).unwrap()), MERGED[1]);
     assert_eq!(
-        run.slice(1..)
-            .unwrap()
-            .elems()
-            .map(commit_id)
-            .collect::<Vec<_>>(),
-        [MERGED[1]]
+        r.iter().rev().map(commit_id).collect::<Vec<_>>(),
+        [MERGED[1], MERGED[0]]
     );
-    assert_eq!(format!("{r:?}").matches("0x").count(), 2);
+    assert_eq!(format!("{r:?}"), "[Commit { .. }, Commit { .. }]");
 
     array.as_mut().clear();
-    assert!(array.as_ref().is_empty() && array.as_ref().commit_ptrs().is_empty());
+    assert!(array.as_ref().is_empty() && array.as_ref().get(0).is_none());
     array.as_mut().clear();
 
     // The same commits held by several arrays at once are counted references of the
@@ -78,24 +86,68 @@ fn filled_arrays_read_clear_and_release() {
     for (i, a) in arrays.into_iter().enumerate().rev() {
         assert_eq!(ids(a.as_ref()), MERGED, "array {i}");
     }
-    let unborn = commit_parents(&OpenRepo::open(EMPTY));
+    let empty = OpenRepo::open(EMPTY);
+    let unborn = commit_parents(&empty);
     assert!(unborn.as_ref().is_empty());
 }
 
-/// Arrays dropped after their repository (the parent first): the commits outlive it.
+/// Commits lent by an array and copied out of it outlive the array; commits taken out
+/// of one array and moved into another keep their single references (ASan: a double
+/// release; LSan: a leak).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
-fn arrays_outlive_their_repository() {
+fn commits_move_between_arrays_and_outlive_them() {
+    let repo = OpenRepo::open(MERGEDREPO);
+    let mut first = commit_parents(&repo);
+    let copied: Vec<_> = first.as_ref().iter().map(|c| c.to_commit()).collect();
+    let taken = first.as_mut().take();
+    assert!(first.as_ref().is_empty());
+    drop(first);
+    assert_eq!(taken.len(), 2);
+
+    let mut second = CommitArray::from_commits(taken).unwrap();
+    assert_eq!(ids(second.as_ref()), MERGED);
+    // Replacing releases the old commits; the copies keep theirs.
+    second.as_mut().set_commits(copied.clone()).unwrap();
+    second
+        .as_mut()
+        .set_commits(copied.iter().rev().cloned().collect())
+        .unwrap();
+    assert_eq!(ids(second.as_ref()), [MERGED[1], MERGED[0]]);
+    let lent = second.as_ref().get(0).unwrap().to_commit();
+    drop(second);
+    assert_eq!(commit_id(lent.as_ref()), MERGED[1]);
+
+    // Many arrays of the same commits, refilled and emptied in turn.
+    let mut arrays: Vec<_> = (0..8)
+        .map(|_| CommitArray::from_commits(copied.clone()).unwrap())
+        .collect();
+    for (i, array) in arrays.iter_mut().enumerate() {
+        if i % 2 == 0 {
+            drop(array.as_mut().take());
+        } else {
+            array.as_mut().set_commits(vec![lent.clone()]).unwrap();
+        }
+    }
+    drop(copied);
+    for (i, array) in arrays.iter().enumerate() {
+        assert_eq!(array.as_ref().len(), i % 2, "array {i}");
+    }
+}
+
+/// Arrays released before their repository, after their commits were read: the
+/// commits are released through the repository's cache, which is still live.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn arrays_go_before_their_repository() {
     let repo = OpenRepo::open(TESTREPO);
     let kept = commit_parents(&repo);
     let mut cleared = commit_parents(&repo);
-    let read_before = ids(kept.as_ref());
-    drop(repo);
-    assert_eq!(ids(kept.as_ref()), read_before);
-    assert_eq!(read_before, [HEAD]);
+    assert_eq!(ids(kept.as_ref()), [HEAD]);
     cleared.as_mut().clear();
     drop(cleared);
     drop(kept);
+    drop(repo);
 }
 
 /// Dropping and clearing empty arrays on one thread while another performs the
@@ -112,8 +164,9 @@ fn empty_drops_do_not_race_the_first_init() {
                 s.spawn(|| {
                     barrier.wait();
                     for _ in 0..200 {
-                        let mut array = CommitArray::new();
+                        let mut array: CommitArrayVal<'_> = CommitArray::new();
                         array.as_mut().clear();
+                        drop(array.as_mut().take());
                         drop(array);
                     }
                 });
@@ -138,6 +191,8 @@ fn arrays_on_their_own_threads() {
                 for _ in 0..8 {
                     let mut array = commit_parents(&repo);
                     assert_eq!(ids(array.as_ref()), MERGED);
+                    let taken = array.as_mut().take();
+                    array.as_mut().set_commits(taken).unwrap();
                     array.as_mut().clear();
                 }
             });
@@ -290,4 +345,410 @@ mod header {
         });
         assert_eq!(*seen.lock().unwrap(), 4);
     }
+}
+
+/// The commit owner: `CommitArc<'r>`, its constructors `Commit::lookup` and
+/// `Commit::lookup_prefix`, its handles, and its conversions to and from objects.
+///
+/// A commit is counted and shared with its repository's cache, which hands the same
+/// commit to every lookup of one id: every owner gives back its one reference through
+/// `git_commit_free` exactly once, and every clone, `to_commit` and conversion takes or
+/// moves exactly one. A miscount frees a commit the cache or another owner still
+/// reads, which ASan flags, or leaks it, which LSan does. The tests share commits
+/// between lookups, clones, conversions and arrays, drop them in every order, let the
+/// cache evict commits owners still hold (a tiny cache limit) and run with the cache
+/// off (a fresh commit per lookup). Every failing lookup must leave nothing behind, an
+/// object of another type must never pass for a commit, and an id of another type
+/// than the repository's must be refused before it reaches C. libgit2 copies the id it
+/// is given: the tests overwrite and drop each id right after its lookup (BSan).
+///
+/// A commit is neither `Send` nor `Sync`, so there is no thread test (doctests); it,
+/// its handles and its clones cannot outlive the repository, nor a handle its owner,
+/// and no owner lends an exclusive handle (`compile_fail/`).
+mod commit {
+    use std::ffi::CString;
+
+    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::object::commit::{Commit, CommitArc, CommitArray, CommitRef};
+    use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::commit_and_config::commit_id;
+    use crate::fixture::isolated;
+    use crate::fixture::object_and_tree_entry::{
+        enable_caching, object_view, open_testrepo, set_cache_max_size,
+    };
+
+    /// Commits of `testrepo.git`.
+    const COMMITS: [&str; 8] = [
+        "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        "be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+        "c47800c7266a2be04c571c04d5a6614691ea99bd",
+        "9fd738e8f7967c078dceed8190330fc8648ee56a",
+        "4a202b346bb0fb0db7eff3cffeb3c70babbd2045",
+        "5b5b025afb0b4c913b4c338a42934a3863bf3644",
+        "8496071c1b46c854b31185ea97743be6a8774479",
+        "763d71aadf09a7951596c9746c024e7eece7c7af",
+    ];
+    const TREE: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
+    const BLOB: &str = "a8233120f6ad708f843d861ce2b7228ec4e3dec6";
+    const TAG: &str = "b25fa35b38051e4ae45d4222e795f9df2e43f1d1";
+
+    fn id(hex: &str) -> Oid {
+        Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap()
+    }
+
+    fn hex(commit: &CommitArc<'_>) -> String {
+        commit_id(commit.as_ref())
+    }
+
+    fn assert_failed(result: Result<CommitArc<'_>, RepositoryError>, code: i32, class: ErrorClass) {
+        let e = result.unwrap_err();
+        assert_eq!((e.raw_code(), e.class()), (code, Some(class)), "{e:?}");
+    }
+
+    /// Lookups by id and by prefix, clones and `to_commit` copies share one commit
+    /// with the cache, and each owner releases its own reference, in every order. The
+    /// id is overwritten and dropped right after each lookup.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owners_share_one_commit_and_release_in_every_order() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        let mut held: Vec<CommitArc<'_>> = Vec::new();
+        for (i, hex) in COMMITS.iter().enumerate() {
+            // On the heap, so a read after the free is flagged.
+            let mut oid = Box::new(id(hex));
+            let full = Commit::lookup(r, Oid::as_ref(&oid)).unwrap();
+            let short = Commit::lookup_prefix(r, Oid::as_ref(&oid), 7 + i).unwrap();
+            Oid::as_mut(&mut oid).set_id([0xff; 32]);
+            drop(oid);
+            assert!(CommitArc::ptr_eq(&full, &short));
+            let copy = full.as_ref().to_commit();
+            let clone = short.clone();
+            assert!(CommitArc::ptr_eq(&copy, &clone));
+            match i % 3 {
+                0 => drop((full, short)),
+                1 => {
+                    drop(short);
+                    held.push(full);
+                }
+                _ => held.push(short),
+            }
+            held.push(copy);
+            drop(clone);
+        }
+        for owner in held.iter().rev() {
+            assert!(COMMITS.contains(&hex(owner).as_str()));
+        }
+        // Drop from both ends towards the middle.
+        while let Some(last) = held.pop() {
+            let id = hex(&last);
+            if !held.is_empty() {
+                let first = held.remove(0);
+                drop(last);
+                assert!(COMMITS.contains(&hex(&first).as_str()));
+            }
+            assert!(COMMITS.contains(&id.as_str()));
+        }
+    }
+
+    /// With a tiny cache, commits are evicted while owners hold them; with the cache
+    /// off, every lookup parses a fresh commit. Each owner keeps its commit alive
+    /// either way.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owners_survive_eviction_and_a_disabled_cache() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::owners_survive_eviction_and_a_disabled_cache"
+            ),
+            || {
+                set_cache_max_size(1);
+                let repo = open_testrepo();
+                let first: Vec<_> = COMMITS
+                    .iter()
+                    .map(|h| Commit::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
+                    .collect();
+                let again: Vec<_> = COMMITS
+                    .iter()
+                    .map(|h| Commit::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
+                    .collect();
+                for (a, b) in first.iter().zip(&again) {
+                    assert_eq!(hex(a), hex(b));
+                }
+                drop(first);
+                enable_caching(false);
+                let fresh = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
+                let other = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
+                assert!(!CommitArc::ptr_eq(&fresh, &other));
+                let array = CommitArray::from_commits(vec![fresh, other.clone()]).unwrap();
+                drop(other);
+                assert_eq!(
+                    array.as_ref().iter().map(commit_id).collect::<Vec<_>>(),
+                    [COMMITS[0]; 2]
+                );
+                drop(again);
+            },
+        );
+    }
+
+    /// Failing lookups leave nothing behind: objects of other types, missing and
+    /// ambiguous ids, ids of another type, and a repository without an object database.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failing_lookups_leave_nothing() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        for other in [TREE, BLOB, TAG] {
+            assert_failed(
+                Commit::lookup(r, id(other).as_ref()),
+                ErrorCode::NotFound.raw(),
+                ErrorClass::Invalid,
+            );
+            assert_failed(
+                Commit::lookup_prefix(r, id(other).as_ref(), 10),
+                ErrorCode::NotFound.raw(),
+                ErrorClass::Invalid,
+            );
+        }
+        assert_failed(
+            Commit::lookup(r, Oid::zero(OidType::Sha1).as_ref()),
+            ErrorCode::NotFound.raw(),
+            ErrorClass::Odb,
+        );
+        for len in [0, 1, 3] {
+            assert_failed(
+                Commit::lookup_prefix(r, id(COMMITS[0]).as_ref(), len),
+                ErrorCode::Ambiguous.raw(),
+                ErrorClass::Object,
+            );
+        }
+        let wide = Oid::from_raw(&[0xa6; 32], OidType::Sha256).unwrap();
+        assert_failed(Commit::lookup(r, wide.as_ref()), -1, ErrorClass::Invalid);
+        assert_failed(
+            Commit::lookup_prefix(r, wide.as_ref(), 64),
+            -1,
+            ErrorClass::Invalid,
+        );
+        let pathless = Repository::new().unwrap();
+        assert!(Commit::lookup(pathless.as_ref(), id(COMMITS[0]).as_ref()).is_err());
+        // The repository still answers.
+        assert_eq!(
+            hex(&Commit::lookup(r, id(COMMITS[0]).as_ref()).unwrap()),
+            COMMITS[0]
+        );
+    }
+
+    /// A commit seen and converted as an object, and back: the same commit, one
+    /// reference moved or counted per owner; objects of other types are refused and
+    /// handed back usable.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn object_conversions_move_one_reference() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        let object = Object::lookup(r, id(COMMITS[1]).as_ref(), None).unwrap();
+        let viewed = CommitRef::from_object(object.as_ref()).unwrap();
+        assert_eq!(commit_id(viewed), COMMITS[1]);
+        let from_view = viewed.to_commit();
+        let commit = Commit::try_from_object(object).unwrap();
+        assert!(CommitArc::ptr_eq(&commit, &from_view));
+        let as_object: ObjectArc<'_> = commit.as_ref().as_object().to_object();
+        assert_eq!(
+            object_view(&as_object),
+            (COMMITS[1].into(), libgit2::ffi::GIT_OBJECT_COMMIT)
+        );
+        let back = Commit::into_object(commit);
+        drop(from_view);
+        assert_eq!(object_view(&back), object_view(&as_object));
+        drop(as_object);
+        let again = Commit::try_from_object(back).unwrap();
+        assert_eq!(hex(&again), COMMITS[1]);
+
+        for (other, kind) in [
+            (TREE, ObjectType::Tree),
+            (BLOB, ObjectType::Blob),
+            (TAG, ObjectType::Tag),
+        ] {
+            let object = Object::lookup(r, id(other).as_ref(), Some(kind)).unwrap();
+            assert!(CommitRef::from_object(object.as_ref()).is_none());
+            let object = Commit::try_from_object(object).unwrap_err();
+            assert_eq!(object_view(&object).0, other);
+        }
+        // A tag peeled to its commit converts.
+        let tag = Object::lookup(r, id(TAG).as_ref(), None).unwrap();
+        let peeled = tag.as_ref().peel(Some(ObjectType::Commit)).unwrap();
+        drop(tag);
+        let commit = Commit::try_from_object(peeled).unwrap();
+        assert_eq!(hex(&commit), "e90810b8df3e80c413d903f631643c716887138d");
+    }
+}
+
+/// The creation options: the `CreateExtOptions` value (`git_commit_create_ext_options`)
+/// and its handles.
+///
+/// The options are a few borrowed pointers and a length. Their handles project each
+/// field out of a pointer and rebuild a `&CStr` or a run of headers from it, so these
+/// tests exercise every getter and setter on every holder Rust has for one (a local, a
+/// heap slot, an element of a run that moves when it grows), through reborrows, with
+/// strings and headers on the heap dropped right after their last read (ASan: a getter
+/// reading past them or after them). libgit2 reads the options for one call and keeps
+/// nothing: one test hands them to `git_commit_create_ext`, its strings and headers on
+/// the heap, freed right after the call (ASan, BSan: a retained pointer). Options that
+/// outlive their borrows, aliased handles and the raw seam without `unsafe` do not
+/// compile (`compile_fail/` and the type's doctests). The options are neither `Send`
+/// nor `Sync`, so there is no thread test. `CreateExtOptions::new` fills the options
+/// through libgit2, so Miri skips every test here; the module's `unit_tests` run the
+/// same projections under Miri over options built in Rust.
+mod create_ext_options {
+    use std::ffi::{CStr, CString};
+
+    use libgit2::libgit2::object::commit::{
+        CreateExtOptions, CreateExtOptionsMut, CreateExtOptionsRef, Header,
+    };
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::create_ext::{create, has_reference};
+
+    type Fields<'o> = (
+        Option<&'o CStr>,
+        Option<&'o CStr>,
+        Vec<(&'o CStr, &'o CStr)>,
+    );
+
+    fn read<'o>(r: CreateExtOptionsRef<'_, 'o>) -> Fields<'o> {
+        let headers = r
+            .extra_headers()
+            .iter()
+            .map(|h| (h.field(), h.value()))
+            .collect();
+        (r.update_ref(), r.message_encoding(), headers)
+    }
+
+    fn write<'o>(
+        mut m: CreateExtOptionsMut<'_, 'o>,
+        name: Option<&'o CStr>,
+        encoding: Option<&'o CStr>,
+        headers: &'o [Header<'o>],
+    ) {
+        m.set_update_ref(name);
+        m.set_message_encoding(encoding);
+        m.set_extra_headers(headers);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn every_field_round_trips_on_every_holder() {
+        let strings: Vec<CString> = ["refs/heads/a", "", "UTF-16", &"x".repeat(1024)]
+            .into_iter()
+            .map(|s| CString::new(s).unwrap())
+            .collect();
+        let headers: Vec<Header<'_>> = strings.iter().map(|s| Header::new(s, s)).collect();
+        let mut local = CreateExtOptions::new();
+        let mut boxed = Box::new(CreateExtOptions::new());
+        let mut run = vec![CreateExtOptions::new()];
+        for i in 0..strings.len() {
+            let (name, encoding) = (
+                Some(strings[i].as_c_str()),
+                strings.get(i + 1).map(|s| s.as_c_str()),
+            );
+            let hs = &headers[i..];
+            write(local.as_mut(), name, encoding, hs);
+            write(CreateExtOptions::as_mut(&mut boxed), name, encoding, hs);
+            // Growing the run moves its elements; each handle is taken afresh.
+            run.push(CreateExtOptions::new());
+            write(run[i].as_mut(), name, encoding, hs);
+            let expected = (
+                name,
+                encoding,
+                hs.iter()
+                    .map(|h| (h.as_ref().field(), h.as_ref().value()))
+                    .collect::<Vec<_>>(),
+            );
+            for r in [
+                local.as_ref(),
+                CreateExtOptions::as_ref(&boxed),
+                run[i].as_ref(),
+            ] {
+                assert_eq!(read(r), expected);
+                assert_eq!(r.version(), 1);
+                assert!(r.sign_callback().0.is_none());
+            }
+            assert_eq!(read(run[i + 1].as_ref()), (None, None, Vec::new()));
+        }
+        write(local.as_mut(), None, None, &[]);
+        assert_eq!(read(local.as_ref()), (None, None, Vec::new()));
+    }
+
+    /// Strings and headers on the heap, freed right after the options' last use.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reads_stay_inside_heap_borrows() {
+        for len in [0, 1, 7, 8, 15, 16, 255] {
+            let name = CString::new("n".repeat(len)).unwrap();
+            let headers: Vec<Header<'_>> =
+                (0..len % 5).map(|_| Header::new(&name, &name)).collect();
+            let mut options = CreateExtOptions::new();
+            write(options.as_mut(), Some(&name), Some(&name), &headers);
+            let (n, e, hs) = read(options.as_ref());
+            assert_eq!(
+                (n.unwrap().to_bytes().len(), e.unwrap().to_bytes().len()),
+                (len, len)
+            );
+            assert_eq!(hs.len(), len % 5);
+            assert!(format!("{options:?}").len() > len);
+            drop(headers);
+            drop(name);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reborrows_keep_one_writer() {
+        let headers = [Header::new(c"f", c"v")];
+        let mut options = CreateExtOptions::default();
+        let mut m = options.as_mut();
+        {
+            let mut inner = m.as_mut();
+            inner.set_extra_headers(&headers);
+            assert_eq!(inner.as_ref().extra_headers().len(), 1);
+        }
+        let shared = m.as_ref();
+        assert_eq!(read(shared).2, [(c"f", c"v")]);
+        m.set_update_ref(Some(c"HEAD"));
+        assert_eq!(options.as_ref().update_ref(), Some(c"HEAD"));
+        assert_eq!(format!("{:?}", options.as_mut()), format!("{options:?}"));
+    }
+
+    /// libgit2 reads the options for the call only: the commit it writes carries the
+    /// encoding and the headers, the reference it names is created, and nothing it was
+    /// given is read after the call (the heap borrows are freed right away).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn libgit2_reads_the_options_for_the_call_only() {
+        let repo = TempRepo::new("commit-create-ext-options");
+        let name = CString::new("refs/heads/created").unwrap();
+        let encoding = CString::new("ISO-8859-1").unwrap();
+        let value = CString::new("one\ntwo").unwrap();
+        let headers = vec![Header::new(c"x-a", &value), Header::new(c"x-b", c"")];
+        let mut options = CreateExtOptions::new();
+        write(options.as_mut(), Some(&name), Some(&encoding), &headers);
+        let text = create(&repo, &options).unwrap();
+        drop(headers);
+        drop((value, encoding));
+        assert!(
+            text.contains("\nencoding ISO-8859-1\nx-a one\n two\nx-b \n\nmsg\n"),
+            "{text}"
+        );
+        assert!(has_reference(&repo, &name));
+
+        // The default options write a plain commit and move no reference.
+        let text = create(&repo, &CreateExtOptions::new()).unwrap();
+        assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
+    }
+
 }

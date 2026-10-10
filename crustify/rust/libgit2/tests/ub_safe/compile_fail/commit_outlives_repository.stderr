@@ -1,0 +1,13 @@
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/commit_outlives_repository.rs:13:10
+   |
+ 8 |     let repo = Repository::open(c".").unwrap();
+   |         ---- binding `repo` declared here
+ 9 |     let id = Oid::zero(OidType::Sha1);
+10 |     let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+   |                                 ---- borrow of `repo` occurs here
+...
+13 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+14 |     drop(copy);
+   |          ---- borrow later used here

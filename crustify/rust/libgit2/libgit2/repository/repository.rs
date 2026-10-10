@@ -93,9 +93,8 @@ use crate::libgit2::config::config::{ConfigArc, ConfigBox};
 use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::ObjectType;
 use crate::libgit2::index::index::IndexArc;
-use crate::libgit2::object::commit::{CommitArray, CommitArrayVal};
+use crate::libgit2::object::commit::{CommitArc, CommitArray, CommitArrayVal};
 use crate::libgit2::odb::odb::OdbArc;
-use crate::libgit2::odb::sys::odb_backend::OdbDataVec;
 use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
 use crate::libgit2::refs::annotated_commit::AnnotatedCommitRef;
 use crate::libgit2::refs::refdb::{RefdbArc, RefdbType};
@@ -3216,10 +3215,8 @@ impl<'a> RepositoryRef<'a> {
     /// The array may be released after the repository (`git_commit_free` touches only
     /// the commit), but each commit keeps the repository it was parsed from
     /// (`object.repo`, uncounted), which `git_commit_owner`, `git_commit_tree`,
-    /// `git_commit_parent` and the other lookups through it read: the raw commit
-    /// pointers of [`CommitArrayRef::commit_ptrs`](crate::libgit2::object::commit::CommitArrayRef::commit_ptrs)
-    /// may be given to those only while this repository lives, and the commit handle
-    /// the `git_commit` run adds must borrow it.
+    /// `git_commit_parent` and the other lookups through it read: so the array
+    /// carries this borrow's `'a`, as the commits it lends do.
     ///
     /// Fails with libgit2's error when `HEAD` cannot be resolved to a commit, or
     /// `MERGE_HEAD` cannot be read or names something other than a commit.
@@ -3242,7 +3239,7 @@ impl<'a> RepositoryRef<'a> {
     /// Otherwise it gives what libgit2 gives, with the same errors.
     ///
     /// Replaces: git_repository_commit_parents
-    pub fn commit_parents(&self) -> Result<CommitArrayVal, RepositoryError> {
+    pub fn commit_parents(&self) -> Result<CommitArrayVal<'a>, RepositoryError> {
         let repo = self.as_ptr().cast_mut();
         // `HEAD` as `git_revparse_ext(.., "HEAD")` finds it: no id or description, so
         // the reference `git_reference_dwim` resolves it to, and that reference's
@@ -3287,9 +3284,13 @@ impl<'a> RepositoryRef<'a> {
         if rc < 0 {
             return failed(rc);
         }
+        // SAFETY: on success the peel handed out one counted reference to a live object
+        // of type `GIT_OBJECT_COMMIT`, so a `git_commit`, of this repository, borrowed for
+        // `'a`; the owner releases it.
+        let first = unsafe { CommitArc::from_c(first.cast()) };
         let mut parents = Parents {
             repo: *self,
-            commits: vec![first.cast()],
+            commits: vec![first.expect("a peel succeeded without an object")],
         };
         // SAFETY: a live repository, used on this thread only; `collect_parent` is
         // `git_repository_mergehead_foreach_cb`, given a payload of the type it reads,
@@ -3304,39 +3305,16 @@ impl<'a> RepositoryRef<'a> {
         if rc != 0 && rc != ErrorCode::NotFound.raw() {
             return failed(rc);
         }
-        let Some(buffer) = OdbDataVec::from_slice(&parents.commits) else {
-            set_oom();
-            return failed(-1);
-        };
-        let (commits, count) = buffer.into_raw_parts();
-        // The array owns the commits from here on.
-        parents.commits.clear();
-        let array = ffi::git_commitarray {
-            commits: commits.cast_const(),
-            count,
-        };
-        // SAFETY: `commits` is a fresh buffer of libgit2's allocator holding `count`
-        // commit pointers, each a reference (from `git_commit_lookup` or the peel) owned
-        // by nothing else from here on.
-        Ok(unsafe { CommitArray::from_raw(array) })
+        // libgit2's allocator sets its out-of-memory error when the buffer fails.
+        CommitArray::from_commits(parents.commits).or_else(|_| failed(-1))
     }
 }
 
-/// The commits [`RepositoryRef::commit_parents`] collected; it releases each until the
-/// array they move into takes them. Raw commit pointers, as [`CommitArray`] holds
-/// them until the `git_commit` run wraps the commit.
+/// The commits [`RepositoryRef::commit_parents`] collected, released with the
+/// collection until the array they move into takes them.
 struct Parents<'a> {
     repo: RepositoryRef<'a>,
-    commits: Vec<*mut ffi::git_commit>,
-}
-
-impl Drop for Parents<'_> {
-    fn drop(&mut self) {
-        for &commit in &self.commits {
-            // SAFETY: each is a commit reference this collection owns, released once.
-            unsafe { ffi::git_commit_free(commit) };
-        }
-    }
+    commits: Vec<CommitArc<'a>>,
 }
 
 /// `git_repository_mergehead_foreach_cb` collecting each `MERGE_HEAD` commit into a
@@ -3361,7 +3339,12 @@ unsafe extern "C" fn collect_parent(oid: *const ffi::git_oid, payload: *mut c_vo
     if unsafe { ffi::git_commit_lookup(&mut commit, repo, oid) } < 0 {
         return -1;
     }
-    parents.commits.push(commit);
+    // SAFETY: on success one counted reference to a live commit of the collection's
+    // repository, borrowed for its `'a`; the owner releases it.
+    let commit = unsafe { CommitArc::from_c(commit) };
+    parents
+        .commits
+        .push(commit.expect("a lookup succeeded without a commit"));
     0
 }
 
@@ -5123,34 +5106,60 @@ mod unit_tests {
         }
 
         /// A live object's id, in hex.
-        fn hex(object: *mut ffi::git_commit) -> String {
+        fn hex(object: *const ffi::git_object) -> String {
             // SAFETY: the tests pass objects their arrays keep alive; the id is copied.
-            let id = unsafe { OidRef::from_ptr(ffi::git_commit_id(object).cast_mut()) };
+            let id = unsafe { OidRef::from_ptr(ffi::git_object_id(object).cast_mut()) };
             id.unwrap().to_hex_string().unwrap()
         }
 
-        /// The object types of an array's entries, as libgit2 tags them.
-        fn types(array: &CommitArrayVal) -> Vec<ffi::git_object_t> {
+        /// The ids of an array's commits, in hex.
+        fn ids(array: &CommitArrayVal<'_>) -> Vec<String> {
             array
                 .as_ref()
-                .commit_ptrs()
-                .elems()
-                // SAFETY: each is a live object the array owns a reference to.
-                .map(|object| unsafe { ffi::git_object_type(object.cast()) })
+                .iter()
+                .map(|commit| hex(commit.as_object().as_ptr()))
                 .collect()
         }
 
-        /// `git_repository_commit_parents` itself, adopted; only for repositories it is
-        /// defined on (no failure after collecting `HEAD`).
-        fn c_commit_parents(repo: &RepositoryBox) -> CommitArrayVal {
-            let mut raw = ffi::git_commitarray::default();
-            let repo = repo.as_c_ptr();
-            // SAFETY: an empty array and a live repository.
-            let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo) };
-            assert_eq!(rc, 0);
-            // SAFETY: what libgit2 filled: a buffer of its allocator holding references
-            // the array owns; `git_commit_free` releases any object type alike.
-            unsafe { CommitArray::from_raw(raw) }
+        /// The object types of an array's entries, as libgit2 tags them.
+        fn types(objects: &[*const ffi::git_object]) -> Vec<ffi::git_object_t> {
+            objects
+                .iter()
+                // SAFETY: each is a live object its array owns a reference to.
+                .map(|&object| unsafe { ffi::git_object_type(object) })
+                .collect()
+        }
+
+        /// `git_repository_commit_parents` itself, as C filled it, released by
+        /// `git_commitarray_dispose` on drop; only for repositories it is defined on (no
+        /// failure after collecting `HEAD`). Read as raw objects, which a
+        /// [`CommitArray`] may not hold: C's array may hold a tag or a blob.
+        struct CParents(ffi::git_commitarray);
+
+        impl CParents {
+            fn of(repo: &RepositoryBox) -> Self {
+                let mut raw = ffi::git_commitarray::default();
+                // SAFETY: an empty array and a live repository.
+                let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.as_c_ptr()) };
+                assert_eq!(rc, 0);
+                Self(raw)
+            }
+
+            /// The objects C put in the array, which it keeps alive.
+            fn objects(&self) -> Vec<*const ffi::git_object> {
+                (0..self.0.count)
+                    // SAFETY: libgit2 filled `count` live object pointers.
+                    .map(|i| unsafe { *self.0.commits.add(i) }.cast_const().cast())
+                    .collect()
+            }
+        }
+
+        impl Drop for CParents {
+            fn drop(&mut self) {
+                // SAFETY: what libgit2 filled, released once; `git_commit_free` releases
+                // any object type alike.
+                unsafe { ffi::git_commitarray_dispose(&mut self.0) };
+            }
         }
 
         /// Corrects C: with a `MERGE_HEAD` it cannot use after `HEAD`'s commit was
@@ -5182,8 +5191,7 @@ mod unit_tests {
                 // HEAD's commit, cached by the failed call, is looked up again.
                 fs::remove_file(sandbox.0.join("bare/MERGE_HEAD")).unwrap();
                 let parents = repo.as_ref().commit_parents().unwrap();
-                let ids: Vec<_> = parents.as_ref().commit_ptrs().elems().map(hex).collect();
-                assert_eq!(ids, [HEAD_COMMIT]);
+                assert_eq!(ids(&parents), [HEAD_COMMIT]);
             }
             drop(repo);
         }
@@ -5199,22 +5207,9 @@ mod unit_tests {
                 "bare/MERGE_HEAD",
                 &format!("{HEAD_COMMIT}\n{HEAD_COMMIT}\n"),
             );
-            let ids: Vec<_> = repo
-                .as_ref()
-                .commit_parents()
-                .unwrap()
-                .as_ref()
-                .commit_ptrs()
-                .elems()
-                .map(hex)
-                .collect();
+            let ids = ids(&repo.as_ref().commit_parents().unwrap());
             assert_eq!(ids, [HEAD_COMMIT; 3]);
-            let c: Vec<_> = c_commit_parents(&repo)
-                .as_ref()
-                .commit_ptrs()
-                .elems()
-                .map(hex)
-                .collect();
+            let c: Vec<_> = CParents::of(&repo).objects().into_iter().map(hex).collect();
             assert_eq!(ids, c);
         }
 
@@ -5246,24 +5241,22 @@ mod unit_tests {
             let sandbox = Sandbox::bare("tag-head");
             let repo = sandbox.open("bare");
             sandbox.write("bare/HEAD", &format!("{TAG}\n"));
-            let c = c_commit_parents(&repo);
-            assert_eq!(types(&c), [ffi::GIT_OBJECT_TAG]);
+            let c = CParents::of(&repo);
+            assert_eq!(types(&c.objects()), [ffi::GIT_OBJECT_TAG]);
             let rust = repo.as_ref().commit_parents().unwrap();
-            assert_eq!(types(&rust), [ffi::GIT_OBJECT_COMMIT]);
+            let rust_objects: Vec<_> = rust
+                .as_ref()
+                .iter()
+                .map(|c| c.as_object().as_ptr())
+                .collect();
+            assert_eq!(types(&rust_objects), [ffi::GIT_OBJECT_COMMIT]);
             let mut peeled = ptr::null_mut();
-            let tag = c.as_ref().commit_ptrs().elems().next().unwrap();
+            let tag = c.objects()[0];
             let commit = ffi::GIT_OBJECT_COMMIT;
             // SAFETY: a live tag object and a writable slot; the peel is freed below.
-            let rc = unsafe { ffi::git_object_peel(&mut peeled, tag.cast(), commit) };
+            let rc = unsafe { ffi::git_object_peel(&mut peeled, tag, commit) };
             assert_eq!(rc, 0);
-            assert_eq!(
-                rust.as_ref()
-                    .commit_ptrs()
-                    .elems()
-                    .map(hex)
-                    .collect::<Vec<_>>(),
-                [hex(peeled.cast())]
-            );
+            assert_eq!(ids(&rust), [hex(peeled)]);
             // SAFETY: the peel's own reference, released once.
             unsafe { ffi::git_object_free(peeled) };
         }
@@ -5276,7 +5269,10 @@ mod unit_tests {
             let sandbox = Sandbox::bare("blob-head");
             let repo = sandbox.open("bare");
             sandbox.write("bare/HEAD", &format!("{BLOB}\n"));
-            assert_eq!(types(&c_commit_parents(&repo)), [ffi::GIT_OBJECT_BLOB]);
+            assert_eq!(
+                types(&CParents::of(&repo).objects()),
+                [ffi::GIT_OBJECT_BLOB]
+            );
             let error = repo.as_ref().commit_parents().unwrap_err();
             assert_eq!(error.code(), Some(ErrorCode::InvalidSpec));
             assert_eq!(error.class(), Some(ErrorClass::Object));

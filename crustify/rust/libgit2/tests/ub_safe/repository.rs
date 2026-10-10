@@ -1829,13 +1829,8 @@ mod head_and_lookups {
         Item::WorktreeConfig,
     ];
 
-    fn ids(array: &CommitArrayVal) -> Vec<String> {
-        array
-            .as_ref()
-            .commit_ptrs()
-            .elems()
-            .map(commit_id)
-            .collect()
+    fn ids(array: &CommitArrayVal<'_>) -> Vec<String> {
+        array.as_ref().iter().map(commit_id).collect()
     }
 
     /// Every read-only routine, its borrowed results read before the repository goes.
@@ -1889,10 +1884,10 @@ mod head_and_lookups {
     }
 
     /// Owned results stay valid after the repository is freed: counted indexes,
-    /// config snapshots, commit arrays, buffers, ids and worktree `HEAD` copies. The
-    /// counted config is not one of them: its file backends read the repository
-    /// (`includeIf`), so it borrows it (`compile_fail/config_arc_outlives_repository.rs`)
-    /// and goes first.
+    /// config snapshots, buffers, ids and worktree `HEAD` copies. The counted config
+    /// and commit arrays are not among them: its file backends and their commits read
+    /// the repository, so they borrow it (`compile_fail/config_arc_outlives_repository.rs`,
+    /// `compile_fail/commit_array_outlives_repository.rs`) and go first.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn owned_results_outlive_their_repository() {
@@ -1903,7 +1898,7 @@ mod head_and_lookups {
         let snapshot = main.as_ref().config_snapshot().unwrap();
         drop(config);
         let index = main.as_ref().index().unwrap();
-        let parents = merged.as_ref().commit_parents().unwrap();
+        let parents = ids(&merged.as_ref().commit_parents().unwrap());
         let gitdir = main.as_ref().item_path(Item::GitDir).unwrap();
         let id = main
             .as_ref()
@@ -1914,7 +1909,7 @@ mod head_and_lookups {
             .head_for_worktree(c"testrepo-worktree")
             .unwrap();
         drop((main, merged));
-        assert_eq!(ids(&parents).len(), 2);
+        assert_eq!(parents.len(), 2);
         assert!(
             gitdir
                 .as_ref()
@@ -1962,7 +1957,8 @@ mod head_and_lookups {
 
     /// The `MERGE_HEAD`s after which `git_repository_commit_parents` frees cached
     /// commits: the wrapper fails, and the commits stay usable through the cache
-    /// (looked up again) and are released with the repository. ASan watches.
+    /// (looked up again) and are released before the repository, which they borrow.
+    /// ASan watches.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn failing_merge_heads_leave_the_cache_intact() {
@@ -1985,14 +1981,15 @@ mod head_and_lookups {
             assert_eq!(ids(&again), good);
         }
         let kept = repo.as_ref().commit_parents().unwrap();
-        drop(repo);
         assert_eq!(ids(&kept), good);
+        drop(kept);
+        drop(repo);
     }
 
     /// Cleaning up while counted results are out: they stay valid, the repository
     /// loads fresh ones, and commits parse again (without grafts). The counted config
-    /// borrows the repository, so it is released before the exclusive cleanup; the
-    /// config loaded afterwards is a fresh one.
+    /// and the commits borrow the repository, so they are released before the
+    /// exclusive cleanup; the config loaded afterwards is a fresh one.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn cleanup_keeps_what_was_handed_out() {
@@ -2000,18 +1997,18 @@ mod head_and_lookups {
         let mut repo = sandbox.open("merged");
         let config = repo.as_ref().config().unwrap();
         let index = repo.as_ref().index().unwrap();
-        let parents = repo.as_ref().commit_parents().unwrap();
+        let parents = ids(&repo.as_ref().commit_parents().unwrap());
         let first_config = config.as_c_ptr();
         drop(config);
         repo.as_mut().cleanup();
         let fresh = repo.as_ref().index().unwrap();
         let config = repo.as_ref().config().unwrap();
         assert_ne!(config.as_c_ptr(), first_config);
-        assert_eq!(ids(&repo.as_ref().commit_parents().unwrap()), ids(&parents));
+        assert_eq!(ids(&repo.as_ref().commit_parents().unwrap()), parents);
         drop(config);
         repo.as_mut().cleanup();
         drop(repo);
-        drop((index, fresh, parents));
+        drop((index, fresh));
         let mut pathless = Repository::new().unwrap();
         pathless.as_mut().cleanup();
         pathless.as_mut().cleanup();

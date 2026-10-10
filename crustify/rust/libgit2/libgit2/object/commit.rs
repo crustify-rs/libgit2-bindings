@@ -1,5 +1,32 @@
 //! Safe wrappers over `include/git2/commit.h`.
 //!
+//! # Commits
+//!
+//! A [`Commit`] is a `git_commit`: a parsed commit object, whose first member is the
+//! `git_object` every object starts with, of type `GIT_OBJECT_COMMIT`. It is opaque:
+//! libgit2 publishes no field. It is counted and shared as every [`Object`](super::object::Object) is (see the
+//! [`object` module](super::object#ownership)): the repository's object cache holds a
+//! reference of its own and hands the same commit, one more reference counted on it, to
+//! every lookup of its id; `git_commit_free` gives one reference back (it is
+//! `git_object_free`) and `git_commit_dup` takes another, on the same pointer. So the
+//! Rust owner is a [`CommitArc`], built by [`Commit::lookup`] and
+//! [`Commit::lookup_prefix`], whose `Clone` is `git_commit_dup` and which never proves
+//! itself the only reference: it lends the shared handle, [`CommitRef`], and never
+//! [`CommitMut`].
+//!
+//! A commit keeps the repository it was looked up in (`object.repo`, uncounted), which
+//! its owner, tree and parent lookups read and `git_repository_free` does not clear. So
+//! a commit carries the lifetime `'r` of the repository borrow it was looked up
+//! through, as an [`ObjectArc<'r>`](ObjectArc) does. Neither a commit nor its handles
+//! are `Send` or `Sync`: what a commit reaches is its repository, which is neither, and
+//! `git_commit_summary` and `git_commit_body` compute their result on first use and
+//! store it in the shared commit, without synchronisation.
+//!
+//! A commit is an object, and libgit2's casts between the two never check the type:
+//! [`CommitRef::as_object`] and [`Commit::into_object`] view or convert a commit as an
+//! object, and [`CommitRef::from_object`] and [`Commit::try_from_object`] take an
+//! object back as a commit only when it is of type `GIT_OBJECT_COMMIT`.
+//!
 //! # Commit arrays
 //!
 //! A [`CommitArray`] is a `git_commitarray`: a run of `count` commit pointers,
@@ -15,30 +42,28 @@
 //! [`CommitArray::from_raw`] or a crate-internal `from_ptr` over a C-owned struct must
 //! vouch for: `commits` is NULL, or a live buffer of libgit2's allocator holding at
 //! least `count` pointers, each to a live `git_commit` of which the array owns one
-//! reference. libgit2 leaves `commits` NULL with `count == 0` for an empty result (an
-//! unborn `HEAD`, or a failure). A NULL `commits` reads as the empty array whatever
-//! `count` says, and is never handed to C.
+//! reference, looked up in a repository that outlives the array's `'r`. libgit2 leaves
+//! `commits` NULL with `count == 0` for an empty result (an unborn `HEAD`, or a
+//! failure). A NULL `commits` reads as the empty array whatever `count` says, and is
+//! never handed to C.
 //!
 //! An empty array never reaches libgit2: nothing allocated it, so nothing has
 //! initialised the library on its behalf, and even `git__free(NULL)` reads the
 //! allocator a concurrent first `git_libgit2_init` writes. Every other array's buffer
 //! came from libgit2's allocator, whose allocation initialised the library first.
 //!
-//! The commits themselves are a raw seam: `git_commit` is wrapped by the `object`
-//! subsystem's run, which replaces [`CommitArrayRef::commit_ptrs`] with handles and
-//! adds the setters that move owned commits in and out. Until then the array is read
-//! as raw pointers it keeps alive, and emptied only as a whole
-//! ([`CommitArrayMut::clear`]). The array asserts neither `Send` nor `Sync`: the
-//! commits it owns belong to a repository's object cache, whose thread story is that
-//! run's to settle.
+//! The array lends each commit as a [`CommitRef`] borrowed from it
+//! ([`CommitArrayRef::get`], [`CommitArrayRef::iter`]), which
+//! [`to_commit`](CommitRef::to_commit) turns into an owner of its own.
+//! [`CommitArrayMut::set_commits`] moves owned commits in, in a fresh buffer of
+//! libgit2's allocator ([`CommitArray::from_commits`] builds an array of them), and
+//! [`CommitArrayMut::take`] moves them out. The array asserts neither `Send` nor
+//! `Sync`, as its commits do not.
 //!
 //! An array may be dropped after the repository its commits came from:
-//! `git_commit_free` touches only the commit. The commits may not be *used* past it:
-//! each keeps the repository it was parsed from (`git_object.repo`, uncounted, which
-//! `git_repository_free` does not clear), and `git_commit_owner`, `git_commit_tree`,
-//! `git_commit_parent` and every other lookup through a commit read it. So the
-//! `git_commit` run's handle must borrow the repository, as `Reference<'r>` and
-//! `Odb<'r>` do, and the array that holds such handles with it.
+//! `git_commit_free` touches only the commit. The commits may not be *used* past it,
+//! since each keeps that repository: so the array carries the commits' `'r`, as a
+//! [`CommitArc<'r>`](CommitArc) does, and lends them for no longer.
 //!
 //! # Extra headers
 //!
@@ -71,46 +96,494 @@
 //! for the call alone, and exclusively, since adding a header rewrites the buffer.
 //! Neither handle is `Send` or `Sync`: the buffer belongs to the thread writing the
 //! commit, which runs the callback.
+//!
+//! # Creation options
+//!
+//! A [`CreateExtOptions`] is a `git_commit_create_ext_options`: what
+//! `git_commit_create_ext` does besides writing the commit — the reference to move to
+//! it, the message's encoding, the [extra headers](#extra-headers), and the signing
+//! callback with its payload. libgit2 never allocates one it hands out, nor keeps or
+//! frees one it is given: the caller builds the struct (on the stack, in C) with
+//! `git_commit_create_ext_options_init`, and the call reads it, and everything it
+//! points at, through a `const` pointer, for the call only. libgit2's other creation
+//! routines (`git_commit_create`, `_v`, `_from_ids`, `_from_callback`, `git_commit_amend`)
+//! build one of their own the same way. So nothing it points at is owned: Rust holds
+//! the struct by value, borrowing the strings and the headers for `'o`.
+//!
+//! The signing callback stays a raw seam, with an `unsafe` setter, until
+//! `git_commit_signature_cb` is wrapped.
 
-use core::ffi::CStr;
+use core::ffi::{CStr, c_void};
 use core::fmt;
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBorrowedPtr, CCell, CDispose, CSlice, CVal, define_ctype};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDispose, CDrop, CRefClone, CSlice, CVal, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
+use crate::libgit2::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataVec};
+use crate::libgit2::oid::oid::OidRef;
+use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 
-define_ctype!(
-    /// An array of commits (`git_commitarray`): `count` commit references in one buffer
-    /// of libgit2's allocator, which the struct owns, as `git_repository_commit_parents`
-    /// hands one out.
-    ///
-    /// Held by value inside a [`CommitArrayVal`], which [`new`](Self::new) builds empty
-    /// for libgit2 to fill and [`from_raw`](Self::from_raw) adopts from C; read it
-    /// through the owner's [`as_ref`](CVal::as_ref) handle. Not `Clone`: it owns its
-    /// commits, and libgit2 has no copy routine.
-    ///
-    /// ```compile_fail,E0599
-    /// use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
-    ///
-    /// let array = CommitArray::new();
-    /// let copy: CommitArrayVal = array.clone();
-    /// ```
-    ///
-    /// Nor `Send`: the commits it owns belong to a repository's object cache, whose
-    /// thread story the `git_commit` run settles.
-    ///
-    /// ```compile_fail,E0277
-    /// use libgit2::libgit2::object::commit::CommitArray;
-    ///
-    /// let array = CommitArray::new();
-    /// std::thread::spawn(move || drop(array));
-    /// ```
-    ///
-    /// Wraps: git_commitarray
-    CommitArray, CommitArrayRef, CommitArrayMut, ffi::git_commitarray
+/// A parsed commit (`git_commit`): a commit object read from a repository's object
+/// database.
+///
+/// libgit2 allocates, counts and frees it, so it is only ever reached through a
+/// [`CommitArc`] and its handles, built by [`lookup`](Self::lookup) and
+/// [`lookup_prefix`](Self::lookup_prefix), converted from an object by
+/// [`try_from_object`](Self::try_from_object), or lent by a [`CommitArray`]. It is
+/// opaque: no field is published.
+///
+/// `'r` is the borrow of the repository the commit was looked up in: routines that
+/// look further objects up through it reach that repository, so it lives no longer
+/// than the borrow (see the [module docs](self#commits)). The lifetime only shrinks:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::commit::CommitArc;
+///
+/// fn widen<'r>(commit: CommitArc<'r>) -> CommitArc<'static> {
+///     commit
+/// }
+/// ```
+///
+/// and a commit stays on the thread that looked it up:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::commit::CommitArc;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(commit: CommitArc<'static>) {
+///     send(commit)
+/// }
+/// ```
+///
+/// Wraps: git_commit
+/// Handwritten
+#[repr(transparent)]
+pub struct Commit<'r>(ffi::git_commit, PhantomData<(*const (), &'r ())>);
+
+/// Shared borrow of a [`Commit`]. `Copy`, like `&T`.
+///
+/// It stays on the thread of the commit's repository, as the owner does:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::commit::CommitRef;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(handle: CommitRef<'static, 'static>) {
+///     send(handle)
+/// }
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct CommitRef<'a, 'r>(CBorrowedPtr<'a, Commit<'r>>);
+
+/// Exclusive borrow of a [`Commit`]. Reaches the shared handle with
+/// [`as_ref`](Self::as_ref).
+///
+/// No owner hands one out: every commit is shared with its repository's cache.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct CommitMut<'a, 'r>(
+    CommitRef<'a, 'r>,
+    // Invariant in the commit, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Commit<'r>>,
 );
+
+// SAFETY: `Commit` is `#[repr(transparent)]` over `git_commit` with a zero-sized
+// marker; both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Commit<'r>>`
+// (`CommitMut` through `CommitRef`) with zero-sized markers and no `Drop`, hand out no
+// reference to the C object, and `CommitRef` has no write operation. `CommitMut` is
+// invariant in the commit through its `PhantomData<&'a mut Commit<'r>>`.
+unsafe impl<'r> CCell for Commit<'r> {
+    type C = ffi::git_commit;
+    type Ref<'a>
+        = CommitRef<'a, 'r>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = CommitMut<'a, 'r>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'r> CommitRef<'a, 'r> {
+    /// Borrows a raw pointer; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live commit looked up in a repository that
+    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
+    /// least that long).
+    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_commit) -> Option<Self> {
+        // SAFETY: a non-null pointer the caller vouches for, per this function's
+        // contract; `Commit` is transparent over `git_commit`.
+        NonNull::new(ptr.cast_mut()).map(|p| CommitRef(unsafe { CBorrowedPtr::new(p.cast()) }))
+    }
+
+    /// Read-only pointer to the C object.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Another counted reference to the commit, as `git_commit_dup` takes one: the
+    /// same commit, now also kept alive by the result, which may outlive this borrow
+    /// but not the repository.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let copy = commit.as_ref().to_commit();
+    /// drop(commit);
+    /// drop(repo);
+    /// drop(copy);
+    /// ```
+    pub fn to_commit(&self) -> CommitArc<'r> {
+        let commit = self.0.as_non_null();
+        // SAFETY: the handle addresses a live commit for `'a`, whose reference its
+        // holder keeps meanwhile; one more is counted on it here.
+        if !unsafe { CommitFree.c_up_ref(commit) } {
+            unreachable!("git_commit_dup cannot fail");
+        }
+        // SAFETY: the reference just counted, given to the result, which
+        // `git_commit_free` releases; the commit's repository outlives `'r`, which the
+        // result carries.
+        unsafe { CommitArc::from_raw(commit.as_ptr()) }.expect("a handle is never NULL")
+    }
+
+    /// The commit, as the object it is: the same pointer, borrowed for as long.
+    pub fn as_object(&self) -> ObjectRef<'a, 'r> {
+        // SAFETY: a `git_commit` starts with its `git_object`, so the handle's pointer
+        // addresses a live object of the same repository for `'a`, as this handle's
+        // does; nothing is written through it while it is shared.
+        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) };
+        object.expect("a handle is never NULL")
+    }
+
+    /// The object, as a commit, when it is one (of type `GIT_OBJECT_COMMIT`); `None`
+    /// for a tree, a blob or a tag.
+    pub fn from_object(object: ObjectRef<'a, 'r>) -> Option<Self> {
+        if !is_commit(object) {
+            return None;
+        }
+        // SAFETY: an object of type `GIT_OBJECT_COMMIT` is a `git_commit` (libgit2
+        // allocates each object by its type), live for `'a` and of a repository that
+        // outlives `'r`, as `object` vouches.
+        unsafe { Self::from_ptr(object.as_ptr().cast()) }
+    }
+}
+
+impl<'a, 'r> CommitMut<'a, 'r> {
+    /// Borrows a raw pointer exclusively; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// As [`CommitRef::from_ptr`], plus: nothing else reaches the commit while the
+    /// result lives, its repository's cache included.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit) -> Option<Self> {
+        // SAFETY: the caller upholds `CommitRef::from_ptr`'s contract and exclusivity.
+        unsafe { CommitRef::from_ptr(ptr) }.map(|r| CommitMut(r, PhantomData))
+    }
+
+    /// Writable pointer to the C object.
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> CommitRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> CommitMut<'_, 'r> {
+        CommitMut(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for CommitRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Commit").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for CommitMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Whether `object` is a commit: of type `GIT_OBJECT_COMMIT`, and so a `git_commit`.
+fn is_commit(object: ObjectRef<'_, '_>) -> bool {
+    // SAFETY: the handle addresses a live object; the call reads its type only.
+    unsafe { ffi::git_object_type(object.as_ptr()) == ffi::GIT_OBJECT_COMMIT }
+}
+
+/// Releases one counted reference to a commit through `git_commit_free`, and takes
+/// another through `git_commit_dup`.
+///
+/// They are `git_object_free` and `git_object_dup` on the commit's object: the free
+/// decrements the object's atomic count and, at zero, frees the commit with its
+/// parents, signatures and strings, never reading its repository; the copy
+/// increments the same count and hands back the same pointer, so a copy is the same
+/// commit, of the same repository, for the same `'r`. Neither can fail, and neither
+/// allocates.
+///
+/// Wraps: git_commit_free
+/// Wraps: git_commit_dup
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CommitFree;
+
+// SAFETY: `git_commit_free` gives back exactly one counted reference of a live commit,
+// in every state the owners reach (a NULL pointer, which it skips, never reaches it);
+// the commit outlives the call through that reference, and is freed only once the
+// count, which the cache's reference is part of, reaches zero.
+unsafe impl<'r> CDrop<Commit<'r>> for CommitFree {
+    unsafe fn c_drop(&self, ptr: NonNull<Commit<'r>>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live commit of which the
+        // caller gives up one reference; `Commit` is transparent over `git_commit`.
+        unsafe { ffi::git_commit_free(ptr.as_ptr().cast()) }
+    }
+}
+
+// SAFETY: `git_commit_dup` atomically increments the count of the live commit it is
+// given and stores that same pointer in `out`, returning 0: the commit then owes one
+// more `git_commit_free`, which this policy performs, and `ptr` stays valid. It never
+// fails. `c_is_sole_owner` keeps its `false` default: the repository's cache counts a
+// reference no owner sees, and a later lookup may take another.
+unsafe impl<'r> CRefClone<Commit<'r>> for CommitFree {
+    unsafe fn c_up_ref(&self, ptr: NonNull<Commit<'r>>) -> bool {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot; `ptr` addresses a live commit whose
+        // reference the caller holds, per `c_up_ref`'s contract.
+        let rc = unsafe { ffi::git_commit_dup(&mut out, ptr.as_ptr().cast()) };
+        debug_assert_eq!(out, ptr.as_ptr().cast());
+        rc == 0
+    }
+}
+
+/// One counted reference to a [`Commit`], given back by `git_commit_free` on drop;
+/// `clone` takes another through `git_commit_dup`, on the same commit.
+pub type CommitArc<'r> = CArc<Commit<'r>, CommitFree>;
+
+impl<'r> Commit<'r> {
+    /// The commit `id` names in `repo`.
+    ///
+    /// The repository's cache answers when it holds the commit, with the commit it
+    /// holds; otherwise libgit2 reads it from the object database, parses it and,
+    /// under the cache's size limit, caches it, so that every later lookup of the id
+    /// yields the same commit while the cache keeps it.
+    ///
+    /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// when the object database has no such object (the zero id included), when the
+    /// object is not a commit (class `GIT_ERROR_INVALID`, "the requested type does not
+    /// match the type in the ODB"; a tag is not peeled, whatever libgit2's header
+    /// says), and for a repository without a git directory, which has no object
+    /// database to load (`GIT_ERROR_INVALID`, "path cannot exist in repository"); and
+    /// with libgit2's error when the object database cannot be loaded or read, or the
+    /// commit cannot be parsed.
+    ///
+    /// Refuses, with code `-1` and libgit2's `GIT_ERROR_INVALID` error "specified
+    /// object ID type does not match repository object ID type", an `id` whose type is
+    /// not `repo`'s, which libgit2 would format out of bounds (see the
+    /// [`object` module](super::object#looking-objects-up)).
+    ///
+    /// The commit reads the repository it was looked up in, so it lives no longer than
+    /// this borrow of it:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// drop(repo);
+    /// drop(commit);
+    /// ```
+    ///
+    /// Wraps: git_commit_lookup
+    pub fn lookup(
+        repo: RepositoryRef<'r>,
+        id: OidRef<'_>,
+    ) -> Result<CommitArc<'r>, RepositoryError> {
+        id_fits(repo, id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; `repo` is a live
+        // repository on this thread, whose odb libgit2 loads and whose cache it fills
+        // through this shared handle, as `RepositoryRef` allows; `id` is a live id of
+        // the repository's type (checked above), read for the call only.
+        let rc = unsafe { ffi::git_commit_lookup(&mut out, repo.as_ptr().cast_mut(), id.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` holds one counted reference to a live commit of
+        // `repo` (an object of type `GIT_OBJECT_COMMIT`), borrowed for `'r`, given to
+        // the result and released by `git_commit_free`.
+        let commit = unsafe { CommitArc::from_c(out) };
+        Ok(commit.expect("a lookup succeeded without a commit"))
+    }
+
+    /// The commit whose id starts with the first `len` hex digits of `id`, in `repo`.
+    /// A `len` past the repository's full length (40 hex digits for SHA-1, 64 for
+    /// SHA-256) means the full id, which is [`lookup`](Self::lookup).
+    ///
+    /// The digits past `len` are ignored, and every object in the database is a
+    /// candidate, whatever its type: the prefix must name exactly one, which must then
+    /// be a commit.
+    ///
+    /// Fails with [`ErrorCode::Ambiguous`](crate::libgit2::util::errors::ErrorCode::Ambiguous)
+    /// when `len` is under 4 (`GIT_ERROR_OBJECT`, "ambiguous lookup - OID prefix is too
+    /// short") or the prefix names several objects, with
+    /// [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) when
+    /// it names none or one that is not a commit, and as [`lookup`](Self::lookup)
+    /// otherwise; an `id` of another type than `repo`'s is refused as it is, whatever
+    /// `len`.
+    ///
+    /// Wraps: git_commit_lookup_prefix
+    pub fn lookup_prefix(
+        repo: RepositoryRef<'r>,
+        id: OidRef<'_>,
+        len: usize,
+    ) -> Result<CommitArc<'r>, RepositoryError> {
+        id_fits(repo, id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `lookup`; libgit2 clamps `len` to the repository's length, and
+        // copies at most `(len + 1) / 2` of `id`'s `GIT_OID_MAX_SIZE` bytes, with its
+        // type, into the key it searches with.
+        let rc = unsafe {
+            ffi::git_commit_lookup_prefix(&mut out, repo.as_ptr().cast_mut(), id.as_ptr(), len)
+        };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: as in `lookup`: one counted reference to a live commit of `repo`.
+        let commit = unsafe { CommitArc::from_c(out) };
+        Ok(commit.expect("a lookup succeeded without a commit"))
+    }
+
+    /// The object, as a commit, when it is one (of type `GIT_OBJECT_COMMIT`): the same
+    /// counted reference, moved. Otherwise the object, unchanged.
+    pub fn try_from_object(object: ObjectArc<'r>) -> Result<CommitArc<'r>, ObjectArc<'r>> {
+        if !is_commit(object.as_ref()) {
+            return Err(object);
+        }
+        let raw = object.into_c();
+        // SAFETY: `raw` is the counted reference the object owner gave up, to an object
+        // of type `GIT_OBJECT_COMMIT`, so a `git_commit`, of a repository borrowed for
+        // `'r`; `git_commit_free` releases it as `git_object_free` would.
+        let commit = unsafe { CommitArc::from_c(raw.cast()) };
+        Ok(commit.expect("an owner is never NULL"))
+    }
+
+    /// The commit, as the object it is: the same counted reference, moved.
+    pub fn into_object(commit: CommitArc<'r>) -> ObjectArc<'r> {
+        let raw = commit.into_c();
+        // SAFETY: `raw` is the counted reference the commit owner gave up; a
+        // `git_commit` starts with its `git_object`, of the same repository, borrowed
+        // for `'r`, and `git_object_free` releases it as `git_commit_free` would.
+        let object = unsafe { ObjectArc::from_c(raw.cast()) };
+        object.expect("an owner is never NULL")
+    }
+}
+
+// A `Commit` is a `git_commit`, never held by value; the owner is one pointer.
+const _: () = assert!(
+    size_of::<Commit<'static>>() == size_of::<ffi::git_commit>()
+        && size_of::<CommitArc<'static>>() == size_of::<*mut ffi::git_commit>()
+        && size_of::<Option<CommitArc<'static>>>() == size_of::<*mut ffi::git_commit>()
+);
+
+/// An array of commits (`git_commitarray`): `count` commit references in one buffer
+/// of libgit2's allocator, which the struct owns, as `git_repository_commit_parents`
+/// hands one out.
+///
+/// Held by value inside a [`CommitArrayVal`], which [`new`](Self::new) builds empty
+/// for libgit2 to fill, [`from_commits`](Self::from_commits) builds from owned commits
+/// and [`from_raw`](Self::from_raw) adopts from C; read it through the owner's
+/// [`as_ref`](CVal::as_ref) handle. Not `Clone`: it owns its commits, and libgit2 has
+/// no copy routine.
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
+///
+/// let array: CommitArrayVal<'static> = CommitArray::new();
+/// let copy: CommitArrayVal<'static> = array.clone();
+/// ```
+///
+/// Nor `Send`: the commits it owns are not.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
+///
+/// let array: CommitArrayVal<'static> = CommitArray::new();
+/// std::thread::spawn(move || drop(array));
+/// ```
+///
+/// `'r` is the borrow of the repository its commits were looked up in, which the
+/// commits it lends carry; it only shrinks, and the exclusive handle, which moves
+/// commits in, is invariant in it:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::commit::CommitArrayMut;
+///
+/// fn shrink<'a, 'r>(m: CommitArrayMut<'a, 'static>) -> CommitArrayMut<'a, 'r> {
+///     m
+/// }
+/// ```
+///
+/// Wraps: git_commitarray
+/// Handwritten
+#[repr(transparent)]
+pub struct CommitArray<'r>(ffi::git_commitarray, PhantomData<(*const (), &'r ())>);
+
+/// Shared borrow of a [`CommitArray`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct CommitArrayRef<'a, 'r>(CBorrowedPtr<'a, CommitArray<'r>>);
+
+/// Exclusive borrow of a [`CommitArray`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct CommitArrayMut<'a, 'r>(
+    CommitArrayRef<'a, 'r>,
+    // Invariant in the array, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut CommitArray<'r>>,
+);
+
+// SAFETY: `CommitArray` is `#[repr(transparent)]` over `git_commitarray` with a
+// zero-sized marker; both handles are `#[repr(transparent)]` over
+// `CBorrowedPtr<'a, CommitArray<'r>>` (`CommitArrayMut` through `CommitArrayRef`) with
+// zero-sized markers and no `Drop`, hand out no reference to the array, and
+// `CommitArrayRef` has no write operation. `CommitArrayMut` is invariant in the array
+// through its `PhantomData<&'a mut CommitArray<'r>>`.
+unsafe impl<'r> CCell for CommitArray<'r> {
+    type C = ffi::git_commitarray;
+    type Ref<'a>
+        = CommitArrayRef<'a, 'r>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = CommitArrayMut<'a, 'r>
+    where
+        Self: 'a;
+}
 
 /// Releases an array's commits through `git_commitarray_dispose`, which hands each to
 /// `git_commit_free`, the buffer to `git__free`, and zeroes the struct, leaving the
@@ -131,11 +604,12 @@ pub struct CommitArrayDispose;
 // frees `commits` once and never the struct, which it zeroes. It accepts every state
 // the safe API reaches: a buffer libgit2 filled (whose allocation initialised the
 // library, so the allocator it reads is settled), adopted through `from_raw` under that
-// function's contract; `clear` leaves the empty array, as `new` builds it, which owns
-// nothing and is released without C.
-unsafe impl CDispose<CommitArray> for CommitArrayDispose {
+// function's contract, or one `set_commits` allocated through libgit2's allocator;
+// `clear` and `take` leave the empty array, as `new` builds it, which owns nothing and
+// is released without C.
+unsafe impl<'r> CDispose<CommitArray<'r>> for CommitArrayDispose {
     #[inline]
-    unsafe fn c_dispose(&self, ptr: NonNull<CommitArray>) {
+    unsafe fn c_dispose(&self, ptr: NonNull<CommitArray<'r>>) {
         let raw: *mut ffi::git_commitarray = ptr.as_ptr().cast();
         // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_commitarray`.
         let commits = unsafe { addr_of!((*raw).commits).read() };
@@ -151,12 +625,12 @@ unsafe impl CDispose<CommitArray> for CommitArrayDispose {
 
 /// An owned [`CommitArray`], held inline; its commits and buffer are released by
 /// `git_commitarray_dispose` on drop.
-pub type CommitArrayVal = CVal<CommitArray, CommitArrayDispose>;
+pub type CommitArrayVal<'r> = CVal<CommitArray<'r>, CommitArrayDispose>;
 
-impl CommitArray {
+impl<'r> CommitArray<'r> {
     /// An empty array: no commits, nothing allocated, as `git_commitarray array = {0}`.
     /// The storage libgit2 fills a result into.
-    pub fn new() -> CommitArrayVal {
+    pub fn new() -> CommitArrayVal<'r> {
         CVal::new(Self(
             ffi::git_commitarray {
                 commits: ptr::null(),
@@ -164,6 +638,20 @@ impl CommitArray {
             },
             PhantomData,
         ))
+    }
+
+    /// An array of `commits`, in order, moved into a fresh buffer of libgit2's
+    /// allocator; an empty `commits` allocates nothing. Released, commits and buffer,
+    /// by `git_commitarray_dispose`, as an array libgit2 filled is.
+    ///
+    /// Fails, handing `commits` back, when the buffer cannot be allocated, or libgit2
+    /// cannot be initialised (libgit2's error is then set on the calling thread).
+    pub fn from_commits(
+        commits: Vec<CommitArc<'r>>,
+    ) -> Result<CommitArrayVal<'r>, Vec<CommitArc<'r>>> {
+        let mut array = Self::new();
+        array.as_mut().set_commits(commits)?;
+        Ok(array)
     }
 
     /// Adopts a `git_commitarray` C code filled, as `git_repository_commit_parents`
@@ -177,11 +665,12 @@ impl CommitArray {
     ///
     /// When `raw.commits` is not NULL, it must be a live allocation from libgit2's
     /// current allocator holding at least `raw.count` pointers, each to a live
-    /// `git_commit` of which `raw` owns one reference (one `git_commit_free` releases
-    /// it), all of which the caller gives up: nothing else may free the buffer or
-    /// release those references, nor write the buffer while the result lives. With
-    /// `raw.commits` NULL there is no requirement.
-    pub unsafe fn from_raw(raw: ffi::git_commitarray) -> CommitArrayVal {
+    /// `git_commit` (an object of type `GIT_OBJECT_COMMIT`, never a tag or another
+    /// object) of which `raw` owns one reference (one `git_commit_free` releases it),
+    /// looked up in a repository that outlives `'r`, all of which the caller gives up:
+    /// nothing else may free the buffer or release those references, nor write the
+    /// buffer while the result lives. With `raw.commits` NULL there is no requirement.
+    pub unsafe fn from_raw(raw: ffi::git_commitarray) -> CommitArrayVal<'r> {
         CVal::new(Self(raw, PhantomData))
     }
 
@@ -190,11 +679,45 @@ impl CommitArray {
     pub fn into_raw(self) -> ffi::git_commitarray {
         self.0
     }
+
+    /// Shared handle to the array — the getters.
+    pub fn as_ref(&self) -> CommitArrayRef<'_, 'r> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        CommitArrayRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the array — the setters.
+    pub fn as_mut(&mut self) -> CommitArrayMut<'_, 'r> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        CommitArrayMut(CommitArrayRef(ptr), PhantomData)
+    }
 }
 
-impl<'a> CommitArrayRef<'a> {
+impl<'a, 'r> CommitArrayRef<'a, 'r> {
+    /// Borrows the array at `ptr`; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must address a live `git_commitarray` (or be NULL) that outlives `'a`,
+    /// that nothing writes while the handle lives, and that keeps the handles'
+    /// invariant (see the [module docs](self#commit-arrays)) for `'r`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commitarray) -> Option<Self> {
+        let ptr = NonNull::new(ptr.cast::<CommitArray<'r>>())?;
+        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
+        // liveness, the invariant and the absence of writers.
+        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
+    }
+
+    /// Read-only pointer to the C struct.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_commitarray {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
     /// The number of commits; 0 without a buffer, whatever `count` says, as
-    /// [`commit_ptrs`](Self::commit_ptrs) reads it.
+    /// [`get`](Self::get) reads it.
     ///
     /// Field: git_commitarray.count
     pub fn len(&self) -> usize {
@@ -215,59 +738,93 @@ impl<'a> CommitArrayRef<'a> {
         self.len() == 0
     }
 
-    /// The commits, as the [`len`](Self::len) pointers the array holds, borrowed in
-    /// place for as long as the array is; each is non-NULL, and its commit stays alive
-    /// at least that long, since the array owns a reference to it.
-    ///
-    /// Raw seam: `git_commit` has no wrapper yet; the `object` subsystem's run replaces
-    /// this with commit handles. Reading a commit through a pointer is the caller's
-    /// `unsafe`, and the commit must not be released through it: the array releases
-    /// its references when disposed. A routine that reaches the commit's repository
-    /// (`git_commit_owner`, `git_commit_tree`, `git_commit_parent`, ...) may be given
-    /// one only while the repository the array came from lives (see the
-    /// [module docs](self)).
+    /// The commit at `index`, borrowed from the array for as long as the array is;
+    /// `None` past the [`len`](Self::len) commits. The array owns a reference to it, so
+    /// it lives at least that long; [`to_commit`](CommitRef::to_commit) takes one of
+    /// its own.
     ///
     /// ```compile_fail,E0505
-    /// use libgit2::libgit2::object::commit::CommitArray;
+    /// use libgit2::libgit2::object::commit::{CommitArray, CommitArrayVal};
     ///
-    /// let array = CommitArray::new();
-    /// let commits = array.as_ref().commit_ptrs();
+    /// let array: CommitArrayVal<'static> = CommitArray::new();
+    /// let first = array.as_ref().get(0);
     /// drop(array);
-    /// let _ = commits.len();
+    /// let _ = first;
     /// ```
     ///
     /// Field: git_commitarray.commits
-    pub fn commit_ptrs(&self) -> CSlice<'a, *mut ffi::git_commit> {
-        let len = self.len();
+    pub fn get(&self, index: usize) -> Option<CommitRef<'a, 'r>> {
+        if index >= self.len() {
+            return None;
+        }
         // SAFETY: a read through the shared handle's pointer to a live
         // `git_commitarray`.
         let commits = unsafe { addr_of!((*self.as_ptr()).commits).read() };
-        match NonNull::new(commits.cast_mut()) {
-            // SAFETY: per the handles' invariant a non-NULL `commits` addresses at
-            // least `count` initialised commit pointers, owned by the array, so they
-            // live as long as it does, past `'a`; the run only copies them out, and
-            // nothing writes the buffer while the array is shared.
-            Some(commits) => unsafe { CSlice::from_raw_parts(commits, len) },
-            // NULL is the empty array; a run may not start at NULL.
-            // SAFETY: zero elements at an aligned dangling pointer.
-            None => unsafe { CSlice::from_raw_parts(NonNull::dangling(), 0) },
-        }
+        // SAFETY: `len` is non-zero, so `commits` is not NULL and, per the handles'
+        // invariant, addresses at least `count > index` initialised commit pointers,
+        // which nothing writes while the array is shared.
+        let commit = unsafe { commits.add(index).read() };
+        // SAFETY: per the handles' invariant, a live commit of which the array owns one
+        // reference, so it lives as long as the array does, past `'a`, looked up in a
+        // repository that outlives `'r`.
+        unsafe { CommitRef::from_ptr(commit) }
+    }
+
+    /// The commits, in order, each borrowed from the array as [`get`](Self::get) lends
+    /// it.
+    ///
+    /// Field: git_commitarray.commits
+    pub fn iter(
+        &self,
+    ) -> impl ExactSizeIterator<Item = CommitRef<'a, 'r>> + DoubleEndedIterator + use<'a, 'r> {
+        let array = *self;
+        (0..self.len()).map(move |i| array.get(i).expect("an index under len"))
     }
 }
 
-impl fmt::Debug for CommitArrayRef<'_> {
+impl fmt::Debug for CommitArrayRef<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.commit_ptrs().elems()).finish()
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl fmt::Debug for CommitArrayMut<'_> {
+impl fmt::Debug for CommitArrayMut<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_ref().fmt(f)
     }
 }
 
-impl CommitArrayMut<'_> {
+impl<'a, 'r> CommitArrayMut<'a, 'r> {
+    /// Borrows the array at `ptr` exclusively; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// As [`CommitArrayRef::from_ptr`], plus: nothing else reads or writes the array
+    /// while the result lives, and whatever the setters store may stay there for as
+    /// long as the array's owner expects commits of `'r`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commitarray) -> Option<Self> {
+        // SAFETY: the caller upholds `CommitArrayRef::from_ptr`'s contract, and
+        // excludes every other access for `'a`.
+        let shared = unsafe { CommitArrayRef::from_ptr(ptr) }?;
+        Some(Self(shared, PhantomData))
+    }
+
+    /// Writable pointer to the C struct, for the setters and for libgit2 to fill.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commitarray {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> CommitArrayRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> CommitArrayMut<'_, 'r> {
+        CommitArrayMut(self.0, PhantomData)
+    }
+
     /// Releases the commits and the buffer, leaving the empty array: what
     /// `git_commitarray_dispose` leaves, and the storage libgit2 fills again without
     /// leaking what it overwrites.
@@ -279,7 +836,9 @@ impl CommitArrayMut<'_> {
         // `git_commitarray` (`CommitArray` is transparent over it) that, per the
         // handles' invariant, owns what it holds, released once here; it is reset to
         // the empty array below, before anything reads it again.
-        unsafe { CommitArrayDispose.c_dispose(NonNull::new_unchecked(array.cast())) };
+        unsafe {
+            CommitArrayDispose.c_dispose(NonNull::new_unchecked(array.cast::<CommitArray<'r>>()))
+        };
         // SAFETY: writes the empty array through the exclusive handle's pointer to a
         // live `git_commitarray`; C has zeroed it already unless `commits` was NULL, in
         // which case only `count` may differ.
@@ -288,7 +847,87 @@ impl CommitArrayMut<'_> {
             addr_of_mut!((*array).count).write(0);
         }
     }
+
+    /// Replaces the commits with `commits`, in order, moved into a fresh buffer of
+    /// libgit2's allocator, releasing the ones held before as [`clear`](Self::clear)
+    /// does; an empty `commits` leaves the empty array and allocates nothing.
+    ///
+    /// Fails, handing `commits` back and leaving the array as it was, when the buffer
+    /// cannot be allocated, or libgit2 cannot be initialised (libgit2's error is then
+    /// set on the calling thread).
+    ///
+    /// Field: git_commitarray.commits
+    /// Field: git_commitarray.count
+    pub fn set_commits(&mut self, commits: Vec<CommitArc<'r>>) -> Result<(), Vec<CommitArc<'r>>> {
+        let Some(mut buffer) = OdbDataArrayFree::new_uninit::<*mut ffi::git_commit>(commits.len())
+        else {
+            return Err(commits);
+        };
+        for (slot, commit) in buffer.as_mut_slice().iter_mut().zip(commits) {
+            slot.write(commit.into_c());
+        }
+        // SAFETY: `buffer` holds as many slots as `commits` had commits, and the loop
+        // wrote each, the zip running to the end of both.
+        let (buffer, count) = unsafe { buffer.assume_init() }.into_raw_parts();
+        self.clear();
+        let array = self.as_mut_ptr();
+        // SAFETY: writes through the exclusive handle's pointer to a live
+        // `git_commitarray`, whose previous commits and buffer `clear` released.
+        // `buffer` is NULL with `count == 0`, or `count` pointers in libgit2's
+        // allocator, each a counted reference an owner of `'r` gave up to the array,
+        // which keeps the handles' invariant.
+        unsafe {
+            addr_of_mut!((*array).commits).write(buffer.cast_const());
+            addr_of_mut!((*array).count).write(count);
+        }
+        Ok(())
+    }
+
+    /// Takes the commits out, in order, leaving the empty array: what
+    /// `git_commitarray_dispose` would release, owned. The buffer is released.
+    ///
+    /// Field: git_commitarray.commits
+    pub fn take(&mut self) -> Vec<CommitArc<'r>> {
+        let array = self.as_mut_ptr();
+        // SAFETY: reads, then writes the empty array, through the exclusive handle's
+        // pointer to a live `git_commitarray`.
+        let (commits, count) = unsafe {
+            let commits = addr_of!((*array).commits).read();
+            let count = addr_of!((*array).count).read();
+            addr_of_mut!((*array).commits).write(ptr::null());
+            addr_of_mut!((*array).count).write(0);
+            (commits, count)
+        };
+        if commits.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: per the handles' invariant `commits` is a live buffer of libgit2's
+        // allocator holding at least `count` initialised commit pointers, owned by the
+        // array and handed over whole, since the array no longer refers to it.
+        // `OdbDataArrayFree` frees with `git__free`, which ignores the length, so spare
+        // capacity beyond `count` is released with the buffer.
+        let buffer = unsafe { OdbDataVec::from_raw_parts(commits.cast_mut(), count) };
+        let buffer = buffer.expect("a non-NULL buffer");
+        let owned = buffer
+            .as_slice()
+            .iter()
+            // SAFETY: each pointer is a live commit of a repository that outlives `'r`,
+            // whose one reference the array owned and now gives to the result, once:
+            // the buffer is freed below without releasing it.
+            .map(|&commit| unsafe { CommitArc::from_c(commit) }.expect("a commit is never NULL"))
+            .collect();
+        drop(buffer);
+        owned
+    }
 }
+
+// A `CommitArray` is a `git_commitarray`, so C reads and writes a value Rust holds in
+// place, and the owner adds nothing to it.
+const _: () = assert!(
+    size_of::<CommitArray<'static>>() == size_of::<ffi::git_commitarray>()
+        && align_of::<CommitArray<'static>>() == align_of::<ffi::git_commitarray>()
+        && size_of::<CommitArrayVal<'static>>() == size_of::<ffi::git_commitarray>()
+);
 
 define_ctype!(
     /// A commit being written (`git_commitbuilder`), as libgit2 lends it to a commit
@@ -350,14 +989,6 @@ impl fmt::Debug for CommitBuilderMut<'_> {
 const _: () = assert!(
     size_of::<CommitBuilder>() == size_of::<ffi::git_commitbuilder>()
         && size_of::<CommitBuilderMut<'static>>() == size_of::<*mut ffi::git_commitbuilder>()
-);
-
-// A `CommitArray` is a `git_commitarray`, so C reads and writes a value Rust holds in
-// place, and the owner adds nothing to it.
-const _: () = assert!(
-    size_of::<CommitArray>() == size_of::<ffi::git_commitarray>()
-        && align_of::<CommitArray>() == align_of::<ffi::git_commitarray>()
-        && size_of::<CommitArrayVal>() == size_of::<ffi::git_commitarray>()
 );
 
 /// One extra header of a commit being created (`git_commit_header`): a field name and
@@ -622,12 +1253,441 @@ const _: () = assert!(
         && size_of::<[Header<'static>; 3]>() == size_of::<[ffi::git_commit_header; 3]>()
 );
 
+/// Options for creating a commit with `git_commit_create_ext`
+/// (`git_commit_create_ext_options`), held by value in Rust storage.
+///
+/// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: no reference
+/// to update, no encoding header, no extra headers and no signing. Read it through
+/// [`as_ref`](Self::as_ref) and change it through [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::object::commit::{CreateExtOptions, Header};
+///
+/// const HEADERS: [Header<'static>; 1] = [Header::new(c"x-tool", c"crustify")];
+/// let mut options = CreateExtOptions::new();
+/// let mut m = options.as_mut();
+/// m.set_update_ref(Some(c"HEAD"));
+/// m.set_extra_headers(&HEADERS);
+/// assert_eq!(options.as_ref().update_ref(), Some(c"HEAD"));
+/// assert_eq!(options.as_ref().extra_headers().len(), 1);
+/// assert_eq!(options.as_ref().message_encoding(), None);
+/// ```
+///
+/// `#[repr(transparent)]` over `git_commit_create_ext_options`, so a pointer to it is a
+/// pointer to the C struct, which C reads in place. `'o` is the lifetime of what it
+/// points at: the strings and headers its safe setters take are borrowed for `'o`, so
+/// the options cannot outlive them:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::object::commit::CreateExtOptions;
+/// use std::ffi::CString;
+///
+/// let mut options = CreateExtOptions::new();
+/// {
+///     let encoding = CString::new("ISO-8859-1").unwrap();
+///     options.as_mut().set_message_encoding(Some(&encoding));
+/// }
+/// let _ = options.as_ref().message_encoding();
+/// ```
+///
+/// The exclusive handle is invariant in `'o`, so one cannot be shrunk to accept a
+/// shorter-lived borrow than its options were built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::commit::CreateExtOptionsMut;
+///
+/// fn shrink<'a, 'o>(m: CreateExtOptionsMut<'a, 'static>) -> CreateExtOptionsMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// Neither `Send` nor `Sync`: the signing callback's raw seam stores a payload whose
+/// thread affinity the caller alone knows.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::commit::CreateExtOptions;
+///
+/// let options = CreateExtOptions::new();
+/// std::thread::spawn(move || drop(options));
+/// ```
+///
+/// Not `Clone`: the payload its callback receives may be an exclusive borrow, which a
+/// copy would alias. Build another with [`new`](Self::new) instead.
+///
+/// Wraps: git_commit_create_ext_options
+/// Handwritten
+#[repr(transparent)]
+pub struct CreateExtOptions<'o>(
+    ffi::git_commit_create_ext_options,
+    PhantomData<(*const (), &'o CStr, &'o [Header<'o>])>,
+);
+
+/// Shared borrow of a [`CreateExtOptions`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct CreateExtOptionsRef<'a, 'o>(CBorrowedPtr<'a, CreateExtOptions<'o>>);
+
+/// Exclusive borrow of a [`CreateExtOptions`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct CreateExtOptionsMut<'a, 'o>(
+    CreateExtOptionsRef<'a, 'o>,
+    // Invariant in the options, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut CreateExtOptions<'o>>,
+);
+
+// SAFETY: `CreateExtOptions` is `#[repr(transparent)]` over
+// `git_commit_create_ext_options` with a zero-sized marker; both handles are
+// `#[repr(transparent)]` over `CBorrowedPtr<'a, CreateExtOptions<'o>>`
+// (`CreateExtOptionsMut` through `CreateExtOptionsRef`) with zero-sized markers and no
+// `Drop`, hand out no reference to the options, and `CreateExtOptionsRef` has no write
+// operation. `CreateExtOptionsMut` is invariant in the options through its
+// `PhantomData<&'a mut CreateExtOptions<'o>>`.
+unsafe impl<'o> CCell for CreateExtOptions<'o> {
+    type C = ffi::git_commit_create_ext_options;
+    type Ref<'a>
+        = CreateExtOptionsRef<'a, 'o>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = CreateExtOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+}
+
+impl<'o> CreateExtOptions<'o> {
+    /// libgit2's default options, as `GIT_COMMIT_CREATE_EXT_OPTIONS_INIT` spells them:
+    /// version 1, every other field NULL, zero or `None`.
+    ///
+    /// `git_commit_create_ext_options_init` only fails for a version other than
+    /// `GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION`, and with that version it reaches no
+    /// global, no allocator and no thread state, so this needs no initialised library.
+    ///
+    /// Wraps: git_commit_create_ext_options_init
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_commit_create_ext_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_commit_create_ext_options`,
+        // which `git_commit_create_ext_options_init` overwrites whole with the template
+        // for this version; nothing else reads it during the call.
+        let rc = unsafe {
+            ffi::git_commit_create_ext_options_init(
+                raw.as_mut_ptr(),
+                ffi::GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(
+            rc, 0,
+            "git_commit_create_ext_options_init refused its own version"
+        );
+        // SAFETY: a 0 return means the template was copied in: every field is
+        // initialised, every pointer NULL and the callback `None`.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Shared handle to the options — the getters, and the pointer for C calls that
+    /// read them.
+    pub fn as_ref(&self) -> CreateExtOptionsRef<'_, 'o> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        CreateExtOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the options — the setters.
+    pub fn as_mut(&mut self) -> CreateExtOptionsMut<'_, 'o> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        CreateExtOptionsMut(CreateExtOptionsRef(ptr), PhantomData)
+    }
+}
+
+impl Default for CreateExtOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for CreateExtOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'o> CreateExtOptionsRef<'a, 'o> {
+    /// Borrows the options at `ptr`; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must address live, initialised options (or be NULL) that outlive `'a` and
+    /// that nothing writes while the handle lives, whose strings are NULL or
+    /// NUL-terminated and outlive `'o`, and whose `extra_headers` is NULL or addresses
+    /// `extra_headers_len` headers whose strings are non-NULL and NUL-terminated, all
+    /// outliving `'o`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit_create_ext_options) -> Option<Self> {
+        let ptr = NonNull::new(ptr.cast::<CreateExtOptions<'o>>())?;
+        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
+        // liveness, the lifetimes and the absence of writers.
+        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
+    }
+
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_commit_create_ext_options *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_create_ext_options {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The structure's version, `GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION`; fixed by
+    /// [`CreateExtOptions::new`].
+    ///
+    /// Field: git_commit_create_ext_options.version
+    pub fn version(&self) -> u32 {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        unsafe { addr_of!((*p).version).read() }
+    }
+
+    /// The name of the reference moved to the new commit; `None`, the default, moves
+    /// none.
+    ///
+    /// Field: git_commit_create_ext_options.update_ref
+    pub fn update_ref(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).update_ref).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The message's encoding, written as the commit's `encoding` header; `None`, the
+    /// default, writes no such header (git reads the message as UTF-8).
+    ///
+    /// Field: git_commit_create_ext_options.message_encoding
+    pub fn message_encoding(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).message_encoding).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The extra headers written after `committer` and any `encoding`, in order;
+    /// empty, the default, writes none. Borrowed for `'o`, as they were set; each reads
+    /// through its [`HeaderRef`].
+    ///
+    /// Field: git_commit_create_ext_options.extra_headers
+    /// Field: git_commit_create_ext_options.extra_headers_len
+    pub fn extra_headers(&self) -> CSlice<'o, Header<'o>> {
+        let p = self.as_ptr();
+        // SAFETY: reads through the shared handle's pointer to live options.
+        let (headers, len) = unsafe {
+            (
+                addr_of!((*p).extra_headers).read(),
+                addr_of!((*p).extra_headers_len).read(),
+            )
+        };
+        match NonNull::new(headers.cast_mut()) {
+            // SAFETY: every setter stores NULL with a length of 0, or the pointer and
+            // length of a `&'o [Header<'o>]`: `len` initialised headers (`Header` is
+            // transparent over `git_commit_header`) that outlive `'o` and that nothing
+            // writes, being shared-borrowed.
+            Some(headers) => unsafe { CSlice::from_raw_parts(headers.cast(), len) },
+            // NULL is no headers; a run may not start at NULL.
+            // SAFETY: zero elements at an aligned dangling pointer.
+            None => unsafe { CSlice::from_raw_parts(NonNull::dangling(), 0) },
+        }
+    }
+
+    /// The signing callback and its payload; `None` and NULL by default.
+    ///
+    /// Raw seam: the callback is `git_commit_signature_cb`, which this crate does not
+    /// wrap yet.
+    ///
+    /// Field: git_commit_create_ext_options.sign
+    /// Field: git_commit_create_ext_options.payload
+    pub fn sign_callback(&self) -> (ffi::git_commit_signature_cb, *mut c_void) {
+        let p = self.as_ptr();
+        // SAFETY: reads through the shared handle's pointer to live options.
+        unsafe { (addr_of!((*p).sign).read(), addr_of!((*p).payload).read()) }
+    }
+}
+
+impl fmt::Debug for CreateExtOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (sign, _) = self.sign_callback();
+        f.debug_struct("CreateExtOptions")
+            .field("version", &self.version())
+            .field("update_ref", &self.update_ref())
+            .field("message_encoding", &self.message_encoding())
+            .field("extra_headers", &DebugHeaders(self.extra_headers()))
+            .field("sign_callback", &sign.is_some())
+            .finish()
+    }
+}
+
+/// A run of headers, printed as a list.
+struct DebugHeaders<'o>(CSlice<'o, Header<'o>>);
+
+impl fmt::Debug for DebugHeaders<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0.iter()).finish()
+    }
+}
+
+impl<'a, 'o> CreateExtOptionsMut<'a, 'o> {
+    /// Borrows the options at `ptr` exclusively; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// As [`CreateExtOptionsRef::from_ptr`], plus: nothing else reads or writes the
+    /// options while the result lives, and whatever the setters store may stay there
+    /// for as long as the options' owner expects `'o` borrows to.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit_create_ext_options) -> Option<Self> {
+        // SAFETY: the caller upholds `CreateExtOptionsRef::from_ptr`'s contract, and
+        // excludes every other access for `'a`.
+        let shared = unsafe { CreateExtOptionsRef::from_ptr(ptr) }?;
+        Some(Self(shared, PhantomData))
+    }
+
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_create_ext_options {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> CreateExtOptionsRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> CreateExtOptionsMut<'_, 'o> {
+        CreateExtOptionsMut(self.0, PhantomData)
+    }
+
+    /// Sets the reference moved to the new commit; `None` moves none. A symbolic
+    /// reference (`HEAD`, say) is resolved to the reference it names, created when
+    /// missing; an existing one must point at the commit's first parent, or the call
+    /// fails with `GIT_EMODIFIED` without writing the reference.
+    ///
+    /// Field: git_commit_create_ext_options.update_ref
+    pub fn set_update_ref(&mut self, name: Option<&'o CStr>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe { addr_of_mut!((*p).update_ref).write(name.map_or(ptr::null(), CStr::as_ptr)) }
+    }
+
+    /// Sets the message's encoding, written as the commit's `encoding` header as given;
+    /// `None` writes no such header.
+    ///
+    /// Field: git_commit_create_ext_options.message_encoding
+    pub fn set_message_encoding(&mut self, encoding: Option<&'o CStr>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe {
+            addr_of_mut!((*p).message_encoding).write(encoding.map_or(ptr::null(), CStr::as_ptr))
+        }
+    }
+
+    /// Sets the extra headers, written in order after `committer` and any `encoding`,
+    /// each as `<field> <value>`; an empty run writes none, and is stored as C stores
+    /// it, NULL with a length of 0. Borrowed for `'o`, run and strings alike.
+    ///
+    /// Field: git_commit_create_ext_options.extra_headers
+    /// Field: git_commit_create_ext_options.extra_headers_len
+    pub fn set_extra_headers(&mut self, headers: &'o [Header<'o>]) {
+        let run: *const ffi::git_commit_header = if headers.is_empty() {
+            ptr::null()
+        } else {
+            headers.as_ptr().cast()
+        };
+        let p = self.as_mut_ptr();
+        // SAFETY: writes through the exclusive handle's pointer to live options; the
+        // fields are plain data, so the old values need no drop. `run` is NULL with a
+        // length of 0, or `headers`' own pointer and length, a run of initialised
+        // `git_commit_header`s (`Header` is transparent over it) whose strings are
+        // non-NULL, as `extra_headers()` requires.
+        unsafe {
+            addr_of_mut!((*p).extra_headers).write(run);
+            addr_of_mut!((*p).extra_headers_len).write(headers.len());
+        }
+    }
+
+    /// Sets the signing callback and the payload it is passed; `None` signs nothing.
+    /// libgit2 calls it once per commit created with these options, after building
+    /// the commit and before writing it, with the builder to add the signature header
+    /// to, the repository, the commit's contents and `payload`: 0 or a positive value
+    /// writes the commit, with whatever headers the callback added, and a negative
+    /// value fails the call with that value, nothing written. That includes
+    /// `GIT_PASSTHROUGH`, which libgit2's header says writes the commit unsigned.
+    ///
+    /// Raw seam: the callback is `git_commit_signature_cb`, which this crate does not
+    /// wrap yet.
+    ///
+    /// # Safety
+    ///
+    /// Until these options are dropped or the callback is replaced, every libgit2 call
+    /// they are passed to may call `callback` on the calling thread, once, with
+    /// arguments valid for that call only (the builder exclusively, the contents
+    /// NUL-terminated) and with `payload`: `callback` must be sound to call that way,
+    /// and `payload` must stay valid for whatever `callback` does with it.
+    ///
+    /// Field: git_commit_create_ext_options.sign
+    /// Field: git_commit_create_ext_options.payload
+    pub unsafe fn set_sign_callback(
+        &mut self,
+        callback: ffi::git_commit_signature_cb,
+        payload: *mut c_void,
+    ) {
+        let p = self.as_mut_ptr();
+        // SAFETY: writes through the exclusive handle's pointer to live options; the
+        // fields are plain data, so the old values need no drop.
+        unsafe {
+            addr_of_mut!((*p).sign).write(callback);
+            addr_of_mut!((*p).payload).write(payload);
+        }
+    }
+}
+
+impl fmt::Debug for CreateExtOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `CreateExtOptions` is a `git_commit_create_ext_options`, so C reads a value Rust
+// holds in place.
+const _: () = assert!(
+    size_of::<CreateExtOptions<'static>>() == size_of::<ffi::git_commit_create_ext_options>()
+        && align_of::<CreateExtOptions<'static>>()
+            == align_of::<ffi::git_commit_create_ext_options>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::libgit2::core::types::ObjectType;
+    use crate::libgit2::object::object::Object;
+    use crate::libgit2::oid::oid::{Oid, OidType};
+    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+    use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::runtime_pinned;
     use core::ffi::{CStr, c_char, c_int, c_void};
     use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     /// The fixture repositories: `testrepo.git` (a branch at `a65fedf`), `mergedrepo`
     /// (merging `e280915` into `3a34580`) and `empty_bare.git` (an unborn `HEAD`).
@@ -663,15 +1723,15 @@ mod unit_tests {
     }
 
     /// The hex id of the live commit `commit`.
-    fn hex(commit: *mut ffi::git_commit) -> String {
+    fn hex(commit: CommitRef<'_, '_>) -> String {
         let mut out = [0u8; 41];
-        // SAFETY: `commit` is a live commit the caller's array keeps alive; its id is
-        // formatted into `out`, 41 writable bytes, NUL included.
+        // SAFETY: the handle's commit is live; its id is formatted into `out`, 41
+        // writable bytes, NUL included.
         unsafe {
             ffi::git_oid_tostr(
                 out.as_mut_ptr().cast(),
                 out.len(),
-                ffi::git_commit_id(commit),
+                ffi::git_commit_id(commit.as_ptr()),
             )
         };
         CStr::from_bytes_until_nul(&out)
@@ -681,8 +1741,405 @@ mod unit_tests {
             .to_owned()
     }
 
-    fn ids(array: CommitArrayRef<'_>) -> Vec<String> {
-        array.commit_ptrs().elems().map(hex).collect()
+    fn ids(array: CommitArrayRef<'_, '_>) -> Vec<String> {
+        array.iter().map(hex).collect()
+    }
+
+    /// `testrepo.git`, through the safe wrapper.
+    fn open_testrepo() -> RepositoryBox {
+        assert!(runtime_pinned());
+        Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap()).unwrap()
+    }
+
+    fn sha1(hex: &CStr) -> Oid {
+        Oid::from_string(hex, OidType::Sha1).unwrap()
+    }
+
+    /// `testrepo.git`'s `HEAD` commit, its parent and its tree.
+    const HEAD: &CStr = c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
+    const PARENT: &CStr = c"be3563ae3f795b2b4353bcce3a527ad0a4f7f644";
+    const TREE: &CStr = c"944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
+
+    const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+    /// Runs `body` alone in a child process, where nothing has initialised libgit2.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    static REFUSING: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" {
+        fn malloc(n: usize) -> *mut c_void;
+        fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+        fn free(p: *mut c_void);
+    }
+
+    /// libc's allocator, refusing everything while `REFUSING` is set.
+    struct Refusing;
+
+    // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+    unsafe impl Alloc for Refusing {
+        fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            // SAFETY: plain libc allocation.
+            NonNull::new(unsafe { malloc(len) }.cast())
+        }
+        unsafe fn realloc(
+            p: Option<NonNull<u8>>,
+            len: usize,
+            _: Option<&CStr>,
+            _: i32,
+        ) -> Option<NonNull<u8>> {
+            if REFUSING.load(SeqCst) {
+                return None;
+            }
+            let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+            // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+            NonNull::new(unsafe { realloc(p, len) }.cast())
+        }
+        unsafe fn free(p: NonNull<u8>) {
+            // SAFETY: `p` is a live libc block the caller gives up.
+            unsafe { free(p.as_ptr().cast()) }
+        }
+    }
+
+    /// Installs [`Refusing`] as libgit2's allocator, before anything is allocated.
+    fn install_refusing() {
+        let allocator = Allocator::new::<Refusing>();
+        // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
+        // member set; libgit2 copies it before anything is allocated.
+        let rc = unsafe {
+            ffi::git_libgit2_opts(
+                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                allocator.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+    }
+
+    #[test]
+    fn commit_layout_matches_c() {
+        assert_eq!(size_of::<Commit<'_>>(), size_of::<ffi::git_commit>());
+        assert_eq!(
+            size_of::<CommitArc<'_>>(),
+            size_of::<*mut ffi::git_commit>()
+        );
+        assert_eq!(
+            size_of::<CommitRef<'_, '_>>(),
+            size_of::<*const ffi::git_commit>()
+        );
+        assert_eq!(
+            size_of::<CommitMut<'_, '_>>(),
+            size_of::<*const ffi::git_commit>()
+        );
+        assert_eq!(size_of::<CommitFree>(), 0);
+    }
+
+    /// The commit handles' seams over a pointer nothing reads, so Miri runs them:
+    /// `git_commit` is opaque, of size zero, so a dangling aligned pointer addresses all
+    /// of it; the object view only casts it.
+    #[test]
+    fn commit_handles_without_c() {
+        // SAFETY: NULL is refused without being read.
+        assert!(unsafe { CommitRef::from_ptr(ptr::null()) }.is_none());
+        // SAFETY: as above.
+        assert!(unsafe { CommitMut::from_ptr(ptr::null_mut()) }.is_none());
+        let p = NonNull::<ffi::git_commit>::dangling().as_ptr();
+        // SAFETY: a zero-sized commit at an aligned pointer, never read or written, and
+        // reached by this handle alone.
+        let mut m = unsafe { CommitMut::from_ptr(p) }.unwrap();
+        assert_eq!(m.as_mut_ptr(), p);
+        assert_eq!(m.as_mut().as_mut_ptr(), p);
+        let r = m.as_ref();
+        assert_eq!(r.as_ptr(), p.cast_const());
+        assert_eq!(r.as_object().as_ptr(), p.cast_const().cast());
+        assert_eq!(format!("{r:?}"), "Commit { .. }");
+        assert_eq!(format!("{m:?}"), "Commit { .. }");
+    }
+
+    /// An id of another type than the repository's is refused before libgit2 formats
+    /// it out of bounds, at every length; the same bytes typed as the repository's find
+    /// the commit. Corrects the C routines, which check nothing.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn commit_ids_of_another_type_are_refused_before_c() {
+        let repo = open_testrepo();
+        let repo = repo.as_ref();
+        let head = sha1(HEAD);
+        let mut wide = Oid::from_raw(&head.as_ref().id(), OidType::Sha256).unwrap();
+        for kind in [OidType::Sha256.raw() as u8, 0, 9, u8::MAX] {
+            wide.as_mut().set_raw_kind(kind);
+            let mut results = vec![Commit::lookup(repo, wide.as_ref())];
+            for len in [0, 3, 4, 7, 40, 64, usize::MAX] {
+                results.push(Commit::lookup_prefix(repo, wide.as_ref(), len));
+            }
+            for result in results {
+                let e = result.unwrap_err();
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                assert_eq!(
+                    e.message(),
+                    c"specified object ID type does not match repository object ID type"
+                );
+            }
+        }
+        wide.as_mut().set_kind(OidType::Sha1);
+        let found = Commit::lookup(repo, wide.as_ref()).unwrap();
+        assert_eq!(hex(found.as_ref()), HEAD.to_str().unwrap());
+        let found = Commit::lookup_prefix(repo, wide.as_ref(), 7).unwrap();
+        assert_eq!(hex(found.as_ref()), HEAD.to_str().unwrap());
+    }
+
+    /// The policy driven by hand: the up-ref counts one more reference on the same
+    /// pointer, which an adopted owner and the free each settle; `to_commit` takes one
+    /// through a borrowed handle, and the object views share the commit's pointer.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn commit_policy_counts_references_on_one_commit() {
+        let repo = open_testrepo();
+        let commit = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+        let p = NonNull::new(commit.as_ptr()).unwrap();
+        // SAFETY: `commit` holds a reference to the live commit at `p`.
+        assert!(unsafe { CommitFree.c_up_ref(p) });
+        // SAFETY: the reference just counted, given to the owner.
+        let adopted = unsafe { CommitArc::from_raw(p.as_ptr()) }.unwrap();
+        assert!(CommitArc::ptr_eq(&adopted, &commit));
+        let raw = adopted.into_c();
+        // SAFETY: `raw` is the reference `into_c` gave up, released once here.
+        unsafe { CommitFree.c_drop(NonNull::new(raw).unwrap().cast()) };
+
+        // SAFETY: `commit` keeps the commit alive while the handle lives.
+        let borrowed = unsafe { CommitRef::from_ptr(commit.as_c_ptr()) }.unwrap();
+        let copy = borrowed.to_commit();
+        assert!(CommitArc::ptr_eq(&copy, &commit));
+        assert_eq!(
+            borrowed.as_object().as_ptr(),
+            commit.as_c_ptr().cast_const().cast()
+        );
+
+        let object = Commit::into_object(copy);
+        assert_eq!(object.as_c_ptr().cast(), commit.as_c_ptr());
+        let viewed = CommitRef::from_object(object.as_ref()).unwrap();
+        assert_eq!(viewed.as_ptr(), commit.as_c_ptr().cast_const());
+        let back = Commit::try_from_object(object).unwrap();
+        assert!(CommitArc::ptr_eq(&back, &commit));
+        drop(commit);
+        assert_eq!(hex(back.as_ref()), HEAD.to_str().unwrap());
+
+        let tree = Object::lookup(repo.as_ref(), sha1(TREE).as_ref(), Some(ObjectType::Tree));
+        let tree = tree.unwrap();
+        assert!(CommitRef::from_object(tree.as_ref()).is_none());
+        let tree = Commit::try_from_object(tree).unwrap_err();
+        assert_eq!(
+            Commit::lookup(repo.as_ref(), sha1(TREE).as_ref())
+                .unwrap_err()
+                .code(),
+            Some(ErrorCode::NotFound)
+        );
+        drop(tree);
+    }
+
+    /// Commits moved into an array and taken out again: the same pointers, in order,
+    /// each reference handed over once (LSan: a leak; ASan: a double release); the
+    /// buffer is libgit2's, released by the dispose policy or by `take`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn commits_move_into_and_out_of_arrays() {
+        let repo = open_testrepo();
+        let head = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+        let parent = Commit::lookup(repo.as_ref(), sha1(PARENT).as_ref()).unwrap();
+        let mut array =
+            CommitArray::from_commits(vec![head.clone(), parent.clone(), head.clone()]).unwrap();
+        let r = array.as_ref();
+        let lent: Vec<_> = r.iter().map(|c| c.as_ptr().cast_mut()).collect();
+        assert_eq!(lent, [head.as_c_ptr(), parent.as_c_ptr(), head.as_c_ptr()]);
+        // SAFETY: a read of the array's own buffer pointer, through its shared handle.
+        let buffer = unsafe { r.as_ptr().read() }.commits;
+        assert!(!buffer.is_null());
+
+        let taken = array.as_mut().take();
+        assert!(array.as_ref().is_empty());
+        assert_eq!(taken.len(), 3);
+        assert!(CommitArc::ptr_eq(&taken[1], &parent));
+
+        // Replacing releases what was held; an empty run leaves the empty array.
+        let mut m = array.as_mut();
+        m.set_commits(taken).unwrap();
+        m.set_commits(vec![parent.clone()]).unwrap();
+        assert_eq!(ids(m.as_ref()), [PARENT.to_str().unwrap()]);
+        m.set_commits(Vec::new()).unwrap();
+        // SAFETY: as above.
+        assert!(unsafe { m.as_ref().as_ptr().read() }.commits.is_null());
+        m.set_commits(vec![head]).unwrap();
+        drop(parent);
+        drop(array);
+    }
+
+    /// When the buffer cannot be allocated, the commits come back and the array keeps
+    /// what it held; nothing is released twice or leaked.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn a_refused_buffer_hands_the_commits_back() {
+        isolated(
+            concat!(module_path!(), "::a_refused_buffer_hands_the_commits_back"),
+            || {
+                install_refusing();
+                let repo = open_testrepo();
+                let head = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+                let mut array = CommitArray::from_commits(vec![head.clone()]).unwrap();
+                REFUSING.store(true, SeqCst);
+                let refused = CommitArray::from_commits(vec![head.clone(), head.clone()]);
+                let kept = array.as_mut().set_commits(vec![head.clone()]);
+                let empty = CommitArray::from_commits(Vec::new());
+                REFUSING.store(false, SeqCst);
+                assert_eq!(refused.unwrap_err().len(), 2);
+                assert_eq!(kept.unwrap_err().len(), 1);
+                assert!(empty.unwrap().as_ref().is_empty());
+                assert_eq!(ids(array.as_ref()), [HEAD.to_str().unwrap()]);
+            },
+        );
+    }
+
+    /// `GIT_COMMIT_CREATE_EXT_OPTIONS_INIT`, built in Rust so Miri can run the
+    /// accessors; `options_new_matches_the_template` ties it to
+    /// `git_commit_create_ext_options_init`.
+    fn template<'o>() -> CreateExtOptions<'o> {
+        CreateExtOptions(
+            ffi::git_commit_create_ext_options {
+                version: ffi::GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION,
+                ..Default::default()
+            },
+            PhantomData,
+        )
+    }
+
+    fn raw(options: &CreateExtOptions<'_>) -> ffi::git_commit_create_ext_options {
+        // SAFETY: a read of the live options through their shared handle's pointer.
+        unsafe { options.as_ref().as_ptr().read() }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_new_matches_the_template() {
+        let (new, template) = (raw(&CreateExtOptions::new()), raw(&template()));
+        assert_eq!(new.version, template.version);
+        assert_eq!(new.update_ref, template.update_ref);
+        assert_eq!(new.message_encoding, template.message_encoding);
+        assert_eq!(new.extra_headers, template.extra_headers);
+        assert_eq!(new.extra_headers_len, template.extra_headers_len);
+        assert!(new.sign.is_none() && template.sign.is_none());
+        assert_eq!(new.payload, template.payload);
+        assert_eq!(raw(&CreateExtOptions::default()).version, 1);
+    }
+
+    unsafe extern "C" fn never_signs(
+        _: *mut ffi::git_commitbuilder,
+        _: *mut ffi::git_repository,
+        _: *const c_char,
+        _: *mut c_void,
+    ) -> c_int {
+        unreachable!("only stored")
+    }
+
+    /// Every setter stores what its getter reads back, the strings' and the run's own
+    /// pointers included, and an empty run is stored as C stores none.
+    #[test]
+    fn options_setters_round_trip() {
+        let encoding = std::ffi::CString::new("ISO-8859-1").unwrap();
+        let headers = [Header::new(c"a", c"1"), Header::new(c"b", c"2")];
+        let mut payload = 7u8;
+        let mut options = template();
+        assert_eq!(
+            format!("{options:?}"),
+            "CreateExtOptions { version: 1, update_ref: None, message_encoding: None, \
+             extra_headers: [], sign_callback: false }"
+        );
+        let mut m = options.as_mut();
+        m.set_update_ref(Some(c"refs/heads/main"));
+        m.set_message_encoding(Some(&encoding));
+        m.set_extra_headers(&headers);
+        // SAFETY: the callback is never called: the options reach no libgit2 call.
+        unsafe { m.set_sign_callback(Some(never_signs), ptr::from_mut(&mut payload).cast()) };
+        {
+            let mut inner = m.as_mut();
+            inner.set_update_ref(Some(c"HEAD"));
+            assert_eq!(inner.as_ref().update_ref(), Some(c"HEAD"));
+        }
+        let r = m.as_ref();
+        assert_eq!(r.version(), 1);
+        assert_eq!(r.message_encoding().unwrap().as_ptr(), encoding.as_ptr());
+        let run = r.extra_headers();
+        assert_eq!(run.len(), 2);
+        assert_eq!(run.as_ptr(), headers.as_ptr().cast());
+        assert_eq!(run.get(1).unwrap().value(), c"2");
+        let (sign, data) = r.sign_callback();
+        assert!(sign.is_some());
+        assert_eq!(data, ptr::from_mut(&mut payload).cast());
+        assert_eq!(
+            format!("{m:?}"),
+            "CreateExtOptions { version: 1, update_ref: Some(\"HEAD\"), message_encoding: \
+             Some(\"ISO-8859-1\"), extra_headers: [Header { field: \"a\", value: \"1\" }, \
+             Header { field: \"b\", value: \"2\" }], sign_callback: true }"
+        );
+
+        m.set_extra_headers(&headers[..0]);
+        m.set_update_ref(None);
+        m.set_message_encoding(None);
+        // SAFETY: nothing is stored to call.
+        unsafe { m.set_sign_callback(None, ptr::null_mut()) };
+        let back = raw(&options);
+        assert!(back.extra_headers.is_null() && back.extra_headers_len == 0);
+        assert!(back.update_ref.is_null() && back.message_encoding.is_null());
+        assert!(back.sign.is_none() && back.payload.is_null());
+        assert!(options.as_ref().extra_headers().is_empty());
+    }
+
+    /// Options C code filled, borrowed through the crate-internal seams: a NULL run with
+    /// a stale length reads as none, a C array of headers reads in place.
+    #[test]
+    fn options_handles_over_c_storage() {
+        // SAFETY: NULL is refused.
+        assert!(unsafe { CreateExtOptionsRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: as above.
+        assert!(unsafe { CreateExtOptionsMut::from_ptr(ptr::null_mut()) }.is_none());
+        let c_headers = [ffi::git_commit_header {
+            field: c"f".as_ptr(),
+            value: c"v".as_ptr(),
+        }];
+        let mut c = ffi::git_commit_create_ext_options {
+            version: 1,
+            extra_headers: ptr::null(),
+            extra_headers_len: 3,
+            ..Default::default()
+        };
+        // SAFETY: `c` is live, with no headers and no strings, for the handle's use.
+        let r = unsafe { CreateExtOptionsRef::from_ptr(&mut c) }.unwrap();
+        assert!(r.extra_headers().is_empty());
+        c.extra_headers = c_headers.as_ptr();
+        c.extra_headers_len = 1;
+        // SAFETY: `c` now addresses one live header of `'static` strings, and nothing
+        // else reaches `c` while the handle lives.
+        let mut m = unsafe { CreateExtOptionsMut::<'_, 'static>::from_ptr(&mut c) }.unwrap();
+        assert_eq!(m.as_ref().extra_headers().get(0).unwrap().field(), c"f");
+        m.set_message_encoding(Some(c"UTF-8"));
+        assert_eq!(c.message_encoding, c"UTF-8".as_ptr());
     }
 
     #[test]
@@ -764,17 +2221,20 @@ mod unit_tests {
 
     #[test]
     fn layout_matches_c() {
-        assert_eq!(size_of::<CommitArray>(), size_of::<ffi::git_commitarray>());
         assert_eq!(
-            size_of::<CommitArrayVal>(),
+            size_of::<CommitArray<'_>>(),
             size_of::<ffi::git_commitarray>()
         );
         assert_eq!(
-            size_of::<CommitArrayRef<'_>>(),
+            size_of::<CommitArrayVal<'_>>(),
+            size_of::<ffi::git_commitarray>()
+        );
+        assert_eq!(
+            size_of::<CommitArrayRef<'_, '_>>(),
             size_of::<*const ffi::git_commitarray>()
         );
         assert_eq!(
-            size_of::<CommitArrayMut<'_>>(),
+            size_of::<CommitArrayMut<'_, '_>>(),
             size_of::<*const ffi::git_commitarray>()
         );
         assert_eq!(size_of::<CommitArrayDispose>(), 0);
@@ -788,16 +2248,30 @@ mod unit_tests {
         let mut m = array.as_mut();
         assert_eq!(m.as_ref().len(), 0);
         assert!(m.as_ref().is_empty());
-        assert!(m.as_ref().commit_ptrs().is_empty());
-        assert!(m.as_ref().commit_ptrs().elem(0).is_none());
+        assert_eq!(m.as_ref().iter().len(), 0);
+        assert!(m.as_ref().get(0).is_none());
         m.clear();
+        assert!(m.take().is_empty());
+        assert!(m.set_commits(Vec::new()).is_ok());
         assert_eq!(format!("{m:?}"), "[]");
         assert_eq!(format!("{:?}", array.as_ref()), "[]");
-        let raw = array.into_inner().into_raw();
+        let mut bare = array.into_inner();
+        {
+            let mut m = bare.as_mut();
+            let mut inner = m.as_mut();
+            inner.clear();
+            assert!(inner.take().is_empty());
+            assert!(m.as_ref().is_empty());
+        }
+        let raw = bare.into_raw();
         assert!(raw.commits.is_null() && raw.count == 0);
         // SAFETY: a NULL `commits` carries no requirement.
         let adopted = unsafe { CommitArray::from_raw(raw) };
         assert!(adopted.as_ref().is_empty());
+        // SAFETY: NULL is refused without being read.
+        assert!(unsafe { CommitArrayRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: as above.
+        assert!(unsafe { CommitArrayMut::from_ptr(ptr::null_mut()) }.is_none());
     }
 
     /// Without a buffer the array is empty and owns nothing, whatever `count` says:
@@ -810,18 +2284,26 @@ mod unit_tests {
             count: 3,
         };
         // SAFETY: `broken` is live and holds no buffer; nothing is released.
-        unsafe { CommitArrayDispose.c_dispose(NonNull::from(&mut broken).cast::<CommitArray>()) };
+        unsafe {
+            CommitArrayDispose.c_dispose(NonNull::from(&mut broken).cast::<CommitArray<'_>>())
+        };
         assert_eq!((broken.commits, broken.count), (ptr::null(), 3));
         // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
         let mut m = unsafe { CommitArrayMut::from_ptr(&mut broken) }.unwrap();
         assert_eq!(m.as_ref().len(), 0);
-        assert!(m.as_ref().commit_ptrs().is_empty());
+        assert!(m.as_ref().get(0).is_none());
+        assert_eq!(m.as_ref().iter().count(), 0);
         assert_eq!(format!("{m:?}"), "[]");
         m.clear();
         assert_eq!((broken.commits, broken.count), (ptr::null(), 0));
+        broken.count = 2;
+        // SAFETY: as above.
+        let mut m = unsafe { CommitArrayMut::from_ptr(&mut broken) }.unwrap();
+        assert!(m.take().is_empty());
+        assert_eq!((broken.commits, broken.count), (ptr::null(), 0));
 
         // SAFETY: a NULL `commits` carries no requirement.
-        let adopted = unsafe {
+        let adopted: CommitArrayVal<'_> = unsafe {
             CommitArray::from_raw(ffi::git_commitarray {
                 commits: ptr::null(),
                 count: usize::MAX,
@@ -832,8 +2314,8 @@ mod unit_tests {
     }
 
     /// The handles' projections over a buffer Rust allocated, so Miri checks them: the
-    /// pointers are only copied out, never dereferenced, and the buffer leaves through
-    /// `into_raw`, so nothing reaches libgit2's dispose.
+    /// commit handles only carry the pointers, never dereferenced, and the buffer leaves
+    /// through `into_raw`, so nothing reaches libgit2's dispose.
     #[test]
     fn handles_over_rust_storage() {
         let mut slots = [0u64; 3];
@@ -845,18 +2327,21 @@ mod unit_tests {
         };
         // SAFETY: never disposed: the value leaves through `into_raw` below, so the
         // test's buffer and fake commits never reach `git_commitarray_dispose`.
-        let array = unsafe { CommitArray::from_raw(raw) };
+        let array: CommitArrayVal<'_> = unsafe { CommitArray::from_raw(raw) };
         let r = array.as_ref();
         assert_eq!(r.len(), 3);
         assert!(!r.is_empty());
-        let run = r.commit_ptrs();
-        assert_eq!(run.len(), 3);
-        assert_eq!(run.elems().collect::<Vec<_>>(), fake);
-        assert_eq!(run.elem(2), Some(fake[2]));
-        assert!(run.elem(3).is_none());
-        let tail = run.slice(1..).unwrap();
-        assert_eq!(tail.elem(0), Some(fake[1]));
-        assert_eq!(format!("{r:?}"), format!("{fake:?}"));
+        let lent: Vec<_> = r.iter().map(|c| c.as_ptr().cast_mut()).collect();
+        assert_eq!(lent, fake);
+        let back_to_front: Vec<_> = r.iter().rev().map(|c| c.as_ptr().cast_mut()).collect();
+        assert_eq!(back_to_front, [fake[2], fake[1], fake[0]]);
+        assert_eq!(r.iter().len(), 3);
+        assert_eq!(r.get(2).unwrap().as_ptr(), fake[2].cast_const());
+        assert!(r.get(3).is_none() && r.get(usize::MAX).is_none());
+        assert_eq!(
+            format!("{r:?}"),
+            "[Commit { .. }, Commit { .. }, Commit { .. }]"
+        );
         let back = array.into_inner().into_raw();
         assert_eq!((back.commits, back.count), (fake.as_ptr(), 3));
     }
@@ -872,7 +2357,7 @@ mod unit_tests {
     fn c_fills_an_owner_in_place() {
         let (testrepo, merged, empty) = (open(TESTREPO), open(MERGEDREPO), open(EMPTY));
         let mut array = CommitArray::new();
-        let fill = |array: &mut CommitArrayVal, repo| {
+        let fill = |array: &mut CommitArrayVal<'_>, repo| {
             let out = array.as_mut().as_mut_ptr();
             // SAFETY: `out` is the owner's live storage, reached through its exclusive
             // handle and used for the call alone; it holds the empty array, so nothing
@@ -904,7 +2389,7 @@ mod unit_tests {
 
         fill(&mut array, empty);
         assert!(array.as_ref().is_empty());
-        assert!(array.as_ref().commit_ptrs().is_empty());
+        assert!(array.as_ref().get(0).is_none());
 
         for repo in [testrepo, merged, empty] {
             // SAFETY: each repository is open and freed once; the arrays' commits
@@ -931,7 +2416,7 @@ mod unit_tests {
         assert_eq!(rc, 0);
         // SAFETY: `raw` is what libgit2 filled: two commit references in a libgit2
         // buffer, given up here.
-        let mut bare = unsafe { CommitArray::from_raw(raw) }.into_inner();
+        let mut bare = unsafe { CommitArray::<'_>::from_raw(raw) }.into_inner();
         assert_eq!(bare.as_ref().len(), 2);
         // SAFETY: `bare` is a live array Rust owns, disposed once; C zeroes it.
         unsafe { CommitArrayDispose.c_dispose(NonNull::from(&mut bare)) };
@@ -943,7 +2428,7 @@ mod unit_tests {
         let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo) };
         assert_eq!(rc, 0);
         // SAFETY: as above.
-        let adopted = unsafe { CommitArray::from_raw(raw) };
+        let adopted: CommitArrayVal<'_> = unsafe { CommitArray::from_raw(raw) };
         let mut back = adopted.into_inner().into_raw();
         assert_eq!(back.count, 2);
         // SAFETY: `back` owns its commits and buffer again, released once by C.

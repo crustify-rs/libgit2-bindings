@@ -5169,8 +5169,9 @@ mod head_and_lookups {
             },
             Step::CommitParents => match r.commit_parents() {
                 Ok(array) => {
-                    let commits: Vec<_> = array.as_ref().commit_ptrs().elems().collect();
-                    // SAFETY: the array keeps its commits alive.
+                    let owners: Vec<_> = array.as_ref().iter().map(|c| c.to_commit()).collect();
+                    let commits: Vec<_> = owners.iter().map(|c| c.as_c_ptr()).collect();
+                    // SAFETY: the owners keep their commits alive.
                     Outcome::Value(unsafe { commit_ids(commits.as_ptr(), commits.len()) })
                 }
                 Err(error) => rust_failed(scratch, &error),

@@ -1,0 +1,41 @@
+error[E0521]: borrowed data escapes outside of function
+ --> tests/ub_safe/compile_fail/commit_array_outlives_repository.rs:8:13
+  |
+7 | fn store<'r>(mut array: CommitArrayMut<'_, 'static>, commit: CommitArc<'r>) {
+  |          --  ---------                               ------ `commit` is a reference that is only valid in the function body
+  |          |   |
+  |          |   `array` declared here, outside of the function body
+  |          lifetime `'r` defined here
+8 |     let _ = array.set_commits(vec![commit]);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |             |
+  |             `commit` escapes the function body here
+  |             argument requires that `'r` must outlive `'static`
+  |
+  = note: requirement occurs because of a mutable reference to `CommitArrayMut<'_, '_>`
+  = note: mutable references are invariant over their type parameter
+  = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance
+
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/commit_array_outlives_repository.rs:14:10
+   |
+12 |     let repo = Repository::open(c".").unwrap();
+   |         ---- binding `repo` declared here
+13 |     let parents = repo.as_ref().commit_parents().unwrap();
+   |                   ---- borrow of `repo` occurs here
+14 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+15 |     drop(parents);
+   |          ------- borrow later used here
+
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/commit_array_outlives_repository.rs:19:10
+   |
+17 |     let repo = Repository::open(c".").unwrap();
+   |         ---- binding `repo` declared here
+18 |     let taken = repo.as_ref().commit_parents().unwrap().as_mut().take();
+   |                 ---- borrow of `repo` occurs here
+19 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+20 |     drop(taken);
+   |          ----- borrow later used here
