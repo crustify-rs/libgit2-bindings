@@ -1272,6 +1272,30 @@
    ]
   },
   {
+   "name": "git_worktree_add_options",
+   "defined_in": "include/git2/worktree.h",
+   "_comment_agent": "Caller-built by-value options (stack in C), filled by git_worktree_add_options_init / GIT_WORKTREE_ADD_OPTIONS_INIT, never allocated or freed by libgit2; git_worktree_add (the only consumer) refuses version 0 or >1 via GIT_ERROR_CHECK_VERSION, memcpys it, reads lock and checkout_existing as C booleans (nonzero), dups ref, and copies checkout_options by value into git_checkout_head. No release, dispose or clone primitive; the embedded git_checkout_options borrows its own strings/paths/index/payloads.",
+   "fields": [
+    {
+     "name": "ref",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "The caller's attached reference, borrowed for the git_worktree_add call: git_worktree_add memcpys the options, tests git_reference_is_branch (name only), then git_reference_dup's it (reads name/target/peel, bumps the refdb count, never writes the reference) and frees only its own copy. NULL means 'branch named after the worktree' (checkout_existing) or a new branch at HEAD. Must be attached: dup copies ->db, and git_branch_is_checked_out reaches db->repo, so an unattached reference (NULL db) crashes and a reference outliving its repository reads a freed repo. git_worktree_add_options_init writes NULL; nothing frees it."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_worktree_prune_options",
    "defined_in": "include/git2/worktree.h",
    "_comment_agent": "Resource-free POD of two 32-bit scalars (8 bytes, no padding, no pointer). No dropper, disposer or cloner: callers hold it by value (stack) and C copies it by value. Its one lifecycle primitive is the in-place init constructor git_worktree_prune_options_init(opts, version), which memcpys GIT_WORKTREE_PRUNE_OPTIONS_INIT = {1, 0} and fails (git_error_set GIT_ERROR_INVALID, opts untouched) only for version 0 or > GIT_WORKTREE_PRUNE_OPTIONS_VERSION. All-zero is NOT the default: consumers (git_worktree_is_prunable, git_worktree_prune) reject version 0 with -1 'invalid version 0 on git_worktree_prune_options'. Consumers take it nullable and read-only (version check, then memcpy into a local); flags bits outside git_worktree_prune_t are ignored. Not shared with threads by C; no lock.",
@@ -5396,6 +5420,39 @@
       "nullable": false,
       "mutable": true,
       "note": "GIT_ASSERT_ARG, then set to NULL; receives the worktree git_worktree_lookup loads once the gitdir, working directory, refs and checkout are created, owned by the caller (git_worktree_free). Stays NULL on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_worktree_add_options_init",
+   "defined_in": "src/libgit2/worktree.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-provided storage, written in full by memcpy of GIT_WORKTREE_ADD_OPTIONS_INIT ({1, 0, 0, NULL, GIT_CHECKOUT_OPTIONS_INIT}) when version is in 1..=GIT_WORKTREE_ADD_OPTIONS_VERSION; left untouched (error set, -1) otherwise. No NULL check: a NULL opts with a valid version is a NULL write. Reaches no allocator on success."
      }
     }
    ]
