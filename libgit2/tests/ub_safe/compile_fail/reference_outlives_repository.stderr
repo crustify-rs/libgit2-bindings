@@ -1,0 +1,11 @@
+error[E0597]: `repository` does not live long enough
+  --> tests/ub_safe/compile_fail/reference_outlives_repository.rs:15:14
+   |
+13 |     let reference = {
+   |         --------- borrow later stored here
+14 |         let repository = Repository;
+   |             ---------- binding `repository` declared here
+15 |         read(&repository)
+   |              ^^^^^^^^^^^ borrowed value does not live long enough
+16 |     };
+   |     - `repository` dropped here while still borrowed

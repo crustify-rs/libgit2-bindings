@@ -815,3 +815,151 @@ pub mod odb {
         }
     }
 }
+
+// --- `git2/refs.h`: `git_reference` ------------------------------------------------
+
+/// Attached references, read through a repository the fixture owns, and C's view of
+/// any reference; stands in for the repository and reference wrappers.
+pub mod refs {
+    use core::ptr;
+    use std::ffi::{CStr, CString};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::refs::{ReferenceBox, UnattachedReferenceBox};
+
+    /// A fresh bare repository in a temporary directory, freed and removed on drop.
+    ///
+    /// Its references borrow it, as the repository wrapper's will.
+    pub struct Repo {
+        path: PathBuf,
+        repo: *mut ffi::git_repository,
+    }
+
+    impl Repo {
+        pub fn new(tag: &str) -> Self {
+            super::init();
+            let path =
+                std::env::temp_dir().join(format!("crustify-refs-ub-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let mut opts = ffi::git_repository_init_options::default();
+            // SAFETY: `opts` is a live options struct, filled with the version's
+            // defaults.
+            let rc = unsafe {
+                ffi::git_repository_init_options_init(
+                    &mut opts,
+                    ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+                )
+            };
+            assert_eq!(rc, 0);
+            opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+            let mut repo = ptr::null_mut();
+            // SAFETY: a live slot, a NUL-terminated path and live options, read for the
+            // call.
+            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+            assert_eq!(rc, 0);
+            // A packed tag with a peeled id, which no loose file overrides.
+            std::fs::write(
+                path.join("packed-refs"),
+                format!(
+                    "# pack-refs with: peeled fully-peeled sorted \n{} refs/tags/v1\n^{}\n",
+                    "11".repeat(20),
+                    "22".repeat(20)
+                ),
+            )
+            .unwrap();
+            Self { path, repo }
+        }
+
+        /// `git_reference_lookup(name)`, adopted: the one fixture adopting an attached
+        /// reference, which the reference lookup wrapper replaces.
+        pub fn lookup(&self, name: &CStr) -> ReferenceBox<'_> {
+            let mut out = ptr::null_mut();
+            // SAFETY: a live slot, the live repository and a NUL-terminated name, read
+            // for the call.
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+            assert_eq!(rc, 0, "lookup {name:?}");
+            // SAFETY: a fresh attached reference the caller owns, released by
+            // `git_reference_free`; it borrows `self`, which frees the repository last.
+            unsafe { ReferenceBox::from_c(out) }.unwrap()
+        }
+
+        /// The repository, as `git_reference_owner` reports it.
+        pub fn raw(&self) -> *mut ffi::git_repository {
+            self.repo
+        }
+    }
+
+    impl Drop for Repo {
+        fn drop(&mut self) {
+            // SAFETY: the repository `new` opened, freed once; its references borrowed
+            // `self` and are gone.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// What C reads out of a reference: its name, type, target id, peeled id and
+    /// symbolic target.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct View {
+        pub name: CString,
+        pub kind: ffi::git_reference_t,
+        pub target: Option<(u8, [u8; 32])>,
+        pub peel: Option<(u8, [u8; 32])>,
+        pub symbolic: Option<CString>,
+    }
+
+    fn id(oid: *const ffi::git_oid) -> Option<(u8, [u8; 32])> {
+        // SAFETY: NULL, or an id inside a live reference, copied out at once.
+        (!oid.is_null()).then(|| unsafe { ((*oid).type_, (*oid).id) })
+    }
+
+    /// C's view of the live reference at `p`.
+    fn view_raw(p: *const ffi::git_reference) -> View {
+        // SAFETY: `p` is a live reference, read for the calls only; every string and id
+        // it hands back lives as long as it and is copied at once.
+        unsafe {
+            let symbolic = ffi::git_reference_symbolic_target(p);
+            View {
+                name: CStr::from_ptr(ffi::git_reference_name(p)).to_owned(),
+                kind: ffi::git_reference_type(p),
+                target: id(ffi::git_reference_target(p)),
+                peel: id(ffi::git_reference_target_peel(p)),
+                symbolic: (!symbolic.is_null()).then(|| CStr::from_ptr(symbolic).to_owned()),
+            }
+        }
+    }
+
+    /// C's view of an attached reference.
+    pub fn view(reference: &ReferenceBox<'_>) -> View {
+        view_raw(reference.as_c_ptr())
+    }
+
+    /// C's view of an unattached reference.
+    pub fn view_unattached(reference: &UnattachedReferenceBox) -> View {
+        view_raw(reference.as_c_ptr())
+    }
+
+    /// `git_reference_owner`: the repository an attached reference reaches.
+    pub fn owner(reference: &ReferenceBox<'_>) -> *mut ffi::git_repository {
+        // SAFETY: a live attached reference, whose repository outlives its borrow.
+        unsafe { ffi::git_reference_owner(reference.as_c_ptr()) }
+    }
+
+    /// `git_reference_cmp` of two references, attached or not.
+    pub fn cmp(a: *const ffi::git_reference, b: *const ffi::git_reference) -> i32 {
+        // SAFETY: two live references, read for the call only.
+        unsafe { ffi::git_reference_cmp(a, b) }
+    }
+
+    /// `UnattachedReferenceBox::from_c`, for a pointer an owner gave up with `into_c`,
+    /// as libgit2 takes one from a backend.
+    pub fn adopt_unattached(raw: *mut ffi::git_reference) -> UnattachedReferenceBox {
+        // SAFETY: the caller passes a pointer `into_c` surrendered: a live unattached
+        // reference nothing else owns, released by `git_reference_free`.
+        unsafe { UnattachedReferenceBox::from_c(raw) }.unwrap()
+    }
+}

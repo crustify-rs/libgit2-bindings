@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing function parameter `reference`
+ --> tests/ub_safe/compile_fail/reference_handle_outlives_box.rs:5:5
+  |
+5 |     reference.as_ref()
+  |     ---------^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `reference` is borrowed here

@@ -20,6 +20,7 @@ mod odb;
 mod oid;
 mod oidarray;
 mod refdb;
+mod refs;
 mod repository;
 mod strarray;
 mod sys_alloc;

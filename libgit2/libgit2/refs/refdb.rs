@@ -53,6 +53,22 @@
 //! The constructors can fail and set the calling thread's libgit2 error, so they pin
 //! libgit2's runtime first (`runtime_pinned`) and return the error, copied out, as an
 //! [`ErrorBuf`].
+//!
+//! # The storage format
+//!
+//! [`RefdbType`] is a `git_refdb_t`: the storage format of a repository's reference
+//! database, which `git_repository_init_ext` takes through
+//! `git_repository_init_options.refdb_type` and records as the
+//! `extensions.refstorage` setting, and which opening a repository reads back from
+//! it. libgit2 builds both named formats: loose and packed files, and reftable.
+//!
+//! Values the header does not name travel through the C enum too. A zeroed
+//! `refdb_type` means "the default format", [`RefdbType::default`]. Any other value
+//! is written as `extensions.refstorage = unknown`, after which the repository fails
+//! to open with `GIT_EINVALID` ("unknown refstorage format 'unknown'"): initialisation
+//! reports that failure, but leaves the unopenable repository on disk. So a raw value
+//! is converted fallibly ([`RefdbType::from_raw`]) and never transmuted, and an options
+//! wrapper takes the typed value.
 
 use core::ffi::c_int;
 use core::fmt;
@@ -351,6 +367,90 @@ impl<'r> Refdb<'r> {
 const _: () = assert!(size_of::<Refdb<'static>>() == size_of::<ffi::git_refdb>());
 const _: () = assert!(size_of::<RefdbBox<'static>>() == size_of::<*mut ffi::git_refdb>());
 
+/// The storage format of a repository's reference database (`git_refdb_t`), as the
+/// `extensions.refstorage` setting names it.
+///
+/// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name,
+/// `0` included, which an options struct reads as [`RefdbType::default`].
+///
+/// Wraps: git_refdb_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum RefdbType {
+    /// Loose reference files under `refs/`, plus `packed-refs` (`files`).
+    Files = ffi::GIT_REFDB_FILES,
+    /// A reftable stack under `reftable/` (`reftable`).
+    Reftable = ffi::GIT_REFDB_REFTABLE,
+}
+
+impl RefdbType {
+    /// The variant whose C value is `raw`; `None` for a value this version of
+    /// libgit2's header does not name.
+    pub const fn from_raw(raw: ffi::git_refdb_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_REFDB_FILES => Some(Self::Files),
+            ffi::GIT_REFDB_REFTABLE => Some(Self::Reftable),
+            _ => None,
+        }
+    }
+
+    /// The C value, as libgit2's options take it.
+    pub const fn raw(self) -> ffi::git_refdb_t {
+        self as ffi::git_refdb_t
+    }
+}
+
+/// libgit2's default format, the one a zeroed `refdb_type` selects and a repository
+/// without an `extensions.refstorage` setting has.
+impl Default for RefdbType {
+    fn default() -> Self {
+        Self::Files
+    }
+}
+
+impl TryFrom<ffi::git_refdb_t> for RefdbType {
+    type Error = UnnamedRefdbType;
+
+    fn try_from(raw: ffi::git_refdb_t) -> Result<Self, UnnamedRefdbType> {
+        Self::from_raw(raw).ok_or(UnnamedRefdbType(raw))
+    }
+}
+
+impl From<RefdbType> for ffi::git_refdb_t {
+    fn from(value: RefdbType) -> ffi::git_refdb_t {
+        value.raw()
+    }
+}
+
+/// A reference database format that this version of libgit2's header does not name:
+/// `0`, which an options struct reads as the default, or a value libgit2 records as
+/// an unknown format. [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedRefdbType(ffi::git_refdb_t);
+
+impl UnnamedRefdbType {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_refdb_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedRefdbType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 reference database type {} is not named by git2/refdb.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedRefdbType {}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -541,5 +641,63 @@ mod unit_tests {
         let db = unsafe { Refdb::new(repo.repo, NonNull::new(backend).unwrap()) }.unwrap();
         // SAFETY: the box's live refdb, with the backend just set.
         assert_eq!(unsafe { ffi::git_refdb_compress(db.as_c_ptr()) }, 0);
+    }
+
+    /// `RefdbType`, `git_refdb_t`.
+    mod refdb_type {
+        use super::super::*;
+
+        /// Every `git_refdb_t` constant, beside the variant that must carry it.
+        const TYPES: [(ffi::git_refdb_t, RefdbType); 2] = [
+            (ffi::GIT_REFDB_FILES, RefdbType::Files),
+            (ffi::GIT_REFDB_REFTABLE, RefdbType::Reftable),
+        ];
+
+        #[test]
+        fn variants_carry_the_c_values() {
+            for (raw, kind) in TYPES {
+                assert_eq!(kind.raw(), raw);
+                assert_eq!(ffi::git_refdb_t::from(kind), raw);
+                assert_eq!(RefdbType::from_raw(raw), Some(kind));
+                assert_eq!(RefdbType::try_from(raw), Ok(kind));
+            }
+            assert_eq!(size_of::<RefdbType>(), size_of::<ffi::git_refdb_t>());
+            assert_eq!(
+                size_of::<Option<RefdbType>>(),
+                size_of::<ffi::git_refdb_t>()
+            );
+        }
+
+        #[test]
+        fn unnamed_values_are_refused() {
+            for raw in (0..=300)
+                .filter(|raw| TYPES.iter().all(|&(named, _)| named != *raw))
+                .chain([ffi::git_refdb_t::MAX - 1, ffi::git_refdb_t::MAX])
+            {
+                assert_eq!(RefdbType::from_raw(raw), None, "{raw}");
+                let e = RefdbType::try_from(raw).unwrap_err();
+                assert_eq!(e.raw(), raw);
+                assert_eq!(e, UnnamedRefdbType(raw));
+            }
+        }
+
+        #[test]
+        fn default_is_the_files_format() {
+            assert_eq!(RefdbType::default(), RefdbType::Files);
+            assert_eq!(RefdbType::default().raw(), ffi::GIT_REFDB_FILES);
+        }
+
+        #[test]
+        fn errors_describe_the_value() {
+            let e = RefdbType::try_from(0).unwrap_err();
+            assert_eq!(
+                e.to_string(),
+                "libgit2 reference database type 0 is not named by git2/refdb.h"
+            );
+            assert_eq!(format!("{e:?}"), "UnnamedRefdbType(0)");
+            assert_eq!(format!("{:?}", RefdbType::Reftable), "Reftable");
+            let source: &dyn std::error::Error = &e;
+            assert!(source.source().is_none());
+        }
     }
 }

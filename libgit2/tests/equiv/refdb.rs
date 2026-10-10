@@ -17,6 +17,8 @@
 //! A refused backend fails both alike, with the same error class and message, and
 //! stays its caller's: neither frees it (ASan would flag the caller's free as a
 //! double free).
+//!
+//! Then the enum `RefdbType` (`git_refdb_t`), in `refdb_type`.
 
 mod owner {
     use std::ffi::{CStr, CString, c_int};
@@ -383,5 +385,222 @@ mod owner {
                 ((*b).free.unwrap())(b);
             }
         }
+    }
+}
+
+mod refdb_type {
+    //! Equivalence of `git2/refdb.h`'s [`RefdbType`] with the values libgit2 accepts as a
+    //! reference database format.
+    //!
+    //! libgit2 observes a `git_refdb_t` through `git_repository_init_ext`, which takes it
+    //! in `git_repository_init_options.refdb_type`, records it as the
+    //! `extensions.refstorage` setting, and opens the repository it built, reading the
+    //! setting back. Each probe initialises a fresh bare repository with one raw value,
+    //! then opens it again and looks its `HEAD` up; the Rust conversion alone predicts
+    //! every step: the result and error of the initialisation, the setting and directory
+    //! it leaves on disk, the reopening, and the lookup. A zero value is the default
+    //! format, exactly as [`RefdbType::default`] is.
+    //!
+    //! Recorded C behaviour, outside the type: a value the header does not name is
+    //! written as `refstorage = unknown`, so the initialisation fails with `GIT_EINVALID`
+    //! ("unknown refstorage format 'unknown'") but leaves that unopenable repository on
+    //! disk.
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::refs::refdb::RefdbType;
+
+    /// Initialises libgit2; never released.
+    fn init() {
+        // SAFETY: no arguments; the reference is never released.
+        assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+    }
+
+    /// The calling thread's last error class and message.
+    fn c_last() -> (c_int, String) {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        unsafe {
+            let e = ffi::git_error_last();
+            (
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        }
+    }
+
+    /// What libgit2 did with one `refdb_type`, step by step.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Outcome {
+        /// `git_repository_init_ext`'s result, and its error when it failed.
+        init: Result<(), (c_int, (c_int, String))>,
+        /// The `extensions.refstorage` value the repository's config records.
+        refstorage: Option<String>,
+        /// Whether a `reftable/` directory was made.
+        reftable_dir: bool,
+        /// `git_repository_open_ext`'s result, and its error when it failed.
+        open: Result<(), (c_int, (c_int, String))>,
+        /// `HEAD`'s target, looked up through the reopened repository.
+        head: Option<String>,
+    }
+
+    /// A probe directory, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The `refstorage` line of the `[extensions]` section of a config file.
+    fn refstorage(config: &str) -> Option<String> {
+        config
+            .lines()
+            .map(str::trim)
+            .skip_while(|l| *l != "[extensions]")
+            .find_map(|l| l.strip_prefix("refstorage = "))
+            .map(str::to_owned)
+    }
+
+    /// Runs the C steps for `raw` in a fresh directory.
+    fn c_outcome(tag: &str, raw: ffi::git_refdb_t) -> (Outcome, String) {
+        let path =
+            std::env::temp_dir().join(format!("crustify-refdb-equiv-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        let scratch = Scratch(path);
+        let c_path = CString::new(scratch.0.as_os_str().as_bytes()).unwrap();
+        let mut opts = ffi::git_repository_init_options::default();
+        // SAFETY: `opts` is a live options struct, filled with the version's defaults.
+        let rc = unsafe {
+            ffi::git_repository_init_options_init(
+                &mut opts,
+                ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(rc, 0);
+        opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
+        opts.refdb_type = raw;
+        let mut repo = ptr::null_mut();
+        // SAFETY: a live slot, a NUL-terminated path and live options, read for the call;
+        // the result is a fresh repository on success, NULL otherwise.
+        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        let init = if rc == 0 { Ok(()) } else { Err((rc, c_last())) };
+        // SAFETY: the repository just built, or NULL, which the free accepts.
+        unsafe { ffi::git_repository_free(repo) };
+
+        let config = fs::read_to_string(scratch.0.join("config")).unwrap_or_default();
+        let reftable_dir = scratch.0.join("reftable").is_dir();
+
+        let mut repo = ptr::null_mut();
+        // SAFETY: a live slot and a NUL-terminated path, read for the call; no ceiling.
+        let rc = unsafe {
+            ffi::git_repository_open_ext(
+                &mut repo,
+                c_path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_BARE | ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            )
+        };
+        let open = if rc == 0 { Ok(()) } else { Err((rc, c_last())) };
+        let head = (rc == 0).then(|| {
+            let mut head = ptr::null_mut();
+            // SAFETY: a live slot, the open repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_reference_lookup(&mut head, repo, c"HEAD".as_ptr()) };
+            assert_eq!(rc, 0, "{:?}", c_last());
+            // SAFETY: a live symbolic reference: its target lives as long as it, copied
+            // before the reference is freed once.
+            unsafe {
+                let target = CStr::from_ptr(ffi::git_reference_symbolic_target(head))
+                    .to_string_lossy()
+                    .into_owned();
+                ffi::git_reference_free(head);
+                target
+            }
+        });
+        // SAFETY: the reopened repository, or NULL.
+        unsafe { ffi::git_repository_free(repo) };
+        (
+            Outcome {
+                init,
+                refstorage: refstorage(&config),
+                reftable_dir,
+                open,
+                head,
+            },
+            config,
+        )
+    }
+
+    /// What the Rust conversion predicts for `raw`, given the branch a fresh repository's
+    /// `HEAD` names.
+    fn predicted(raw: ffi::git_refdb_t, head: &str) -> Outcome {
+        let format = if raw == 0 {
+            Some(RefdbType::default())
+        } else {
+            RefdbType::from_raw(raw)
+        };
+        let unknown = || {
+            Err((
+                ffi::GIT_EINVALID,
+                (
+                    ffi::GIT_ERROR_REPOSITORY as c_int,
+                    "unknown refstorage format 'unknown'".to_owned(),
+                ),
+            ))
+        };
+        match format {
+            Some(format) => Outcome {
+                init: Ok(()),
+                refstorage: (format == RefdbType::Reftable).then(|| "reftable".to_owned()),
+                reftable_dir: format == RefdbType::Reftable,
+                open: Ok(()),
+                head: Some(head.to_owned()),
+            },
+            None => Outcome {
+                init: unknown(),
+                refstorage: Some("unknown".to_owned()),
+                reftable_dir: false,
+                open: unknown(),
+                head: None,
+            },
+        }
+    }
+
+    /// Every value around the declared ones, and the extremes.
+    fn probes() -> impl Iterator<Item = ffi::git_refdb_t> {
+        (0..=5).chain([100, ffi::git_refdb_t::MAX - 1, ffi::git_refdb_t::MAX])
+    }
+
+    /// Each raw value initialises, records, reopens and resolves `HEAD` exactly as the
+    /// Rust conversion predicts.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn init_follows_the_rust_type() {
+        init();
+        let (files, _) = c_outcome("head", RefdbType::Files.raw());
+        let head = files.head.expect("a files repository opens");
+        for raw in probes() {
+            let (outcome, _) = c_outcome(&format!("probe-{raw}"), raw);
+            assert_eq!(outcome, predicted(raw, &head), "refdb_type {raw}");
+        }
+    }
+
+    /// A zeroed `refdb_type` builds the same repository as the default variant's value.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn zero_is_the_default_format() {
+        init();
+        let (zero, zero_config) = c_outcome("zero", 0);
+        let (default, default_config) = c_outcome("default", RefdbType::default().raw());
+        assert_eq!(zero, default);
+        assert_eq!(zero_config, default_config);
+        assert_eq!(zero.refstorage, None);
     }
 }

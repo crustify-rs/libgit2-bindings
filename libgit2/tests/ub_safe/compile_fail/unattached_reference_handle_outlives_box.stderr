@@ -1,0 +1,11 @@
+error[E0597]: `reference` does not live long enough
+ --> tests/ub_safe/compile_fail/unattached_reference_handle_outlives_box.rs:7:9
+  |
+5 |     let handle = {
+  |         ------ borrow later stored here
+6 |         let mut reference = UnattachedReference::symbolic(c"HEAD", c"refs/heads/main").unwrap();
+  |             ------------- binding `reference` declared here
+7 |         reference.as_mut()
+  |         ^^^^^^^^^ borrowed value does not live long enough
+8 |     };
+  |     - `reference` dropped here while still borrowed
