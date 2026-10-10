@@ -1,0 +1,20 @@
+### lib (cargo-variant.sh bsan test -p libgit2 --lib, timeout 2400)
+running 443 tests
+test libgit2::object::mailmap::unit_tests::classifier_agrees_with_libgit2 has been running for over 60 seconds
+rc=124 elapsed=2400s
+
+### ub_safe (cargo-variant.sh bsan test -p libgit2 --test ub_safe, timeout 2400)
+running 436 tests
+test mailmap::adversarial_buffers_parse_without_ub has been running for over 60 seconds
+test mailmap::mailmaps_cross_threads has been running for over 60 seconds
+test mailmap::repository_mailmaps_outlive_their_repository has been running for over 60 seconds
+rc=124 elapsed=2400s
+
+### equiv (cargo-variant.sh bsan test -p libgit2 --test equiv, timeout 2400)
+running 289 tests
+test mailmap::buffers_match has been running for over 60 seconds
+test mailmap::empty_replaced_emails_are_skipped_where_c_fails has been running for over 60 seconds
+test mailmap::new_mailmaps_match has been running for over 60 seconds
+test mailmap::repository_mailmaps_match has been running for over 60 seconds
+rc=124 elapsed=2400s
+
