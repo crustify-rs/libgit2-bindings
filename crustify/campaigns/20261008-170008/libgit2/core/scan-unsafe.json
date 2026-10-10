@@ -1,5 +1,5 @@
 {
-  "crate_path": "/target/crustify/rust",
+  "crate_path": "/target/crustify/.worktrees/rescan/1/crustify/rust",
   "counts": {
     "unsafe_blocks": 312,
     "unsafe_block_stmts": 18,

@@ -1,5 +1,5 @@
 {
-  "crate_path": "/target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/core/wave-2/batch-0/crustify/rust",
+  "crate_path": "/target/crustify/.worktrees/rescan/2/crustify/rust",
   "counts": {
     "unsafe_blocks": 312,
     "unsafe_block_stmts": 18,
@@ -41,19 +41,6 @@
     "code_lines": 3209
   },
   "counts_unavailable": null,
-  "seed": "--name git_trace_set",
-  "entries": [
-    {
-      "name": "git_trace_set",
-      "raw_ptr_sites": [],
-      "raw_deref_sites": [],
-      "deref_impl_sites": [],
-      "deref_mut_impl_sites": [],
-      "slice_ref_sites": [],
-      "slice_mut_sites": [],
-      "crate": "libgit2"
-    }
-  ],
   "undocumented_unsafe": {
     "sites": 1136,
     "documented": 1114,

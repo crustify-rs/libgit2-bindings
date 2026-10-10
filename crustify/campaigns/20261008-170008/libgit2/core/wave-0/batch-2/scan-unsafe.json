@@ -1,8 +1,66 @@
 {
- "names": [
-  "git_filemode_t",
-  "git_libgit2_opt_t"
- ],
- "exit": 1,
- "stderr": "unsafe: no sites matched --name git_filemode_t git_libgit2_opt_t"
+  "crate_path": "/target/crustify/.worktrees/rescan/3/crustify/rust",
+  "counts": {
+    "unsafe_blocks": 139,
+    "unsafe_block_stmts": 9,
+    "unsafe_block_lines": 172,
+    "unsafe_block_code_lines": 157,
+    "unsafe_blocks_wrapper_impl": 89,
+    "unsafe_blocks_ffi_export": 4,
+    "unsafe_fns": 33,
+    "unsafe_fns_seam": 26,
+    "unsafe_fns_pub_smell": 1,
+    "unsafe_fns_priv_smell": 6,
+    "unsafe_impls": 43,
+    "unsafe_traits": 1,
+    "ffi_calls": 29,
+    "wrapper_newtypes": 7,
+    "wrapper_newtypes_declared": 6,
+    "wrapper_declared_nonconformant": 0,
+    "wrapper_newtypes_undeclared": 1,
+    "raw_ptr_args": 28,
+    "raw_ptr_rets": 30,
+    "raw_ptr_seam": 48,
+    "raw_ptr_wrapped": 0,
+    "raw_ptr_pub_smell": 0,
+    "raw_ptr_priv_smell": 10,
+    "ref_to_type_wrapper_sanctioned": 28,
+    "ref_to_type_wrapper_smell": 8,
+    "ref_to_type_wrapper_body_smell": 0,
+    "deref_impl_on_wrapper": 0,
+    "raw_ptr_fields": 0,
+    "field_ref_wrapped": 0,
+    "field_proj_wrapped": 32,
+    "field_proj_outside_impl": 0,
+    "void_ptr_seam": 19,
+    "void_ptr_pub_smell": 0,
+    "void_ptr_priv_smell": 0,
+    "raw_ptr_derefs": 32,
+    "raw_ptr_derefs_outside_impl": 0,
+    "total_stmts": 467,
+    "code_lines": 1860
+  },
+  "counts_unavailable": null,
+  "undocumented_unsafe": {
+    "sites": 563,
+    "documented": 549,
+    "undocumented": 14,
+    "per_file": {
+      "libgit2/libgit2/oid/oid.rs": 3,
+      "libgit2/tests/equiv/sys_odb_backend.rs": 3,
+      "libgit2/libgit2/util/sys/alloc.rs": 2,
+      "libgit2/tests/equiv/oid.rs": 2,
+      "libgit2/tests/ub_unsafe/sys_odb_backend.rs": 2,
+      "libgit2/tests/equiv/oidarray.rs": 1,
+      "libgit2/tests/equiv/types.rs": 1
+    }
+  },
+  "derived": {
+    "unsafe_fn_pub_ratio": 0.0303,
+    "unsafe_fn_smell": 7,
+    "raw_ptr_smell": 10,
+    "raw_ptr_seam_ratio": 0.8276,
+    "unsafe_loc_ratio": 0.0844,
+    "loc_per_unsafe_block": 13.4
+  }
 }

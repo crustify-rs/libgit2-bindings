@@ -1,5 +1,5 @@
 {
-  "crate_path": "/target/crustify/rust",
+  "crate_path": "/target/crustify/.worktrees/rescan/1/crustify/rust",
   "counts": {
     "unsafe_blocks": 312,
     "unsafe_block_stmts": 18,
@@ -23,10 +23,12 @@
     "raw_ptr_seam": 81,
     "raw_ptr_wrapped": 5,
     "raw_ptr_pub_smell": 0,
-    "raw_ptr_priv_smell": 17,
+    "raw_ptr_priv_smell": 18,
     "ref_to_type_wrapper_sanctioned": 36,
     "ref_to_type_wrapper_smell": 8,
     "ref_to_type_wrapper_body_smell": 0,
+    "deref_impl_on_wrapper": 0,
+    "raw_ptr_fields": 1,
     "field_ref_wrapped": 0,
     "field_proj_wrapped": 60,
     "field_proj_outside_impl": 4,
@@ -62,8 +64,8 @@
   "derived": {
     "unsafe_fn_pub_ratio": 0.3564,
     "unsafe_fn_smell": 53,
-    "raw_ptr_smell": 17,
-    "raw_ptr_seam_ratio": 0.8265,
+    "raw_ptr_smell": 18,
+    "raw_ptr_seam_ratio": 0.8182,
     "unsafe_loc_ratio": 0.1284,
     "loc_per_unsafe_block": 10.3
   }
