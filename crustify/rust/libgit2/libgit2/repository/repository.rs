@@ -1,5 +1,20 @@
 //! Safe wrappers over `include/git2/repository.h`.
+//!
+//! # Layout items and open flags
+//!
+//! An [`Item`] is a `git_repository_item_t`: one file or directory of a repository's
+//! layout, which `git_repository_item_path` resolves against the repository's git,
+//! common or working directory. libgit2 indexes a static table of
+//! `GIT_REPOSITORY_ITEM__LAST` entries with the value unchecked, so the sentinel and
+//! every value past it read beyond that table: [`Item`] has no variant for them, and
+//! [`Item::from_raw`] refuses them.
+//!
+//! An [`OpenFlag`] is a `git_repository_open_flag_t`, one bit of the `unsigned int`
+//! that `git_repository_open_ext` takes; an [`OpenFlags`] set ORs them. libgit2 only
+//! tests the bits it names and ignores the others, so a set keeps any bit it is given
+//! ([`OpenFlags::from_bits_retain`]) and passes it through unchanged.
 
+use core::ffi::c_uint;
 use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
 
@@ -407,6 +422,443 @@ impl CustomMode {
     }
 }
 
+/// One file or directory of a repository's layout, as `git_repository_item_path`
+/// resolves it: against the git directory ([`GitDir`](Self::GitDir), the `.git`
+/// directory or a bare repository itself), the working directory
+/// ([`WorkDir`](Self::WorkDir)), or the common directory a worktree shares with its
+/// main repository ([`CommonDir`](Self::CommonDir)), falling back to the git directory
+/// for a repository without one. A directory resolves with a trailing `/`; an item
+/// whose path cannot exist (the working directory of a bare repository) resolves to
+/// `GIT_ENOTFOUND`.
+///
+/// [`from_raw`](Self::from_raw) gives `None` for `GIT_REPOSITORY_ITEM__LAST` and every
+/// value after it, which libgit2 would read past its item table with.
+///
+/// Wraps: git_repository_item_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum Item {
+    /// The git directory, `<gitdir>/`.
+    GitDir = ffi::GIT_REPOSITORY_ITEM_GITDIR,
+    /// The working directory, `<workdir>/`; not found in a bare repository.
+    WorkDir = ffi::GIT_REPOSITORY_ITEM_WORKDIR,
+    /// The common directory, `<commondir>/`: the main repository's git directory for
+    /// a worktree, the git directory otherwise.
+    CommonDir = ffi::GIT_REPOSITORY_ITEM_COMMONDIR,
+    /// The index file, `<gitdir>/index`.
+    Index = ffi::GIT_REPOSITORY_ITEM_INDEX,
+    /// The object database, `<commondir>/objects/`.
+    Objects = ffi::GIT_REPOSITORY_ITEM_OBJECTS,
+    /// The loose references, `<commondir>/refs/`.
+    Refs = ffi::GIT_REPOSITORY_ITEM_REFS,
+    /// The packed references file, `<commondir>/packed-refs`.
+    PackedRefs = ffi::GIT_REPOSITORY_ITEM_PACKED_REFS,
+    /// The legacy remotes directory, `<commondir>/remotes/`.
+    Remotes = ffi::GIT_REPOSITORY_ITEM_REMOTES,
+    /// The repository's configuration file, `<commondir>/config`.
+    Config = ffi::GIT_REPOSITORY_ITEM_CONFIG,
+    /// The info directory, `<commondir>/info/`.
+    Info = ffi::GIT_REPOSITORY_ITEM_INFO,
+    /// The hooks directory, `<commondir>/hooks/`.
+    Hooks = ffi::GIT_REPOSITORY_ITEM_HOOKS,
+    /// The reflogs, `<commondir>/logs/`.
+    Logs = ffi::GIT_REPOSITORY_ITEM_LOGS,
+    /// The submodules' git directories, `<gitdir>/modules/`.
+    Modules = ffi::GIT_REPOSITORY_ITEM_MODULES,
+    /// The worktrees' administrative directories, `<commondir>/worktrees/`.
+    Worktrees = ffi::GIT_REPOSITORY_ITEM_WORKTREES,
+    /// The per-worktree configuration file, `<gitdir>/config.worktree`.
+    WorktreeConfig = ffi::GIT_REPOSITORY_ITEM_WORKTREE_CONFIG,
+}
+
+impl Item {
+    /// Every variant, in C value order: `ALL[n]` is the item whose value is `n`.
+    pub const ALL: [Item; 15] = [
+        Self::GitDir,
+        Self::WorkDir,
+        Self::CommonDir,
+        Self::Index,
+        Self::Objects,
+        Self::Refs,
+        Self::PackedRefs,
+        Self::Remotes,
+        Self::Config,
+        Self::Info,
+        Self::Hooks,
+        Self::Logs,
+        Self::Modules,
+        Self::Worktrees,
+        Self::WorktreeConfig,
+    ];
+
+    /// The variant whose C value is `raw`; `None` for `GIT_REPOSITORY_ITEM__LAST` and
+    /// every value after it.
+    pub const fn from_raw(raw: ffi::git_repository_item_t) -> Option<Self> {
+        // `ALL` is indexed by value and ends at `__LAST`, the bound of libgit2's table.
+        const {
+            assert!(Item::ALL.len() == ffi::GIT_REPOSITORY_ITEM__LAST as usize);
+            let mut i = 0;
+            while i < Item::ALL.len() {
+                assert!(Item::ALL[i] as usize == i);
+                i += 1;
+            }
+        }
+        if raw < ffi::GIT_REPOSITORY_ITEM__LAST {
+            Some(Self::ALL[raw as usize])
+        } else {
+            None
+        }
+    }
+
+    /// The C value, as `git_repository_item_path` takes it; always below
+    /// `GIT_REPOSITORY_ITEM__LAST`.
+    pub const fn raw(self) -> ffi::git_repository_item_t {
+        self as ffi::git_repository_item_t
+    }
+}
+
+impl TryFrom<ffi::git_repository_item_t> for Item {
+    type Error = UnnamedItem;
+
+    fn try_from(raw: ffi::git_repository_item_t) -> Result<Self, UnnamedItem> {
+        Self::from_raw(raw).ok_or(UnnamedItem(raw))
+    }
+}
+
+impl From<Item> for ffi::git_repository_item_t {
+    fn from(value: Item) -> ffi::git_repository_item_t {
+        value.raw()
+    }
+}
+
+/// A repository item value that names no item: `GIT_REPOSITORY_ITEM__LAST` or a value
+/// after it. [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedItem(ffi::git_repository_item_t);
+
+impl UnnamedItem {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_repository_item_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 repository item {} is not named by git2/repository.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedItem {}
+
+/// One option of `git_repository_open_ext`'s search for a repository, a single bit of
+/// an [`OpenFlags`] set.
+///
+/// Without any, the search starts at the given path, tries `<path>/.git` and then
+/// `<path>` itself, and walks up through the parent directories until a ceiling
+/// directory, staying on the starting file system.
+///
+/// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`, a
+/// combination of bits, or a bit this version of libgit2's header does not name.
+///
+/// Wraps: git_repository_open_flag_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum OpenFlag {
+    /// Only look at the starting path (and its `.git`); do not walk up through its
+    /// parent directories.
+    NoSearch = ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+    /// Keep walking up across file system boundaries (a change of `st_dev`).
+    CrossFs = ffi::GIT_REPOSITORY_OPEN_CROSS_FS,
+    /// Open the repository as bare whatever its `core.bare`, deferring the loading of
+    /// its configuration; unlike `git_repository_open_bare`, a gitlink is followed.
+    /// The search tries the starting path itself and not its `.git`; the parents it
+    /// walks up to are still tried with `.git` first.
+    Bare = ffi::GIT_REPOSITORY_OPEN_BARE,
+    /// Never append `/.git`: only a git directory itself is a repository.
+    NoDotGit = ffi::GIT_REPOSITORY_OPEN_NO_DOTGIT,
+    /// Respect the git command-line tools' environment variables: `GIT_DIR` (for a
+    /// NULL path, which it then opens as a git directory without searching),
+    /// `GIT_CEILING_DIRECTORIES` (for NULL ceiling directories),
+    /// `GIT_DISCOVERY_ACROSS_FILESYSTEM` (a boolean, adding [`CrossFs`](Self::CrossFs);
+    /// any other value fails the open), `GIT_COMMON_DIR`, `GIT_WORK_TREE`,
+    /// `GIT_INDEX_FILE`, `GIT_NAMESPACE`, `GIT_OBJECT_DIRECTORY`,
+    /// `GIT_ALTERNATE_OBJECT_DIRECTORIES` and the `GIT_CONFIG_*` paths. Unlike what
+    /// libgit2's header says, the other flags and given ceiling directories still
+    /// apply.
+    FromEnv = ffi::GIT_REPOSITORY_OPEN_FROM_ENV,
+}
+
+impl OpenFlag {
+    /// Every variant, in ascending bit order.
+    pub const ALL: [OpenFlag; 5] = [
+        Self::NoSearch,
+        Self::CrossFs,
+        Self::Bare,
+        Self::NoDotGit,
+        Self::FromEnv,
+    ];
+
+    /// The variant whose C value is `raw`; `None` for a value this version of
+    /// libgit2's header does not name.
+    pub const fn from_raw(raw: ffi::git_repository_open_flag_t) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            if Self::ALL[i] as ffi::git_repository_open_flag_t == raw {
+                return Some(Self::ALL[i]);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// The C value, a single bit.
+    pub const fn raw(self) -> ffi::git_repository_open_flag_t {
+        self as ffi::git_repository_open_flag_t
+    }
+
+    /// The flag's bit in the `unsigned int` `git_repository_open_ext` takes.
+    const fn bit(self) -> c_uint {
+        self as c_uint
+    }
+}
+
+impl TryFrom<ffi::git_repository_open_flag_t> for OpenFlag {
+    type Error = UnnamedOpenFlag;
+
+    fn try_from(raw: ffi::git_repository_open_flag_t) -> Result<Self, UnnamedOpenFlag> {
+        Self::from_raw(raw).ok_or(UnnamedOpenFlag(raw))
+    }
+}
+
+impl From<OpenFlag> for ffi::git_repository_open_flag_t {
+    fn from(value: OpenFlag) -> ffi::git_repository_open_flag_t {
+        value.raw()
+    }
+}
+
+/// An open flag value that this version of libgit2's header does not name: `0`, a
+/// combination of flags, or a later header's bit. [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedOpenFlag(ffi::git_repository_open_flag_t);
+
+impl UnnamedOpenFlag {
+    /// The value, as it was converted.
+    pub const fn raw(self) -> ffi::git_repository_open_flag_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedOpenFlag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 repository open flag {} is not named by git2/repository.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedOpenFlag {}
+
+/// A set of [`OpenFlag`]s: the `unsigned int` combination of `GIT_REPOSITORY_OPEN_*`
+/// bits that `git_repository_open_ext` takes. The empty set is the default search.
+///
+/// It keeps every bit it is given, named or not, so [`bits`](Self::bits) passes on
+/// what it was built from; libgit2 ignores the bits no [`OpenFlag`] names.
+/// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
+/// [`unnamed_bits`](Self::unnamed_bits) the rest.
+///
+/// Wraps: git_repository_open_flag_t
+/// Handwritten
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct OpenFlags(c_uint);
+
+impl OpenFlags {
+    /// The bits of every [`OpenFlag`].
+    const NAMED: c_uint = {
+        let mut bits = 0;
+        let mut i = 0;
+        while i < OpenFlag::ALL.len() {
+            bits |= OpenFlag::ALL[i].bit();
+            i += 1;
+        }
+        bits
+    };
+
+    /// The set with no flag: the default search.
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    /// The set of every bit of `bits`; bits that no [`OpenFlag`] names are kept.
+    pub const fn from_bits_retain(bits: c_uint) -> Self {
+        Self(bits)
+    }
+
+    /// The bits of the set, as `git_repository_open_ext` takes them.
+    pub const fn bits(self) -> c_uint {
+        self.0
+    }
+
+    /// The bits of the set that no [`OpenFlag`] names.
+    pub const fn unnamed_bits(self) -> c_uint {
+        self.0 & !Self::NAMED
+    }
+
+    /// Whether the set has no bit, named or not.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether `flag` is in the set.
+    pub const fn contains(self, flag: OpenFlag) -> bool {
+        self.0 & flag.bit() != 0
+    }
+
+    /// Adds `flag` to the set.
+    pub fn insert(&mut self, flag: OpenFlag) {
+        self.0 |= flag.bit();
+    }
+
+    /// Removes `flag` from the set.
+    pub fn remove(&mut self, flag: OpenFlag) {
+        self.0 &= !flag.bit();
+    }
+
+    /// The named flags in the set, in ascending bit order.
+    pub fn iter(self) -> OpenFlagsIter {
+        OpenFlagsIter { set: self, next: 0 }
+    }
+}
+
+impl From<OpenFlag> for OpenFlags {
+    fn from(flag: OpenFlag) -> Self {
+        Self(flag.bit())
+    }
+}
+
+impl BitOr for OpenFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOr<OpenFlag> for OpenFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: OpenFlag) -> Self {
+        self | Self::from(rhs)
+    }
+}
+
+impl BitOr for OpenFlag {
+    type Output = OpenFlags;
+
+    fn bitor(self, rhs: Self) -> OpenFlags {
+        OpenFlags::from(self) | rhs
+    }
+}
+
+impl BitOrAssign for OpenFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl BitOrAssign<OpenFlag> for OpenFlags {
+    fn bitor_assign(&mut self, rhs: OpenFlag) {
+        self.insert(rhs);
+    }
+}
+
+impl FromIterator<OpenFlag> for OpenFlags {
+    fn from_iter<I: IntoIterator<Item = OpenFlag>>(iter: I) -> Self {
+        let mut set = Self::empty();
+        set.extend(iter);
+        set
+    }
+}
+
+impl Extend<OpenFlag> for OpenFlags {
+    fn extend<I: IntoIterator<Item = OpenFlag>>(&mut self, iter: I) {
+        for flag in iter {
+            self.insert(flag);
+        }
+    }
+}
+
+impl IntoIterator for OpenFlags {
+    type Item = OpenFlag;
+    type IntoIter = OpenFlagsIter;
+
+    fn into_iter(self) -> OpenFlagsIter {
+        self.iter()
+    }
+}
+
+/// Lists the named flags, then any unnamed bits in hex: `{NoSearch | Bare, 0x20}`.
+impl fmt::Debug for OpenFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("OpenFlags {")?;
+        let mut sep = "";
+        for flag in self.iter() {
+            write!(f, "{sep}{flag:?}")?;
+            sep = " | ";
+        }
+        if self.unnamed_bits() != 0 {
+            let sep = if sep.is_empty() { "" } else { ", " };
+            write!(f, "{sep}{:#x}", self.unnamed_bits())?;
+        }
+        f.write_str("}")
+    }
+}
+
+/// The named flags of an [`OpenFlags`] set, in ascending bit order
+/// ([`OpenFlags::iter`]).
+///
+/// Handwritten
+#[derive(Clone, Debug)]
+pub struct OpenFlagsIter {
+    set: OpenFlags,
+    /// The index into [`OpenFlag::ALL`] of the next flag to test.
+    next: usize,
+}
+
+impl Iterator for OpenFlagsIter {
+    type Item = OpenFlag;
+
+    fn next(&mut self) -> Option<OpenFlag> {
+        while let Some(&flag) = OpenFlag::ALL.get(self.next) {
+            self.next += 1;
+            if self.set.contains(flag) {
+                return Some(flag);
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(OpenFlag::ALL.len().saturating_sub(self.next)))
+    }
+}
+
+impl core::iter::FusedIterator for OpenFlagsIter {}
+
 #[cfg(test)]
 mod unit_tests {
     mod init_flags_and_modes {
@@ -506,6 +958,149 @@ mod unit_tests {
                 assert_eq!(InitMode::from_raw(raw).raw(), raw);
                 assert!(matches!(InitMode::from_raw(raw), InitMode::Custom(_)));
             }
+        }
+    }
+
+    mod items_and_open_flags {
+        use super::super::*;
+
+        #[test]
+        fn items_are_indexed_by_value() {
+            for (i, item) in Item::ALL.into_iter().enumerate() {
+                assert_eq!(item.raw() as usize, i, "{item:?}");
+                assert_eq!(Item::from_raw(item.raw()), Some(item));
+                assert_eq!(Item::try_from(item.raw()), Ok(item));
+                assert_eq!(ffi::git_repository_item_t::from(item), item.raw());
+            }
+            // `Ord` is the C value order.
+            assert!(Item::ALL.windows(2).all(|w| w[0] < w[1]));
+        }
+
+        #[test]
+        fn item_rejects_the_sentinel_and_beyond() {
+            for raw in [
+                ffi::GIT_REPOSITORY_ITEM__LAST,
+                ffi::GIT_REPOSITORY_ITEM__LAST + 1,
+                u32::MAX,
+            ] {
+                assert_eq!(Item::from_raw(raw), None);
+                let err = Item::try_from(raw).unwrap_err();
+                assert_eq!(err.raw(), raw);
+                assert_eq!(
+                    err.to_string(),
+                    format!("libgit2 repository item {raw} is not named by git2/repository.h")
+                );
+            }
+        }
+
+        #[test]
+        fn open_flag_bits_are_distinct_single_bits() {
+            let mut seen = 0;
+            for (i, flag) in OpenFlag::ALL.into_iter().enumerate() {
+                assert_eq!(flag.raw(), 1 << i, "{flag:?}");
+                assert_eq!(flag.bit() & seen, 0);
+                seen |= flag.bit();
+            }
+            assert_eq!(OpenFlags::NAMED, seen);
+            assert_eq!(OpenFlags::NAMED, 0x1f);
+        }
+
+        #[test]
+        fn open_flag_conversions_round_trip() {
+            for flag in OpenFlag::ALL {
+                assert_eq!(OpenFlag::from_raw(flag.raw()), Some(flag));
+                assert_eq!(OpenFlag::try_from(flag.raw()), Ok(flag));
+                assert_eq!(ffi::git_repository_open_flag_t::from(flag), flag.raw());
+            }
+            for raw in [0, 3, 1 << 5, u32::MAX] {
+                assert_eq!(OpenFlag::from_raw(raw), None);
+                let err = OpenFlag::try_from(raw).unwrap_err();
+                assert_eq!(err.raw(), raw);
+                assert_eq!(
+                    err.to_string(),
+                    format!("libgit2 repository open flag {raw} is not named by git2/repository.h")
+                );
+            }
+        }
+
+        #[test]
+        fn open_flags_build_and_take_apart() {
+            let mut set = OpenFlags::default();
+            assert!(set.is_empty());
+            assert_eq!(set, OpenFlags::empty());
+            set |= OpenFlag::Bare;
+            set.insert(OpenFlag::NoSearch);
+            assert_eq!(set.bits(), 0b101);
+            assert_eq!(set, OpenFlag::NoSearch | OpenFlag::Bare);
+            assert_eq!(set, OpenFlags::from(OpenFlag::Bare) | OpenFlag::NoSearch);
+            assert_eq!(
+                set.iter().collect::<Vec<_>>(),
+                [OpenFlag::NoSearch, OpenFlag::Bare]
+            );
+            set.remove(OpenFlag::NoSearch);
+            set.remove(OpenFlag::NoSearch);
+            assert_eq!(set.into_iter().collect::<Vec<_>>(), [OpenFlag::Bare]);
+            let mut more = OpenFlags::from_bits_retain(1 << 7);
+            more |= set;
+            assert_eq!(more.bits(), 1 << 7 | 0b100);
+            assert_eq!(more.unnamed_bits(), 1 << 7);
+            assert_eq!(
+                OpenFlag::ALL.into_iter().collect::<OpenFlags>().bits(),
+                0x1f
+            );
+        }
+
+        #[test]
+        fn open_flags_iter_skips_unnamed_bits_and_fuses() {
+            let mut iter = OpenFlags::from_bits_retain(u32::MAX).iter();
+            assert_eq!(iter.size_hint(), (0, Some(5)));
+            assert_eq!(iter.by_ref().count(), 5);
+            assert_eq!(iter.size_hint(), (0, Some(0)));
+            assert_eq!(iter.next(), None);
+            assert_eq!(OpenFlags::from_bits_retain(!0x1f).iter().next(), None);
+        }
+
+        /// A formatter target refusing every write after the first `ok`.
+        struct FailAfter {
+            ok: usize,
+        }
+
+        impl fmt::Write for FailAfter {
+            fn write_str(&mut self, _: &str) -> fmt::Result {
+                self.ok = self.ok.checked_sub(1).ok_or(fmt::Error)?;
+                Ok(())
+            }
+        }
+
+        #[test]
+        fn open_flags_debug_passes_on_a_refused_write() {
+            use core::fmt::Write;
+            let set = OpenFlags::from_bits_retain(1 << 5 | 0b11);
+            let writes = {
+                let mut all = FailAfter { ok: usize::MAX };
+                write!(all, "{set:?}").unwrap();
+                usize::MAX - all.ok
+            };
+            for ok in 0..writes {
+                assert_eq!(write!(FailAfter { ok }, "{set:?}"), Err(fmt::Error), "{ok}");
+            }
+        }
+
+        #[test]
+        fn open_flags_debug_names_flags_then_unnamed_bits() {
+            assert_eq!(format!("{:?}", OpenFlags::empty()), "OpenFlags {}");
+            assert_eq!(
+                format!("{:?}", OpenFlag::NoSearch | OpenFlag::Bare),
+                "OpenFlags {NoSearch | Bare}"
+            );
+            assert_eq!(
+                format!("{:?}", OpenFlags::from_bits_retain(1 << 5 | 1)),
+                "OpenFlags {NoSearch, 0x20}"
+            );
+            assert_eq!(
+                format!("{:?}", OpenFlags::from_bits_retain(1 << 5)),
+                "OpenFlags {0x20}"
+            );
         }
     }
 }
