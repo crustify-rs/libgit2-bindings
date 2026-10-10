@@ -503,6 +503,254 @@
    "fields": []
   },
   {
+   "name": "git_repository",
+   "defined_in": "src/libgit2/repository.h",
+   "_comment_agent": "git_repository is opaque to the public API (forward-declared in git2/types.h): no field is published, so the Rust wrapper (repository/repository.rs, Repository/RepositoryRef/RepositoryMut + RepositoryBox = CBox<Repository, RepositoryFree>) exposes no field accessor. No refcount: git_repository_free is the only release (sole owner), and nothing copies a repository. Constructors: git_repository_new/new_ext (allocation only, bare, no paths), open/open_ext/open_bare, init/init_ext, wrap_odb, open_from_worktree, plus git_clone/git_submodule_open elsewhere. C defects found: git_repository_open_bare leaks the half-built repository (and its path strings) when read_repository_format fails (e.g. unsupported core.repositoryformatversion or unknown extension), and when git_str_detach fails; init_ext can fail after git_repository_open succeeded, leaving a live repository in *out that the caller must free. Objects spawned from a repository (git_object, git_reference...) keep a raw repo pointer without a count: freeing the repository first makes their repo-dependent accessors UB, so their wrappers must borrow the repository.",
+   "fields": [
+    {
+     "name": "_config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The repository holds ONE counted reference: set_config does GIT_REFCOUNT_OWN(x, repo) + GIT_REFCOUNT_INC on the new value and atomically swaps it in, then GIT_REFCOUNT_OWN(old, NULL) + git_config_free (a down-ref) on the old one. Lazily loaded on first use (git_repository_config__weakptr, CAS from NULL; the loser frees its own). Public getters (git_repository_config) hand the caller a further counted reference; __weakptr callers borrow without one. git_repository__cleanup / git_repository_free drop the repository's reference and null the object's owner back-pointer, so a caller's reference outlives the repository safely."
+     }
+    },
+    {
+     "name": "_index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The repository holds ONE counted reference: set_index does GIT_REFCOUNT_OWN(x, repo) + GIT_REFCOUNT_INC on the new value and atomically swaps it in, then GIT_REFCOUNT_OWN(old, NULL) + git_index_free (a down-ref) on the old one. Lazily loaded on first use (git_repository_index__weakptr, CAS from NULL; the loser frees its own). Public getters (git_repository_index) hand the caller a further counted reference; __weakptr callers borrow without one. git_repository__cleanup / git_repository_free drop the repository's reference and null the object's owner back-pointer, so a caller's reference outlives the repository safely."
+     }
+    },
+    {
+     "name": "_odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The repository holds ONE counted reference: set_odb does GIT_REFCOUNT_OWN(x, repo) + GIT_REFCOUNT_INC on the new value and atomically swaps it in, then GIT_REFCOUNT_OWN(old, NULL) + git_odb_free (a down-ref) on the old one. Lazily loaded on first use (git_repository_odb__weakptr, CAS from NULL; the loser frees its own). Public getters (git_repository_odb) hand the caller a further counted reference; __weakptr callers borrow without one. git_repository__cleanup / git_repository_free drop the repository's reference and null the object's owner back-pointer, so a caller's reference outlives the repository safely."
+     }
+    },
+    {
+     "name": "_refdb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The repository holds ONE counted reference: set_refdb does GIT_REFCOUNT_OWN(x, repo) + GIT_REFCOUNT_INC on the new value and atomically swaps it in, then GIT_REFCOUNT_OWN(old, NULL) + git_refdb_free (a down-ref) on the old one. Lazily loaded on first use (git_repository_refdb__weakptr, CAS from NULL; the loser frees its own). Public getters (git_repository_refdb) hand the caller a further counted reference; __weakptr callers borrow without one. git_repository__cleanup / git_repository_free drop the repository's reference and null the object's owner back-pointer, so a caller's reference outlives the repository safely."
+     }
+    },
+    {
+     "name": "attrcache",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Lazily created by git_attr_cache__init with an atomic compare-and-swap from NULL; git_attr_cache_flush (from git_repository__cleanup) atomically swaps it out and frees it. Owned, never shared out of the repository."
+     }
+    },
+    {
+     "name": "commondir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Common dir (differs from gitdir for worktrees); set at open, NULL for new/wrap_odb repos and when find_repo produced none. Freed by git_repository_free."
+     }
+    },
+    {
+     "name": "diff_drivers",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Lazily created by git_repository_driver_registry with an atomic CAS from NULL (loser frees its copy); freed by git_repository_free (git_diff_driver_registry_free)."
+     }
+    },
+    {
+     "name": "gitdir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Repository directory with trailing slash; set by open_ext/open_bare (git_str_detach), NULL for git_repository_new/new_ext/wrap_odb repos. Freed by git_repository_free."
+     }
+    },
+    {
+     "name": "gitlink",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Path of the .git file a worktree/submodule gitlink pointed through; git_str_detach'd by open_ext only when find_repo found a gitlink, else NULL. Freed by git_repository_free (git__free). Never replaced after open."
+     }
+    },
+    {
+     "name": "grafts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Loaded by load_grafts at open (info/grafts), freed and NULLed by git_repository__cleanup (git_grafts_free). Handed out only as a weak pointer (git_repository_grafts__weakptr)."
+     }
+    },
+    {
+     "name": "ident_email",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Identity email override from git_repository_set_ident (as ident_name). Freed by git_repository_free."
+     }
+    },
+    {
+     "name": "ident_name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Identity name override from git_repository_set_ident (git__free old, git__strdup new, NULL clears). Freed by git_repository_free."
+     }
+    },
+    {
+     "name": "namespace",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Reference namespace; NULL unless git_repository_set_namespace (git__free old + git__strdup new, NULL clears) or GIT_NAMESPACE under OPEN_FROM_ENV. Freed by git_repository_free."
+     }
+    },
+    {
+     "name": "reserved_names.ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "git_array_t(git_str) buffer: repository_alloc sizes it to 4 (alloc failure fails the constructor, so non-NULL on every live repository); git_repository__reserved_names appends git_str values it owns. git_repository_free disposes each element (git_str_dispose) then git_array_clear frees the buffer."
+     }
+    },
+    {
+     "name": "shallow_grafts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Loaded by load_grafts at open (shallow file), freed and NULLed by git_repository__cleanup (git_grafts_free). Weak pointers only (git_repository_shallow_grafts__weakptr)."
+     }
+    },
+    {
+     "name": "submodule_cache",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Set by git_repository_submodule_cache_all (git_submodule_cache_init), freed and NULLed by git_repository_submodule_cache_clear, which git_repository__cleanup calls. Not synchronised."
+     }
+    },
+    {
+     "name": "workdir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Working directory with trailing slash; NULL for bare repos. load_workdir/git_repository_set_workdir replace it, git__free'ing the old string (set_workdir), git_repository_set_bare frees and NULLs it. Freed by git_repository_free."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_repository_init_flag_t",
    "defined_in": "include/git2/repository.h",
    "_comment_agent": "Fieldless bit-flag enum (BARE 1<<0, NO_REINIT 1<<1, MKDIR 1<<3, MKPATH 1<<4, EXTERNAL_TEMPLATE 1<<5, RELATIVE_GITLINK 1<<6; bindgen c_uint), by value only; no pointer, no lifecycle (repository wave 0 batch 8, 2026-10-10). Consumer: the uint32_t git_repository_init_options.flags, read by git_repository_init_ext (repository.c:2923) and its helpers; git_repository_init sets MKPATH(|BARE). Probed: init_ext ORs repository.h's internal bits into the CALLER's options (1<<16 HAS_DOTGIT, 1<<17 NATURAL_WD in repo_init_directories, 1<<18 IS_REINIT on reinit) and honours them on the next call with those options (a caller-set 1<<17 skips the gitlink/core.worktree); a reused options struct therefore carries IS_REINIT. MKPATH's bit equals GIT_REPOSITORY_OPEN_FROM_ENV, which init_ext also tests on the same flags (lookup_commondir reads $GIT_COMMON_DIR, repo_init_config passes use_env to global/system config loading): with GIT_COMMON_DIR naming a repo, a HEAD-only dir reads as a repository under MKPATH (NO_REINIT -> GIT_EEXISTS) but is initialised under MKDIR. Unnamed bits are never rejected. Rust: InitFlag (#[repr(u32)] single flag, fallible from_raw -> UnnamedInitFlag) and InitFlags (u32 set, from_bits_retain keeps unnamed bits, from_bits_truncate drops them) in repository/repository.rs; the options wrapper should read flags back with from_bits_retain and may want to strip internal bits on set.",
@@ -3498,6 +3746,410 @@
       "nullable": false,
       "mutable": true,
       "note": "Not asserted (dereferenced unconditionally). Its config slot is set with a compare-and-swap on first load."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_free",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "repo",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Released: cleanup drops the counted odb/refdb/config/index references, then every owned string, cache and array, then the struct (git__free). NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_init",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "repo_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Path read for the call only."
+     }
+    },
+    {
+     "name": "repo_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot written by the inner git_repository_open; init_ext may fail AFTER that open (refdb init, origin creation) leaving a live repository in *out that the caller must free. Not NULLed first: callers must pre-NULL it."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_init_ext",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "given_repo",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Path read for the call only."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Options; init_ext WRITES opts->flags (|= GIT_REPOSITORY_INIT__IS_REINIT on reinit), otherwise read for the call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As git_repository_init: *out may hold a live repository even when the call fails after the inner open; never NULLed first."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_new",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot; written with a fresh bare repository (no paths, no backends) or left as repository_alloc's NULL on OOM."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_new_ext",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Options read for the call only (version, oid_type); NULL means defaults."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot; *out = repository_alloc() is written before the allocation check, so NULL on failure. GIT_ASSERT_ARG on an invalid non-zero opts->oid_type."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_open",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "repo_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Path read for the call only."
+     }
+    },
+    {
+     "name": "repo_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot; open_ext NULLs it first, writes the repository only on success (frees it on failure)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_open_bare",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "repo_ptr",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "bare_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Path read for the call only (git_fs_path_prettify_dir)."
+     }
+    },
+    {
+     "name": "repo_ptr",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot; written ONLY on success and not NULLed first. Defect: when read_repository_format fails (unsupported repositoryformatversion, unknown extension/objectformat) the allocated repository and its gitdir/commondir strings leak, and an allocation failure after repository_alloc leaks too."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_repository_open_ext",
+   "defined_in": "src/libgit2/repository.c",
+   "lifetime": {
+    "for": "repo_ptr",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "ceiling_dirs",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Ceiling dirs list read for the call; NULL = none."
+     }
+    },
+    {
+     "name": "repo_ptr",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, may be NULL (probe only). NULLed first; written only on success; the half-built repository is freed on failure."
+     }
+    },
+    {
+     "name": "start_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Start path read for the call; NULL only valid with GIT_REPOSITORY_OPEN_FROM_ENV."
      }
     }
    ]

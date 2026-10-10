@@ -348,3 +348,278 @@ mod state {
         });
     }
 }
+
+/// The `Repository` owner, its handles, its constructors and the
+/// `git_repository_free` policy.
+///
+/// Every repository a constructor builds, or leaves behind when it fails, must be
+/// released exactly once (ASan: double free, use after free; LSan: leak), whichever
+/// thread builds it first (TSan: the first constructor initialises libgit2). Handles
+/// outliving their box and boxes crossing threads are `compile_fail` doctests on
+/// `Repository`. Every constructor calls libgit2, so nothing here runs under Miri.
+mod repository_owner {
+    use std::ffi::CString;
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use std::sync::Barrier;
+    use std::thread;
+
+    use libgit2::libgit2::oid::oid::OidType;
+    use libgit2::libgit2::repository::repository::{
+        Repository, RepositoryBox, RepositoryMut, RepositoryRef,
+    };
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    use crate::fixture::isolated;
+
+    /// libgit2's bare test repository, only ever opened read-only.
+    const TESTREPO: &std::ffi::CStr = {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git\0"
+        );
+        match std::ffi::CStr::from_bytes_with_nul(path.as_bytes()) {
+            Ok(path) => path,
+            Err(_) => panic!("interior NUL"),
+        }
+    };
+
+    /// A scratch directory of its own under the temp dir, removed when dropped.
+    struct Scratch {
+        path: PathBuf,
+        c_path: CString,
+    }
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-repository-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            Self { path, c_path }
+        }
+
+        /// `name` under the directory, NUL-terminated.
+        fn child(&self, name: &str) -> CString {
+            CString::new(self.path.join(name).as_os_str().as_bytes()).unwrap()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// Takes every handle a box hands out, in every order a caller may, then drops
+    /// the box.
+    fn exercise(mut repo: RepositoryBox) {
+        let shared: RepositoryRef<'_> = repo.as_ref();
+        let copy = shared;
+        let _ = (shared, copy);
+        {
+            let mut exclusive: RepositoryMut<'_> = repo.as_mut();
+            {
+                let _reborrowed: RepositoryMut<'_> = exclusive.as_mut();
+            }
+            let _through: RepositoryRef<'_> = exclusive.as_ref();
+        }
+        let _ = repo.as_ref();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn every_constructor_builds_an_owner_freed_once() {
+        exercise(Repository::new().unwrap());
+        exercise(RepositoryBox::new().unwrap());
+        for kind in [OidType::Sha1, OidType::Sha256] {
+            exercise(Repository::with_oid_type(kind).unwrap());
+        }
+        exercise(Repository::open(TESTREPO).unwrap());
+        exercise(Repository::open_bare(TESTREPO).unwrap());
+
+        let scratch = Scratch::new("constructors");
+        for (name, bare) in [("bare", true), ("work", false)] {
+            let path = scratch.child(name);
+            exercise(Repository::init(&path, bare).unwrap());
+            // Reinitialised, then reopened, while the first one is still open.
+            let first = Repository::init(&path, bare).unwrap();
+            exercise(Repository::open(&path).unwrap());
+            drop(first);
+        }
+        exercise(Repository::open_bare(&scratch.child("bare")).unwrap());
+        exercise(Repository::open(&scratch.child("work/.git")).unwrap());
+    }
+
+    /// Each failure returns no owner and leaves nothing allocated, including the one
+    /// where libgit2 fails after opening the repository it hands back.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn failures_release_everything() {
+        let scratch = Scratch::new("failures");
+        fs::create_dir_all(&scratch.path).unwrap();
+        fs::write(scratch.path.join("file"), "").unwrap();
+        let workdir = scratch.child("work");
+        drop(Repository::init(&workdir, false).unwrap());
+
+        let missing = scratch.child("missing");
+        let not_found = Some(ErrorCode::NotFound);
+        assert_eq!(Repository::open(c"").unwrap_err().code(), not_found);
+        assert_eq!(Repository::open(&missing).unwrap_err().code(), not_found);
+        assert_eq!(
+            Repository::open(&scratch.c_path).unwrap_err().code(),
+            not_found
+        );
+        assert_eq!(Repository::open_bare(c"").unwrap_err().code(), not_found);
+        assert_eq!(
+            Repository::open_bare(&workdir).unwrap_err().code(),
+            not_found
+        );
+        let under_file = scratch.child("file/repo");
+        assert_eq!(
+            Repository::init(&under_file, true).unwrap_err().code(),
+            Some(ErrorCode::Exists)
+        );
+        assert_eq!(
+            Repository::init(c"", true).unwrap_err().code(),
+            Some(ErrorCode::Generic)
+        );
+
+        // A reftable repository whose `reftable` directory cannot be made: libgit2
+        // opens it, fails, and returns it anyway, which the wrapper frees.
+        let reftable = scratch.path.join("reftable");
+        fs::create_dir_all(reftable.join("objects")).unwrap();
+        fs::create_dir_all(reftable.join("refs")).unwrap();
+        fs::write(reftable.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            reftable.join("config"),
+            "[core]\n\trepositoryformatversion = 1\n\tbare = true\n\
+             [extensions]\n\trefstorage = reftable\n",
+        )
+        .unwrap();
+        fs::write(reftable.join("reftable"), "").unwrap();
+        let error = Repository::init(&scratch.child("reftable"), true).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Generic));
+
+        // `open` frees its half-built repository when the format is refused.
+        let format = scratch.path.join("format");
+        fs::create_dir_all(format.join("objects")).unwrap();
+        fs::create_dir_all(format.join("refs")).unwrap();
+        fs::write(format.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            format.join("config"),
+            "[core]\n\trepositoryformatversion = 9\n",
+        )
+        .unwrap();
+        let error = Repository::open(&scratch.child("format")).unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Generic));
+    }
+
+    /// Opening and freeing in a loop: every free releases what its open allocated.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn repeated_opens_free_everything() {
+        let rounds = if cfg!(bsan) { 8 } else { 200 };
+        let mut held = Vec::new();
+        for round in 0..rounds {
+            let repo = match round % 3 {
+                0 => Repository::open(TESTREPO),
+                1 => Repository::open_bare(TESTREPO),
+                _ => Repository::new(),
+            };
+            held.push(repo.unwrap());
+            if held.len() > 4 {
+                drop(held.remove(round % held.len()));
+            }
+        }
+    }
+
+    /// Threads build, use and free their own repositories concurrently, over the
+    /// same repository on disk and in directories of their own.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_build_their_own_repositories() {
+        let scratch = Scratch::new("threads");
+        let threads = if cfg!(bsan) { 2 } else { 4 };
+        let rounds = if cfg!(bsan) { 2 } else { 20 };
+        let barrier = Barrier::new(threads);
+        thread::scope(|s| {
+            for t in 0..threads {
+                let (barrier, scratch) = (&barrier, &scratch);
+                s.spawn(move || {
+                    barrier.wait();
+                    for round in 0..rounds {
+                        exercise(Repository::open(TESTREPO).unwrap());
+                        exercise(Repository::open_bare(TESTREPO).unwrap());
+                        exercise(Repository::new().unwrap());
+                        let path = scratch.child(&format!("{t}-{round}"));
+                        exercise(Repository::init(&path, round % 2 == 0).unwrap());
+                        assert!(Repository::open(&scratch.child("missing")).is_err());
+                    }
+                });
+            }
+        });
+    }
+
+    /// The first libgit2 calls in the process are repository constructors racing on
+    /// several threads: each pins the runtime before it allocates.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn first_constructors_race_to_initialise() {
+        isolated(
+            concat!(module_path!(), "::first_constructors_race_to_initialise"),
+            || {
+                let barrier = Barrier::new(4);
+                thread::scope(|s| {
+                    for t in 0..4 {
+                        let barrier = &barrier;
+                        s.spawn(move || {
+                            barrier.wait();
+                            let repo = match t {
+                                0 => Repository::new(),
+                                1 => Repository::open(TESTREPO),
+                                2 => Repository::open_bare(TESTREPO),
+                                _ => Repository::with_oid_type(OidType::Sha256),
+                            };
+                            exercise(repo.unwrap());
+                        });
+                    }
+                });
+            },
+        );
+    }
+
+    /// The first libgit2 call in the process is a constructor that fails: it pins the
+    /// runtime, so its error is read from live thread state.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn a_failing_first_constructor_reports_its_error() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::a_failing_first_constructor_reports_its_error"
+            ),
+            || {
+                let error = Repository::open(c"").unwrap_err();
+                assert_eq!(error.code(), Some(ErrorCode::NotFound));
+                assert_eq!(
+                    error.message().to_str(),
+                    Ok("failed to resolve path '': No such file or directory")
+                );
+            },
+        );
+    }
+
+    /// The owner is one pointer, and an absent one is the NULL niche.
+    #[test]
+    fn the_owner_is_a_pointer() {
+        assert_eq!(size_of::<RepositoryBox>(), size_of::<*mut u8>());
+        assert_eq!(
+            size_of::<Option<RepositoryBox>>(),
+            size_of::<RepositoryBox>()
+        );
+    }
+}

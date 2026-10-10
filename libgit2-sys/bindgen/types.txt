@@ -36,6 +36,7 @@ git_repository_init_flag_t
 git_repository_init_mode_t
 git_repository_init_options
 git_repository_item_t
+git_repository_new_options
 git_repository_open_flag_t
 git_repository_state_t
 git_strarray
