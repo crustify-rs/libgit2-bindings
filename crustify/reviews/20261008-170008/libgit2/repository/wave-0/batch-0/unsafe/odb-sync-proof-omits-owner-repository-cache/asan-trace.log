@@ -1,0 +1,27 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.95s
+     Running `/tmp/rev-repo-w0b0/repro-target/x86_64-unknown-linux-gnu/debug/odb-sync-proof-omits-owner-repository-cache`
+=================================================================
+==3482511==ERROR: AddressSanitizer: heap-use-after-free on address 0x726d3ee07a60 at pc 0x752d406eff5e bp 0x712d3c3fd740 sp 0x712d3c3fd738
+READ of size 4 at 0x726d3ee07a60 thread T2
+    #0 0x752d406eff5d in git_cache_oidmap__idx /target/src/libgit2/cache.c:19:1
+    #1 0x752d406eef80 in git_cache_oidmap_get /target/src/libgit2/cache.c:19:1
+    #2 0x752d406ee79d in cache_get /target/src/libgit2/cache.c:145:6
+    #3 0x752d407d9444 in git_odb_exists_ext /target/src/libgit2/odb.c:791:16
+    #4 0x5cc754884df6 in odb_sync_proof_omits_owner_repository_cache::main::{closure#0}::{closure#0} /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-0/batch-0/crustify/reviews/20261008-170008/libgit2/repository/wave-0/batch-0/unsafe/odb-sync-proof-omits-owner-repository-cache/src/main.rs:49:30
+
+0x726d3ee07a60 is located 32 bytes inside of 400-byte region [0x726d3ee07a40,0x726d3ee07bd0)
+freed by thread T0 here:
+    #0 0x5cc7548529e6 in free (/tmp/rev-repo-w0b0/repro-target/x86_64-unknown-linux-gnu/debug/odb-sync-proof-omits-owner-repository-cache+0xed9e6) (BuildId: 0466d0a7a5688ec385d8d301f571cbe16f15f8d1)
+    #1 0x5cc75488f24f in <libgit2::libgit2::repository::repository::RepositoryFree as ffibox::traits::CDrop<libgit2::libgit2::repository::repository::Repository>>::c_drop /opt/venv/share/ffibox/src/macros.rs:367:34
+    #2 0x5cc754885122 in odb_sync_proof_omits_owner_repository_cache::main::{closure#0} /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/repository/wave-0/batch-0/crustify/reviews/20261008-170008/libgit2/repository/wave-0/batch-0/unsafe/odb-sync-proof-omits-owner-repository-cache/src/main.rs:54:13
+    #3 0x5cc754886703 in std::thread::scoped::scope::<odb_sync_proof_omits_owner_repository_cache::main::{closure#0}, ()>::{closure#0} /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/scoped.rs:158:51
+    #4 0x5cc754888e1d in <core::panic::unwind_safe::AssertUnwindSafe<std::thread::scoped::scope<odb_sync_proof_omits_owner_repository_cache::main::{closure#0}, ()>::{closure#0}> as core::ops::function::FnOnce<()>>::call_once /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+
+previously allocated by thread T0 here:
+    #0 0x5cc754852fb4 in malloc (/tmp/rev-repo-w0b0/repro-target/x86_64-unknown-linux-gnu/debug/odb-sync-proof-omits-owner-repository-cache+0xedfb4) (BuildId: 0466d0a7a5688ec385d8d301f571cbe16f15f8d1)
+    #1 0x752d40671bd2 in git__malloc /target/src/util/alloc.h:19:12
+    #2 0x752d40671bd2 in git__calloc /target/src/util/alloc.c:31:13
+    #3 0x752d40863d60 in repository_alloc /target/src/libgit2/repository.c:310:25
+    #4 0x752d4086822c in git_repository_wrap_odb /target/src/libgit2/repository.c:1284:9
+
+Thread T2 created by T0 here:
