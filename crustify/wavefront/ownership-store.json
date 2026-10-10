@@ -1322,6 +1322,30 @@
    "fields": []
   },
   {
+   "name": "git_treebuilder",
+   "defined_in": "src/libgit2/tree.h",
+   "_comment_agent": "Opaque in the public API (forward-declared in git2/types.h): no field is published. Heap-only, allocated by git_treebuilder_new (git__calloc), released by git_treebuilder_free; git_treebuilder_clear frees the entries but keeps the builder usable. No copy routine, no refcount, no lock. map owns its git_tree_entry values (alloc_entry, freed by clear/remove/filter); write_cache is a git_str scratch buffer disposed by free. Rust: TreeBuilder<'r> in object/tree.rs, owned by TreeBuilderBox<'r> = CBox<TreeBuilder<'r>, TreeBuilderFree>; neither Send nor Sync, since it reaches the repository (not Sync) through repo.",
+   "fields": [
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Set once by git_treebuilder_new from its non-NULL (GIT_ASSERT_ARG) repo argument and never reassigned; git_treebuilder_free never releases it (git_repository keeps no count). Followed by check_entry (git_treebuilder_insert / append_entry with validate) through git_object__is_valid, and by git_treebuilder__write_with_buffer (bld->repo->oid_type, git_repository_odb__weakptr, git_odb_write), which may lazily load and store the repository's odb: written through, so mutable. The repository must outlive the builder: Rust carries it as the builder's 'r borrow of a RepositoryRef."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_treewalk_mode",
    "defined_in": "include/git2/tree.h",
    "_comment_agent": "C enum passed by value, values 0 (GIT_TREEWALK_PRE) and 1 (GIT_TREEWALK_POST); no pointer fields, no lifecycle. Sole consumer git_tree_walk refuses any other value with GIT_ERROR_INVALID 'invalid walking mode for tree walk' and -1 before touching the tree or calling back. PRE calls back for an entry before descending into its subtree and a positive callback result skips that subtree; POST calls back after the subtree and ignores positive results; a negative result stops both and is returned (GIT_ERROR_CALLBACK set if no error exists). Internal callers pass only named values (index.c read_tree POST, pack-objects.c PRE). Wrapped as the fieldless WalkMode enum (repr u32, PreOrder/PostOrder) with a fallible from_raw / TryFrom (UnnamedWalkMode) in object/tree.rs.",
@@ -7482,6 +7506,134 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_clear",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "bld",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL (the only failure, -1). Frees every owned entry and empties the map; the builder, its map storage and write_cache stay, so it remains usable. Returns 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_free",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "bld",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "NULL is a no-op. Disposes write_cache, frees every entry (git_treebuilder_clear), disposes the map, then git__free's the builder. Never touches bld->repo."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_new",
+   "defined_in": "src/libgit2/tree.c",
+   "lifetime": {
+    "for": "builder_p",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "builder_p",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:builder_p"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter, asserted non-NULL. On success receives a fresh git__calloc'd builder the caller owns and releases with git_treebuilder_free; on failure (OOM, or append_entry failing for a source entry, which frees the half-built builder) it is left untouched."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:builder_p"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL; stored unretained in bld->repo, so the repository must outlive the builder written to builder_p. Not read during construction (append_entry runs with validate=false)."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional seed tree, only read during the call: each entry's filename and oid are copied into a new entry (alloc_entry), so the builder keeps nothing of it. NULL starts empty."
      }
     }
    ]

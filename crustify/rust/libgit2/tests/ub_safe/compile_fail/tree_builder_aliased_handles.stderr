@@ -1,0 +1,29 @@
+error[E0499]: cannot borrow `builder` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/tree_builder_aliased_handles.rs:9:22
+   |
+ 8 |     let mut first = builder.as_mut();
+   |                     ------- first mutable borrow occurs here
+ 9 |     let mut second = builder.as_mut();
+   |                      ^^^^^^^ second mutable borrow occurs here
+10 |     first.clear();
+   |     ----- first borrow later used here
+
+error[E0502]: cannot borrow `builder` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/tree_builder_aliased_handles.rs:14:18
+   |
+13 |     let mut exclusive = builder.as_mut();
+   |                         ------- mutable borrow occurs here
+14 |     let shared = builder.as_ref();
+   |                  ^^^^^^^ immutable borrow occurs here
+15 |     exclusive.clear();
+   |     --------- mutable borrow later used here
+
+error[E0499]: cannot borrow `outer` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/tree_builder_aliased_handles.rs:20:5
+   |
+19 |     let mut inner = outer.as_mut();
+   |                     ----- first mutable borrow occurs here
+20 |     outer.clear();
+   |     ^^^^^ second mutable borrow occurs here
+21 |     inner.clear();
+   |     ----- first borrow later used here

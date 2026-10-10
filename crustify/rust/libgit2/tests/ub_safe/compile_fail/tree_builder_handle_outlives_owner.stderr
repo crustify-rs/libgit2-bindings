@@ -1,0 +1,23 @@
+error[E0505]: cannot move out of `builder` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_builder_handle_outlives_owner.rs:9:10
+   |
+ 7 |     let builder = TreeBuilder::new(repo.as_ref()).unwrap();
+   |         ------- binding `builder` declared here
+ 8 |     let shared = builder.as_ref();
+   |                  ------- borrow of `builder` occurs here
+ 9 |     drop(builder);
+   |          ^^^^^^^ move out of `builder` occurs here
+10 |     let _ = shared;
+   |             ------ borrow later used here
+
+error[E0505]: cannot move out of `builder` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_builder_handle_outlives_owner.rs:14:10
+   |
+12 |     let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+   |         ----------- binding `builder` declared here
+13 |     let exclusive = builder.as_mut();
+   |                     ------- borrow of `builder` occurs here
+14 |     drop(builder);
+   |          ^^^^^^^ move out of `builder` occurs here
+15 |     drop(exclusive);
+   |          --------- borrow later used here

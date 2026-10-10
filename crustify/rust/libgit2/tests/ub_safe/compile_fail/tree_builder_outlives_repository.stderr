@@ -1,0 +1,21 @@
+error[E0505]: cannot move out of `repo` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_builder_outlives_repository.rs:10:10
+   |
+ 8 |     let repo = Repository::new().unwrap();
+   |         ---- binding `repo` declared here
+ 9 |     let builder = TreeBuilder::new(repo.as_ref()).unwrap();
+   |                                    ---- borrow of `repo` occurs here
+10 |     drop(repo);
+   |          ^^^^ move out of `repo` occurs here
+11 |     drop(builder);
+   |          ------- borrow later used here
+
+error[E0502]: cannot borrow `repo` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_builder_outlives_repository.rs:15:22
+   |
+14 |     let builder = TreeBuilder::new(repo.as_ref()).unwrap();
+   |                                    ---- immutable borrow occurs here
+15 |     let _exclusive = repo.as_mut();
+   |                      ^^^^^^^^^^^^^ mutable borrow occurs here
+16 |     drop(builder);
+   |          ------- immutable borrow later used here
