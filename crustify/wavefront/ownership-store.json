@@ -7415,7 +7415,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "memcpy'd after the version check; ref is git_reference_dup'ed, checkout options copied and read for the inner git_checkout_head. NULL = defaults."
+      "note": "memcpy'd after the version check; ref is git_reference_dup'ed, checkout options copied and read for the inner git_checkout_head. NULL = defaults. git_branch_is_checked_out(ref) walks the worktrees of git_reference_owner(ref), the repository the reference was READ THROUGH, not of repo: a reference of another repository defeats the 'already checked out' refusal for repo's branch of that name (two of repo's worktrees on one branch) and triggers it for the other repository's checkout (review wave 2 batch 0, C-confirmed; the Rust wrapper looks the name up in repo and substitutes repo's own reference when found)."
      }
     },
     {

@@ -5980,6 +5980,54 @@ mod head_and_lookups {
         }
     }
 
+    /// An entry of an id and a tab alone has no merge marker to parse: libgit2 leaves
+    /// the marker of the entry before it (the walk's initial "not for merge" for a
+    /// first entry), where an id alone, the old format, is always for merge. Both sides
+    /// see the same, and the Rust side's entries read as that.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn fetchhead_entry_without_a_marker_keeps_the_previous_one() {
+        const ID: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
+        const OTHER: &str = "258f0e2a959a364e40ed6603d5d44fbb24765b10";
+        let bare = format!("{OTHER}\t\n");
+        let after_merge = format!("{ID}\t\tbranch 'master' of x\n{OTHER}\t\n{ID}\n");
+        let after_not = format!("{ID}\tnot-for-merge\tbranch 'master' of x\n{OTHER}\t\n{ID}\n");
+        for contents in [&bare, &after_merge, &after_not] {
+            compare_fetchhead(Some(contents), Answer::Continue);
+        }
+        init();
+        let scratch = Scratch::new("fetchhead-marker");
+        scratch.sandbox("testrepo.git", "bare");
+        let repo = Repository::open(&scratch.c_path("bare")).unwrap();
+        let markers = |contents: &str| {
+            fs::write(scratch.0.join("bare/FETCH_HEAD"), contents).unwrap();
+            let mut seen = Vec::new();
+            let mut record = |entry: FetchheadEntry<'_>| {
+                seen.push((entry.id.to_hex_string().unwrap(), entry.is_merge));
+                ControlFlow::Continue(())
+            };
+            let mut callback = FetchheadForeachCallback::new(&mut record);
+            let walked = repo.as_ref().for_each_fetchhead(&mut callback);
+            assert_eq!(walked, Ok(ControlFlow::Continue(())), "{contents:?}");
+            drop(callback);
+            seen
+        };
+        let (id, other) = (ID.to_owned(), OTHER.to_owned());
+        assert_eq!(markers(&bare), [(other.clone(), false)]);
+        assert_eq!(
+            markers(&after_merge),
+            [
+                (id.clone(), true),
+                (other.clone(), true),
+                (id.clone(), true)
+            ]
+        );
+        assert_eq!(
+            markers(&after_not),
+            [(id.clone(), false), (other, false), (id, true)]
+        );
+    }
+
     /// The Rust callback stops the C iteration with `GIT_EUSER` when its closure
     /// breaks, as a C callback returning that code does, and a closure's panic stops
     /// it the same way (leaving the error a C callback's `GIT_EUSER` leaves) before

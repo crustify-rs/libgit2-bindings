@@ -1137,9 +1137,11 @@ mod add_options {
     );
 
     fn name_of(reference: *const ffi::git_reference) -> Option<CString> {
-        // SAFETY: NULL or a live reference; its name lives as long as it and is copied.
-        (!reference.is_null())
-            .then(|| unsafe { CStr::from_ptr(ffi::git_reference_name(reference)) }.to_owned())
+        if reference.is_null() {
+            return None;
+        }
+        // SAFETY: a live reference; its name lives as long as it and is copied.
+        Some(unsafe { CStr::from_ptr(ffi::git_reference_name(reference)) }.to_owned())
     }
 
     fn c_fields(raw: &ffi::git_worktree_add_options) -> Fields {
@@ -1373,8 +1375,8 @@ mod add_options {
         Vec<(String, Option<String>)>,
     );
 
-    /// One side's directory: a non-bare repository at `<base>/repo`, its worktrees at
-    /// `<base>/wt/<name>`.
+    /// One side's directory: a repository at `<base>/repo` (non-bare unless built by
+    /// [`bare`](Self::bare)), its worktrees at `<base>/wt/<name>`.
     struct Side {
         base: PathBuf,
         repo: Option<RepositoryBox>,
@@ -1385,6 +1387,15 @@ mod add_options {
     impl Side {
         /// `tag` must have the same length on both sides, so their paths do.
         fn new(tag: &str) -> Self {
+            Self::build(tag, false)
+        }
+
+        /// As [`new`](Self::new), with a bare repository.
+        fn bare(tag: &str) -> Self {
+            Self::build(tag, true)
+        }
+
+        fn build(tag: &str, bare: bool) -> Self {
             init();
             let base = std::env::temp_dir().join(format!(
                 "crustify-worktree-add-equiv-{}-{tag}",
@@ -1393,7 +1404,12 @@ mod add_options {
             let _ = fs::remove_dir_all(&base);
             let path = base.join("repo");
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
-            let repo = Repository::init(&c_path, false).unwrap();
+            let repo = Repository::init(&c_path, bare).unwrap();
+            let gitdir = if bare {
+                path.clone()
+            } else {
+                path.join(".git")
+            };
             let (mut odb, raw) = (ptr::null_mut(), repo.as_c_ptr());
             // SAFETY: a live slot and the live repository; released below.
             assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, raw) }, 0);
@@ -1429,9 +1445,9 @@ mod add_options {
                 "heads/theta",
                 "tags/v1",
             ] {
-                fs::write(path.join(".git/refs").join(name), format!("{commit}\n")).unwrap();
+                fs::write(gitdir.join("refs").join(name), format!("{commit}\n")).unwrap();
             }
-            fs::write(path.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
             fs::create_dir(base.join("wt")).unwrap();
             // A checkout target directory that cannot be one.
             fs::write(base.join("blocked"), "not a directory\n").unwrap();
@@ -1564,10 +1580,20 @@ mod add_options {
                 }
             }
             let mut out = Vec::new();
-            for dir in ["repo/.git/worktrees", "wt", "target"] {
+            for dir in ["repo/.git/worktrees", "repo/worktrees", "wt", "target"] {
                 walk(&self.base, &self.base.join(dir), &mut out);
             }
             out
+        }
+
+        /// The repository's directory: the bare repository, or `.git` of the other.
+        fn gitdir(&self) -> PathBuf {
+            let dotgit = self.base.join("repo/.git");
+            if dotgit.is_dir() {
+                dotgit
+            } else {
+                self.base.join("repo")
+            }
         }
     }
 
@@ -1770,6 +1796,222 @@ mod add_options {
                 }
             },
         );
+    }
+
+    /// Adds to a bare repository, where the worktree's parent directory is none and
+    /// the administrative directories live under the repository itself: with an
+    /// existing branch, with a lent reference and a lock, then the same name again
+    /// (whose branch the first worktree holds). After each step the outcomes and the
+    /// trees must agree, and the worktree each
+    /// side looked up must validate and open as a repository with the working
+    /// directory the add made.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn adds_in_a_bare_repository_match_c() {
+        let c = Side::bare("c-bare");
+        let rust = Side::bare("r-bare");
+        type Step = (&'static str, bool, bool, Option<&'static CStr>);
+        const STEPS: [Step; 3] = [
+            ("alpha", false, true, None),
+            ("beta", true, false, Some(c"refs/heads/feature")),
+            ("alpha", false, true, None),
+        ];
+        for (step, (name, lock, existing, reference)) in STEPS.into_iter().enumerate() {
+            let mut raw = c_init();
+            raw.lock = c_int::from(lock);
+            raw.checkout_existing = c_int::from(existing);
+            let c_ref = reference.map_or(ptr::null_mut(), |n| c.lookup(n));
+            raw.ref_ = c_ref;
+            let c_outcome = c.add(name, &raw);
+            // SAFETY: NULL or the reference looked up above, freed once.
+            unsafe { ffi::git_reference_free(c_ref) };
+            let lent = reference.map(|n| {
+                // SAFETY: a fresh attached reference the test owns, released by
+                // `git_reference_free`; the side's repository outlives it.
+                unsafe { ReferenceBox::from_c(rust.lookup(n)) }.unwrap()
+            });
+            let mut opts = AddOptions::new();
+            let mut m = opts.as_mut();
+            m.set_lock(lock);
+            m.set_checkout_existing(existing);
+            m.set_reference(lent.as_ref().map(|r| r.as_ref()));
+            let rust_outcome = rust.rust_add(name, opts.as_ref());
+            drop(lent);
+            assert_eq!(rust_outcome, c_outcome, "step {step} ({name})");
+            let expected = if step == 2 { -1 } else { 0 };
+            assert_eq!(c_outcome.0, expected, "step {step}: {:?}", c_outcome.1);
+        }
+        for side in [&c, &rust] {
+            assert!(side.gitdir().join("worktrees/beta/locked").is_file());
+            let name = CString::new("beta").unwrap();
+            let w = Worktree::lookup(side.repo().as_ref(), &name).unwrap();
+            assert_eq!(w.as_ref().validate(), Ok(()));
+            assert_eq!(w.as_ref().is_locked(), Ok(true));
+            let opened = Repository::open_from_worktree(w.as_ref()).unwrap();
+            let workdir = opened
+                .as_ref()
+                .workdir()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(workdir, format!("{}/", side.base.join("wt/beta").display()));
+            assert!(opened.as_ref().is_worktree());
+        }
+    }
+
+    /// A reference of another repository lends its name: the branch of that name in
+    /// the repository added to is checked out, and when there is none libgit2 fails
+    /// once the worktree's files are written; a reference that is not a branch is
+    /// refused whatever its repository. Those steps match C. Then the divergence
+    /// `Worktree::add` corrects (see the module docs of `worktree`): with the branch
+    /// checked out in the repository added to, `git_worktree_add` asks the other
+    /// repository and adds a second worktree on it, where the wrapper refuses.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn adds_with_another_repositorys_reference_match_c() {
+        let c = Side::new("c-lent");
+        let rust = Side::new("r-lent");
+        let c_other = Side::new("c-lend");
+        let rust_other = Side::new("r-lend");
+        for other in [&c_other, &rust_other] {
+            let main = fs::read_to_string(other.gitdir().join("refs/heads/main")).unwrap();
+            fs::write(other.gitdir().join("refs/heads/only"), main).unwrap();
+        }
+        let steps: [(&str, &CStr, c_int); 3] = [
+            ("x1", c"refs/heads/only", ffi::GIT_EUNBORNBRANCH),
+            ("x2", c"refs/tags/v1", -1),
+            ("x3", c"refs/heads/feature", 0),
+        ];
+        for (step, (name, reference, expected)) in steps.into_iter().enumerate() {
+            let mut raw = c_init();
+            let c_ref = c_other.lookup(reference);
+            raw.ref_ = c_ref;
+            let c_outcome = c.add(name, &raw);
+            // SAFETY: the reference looked up above, freed once.
+            unsafe { ffi::git_reference_free(c_ref) };
+            // SAFETY: a fresh attached reference the test owns, released by
+            // `git_reference_free`; the other side's repository outlives it.
+            let lent = unsafe { ReferenceBox::from_c(rust_other.lookup(reference)) }.unwrap();
+            let mut opts = AddOptions::new();
+            opts.as_mut().set_reference(Some(lent.as_ref()));
+            let rust_outcome = rust.rust_add(name, opts.as_ref());
+            drop(lent);
+            assert_eq!(rust_outcome, c_outcome, "step {step} ({name})");
+            assert_eq!(c_outcome.0, expected, "step {step}: {:?}", c_outcome.1);
+        }
+        // The missing branch's worktree was written before the checkout failed, and
+        // nothing was checked out into it.
+        for side in [&c, &rust] {
+            let head = fs::read_to_string(side.gitdir().join("worktrees/x1/HEAD")).unwrap();
+            assert_eq!(head, "ref: refs/heads/only\n");
+            assert!(side.base.join("wt/x1/.git").is_file());
+            assert!(!side.gitdir().join("worktrees/x2").exists());
+            let head = fs::read_to_string(side.gitdir().join("worktrees/x3/HEAD")).unwrap();
+            assert_eq!(head, "ref: refs/heads/feature\n");
+        }
+        // `feature` is checked out in `x3` now.
+        let mut raw = c_init();
+        let c_ref = c_other.lookup(c"refs/heads/feature");
+        raw.ref_ = c_ref;
+        let c_outcome = c.add("x4", &raw);
+        // SAFETY: the reference looked up above, freed once.
+        unsafe { ffi::git_reference_free(c_ref) };
+        assert_eq!((c_outcome.0, &c_outcome.1), (0, &None));
+        assert!(c.gitdir().join("worktrees/x4/HEAD").is_file());
+        let raw = rust_other.lookup(c"refs/heads/feature");
+        // SAFETY: as above.
+        let lent = unsafe { ReferenceBox::from_c(raw) }.unwrap();
+        let mut opts = AddOptions::new();
+        opts.as_mut().set_reference(Some(lent.as_ref()));
+        let rust_outcome = rust.rust_add("x4", opts.as_ref());
+        drop(lent);
+        assert_eq!(
+            (rust_outcome.0, &rust_outcome.1),
+            (
+                -1,
+                &Some((
+                    ffi::GIT_ERROR_WORKTREE as c_int,
+                    "reference refs/heads/feature is already checked out".to_owned()
+                ))
+            )
+        );
+        assert!(!rust.gitdir().join("worktrees/x4").exists());
+        // The rest of the trees agree.
+        let without_x4 = |outcome: &Outcome| -> Vec<_> {
+            outcome
+                .3
+                .iter()
+                .filter(|(path, _)| !path.contains("x4"))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(without_x4(&rust_outcome), without_x4(&c_outcome));
+    }
+
+    /// Adds after the repository changed under its open handle: its configuration
+    /// made one libgit2 cannot open (the worktree's files are written, then the
+    /// worktree cannot be opened for the checkout), and its directory removed (the
+    /// `worktrees` directory cannot be made; without a reference, `HEAD` cannot be
+    /// read). Outcomes and trees must agree after each step.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn adds_on_a_changed_disk_match_c() {
+        let c = Side::new("c-disk");
+        let rust = Side::new("r-disk");
+        let config = |side: &Side| side.gitdir().join("config");
+        let saved = fs::read_to_string(config(&c)).unwrap();
+        for side in [&c, &rust] {
+            let bad = "[core]\n\trepositoryformatversion = 9\n\tbare = false\n";
+            fs::write(config(side), bad).unwrap();
+        }
+        // (name, with the repository's `feature` lent, the expected code)
+        let steps: [(&str, bool, c_int); 4] = [
+            ("b1", true, -1),
+            ("b2", false, -1),
+            ("g1", true, -1),
+            ("g2", false, ffi::GIT_ENOTFOUND),
+        ];
+        for (step, (name, with_reference, expected)) in steps.into_iter().enumerate() {
+            if name == "g1" {
+                for side in [&c, &rust] {
+                    fs::write(config(side), &saved).unwrap();
+                }
+            }
+            let mut raw = c_init();
+            let c_ref = if with_reference {
+                c.lookup(c"refs/heads/feature")
+            } else {
+                ptr::null_mut()
+            };
+            raw.ref_ = c_ref;
+            let lent = with_reference.then(|| {
+                // SAFETY: a fresh attached reference the test owns, released by
+                // `git_reference_free`; the side's repository outlives it.
+                unsafe { ReferenceBox::from_c(rust.lookup(c"refs/heads/feature")) }.unwrap()
+            });
+            if name == "g1" {
+                for side in [&c, &rust] {
+                    fs::remove_dir_all(side.gitdir()).unwrap();
+                }
+            }
+            let c_outcome = c.add(name, &raw);
+            // SAFETY: NULL or the reference looked up above, freed once.
+            unsafe { ffi::git_reference_free(c_ref) };
+            let mut opts = AddOptions::new();
+            opts.as_mut()
+                .set_reference(lent.as_ref().map(|r| r.as_ref()));
+            let rust_outcome = rust.rust_add(name, opts.as_ref());
+            drop(lent);
+            assert_eq!(rust_outcome, c_outcome, "step {step} ({name})");
+            assert_eq!(c_outcome.0, expected, "step {step}: {:?}", c_outcome.1);
+        }
+        for side in [&c, &rust] {
+            // The unopenable repository's worktrees were written up to their `HEAD`.
+            assert!(side.base.join("wt/b1/.git").is_file());
+            assert!(side.base.join("wt/b2/.git").is_file());
+            assert!(!side.base.join("wt/g1").exists());
+        }
     }
 }
 

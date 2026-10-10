@@ -70,7 +70,7 @@
 //! [`WorktreeMut`] locks and unlocks it, the only routines that write the struct. Each
 //! reports a failure as a [`WorktreeError`].
 //!
-//! The wrappers keep four libgit2 defects from reaching Rust callers:
+//! The wrappers keep five libgit2 defects from reaching Rust callers:
 //!
 //! - `git_worktree_lookup` passes the repository's common directory to `strlen`
 //!   unchecked, which is NULL for a repository without paths (`git_repository_new`,
@@ -91,6 +91,12 @@
 //!   or malformed worktree in `git_worktree_lookup`), leaving whatever an earlier call
 //!   set as the thread's last error: each wrapper clears the error first, and gives
 //!   such a failure an error that describes it.
+//! - `git_worktree_add` refuses a branch "already checked out" by asking the
+//!   repository the given reference was read through, not the repository the worktree
+//!   is added to: a reference of another repository (which only lends its name) lets
+//!   a branch be checked out in two of the repository's working trees.
+//!   [`Worktree::add`] passes libgit2 the repository's own reference of that name
+//!   instead, when it has one.
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
@@ -108,7 +114,7 @@ use ffibox::{CBorrowedPtr, CBox, CCell, define_ctype, impl_cdrop};
 use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::strarray::{StrArray, StrArrayVal};
-use crate::libgit2::refs::refs::ReferenceRef;
+use crate::libgit2::refs::refs::{ReferenceBox, ReferenceRef};
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
@@ -1241,6 +1247,43 @@ fn commondir(repo: RepositoryRef<'_>) -> Option<&CStr> {
     (!dir.is_null()).then(|| unsafe { CStr::from_ptr(dir) })
 }
 
+/// Whether `reference` was read through `repo`: whether `repo` is the repository
+/// libgit2 asks about it.
+fn owned_by(reference: ReferenceRef<'_, '_>, repo: RepositoryRef<'_>) -> bool {
+    // SAFETY: `reference` is a live reference attached to a reference database (the
+    // handle's contract); the routine only reads the database's repository pointer.
+    let owner = unsafe { ffi::git_reference_owner(reference.as_ptr()) };
+    ptr::eq(owner.cast_const(), repo.as_ptr())
+}
+
+/// `repo`'s own reference with `reference`'s name, read through `repo`; `None` when
+/// `repo` has none, or the lookup fails otherwise (libgit2 then gets the reference as
+/// given, and fails on it as it would). The thread's error is left as the lookup set
+/// it, for the caller to clear.
+///
+/// A raw seam over `git_reference_lookup` and `git_reference_name` until the
+/// reference routines are wrapped.
+fn same_name<'r>(
+    repo: RepositoryRef<'r>,
+    reference: ReferenceRef<'_, '_>,
+) -> Option<ReferenceBox<'r>> {
+    // SAFETY: a live reference; its name is a NUL-terminated string it owns, which no
+    // one frees or writes while the handle borrows it.
+    let name = unsafe { ffi::git_reference_name(reference.as_ptr()) };
+    let mut out = ptr::null_mut();
+    // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
+    // the lookup reads (and whose reference database it may open); `name` is
+    // NUL-terminated and live for the call.
+    let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.as_ptr().cast_mut(), name) };
+    if rc < 0 {
+        return None;
+    }
+    // SAFETY: on a 0 return `out` is a fresh reference attached to `repo`'s reference
+    // database, owned by the caller alone and released by `git_reference_free`; it
+    // reaches `repo`, which the box's `'r` keeps borrowed.
+    unsafe { ReferenceBox::from_c(out) }
+}
+
 /// Whether `dir` is a worktree's administrative directory, as libgit2 tells one:
 /// it holds the files `commondir`, `gitdir` and `HEAD`.
 fn is_worktree_dir(dir: &Path) -> bool {
@@ -1361,7 +1404,12 @@ impl Worktree {
     ///
     /// The branch is [`reference`](AddOptionsRef::reference) when one is set (a local
     /// branch that no other working tree has checked out; one of another repository
-    /// lends only its name); otherwise the local branch `name` when
+    /// lends only its name, and the branch of that name in `repo` is what libgit2
+    /// then checks and checks out: `git_worktree_add` itself would ask the other
+    /// repository's working trees whether the branch is checked out, and let one of
+    /// `repo`'s working trees check it out twice; when `repo` has no branch of that
+    /// name, libgit2 fails as it would, after the worktree's files are written);
+    /// otherwise the local branch `name` when
     /// [`checkout_existing`](AddOptionsRef::checkout_existing) is set and it exists;
     /// otherwise a new branch `name`, created at `repo`'s `HEAD` with a reflog entry
     /// (which fails with [`ErrorCode::Exists`] when it exists already, with
@@ -1407,13 +1455,36 @@ impl Worktree {
         if commondir(repo).is_none() {
             return Err(refused(ffi::GIT_ENOTFOUND, NO_PATH));
         }
-        let opts = opts.map_or(ptr::null(), |o| o.as_ptr());
+        // A reference of another repository is replaced by `repo`'s own of that name,
+        // so that libgit2 asks `repo`'s working trees whether the branch is checked
+        // out; the copy of the options it then reads is the one `git_worktree_add`
+        // makes itself, with that reference in place of the given one.
+        let local = opts
+            .and_then(|o| o.reference())
+            .filter(|r| !owned_by(*r, repo))
+            .and_then(|r| same_name(repo, r));
+        let substituted = match (opts, &local) {
+            (Some(given), Some(local)) => {
+                // SAFETY: a read of the whole live `git_worktree_add_options` through
+                // the shared handle's pointer; it is plain data (integers and pointers).
+                let mut copy = unsafe { given.as_ptr().read() };
+                copy.ref_ = local.as_c_ptr();
+                Some(copy)
+            }
+            _ => None,
+        };
+        let opts = match (&substituted, opts) {
+            (Some(copy), _) => ptr::from_ref(copy),
+            (None, Some(o)) => o.as_ptr(),
+            (None, None) => ptr::null(),
+        };
         let mut out = ptr::null_mut();
         let rc = checked(
             || {
                 // The options are of the current version (no setter changes it); their
                 // reference is attached and borrowed, with its repository, for `'o`, which
-                // outlives this call, as do their checkout options' borrows.
+                // outlives this call (or is `local`, which outlives it too), as do their
+                // checkout options' borrows.
                 // SAFETY: `out` is a writable slot the routine NULLs first; `repo` a live
                 // repository on this thread with a common directory; `name` and `path`
                 // NUL-terminated, copied; `opts` NULL or live options, copied and read for
@@ -2422,7 +2493,7 @@ mod unit_tests {
         use std::process::Command;
 
         use crate::libgit2::refs::refs::ReferenceBox;
-        use crate::libgit2::repository::repository::Repository;
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -2523,6 +2594,144 @@ mod unit_tests {
                     fs::remove_dir_all(&root).unwrap();
                 },
             );
+        }
+
+        /// A non-bare repository at `path` with one commit, which `main` and `feature`
+        /// name and `HEAD` points at through `main`.
+        fn committed(path: &std::path::Path) -> RepositoryBox {
+            let repo = Repository::init(&c_path(path), false).unwrap();
+            let mut odb = ptr::null_mut();
+            // SAFETY: a writable slot and the live repository; the odb is released below.
+            let rc = unsafe { ffi::git_repository_odb(&mut odb, repo.as_c_ptr()) };
+            assert_eq!(rc, 0);
+            let write = |data: &[u8], kind: ffi::git_object_t| {
+                let mut id = ffi::git_oid::default();
+                let (bytes, len) = (data.as_ptr().cast(), data.len());
+                // SAFETY: a writable id, the live odb and `data` readable for `len` bytes
+                // at a non-NULL address.
+                let rc = unsafe { ffi::git_odb_write(&mut id, odb, bytes, len, kind) };
+                assert_eq!(rc, 0);
+                let mut hex = [0 as std::ffi::c_char; 65];
+                // SAFETY: `hex` bounds the write, and the routine NUL-terminates in it.
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr(), hex.len(), &id) };
+                // SAFETY: NUL-terminated within `hex`.
+                unsafe { CStr::from_ptr(hex.as_ptr()) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
+            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let commit = format!("tree {tree}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n");
+            let commit = write(commit.as_bytes(), ffi::GIT_OBJECT_COMMIT);
+            // SAFETY: the odb reference taken above, released once.
+            unsafe { ffi::git_odb_free(odb) };
+            for branch in ["main", "feature"] {
+                let reference = path.join(".git/refs/heads").join(branch);
+                fs::write(reference, format!("{commit}\n")).unwrap();
+            }
+            fs::write(path.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+            repo
+        }
+
+        /// `git_reference_lookup(name)` in `repo`, as an owned attached reference.
+        fn lookup<'r>(repo: &'r RepositoryBox, name: &CStr) -> ReferenceBox<'r> {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot, the live repository and a NUL-terminated name.
+            let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.as_c_ptr(), name.as_ptr()) };
+            assert_eq!(rc, 0, "{name:?}");
+            // SAFETY: a fresh attached reference the test owns alone, released by
+            // `git_reference_free`; `repo` outlives it.
+            unsafe { ReferenceBox::from_c(out) }.unwrap()
+        }
+
+        /// `git_worktree_add(repo, name, path, opts)`, raw: the return and whether a
+        /// worktree came back (freed).
+        fn c_add(
+            repo: &RepositoryBox,
+            name: &CStr,
+            path: &CStr,
+            opts: AddOptionsRef<'_, '_>,
+        ) -> (c_int, bool) {
+            let mut out = ptr::null_mut();
+            let (raw, opts) = (repo.as_c_ptr(), opts.as_ptr());
+            let (name, path) = (name.as_ptr(), path.as_ptr());
+            // SAFETY: a writable slot, the live repository, NUL-terminated strings and
+            // live options whose reference outlives the call.
+            let rc = unsafe { ffi::git_worktree_add(&mut out, raw, name, path, opts) };
+            let added = !out.is_null();
+            // SAFETY: NULL or the fresh worktree, freed once.
+            unsafe { ffi::git_worktree_free(out) };
+            (rc, added)
+        }
+
+        /// `git_worktree_add` asks the repository the given reference belongs to whether
+        /// its branch is checked out, not the repository the worktree is added to. With
+        /// a reference of another repository (which lends only its name), C lets the
+        /// branch of that name be checked out in two of the repository's working trees,
+        /// and refuses it while the other repository has its own checked out. The
+        /// wrapper passes libgit2 the repository's own reference of that name: the
+        /// check then concerns the right working trees. C's defect is shown alongside.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn add_checks_the_branch_in_the_repository_added_to() {
+            let root = scratch("lent-reference");
+            let feature = c"refs/heads/feature";
+            for side in ["c", "rust"] {
+                let base = root.join(side);
+                fs::create_dir_all(base.join("wt")).unwrap();
+                let main = committed(&base.join("main"));
+                let other = committed(&base.join("other"));
+                let lent = lookup(&other, feature);
+                let mut opts = AddOptions::new();
+                opts.as_mut().set_reference(Some(lent.as_ref()));
+                let at = |rel: &str| c_path(&base.join(rel));
+                let rust = side == "rust";
+                type Added = (c_int, bool, Option<CString>);
+                let add = |repo: &RepositoryBox, name: &CStr, rel: &str| -> Added {
+                    if rust {
+                        match Worktree::add(repo.as_ref(), name, &at(rel), Some(opts.as_ref())) {
+                            Ok(_) => (0, true, None),
+                            Err(e) => (e.raw_code(), false, Some(e.message().to_owned())),
+                        }
+                    } else {
+                        let (rc, added) = c_add(repo, name, &at(rel), opts.as_ref());
+                        (rc, added, (rc < 0).then(|| last().message().to_owned()))
+                    }
+                };
+                // The branch is free in both repositories: the worktree is added, and
+                // `main`'s `feature` is what it checks out.
+                assert_eq!(add(&main, c"one", "wt/one"), (0, true, None));
+                let head = fs::read_to_string(base.join("main/.git/worktrees/one/HEAD")).unwrap();
+                assert_eq!(head, "ref: refs/heads/feature\n");
+                // `main`'s `feature` is checked out now: C asks `other` and adds a second
+                // worktree on it; the wrapper refuses.
+                let again = add(&main, c"two", "wt/two");
+                if rust {
+                    let message =
+                        Some(c"reference refs/heads/feature is already checked out".to_owned());
+                    assert_eq!(again, (-1, false, message));
+                    assert!(!base.join("main/.git/worktrees/two").exists());
+                } else {
+                    assert_eq!(again, (0, true, None));
+                }
+                // `other`'s `feature` is checked out in `other`'s own working tree, and
+                // `main`'s is free in a third repository: C refuses, the wrapper adds.
+                let own = c_add(&other, c"own", &at("wt/own"), opts.as_ref());
+                assert_eq!(own, (0, true));
+                let third = committed(&base.join("third"));
+                let free = add(&third, c"three", "wt/three");
+                if rust {
+                    assert_eq!(free, (0, true, None));
+                } else {
+                    let message =
+                        Some(c"reference refs/heads/feature is already checked out".to_owned());
+                    assert_eq!(free, (-1, false, message));
+                }
+                drop(lent);
+                drop((main, other, third));
+            }
+            fs::remove_dir_all(&root).unwrap();
         }
     }
 }
