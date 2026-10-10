@@ -1,0 +1,19 @@
+error[E0515]: cannot return value referencing local variable `opts`
+ --> tests/ub_safe/compile_fail/filter_options_commit_id_outlives_options.rs:8:5
+  |
+8 |     opts.as_ref().attr_commit_id()
+  |     ----^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `opts` is borrowed here
+
+error[E0502]: cannot borrow `opts` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/filter_options_commit_id_outlives_options.rs:15:18
+   |
+13 |     let mut id = opts.as_mut();
+   |                  ---- mutable borrow occurs here
+14 |     let mut oid = id.attr_commit_id_mut();
+15 |     let shared = opts.as_ref().attr_commit_id();
+   |                  ^^^^ immutable borrow occurs here
+16 |     oid.set_raw_kind(1);
+   |     --- mutable borrow later used here

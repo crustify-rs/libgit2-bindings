@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing function parameter `blob`
+ --> tests/ub_safe/compile_fail/blob_as_object_outlives_arc.rs:6:5
+  |
+6 |     blob.as_ref().as_object()
+  |     ----^^^^^^^^^^^^^^^^^^^^^
+  |     |
+  |     returns a value referencing data owned by the current function
+  |     `blob` is borrowed here

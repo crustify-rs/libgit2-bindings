@@ -151,10 +151,73 @@
    ]
   },
   {
+   "name": "git_blob",
+   "defined_in": "src/libgit2/blob.h",
+   "_comment_agent": "A git_object subtype: struct git_blob starts with its git_object (casts both ways, git_object_type == GIT_OBJECT_BLOB), so it shares git_object's atomic refcount (git_blob_dup = git_object_dup, an upref returning the same pointer; git_blob_free = git_object_free, a down-ref freeing via git_blob__free at zero) and its uncounted object.repo. The repository's object cache stores no blob by default (cache object limit 0 for GIT_OBJECT_BLOB) so a lookup usually parses a fresh blob held only by its caller, but with GIT_OPT_SET_CACHE_OBJECT_LIMIT for blobs the cache shares it like any object: never provably sole. Opaque in the public API (include/git2/types.h forward-declares it); its content is immutable after parsing and only read (git_blob_rawcontent/rawsize, git_blob_is_binary, git_blob_filter read through a non-const pointer but never write). Rust: Blob<'r> layout type, BlobRef/BlobMut handles, BlobArc<'r> = CArc<Blob<'r>, BlobFree> with git_blob_free / git_blob_dup; constructors git_blob_lookup / git_blob_lookup_prefix; casts to and from Object<'r> checked by git_object_type. Not Send/Sync, as git_object.",
+   "fields": [
+    {
+     "name": "data.odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Valid only when raw == 0 (the union member git_blob__parse fills): one counted reference to the odb object (git_cached_obj_incref) whose data and size the blob's content is; git_blob__free gives it back with git_odb_object_free. Every blob the public API hands out (lookups through the odb) is of this kind. Only read (git_odb_object_data/size)."
+     }
+    },
+    {
+     "name": "data.raw.data",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Valid only when raw == 1 (git_blob__parse_raw, reached only through git_object__from_raw from the indexer and git_object_rawcontent_is_valid): size bytes of the caller's buffer, not NUL-terminated, borrowed for the blob's life and never freed by git_blob__free. Such a blob has no repository and never reaches the public lookups."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_blob_filter_flag_t",
    "defined_in": "include/git2/blob.h",
    "_comment_agent": "Flag enum: bits ORed into git_blob_filter_options.flags (uint32_t). git_blob_filter tests each of the four named bits and ignores every other; GIT_BLOB_FILTER_OPTIONS_INIT defaults to CHECK_FOR_BINARY. No lifecycle.",
    "fields": []
+  },
+  {
+   "name": "git_blob_filter_options",
+   "defined_in": "include/git2/blob.h",
+   "_comment_agent": "Plain caller-owned options value, never allocated or freed by libgit2: git_blob_filter_options_init (and GIT_BLOB_FILTER_OPTIONS_INIT) memcpy a template {version 1, flags CHECK_FOR_BINARY, NULL, zero id} after refusing a version of 0 or above 1; git_blob_filter refuses a version of 0 or above 1 (read as unsigned int), memcpy's the struct and reads flags and attr_commit_id for the call only. All-zero is refused (version 0) so no zeroed default. Rust: FilterOptions value (define_ctype, Copy), FilterOptionsRef/FilterOptionsMut handles, built by FilterOptions::new through git_blob_filter_options_init.",
+   "fields": [
+    {
+     "name": "reserved",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Deprecated and unused: with GIT_DEPRECATE_HARD (the campaign's build) the field is a void * that no libgit2 routine reads; the template leaves it NULL. Without GIT_DEPRECATE_HARD it is `git_oid *commit_id`, read by git_blob_filter as the attributes commit when ATTRIBUTES_FROM_COMMIT is set. Rust never dereferences it and only lets safe code clear it."
+     }
+    }
+   ]
   },
   {
    "name": "git_branch_t",
@@ -2570,6 +2633,260 @@
       "nullable": true,
       "mutable": false,
       "note": "Read-only byte buffer of `len` bytes, not NUL-terminated (may contain NUL, which is itself the binary signal). Read only during the call via git_str_attach_notowned (not owned, never freed or retained). When len == 0, attach_notowned replaces it with git_str__initstr, so NULL (or any pointer) is never dereferenced; with len > 0 it must be a live buffer of len bytes. No allocation and no error state touched."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_dup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Not NULL-checked: its atomic refcount is incremented in place, so it must be live; handed back through out."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives obj itself, one more reference counted on it (git_object_dup); always 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_filter_options_init",
+   "defined_in": "src/libgit2/blob.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned storage: with version 1 the template {1, CHECK_FOR_BINARY, NULL, zero id} is memcpy'd over all of it (so it may be uninitialised); any other version sets a GIT_ERROR_INVALID error and leaves it untouched. Not NULL-checked on success."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_free",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "obj",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "git_object_free on the blob's git_object: gives up one counted reference; at zero git_blob__free releases the odb object reference (or nothing for a raw blob) and the struct. Never reads the repository. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_lookup",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; not checked against the repository oid type, which the loose backend formats it for (an id of another type overflows or underfills the path)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to a blob of repo: a fresh parse the caller alone holds, or the cached one when the cache keeps blobs (GIT_OPT_SET_CACHE_OBJECT_LIMIT); keeps repo uncounted, so must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache consulted and filled; the blob keeps this pointer uncounted."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_lookup_prefix",
+   "defined_in": "src/libgit2/object_api.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; not checked against the repository oid type, which the loose backend formats it for (an id of another type overflows or underfills the path)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "On success one counted reference to a blob of repo: a fresh parse the caller alone holds, or the cached one when the cache keeps blobs (GIT_OPT_SET_CACHE_OBJECT_LIMIT); keeps repo uncounted, so must not be used past repo. Untouched on failure."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Its odb is loaded lazily and its object cache consulted and filled; the blob keeps this pointer uncounted."
      }
     }
    ]
