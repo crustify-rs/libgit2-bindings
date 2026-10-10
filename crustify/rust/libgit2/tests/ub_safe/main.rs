@@ -16,6 +16,7 @@ mod fixture;
 mod global;
 mod oid;
 mod oidarray;
+mod repository;
 mod strarray;
 mod sys_alloc;
 mod sys_errors;
