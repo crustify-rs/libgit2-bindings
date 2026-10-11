@@ -94,3 +94,7 @@ git_config_iterator
 
 # config wave 4 batch 0
 git_config_backend
+
+# index wave 0 batch 1: scalar options and capabilities
+git_index_add_option_t
+git_index_capability_t

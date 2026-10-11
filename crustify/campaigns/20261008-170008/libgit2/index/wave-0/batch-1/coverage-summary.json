@@ -1,0 +1,24 @@
+{
+  "rust_functions": {
+    "covered": 19,
+    "total": 19
+  },
+  "rust_regions": {
+    "covered": 69,
+    "total": 69
+  },
+  "rust_source_lines": [
+    314,
+    493
+  ],
+  "c_consumers": {
+    "git_index_set_caps": {
+      "blocks_percent": 94,
+      "executable_lines": "all"
+    },
+    "git_index_caps": {
+      "blocks_percent": 100,
+      "executable_lines": "all"
+    }
+  }
+}

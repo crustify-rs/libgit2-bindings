@@ -311,6 +311,186 @@ impl Index {
     }
 }
 
+/// Flags for adding files that match a pathspec.
+///
+/// These are copied integers with no foreign storage or lifecycle. Unknown bits
+/// are retained, and combinations are passed to C unchanged. In particular, C's
+/// workdir-diff implementation includes ignored files only when the entire flags
+/// value equals `FORCE`, not when `FORCE` is combined with another flag.
+///
+/// Wraps: git_index_add_option_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AddFlags(ffi::git_index_add_option_t);
+
+impl AddFlags {
+    /// Normal addition, without any flags.
+    pub const DEFAULT: Self = Self(ffi::GIT_INDEX_ADD_DEFAULT);
+    /// Request adding ignored files.
+    pub const FORCE: Self = Self(ffi::GIT_INDEX_ADD_FORCE);
+    /// Request literal pathspec matching instead of wildcard matching.
+    pub const DISABLE_PATHSPEC_MATCH: Self = Self(ffi::GIT_INDEX_ADD_DISABLE_PATHSPEC_MATCH);
+    /// Check for explicitly named ignored files, unless `FORCE` is also set.
+    pub const CHECK_PATHSPEC: Self = Self(ffi::GIT_INDEX_ADD_CHECK_PATHSPEC);
+
+    /// An empty flag set, equivalent to `DEFAULT`.
+    pub const fn empty() -> Self {
+        Self::DEFAULT
+    }
+
+    /// Retains all bits, including those not named by this version of libgit2.
+    pub const fn from_bits_retain(bits: core::ffi::c_uint) -> Self {
+        Self(bits)
+    }
+
+    /// The unchanged unsigned flags for the C API.
+    pub const fn bits(self) -> core::ffi::c_uint {
+        self.0
+    }
+
+    /// Whether every bit in `other` is present (true for the empty set).
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Combines two sets without normalizing or discarding any bits.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Removes every bit present in `other`.
+    pub const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+}
+
+impl core::ops::BitOr for AddFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
+}
+
+impl core::ops::BitOrAssign for AddFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = self.union(rhs);
+    }
+}
+
+/// Explicit filesystem capabilities affecting index actions.
+///
+/// Only the three published capability bits are accepted. The C value `-1` is
+/// not a set of capabilities: use [`CapabilitySetting::FromOwner`] to request
+/// reading the owning repository's configuration instead. Values own no foreign
+/// resources and may be freely copied, shared or moved between threads.
+///
+/// Wraps: git_index_capability_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Capabilities(ffi::git_index_capability_t);
+
+impl Capabilities {
+    /// Match index paths case-insensitively.
+    pub const IGNORE_CASE: Self = Self(ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE);
+    /// Do not trust filesystem executable-mode bits.
+    pub const NO_FILEMODE: Self = Self(ffi::GIT_INDEX_CAPABILITY_NO_FILEMODE);
+    /// The filesystem does not support symbolic links.
+    pub const NO_SYMLINKS: Self = Self(ffi::GIT_INDEX_CAPABILITY_NO_SYMLINKS);
+
+    const KNOWN: c_int = Self::IGNORE_CASE.0 | Self::NO_FILEMODE.0 | Self::NO_SYMLINKS.0;
+
+    /// No capability overrides.
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    /// All three explicit capabilities, not the `FROM_OWNER` command.
+    pub const fn all() -> Self {
+        Self(Self::KNOWN)
+    }
+
+    /// Checks that `bits` contains only explicit, published capability bits.
+    /// Returns `None` for `FROM_OWNER` and for any unknown bit.
+    pub const fn from_bits(bits: c_int) -> Option<Self> {
+        if bits & !Self::KNOWN == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
+    /// The explicit capability bits, suitable for the C API.
+    pub const fn bits(self) -> c_int {
+        self.0
+    }
+
+    /// Whether every bit in `other` is present (true for the empty set).
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Combines two explicit sets; cannot produce the `FROM_OWNER` command.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Removes every bit present in `other`.
+    pub const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+}
+
+impl core::ops::BitOr for Capabilities {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
+}
+
+impl core::ops::BitOrAssign for Capabilities {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = self.union(rhs);
+    }
+}
+
+/// Selects either an explicit capability set or the owning repository's config.
+///
+/// This Rust enum is not passed across FFI: [`to_raw`](Self::to_raw) supplies the
+/// signed C value. `FromOwner` requires an index with an owning repository; C
+/// reports an error otherwise. Unlike explicit sets, this command cannot be ORed:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::index::index::{Capabilities, CapabilitySetting};
+/// let _ = CapabilitySetting::FromOwner | Capabilities::IGNORE_CASE;
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CapabilitySetting {
+    /// Use exactly this explicit set.
+    Explicit(Capabilities),
+    /// Read `core.ignorecase`, `core.filemode` and `core.symlinks` from the owner.
+    FromOwner,
+}
+
+impl CapabilitySetting {
+    /// The signed C argument; only `FromOwner` produces the sentinel `-1`.
+    pub const fn to_raw(self) -> c_int {
+        match self {
+            Self::Explicit(caps) => caps.bits(),
+            Self::FromOwner => ffi::GIT_INDEX_CAPABILITY_FROM_OWNER,
+        }
+    }
+}
+
+impl From<Capabilities> for CapabilitySetting {
+    fn from(caps: Capabilities) -> Self {
+        Self::Explicit(caps)
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -653,5 +833,61 @@ mod unit_tests {
                 let _ = std::fs::remove_dir_all(&dir);
             },
         );
+    }
+
+    mod option_unit_tests {
+        use super::{AddFlags, Capabilities, CapabilitySetting};
+        use crate::ffi;
+
+        #[test]
+        fn scalar_layouts_and_traits() {
+            assert_eq!(
+                size_of::<AddFlags>(),
+                size_of::<ffi::git_index_add_option_t>()
+            );
+            assert_eq!(
+                align_of::<AddFlags>(),
+                align_of::<ffi::git_index_add_option_t>()
+            );
+            assert_eq!(
+                size_of::<Capabilities>(),
+                size_of::<ffi::git_index_capability_t>()
+            );
+            assert_eq!(
+                align_of::<Capabilities>(),
+                align_of::<ffi::git_index_capability_t>()
+            );
+            assert!(!core::mem::needs_drop::<AddFlags>());
+            assert!(!core::mem::needs_drop::<Capabilities>());
+            assert_eq!(AddFlags::default(), AddFlags::empty());
+            assert_eq!(Capabilities::default(), Capabilities::empty());
+            assert_eq!(format!("{:?}", AddFlags::FORCE), "AddFlags(1)");
+            assert_eq!(
+                format!("{:?}", Capabilities::NO_SYMLINKS),
+                "Capabilities(4)"
+            );
+            assert_eq!(format!("{:?}", CapabilitySetting::FromOwner), "FromOwner");
+            let setting = CapabilitySetting::from(Capabilities::all());
+            assert_eq!(setting, CapabilitySetting::Explicit(Capabilities::all()));
+            // Exercise Clone explicitly: these are independent, resource-free scalars.
+            #[allow(clippy::clone_on_copy)]
+            {
+                assert_eq!(AddFlags::FORCE.clone(), AddFlags::FORCE);
+                assert_eq!(Capabilities::all().clone(), Capabilities::all());
+                assert_eq!(setting.clone(), setting);
+            }
+        }
+
+        #[test]
+        fn capability_validation_rejects_commands_and_unknown_bits() {
+            for bits in [8, 9, 15, i32::MAX, i32::MIN, -1, -2, -8] {
+                assert_eq!(Capabilities::from_bits(bits), None);
+            }
+            for bits in 0..8 {
+                let caps = Capabilities::from_bits(bits).unwrap();
+                assert_eq!(caps.bits(), bits);
+                assert_eq!(CapabilitySetting::from(caps).to_raw(), bits);
+            }
+        }
     }
 }
