@@ -1142,11 +1142,60 @@ mod backends {
 
 mod registration {
     use super::*;
-    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::config::{
+        Config, ConfigLevel, ConfigRef, EntryRef, ForeachCallback,
+    };
     use libgit2::libgit2::config::sys::config::Backend;
     use libgit2::libgit2::util::errors::last;
     use libgit2::libgit2::util::sys::errors::clear;
+    use std::ffi::{c_int, c_void};
+    use std::ops::ControlFlow;
     use std::ptr;
+
+    /// Name, value, backend type and level of every entry, in enumeration order.
+    type Listing = Vec<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, c_int)>;
+    fn bytes(p: *const std::ffi::c_char) -> Option<Vec<u8>> {
+        // SAFETY: callers pass NULL or a NUL string live for the current entry.
+        (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) }.to_bytes().to_vec())
+    }
+    unsafe extern "C" fn list(entry: *const ffi::git_config_entry, payload: *mut c_void) -> c_int {
+        // SAFETY: the C walk lends a live entry for this call; payload is the
+        // caller's exclusive Listing. Only copies escape.
+        let (entry, listing) = unsafe { (entry.read(), &mut *payload.cast::<Listing>()) };
+        let name = bytes(entry.name).unwrap();
+        listing.push((
+            name,
+            bytes(entry.value),
+            bytes(entry.backend_type),
+            entry.level,
+        ));
+        0
+    }
+    fn list_c(config: *mut ffi::git_config) -> Listing {
+        let mut listing = Listing::new();
+        // SAFETY: live independent config; synchronous callback over an exclusive
+        // payload, which C does not retain.
+        let rc = unsafe {
+            ffi::git_config_foreach(config, Some(list), ptr::from_mut(&mut listing).cast())
+        };
+        assert_eq!(rc, 0);
+        listing
+    }
+    fn list_rust(config: ConfigRef<'_, '_>) -> Listing {
+        let mut listing = Listing::new();
+        let mut f = |entry: EntryRef<'_>| {
+            listing.push((
+                entry.name().unwrap().to_bytes().to_vec(),
+                entry.value().map(|v| v.to_bytes().to_vec()),
+                entry.backend_type().map(|v| v.to_bytes().to_vec()),
+                entry.level().raw(),
+            ));
+            ControlFlow::Continue(())
+        };
+        let flow = config.foreach(&mut ForeachCallback::new(&mut f)).unwrap();
+        assert_eq!(flow, ControlFlow::Continue(()));
+        listing
+    }
 
     struct RawConfig(*mut ffi::git_config);
     impl Drop for RawConfig {
@@ -1226,6 +1275,7 @@ mod registration {
                 }
                 assert_eq!(c_error, last());
             }
+            assert_eq!(list_c(raw.0), list_rust(rust.as_ref()));
         }
         // Both snapshots own copies, not registering-config or backend borrows.
         let mut c_snapshot = ptr::null_mut();
