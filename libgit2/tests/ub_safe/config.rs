@@ -1847,6 +1847,120 @@ mod iterator_entries {
         std::fs::remove_file(path.to_str().unwrap()).unwrap();
     }
 
+    /// Several iterators over one config advance interleaved, beside a level
+    /// view's and a snapshot's, each entry read before its iterator advances;
+    /// owners go in every order (ASan/LSan). A snapshot's iterator outlives the
+    /// source. Then a repository's config file is reparsed under a moved HEAD
+    /// while an iterator lends an entry of the old parse: the lent entry and
+    /// the rest of that walk stay the old parse's, a new walk sees the new one.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_interleaved_views_snapshots_and_reparse() {
+        use std::ffi::CString;
+        let path = scratch("public-iterator-interleaved");
+        std::fs::write(
+            path.to_str().unwrap(),
+            b"[a]\nx = 1\nx = 2\ny\n[b]\nz = 3\n",
+        )
+        .unwrap();
+        let shared = ConfigArc::from(Config::open(&path).unwrap());
+        let view = shared.as_ref().open_level(ConfigLevel::HIGHEST).unwrap();
+        let snapshot = shared.as_ref().snapshot().unwrap();
+        let mut iters = vec![
+            shared.as_ref().iterator().unwrap(),
+            shared
+                .as_ref()
+                .multivar_iterator(c"a.x", Some(c"."))
+                .unwrap(),
+            view.as_ref().iterator_matching(Some(c"^a\\.")).unwrap(),
+            snapshot.as_ref().iterator().unwrap(),
+        ];
+        let mut seen = [0; 4];
+        loop {
+            let mut advanced = false;
+            for (i, iter) in iters.iter_mut().enumerate() {
+                let mut m = iter.as_mut();
+                if let Some(entry) = m.advance_entry().unwrap() {
+                    assert!(entry.name().is_some());
+                    let _ = entry.value().map(CStr::to_bytes);
+                    seen[i] += 1;
+                    advanced = true;
+                }
+            }
+            if !advanced {
+                break;
+            }
+        }
+        assert_eq!(seen, [4, 2, 3, 4]);
+        let mut snap = snapshot.as_ref().iterator().unwrap();
+        assert_eq!(
+            snap.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"1")
+        );
+        drop(iters.remove(2)); // The view's, before the shared config's.
+        drop(iters.remove(2));
+        drop(iters.remove(1));
+        drop(iters);
+        drop(view);
+        drop(shared);
+        std::fs::write(path.to_str().unwrap(), b"[unterminated\n").unwrap();
+        assert_eq!(
+            snap.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"2")
+        );
+        drop(snap);
+        drop(snapshot);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-ub-config-iterator-repo-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false).unwrap();
+        let config_path = dir.join(".git/config");
+        let mut text = std::fs::read(&config_path).unwrap();
+        text.extend_from_slice(
+            b"[includeIf \"onbranch:main\"]\n path = on-main\n\
+              [includeIf \"onbranch:other\"]\n path = on-other\n[a]\n m = local\n",
+        );
+        std::fs::write(&config_path, &text).unwrap();
+        std::fs::write(dir.join(".git/on-main"), b"[a]\n m = main\n").unwrap();
+        std::fs::write(dir.join(".git/on-other"), b"[a]\n m = other-branch\n").unwrap();
+        repo.as_ref().set_head(c"refs/heads/main").unwrap();
+        // Moving HEAD may have parsed the file already; reparse it on main.
+        text.extend_from_slice(b"# on main\n");
+        std::fs::write(&config_path, &text).unwrap();
+
+        let config = repo.as_ref().config().unwrap();
+        let local = config.as_ref().open_level(ConfigLevel::LOCAL).unwrap();
+        let mut old = local.as_ref().multivar_iterator(c"a.m", None).unwrap();
+        let mut m = old.as_mut();
+        let entry = m.advance_entry().unwrap().unwrap();
+        assert_eq!((entry.value(), entry.include_depth()), (Some(c"main"), 1));
+        repo.as_ref().set_head(c"refs/heads/other").unwrap();
+        text.extend_from_slice(b"# grow the file so its stamp changes\n");
+        std::fs::write(&config_path, &text).unwrap();
+        let mut new = local.as_ref().multivar_iterator(c"a.m", None).unwrap();
+        assert_eq!(
+            new.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"other-branch")
+        );
+        assert_eq!((entry.value(), entry.include_depth()), (Some(c"main"), 1));
+        assert_eq!(m.advance_entry().unwrap().unwrap().value(), Some(c"local"));
+        assert!(m.advance_entry().unwrap().is_none());
+        drop(old);
+        assert_eq!(
+            new.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"local")
+        );
+        drop(new);
+        drop(local);
+        drop(config);
+        drop(repo);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// No thread-safety claim is made: each thread builds, uses and drops its
     /// own config and iterator; only C's process runtime is shared.
     #[test]
