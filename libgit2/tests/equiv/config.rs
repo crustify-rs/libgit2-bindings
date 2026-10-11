@@ -2338,4 +2338,140 @@ mod mapping_callbacks {
             std::fs::remove_file(path).unwrap();
         }
     }
+
+    /// A lookup whose key sits above a backend that can no longer reread its file
+    /// spends that backend's failure on the Rust side only, then leaves the thread's
+    /// previous error as C does, verbatim, whatever its class: none, an ordinary one,
+    /// `GIT_ERROR_OS` (which `git_error_set` would extend with `errno`'s description)
+    /// and a class libgit2 does not define. Regression for
+    /// `crustify/reviews/.../config/wave-2/batch-1/equiv/spent-backend-failure-reformats-os-error`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn spent_backend_failures_keep_any_previous_error() {
+        init();
+        let paths = ["rust-lower", "rust-upper", "c-lower", "c-upper"]
+            .map(|side| CString::new(scratch("spent", side).to_str().unwrap()).unwrap());
+        for (lower, upper) in [(&paths[0], &paths[1]), (&paths[2], &paths[3])] {
+            std::fs::write(lower.to_str().unwrap(), b"[a]\n other = old\n").unwrap();
+            std::fs::write(upper.to_str().unwrap(), b"[a]\n b = input\n flag\n").unwrap();
+        }
+        let mut config = Config::open(&paths[0]).unwrap();
+        config
+            .as_mut()
+            .add_file(&paths[1], ConfigLevel::APP, None, false)
+            .unwrap();
+        let mut raw = ptr::null_mut();
+        // SAFETY: writable slot and live NUL path; success hands out one owned config.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw, paths[2].as_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: live exclusive config, live NUL path, a free priority, no repository.
+        let rc = unsafe {
+            ffi::git_config_add_file_ondisk(
+                raw,
+                paths[3].as_ptr(),
+                ffi::GIT_CONFIG_LEVEL_APP,
+                ptr::null(),
+                0,
+            )
+        };
+        assert_eq!(rc, 0);
+        let maps = [
+            ConfigMap::new(MapMatch::String(c"input"), 42),
+            ConfigMap::new(MapMatch::True, 7),
+        ];
+        let raw_maps = [
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_STRING,
+                str_match: c"input".as_ptr(),
+                map_value: 42,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_TRUE,
+                str_match: ptr::null(),
+                map_value: 7,
+            },
+        ];
+        let seed = |previous: Option<(c_int, &CStr)>| match previous {
+            None => clear(),
+            // SAFETY: a NUL-terminated message, copied; the class is only stored.
+            Some((class, message)) => unsafe {
+                ffi::git_error_set_str(class, message.as_ptr());
+            },
+        };
+        let error = || {
+            let error = last();
+            (error.raw_class(), error.message().to_bytes().to_vec())
+        };
+        // Each break changes the size, so the next reread parses the file again.
+        // C never reads the lower files: both keys are found above them.
+        let mut round = 0;
+        let mut break_lower = || {
+            round += 1;
+            for lower in [&paths[0], &paths[2]] {
+                let content = format!("[broken\n{}\n", "x".repeat(round));
+                std::fs::write(lower.to_str().unwrap(), content).unwrap();
+            }
+        };
+        for previous in [
+            None,
+            Some((ffi::GIT_ERROR_ODB as c_int, c"previous error")),
+            Some((
+                ffi::GIT_ERROR_OS as c_int,
+                c"failed to stat '/nowhere': No such file or directory",
+            )),
+            Some((4242, c"a class libgit2 does not define")),
+        ] {
+            for name in [c"a.b", c"a.flag"] {
+                break_lower();
+                seed(previous);
+                let entry = config.as_ref().entry(name).unwrap();
+                let safe = (
+                    entry.as_ref().value().map(|v| v.to_bytes().to_vec()),
+                    error(),
+                );
+                drop(entry);
+                seed(previous);
+                let mut raw_entry = ptr::null_mut();
+                // SAFETY: live config, NUL key, writable slot; success acquires
+                // one entry reference.
+                let rc = unsafe { ffi::git_config_get_entry(&mut raw_entry, raw, name.as_ptr()) };
+                assert_eq!(rc, 0);
+                // SAFETY: the acquired entry is live; its value is NULL or a NUL string.
+                let value = unsafe { core::ptr::addr_of!((*raw_entry).value).read() };
+                let value = (!value.is_null())
+                    // SAFETY: non-NULL values are NUL strings live with the entry.
+                    .then(|| unsafe { CStr::from_ptr(value) }.to_bytes().to_vec());
+                let c = (value, error());
+                // SAFETY: releases the one acquired reference.
+                unsafe { ffi::git_config_entry_free(raw_entry) };
+                assert_eq!(safe, c, "entry {name:?} after {previous:?}");
+
+                break_lower();
+                seed(previous);
+                let safe = observe(config.as_ref().get_mapped(name, &maps));
+                seed(previous);
+                let mut out = 0;
+                // SAFETY: live config, NUL key, writable scalar; exact table count
+                // with a live string for the String rule.
+                let rc = unsafe {
+                    ffi::git_config_get_mapped(
+                        &mut out,
+                        raw,
+                        name.as_ptr(),
+                        raw_maps.as_ptr(),
+                        raw_maps.len(),
+                    )
+                };
+                let c = (record(rc, if rc < 0 { 0 } else { out }, c_error), error());
+                assert_eq!(safe, c, "get_mapped {name:?} after {previous:?}");
+            }
+        }
+        clear();
+        drop(config);
+        // SAFETY: releases the one owned C config.
+        unsafe { ffi::git_config_free(raw) };
+        for path in &paths {
+            std::fs::remove_file(path.to_str().unwrap()).unwrap();
+        }
+    }
 }
