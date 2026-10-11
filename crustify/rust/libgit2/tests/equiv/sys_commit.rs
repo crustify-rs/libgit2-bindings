@@ -8,9 +8,11 @@
 //! reference moved from its first parent and refused from another, and the parents and
 //! trees strict object creation refuses (missing, or of another object type). After
 //! every step the sides compare the outcome (the new id, or the code, class and message
-//! of the failure) and where `HEAD` points. Reference writes reach glibc's timezone
-//! state, which another test's would race (TSan), so the script runs in an isolated
-//! child.
+//! of the failure) and where `HEAD` points. A second script runs both routines on
+//! repositories whose object database cannot be written once their root commit is
+//! (every missing loose fan-out directory a regular file), where libgit2 fails the
+//! write. Reference writes reach glibc's timezone state, which another test's would
+//! race (TSan), so each script runs in an isolated child.
 //!
 //! Documented divergence, outside these comparisons: the wrappers refuse an id of
 //! another type than the repository's, which libgit2 would format out of bounds, and a
@@ -319,6 +321,73 @@ fn creation_by_id_scripts_match_body() {
     }
     // The stale parent, the missing parent and tree, and the objects of the wrong type.
     assert_eq!(failures, 5);
+    drop(rust);
+    // SAFETY: the C side's repository, released once.
+    unsafe { ffi::git_repository_free(c_repo) };
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(c_dir);
+}
+
+/// Both routines, on repositories whose object database cannot be written once the root
+/// commit is: every loose fan-out directory the repository lacks is a regular file, so
+/// `git_odb_write` fails after the parents were validated, before `HEAD` moves. The
+/// sides compare the code, class and message (their directory masked) and `HEAD`.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn unwritable_object_databases_fail_alike() {
+    isolated(
+        concat!(module_path!(), "::unwritable_object_databases_fail_alike"),
+        unwritable_object_databases_fail_alike_body,
+    );
+}
+
+fn unwritable_object_databases_fail_alike_body() {
+    use Id::*;
+    let update = Some(c"HEAD");
+    let root: Step = (false, update, Fixed(EMPTY_TREE), &[], c"root\n");
+    let steps: [Step; 3] = [
+        (true, update, Fixed(EMPTY_TREE), &[Commit(0)], c"child\n"),
+        (
+            false,
+            update,
+            Fixed(EMPTY_TREE),
+            &[Commit(0)],
+            c"child by id\n",
+        ),
+        (true, None, Fixed(EMPTY_TREE), &[], c"another root\n"),
+    ];
+    let block = |dir: &std::path::Path| {
+        for byte in 0..=u8::MAX {
+            let fan_out = dir.join(format!("objects/{byte:02x}"));
+            if !fan_out.exists() {
+                std::fs::write(fan_out, "").unwrap();
+            }
+        }
+    };
+    let masked = |outcome: Outcome, dir: &std::path::Path| {
+        let dir = dir.to_str().unwrap();
+        outcome.map_err(|(rc, class, message)| (rc, class, message.replace(dir, "<repo>")))
+    };
+    let (c_dir, c_path) = scratch("c");
+    let mut c_repo = ptr::null_mut();
+    // SAFETY: a writable slot and a NUL-terminated path.
+    let rc = unsafe { ffi::git_repository_init(&mut c_repo, c_path.as_ptr(), 1) };
+    assert_eq!(rc, 0);
+    let (dir, path) = scratch("rust");
+    let rust = Repository::init(&path, true).unwrap();
+    let (mut c_written, mut written) = (Vec::new(), Vec::new());
+    let expected = c_run(c_repo, &mut c_written, &root);
+    assert_eq!(rust_run(&rust, &mut written, &root), expected);
+    assert!(expected.is_ok());
+    block(&c_dir);
+    block(&dir);
+    for (n, step) in steps.iter().enumerate() {
+        let expected = masked(c_run(c_repo, &mut c_written, step), &c_dir);
+        let got = masked(rust_run(&rust, &mut written, step), &dir);
+        assert_eq!(got, expected, "step {n}: {step:?}");
+        assert!(expected.is_err(), "step {n}: {step:?}");
+        assert_eq!(head(&dir), head(&c_dir), "step {n}");
+    }
     drop(rust);
     // SAFETY: the C side's repository, released once.
     unsafe { ffi::git_repository_free(c_repo) };

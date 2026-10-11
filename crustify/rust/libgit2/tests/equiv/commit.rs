@@ -3949,4 +3949,81 @@ mod creating {
         drop(rust);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// Turns every loose fan-out directory `objects/xx` that the repository at `dir`
+    /// lacks into a regular file: writing an object there then fails as the directory
+    /// cannot be made, even as root.
+    fn block_loose_writes(dir: &std::path::Path) {
+        for byte in 0..=u8::MAX {
+            let fan_out = dir.join(format!("objects/{byte:02x}"));
+            if !fan_out.exists() {
+                std::fs::write(fan_out, "").unwrap();
+            }
+        }
+    }
+
+    /// `outcome` with the repository's directory, which a failure's message names,
+    /// masked.
+    fn masked(outcome: Outcome, dir: &std::path::Path) -> Outcome {
+        let dir = dir.to_str().unwrap();
+        outcome.map_err(|(rc, class, message)| (rc, class, message.replace(dir, "<repo>")))
+    }
+
+    /// Every creation routine, on a repository whose object database cannot be written
+    /// once its root commit is: `git_commit__create_internal` builds the contents and
+    /// fails at `git_odb_write`, before moving any reference. Each side compares the
+    /// code, class and message (its directory masked), and where the references point,
+    /// after each step. The amends move no reference: `git_commit_amend` leaks the one it
+    /// resolved for `update_ref` when the write fails.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unwritable_object_databases_fail_alike() {
+        super::isolated(
+            concat!(module_path!(), "::unwritable_object_databases_fail_alike"),
+            unwritable_object_databases_fail_alike_body,
+        );
+    }
+
+    fn unwritable_object_databases_fail_alike_body() {
+        use Step::*;
+        let head = Some(c"HEAD");
+        let root = Create(head, ALICE, BOB, None, c"root\n", vec![]);
+        let steps = [
+            Create(head, ALICE, BOB, None, c"child\n", vec![0]),
+            Create(
+                None,
+                BOB,
+                ALICE,
+                Some(c"ISO-8859-1"),
+                c"another root\n",
+                vec![],
+            ),
+            Array(head, BOB, c"array child\n", vec![0, 0]),
+            Buffer(ALICE, None, c"buffer\n", vec![0]),
+            Ext(head, Some(c"UTF-8"), &[(c"x-one", c"1")], c"ext\n", vec![0]),
+            Amend(0, None, None, None, None, Some(c"amended\n"), false),
+            Amend(0, None, Some(BOB), Some(LATE), None, None, true),
+        ];
+        let mut c = CSide::new();
+        let (dir, path) = scratch("rust");
+        let rust = Repository::init(&path, true).unwrap();
+        let mut commits = Vec::new();
+        assert_eq!(rust_run(&rust, &mut commits, &root), c.run(&root));
+        block_loose_writes(&dir);
+        block_loose_writes(&c.dir);
+        let mut failures = 0;
+        for (n, step) in steps.iter().enumerate() {
+            let expected = masked(c.run(step), &c.dir);
+            let got = masked(rust_run(&rust, &mut commits, step), &dir);
+            assert_eq!(got, expected, "step {n}: {step:?}");
+            assert_eq!(refs(&dir), refs(&c.dir), "step {n}: {step:?}");
+            failures += usize::from(expected.is_err());
+        }
+        // Every write failed (the buffer is not written); none landed in the root's
+        // fan-out directory.
+        assert_eq!(failures, steps.len() - 1);
+        drop(commits);
+        drop(rust);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
