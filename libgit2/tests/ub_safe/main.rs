@@ -27,6 +27,7 @@ mod object;
 mod odb;
 mod oid;
 mod oidarray;
+mod pathspec;
 mod refdb;
 mod refs;
 mod repository;

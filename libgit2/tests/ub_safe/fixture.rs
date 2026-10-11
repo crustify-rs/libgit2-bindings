@@ -1988,3 +1988,41 @@ pub mod signature {
         }
     }
 }
+
+/// The index-entry insertion wrapper is scheduled in the next index wave. This
+/// one fixture supplies populated indexes; construction already uses the safe API.
+pub fn match_list_index(paths: &[&CStr]) -> libgit2::libgit2::index::index::IndexBox {
+    let index = libgit2::libgit2::index::index::Index::new().unwrap();
+    for path in paths {
+        let mut entry = ffi::git_index_entry {
+            path: path.as_ptr(), mode: 0o100644, ..Default::default()
+        };
+        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        entry.id.id[0] = 1;
+        // SAFETY: exclusive live index; entry and NUL-terminated path are copied
+        // by git_index_add during the call. The fixture retains no raw pointer.
+        assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+    }
+    index
+}
+
+#[path = "../support/pathspec_match_list.rs"]
+mod match_list_support;
+
+/// One raw-construction fixture for the opaque match-list type until a compiled
+/// pathspec wrapper makes its public constructors safe. Every path/failed string
+/// in the returned list is copied; both temporary source owners are released here.
+pub fn match_list_fixture(names: &[&CStr], patterns: &[&CStr], flags: u32)
+    -> libgit2::libgit2::index::pathspec::MatchListBox<'static>
+{
+    let index = match_list_index(names);
+    let ps = match_list_support::patterns(patterns);
+    let mut out = core::ptr::null_mut();
+    // SAFETY: live initialized sources and output slot; C retains one pathspec
+    // reference but copies filenames, retaining no index or input string borrow.
+    let rc = unsafe { ffi::git_pathspec_match_index(&mut out, index.as_c_ptr(), flags, ps.as_c_ptr()) };
+    assert_eq!(rc, 0);
+    // SAFETY: C transferred a fresh initialized list, released by MatchListFree;
+    // this filename variant owns its strings and contains no external diff borrow.
+    unsafe { libgit2::libgit2::index::pathspec::MatchListBox::from_c(out) }.unwrap()
+}

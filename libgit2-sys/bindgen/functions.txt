@@ -467,3 +467,15 @@ git_diff_tree_to_workdir
 git_diff_tree_to_workdir_with_index
 git_diff_index_to_index
 git_diff_options_init
+
+# index wave 0 batch 7: match-list lifecycle and public observations
+git_pathspec_match_workdir
+git_pathspec_match_index
+git_pathspec_match_tree
+git_pathspec_match_diff
+git_pathspec_match_list_free
+git_pathspec_match_list_entrycount
+git_pathspec_match_list_entry
+git_pathspec_match_list_diff_entry
+git_pathspec_match_list_failed_entrycount
+git_pathspec_match_list_failed_entry
