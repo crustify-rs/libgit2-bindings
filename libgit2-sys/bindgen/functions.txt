@@ -441,3 +441,10 @@ git_index_set_caps
 git_index_add_all
 git_index_remove_all
 git_index_update_all
+
+# index wave 0 batch 4: NAME lifecycle and stage equivalence
+git_index_name_add
+git_index_name_clear
+git_index_name_entrycount
+git_index_name_get_byindex
+git_index_entry_stage
