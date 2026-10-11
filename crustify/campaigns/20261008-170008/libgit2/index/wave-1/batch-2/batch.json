@@ -1,0 +1,180 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_index_add_all",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_add_bypath",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_caps",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_clear",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_conflict_cleanup",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_conflict_iterator_free",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_conflict_iterator_new",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_conflict_remove",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_entrycount",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_extension_add",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_extension_lookup",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_extension_remove",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_find",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_find_prefix",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_free",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_has_conflicts",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_iterator_free",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_iterator_new",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_name_add",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/sys/index.rs"
+    },
+    {
+      "name": "git_index_name_clear",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/sys/index.rs"
+    },
+    {
+      "name": "git_index_name_entrycount",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/sys/index.rs"
+    },
+    {
+      "name": "git_index_name_get_byindex",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/sys/index.rs"
+    },
+    {
+      "name": "git_index_new",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_open",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_owner",
+      "defined_in": "src/libgit2/index.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    }
+  ]
+}
