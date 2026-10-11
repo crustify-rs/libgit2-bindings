@@ -367,3 +367,8 @@ git_worktree_prune
 git_worktree_prune_options_init
 git_worktree_unlock
 git_worktree_validate
+
+# config wave 0 batch 2: scalar parsers
+git_config_parse_bool
+git_config_parse_int32
+git_config_parse_int64

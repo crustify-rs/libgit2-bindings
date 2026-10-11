@@ -233,3 +233,169 @@ fn repository_configs_match() {
     // SAFETY: the C side's last reference, released once.
     unsafe { ffi::git_config_free(c_config) };
 }
+
+/// Each side owns its own input strings and replays the whole sequence without
+/// clearing errors between calls: success and suffix-tail failure preserve them.
+#[cfg(not(miri))]
+mod parsers {
+    use super::*;
+    use libgit2::libgit2::config::config::{parse_bool, parse_int32, parse_int64};
+    use libgit2::libgit2::util::errors::ErrorBuf;
+    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::sys::errors::{clear, set_str};
+
+    type Observation<T> = (c_int, Option<T>, Option<(c_int, Vec<u8>)>, (c_int, Vec<u8>));
+
+    fn error_bytes(error: ErrorBuf) -> (c_int, Vec<u8>) {
+        (error.raw_class(), error.message().to_bytes().to_vec())
+    }
+
+    fn rust_observation<T>(result: Result<T, ErrorBuf>) -> Observation<T> {
+        let state = error_bytes(last());
+        match result {
+            Ok(out) => (0, Some(out), None, state),
+            Err(error) => (-1, None, Some(error_bytes(error)), state),
+        }
+    }
+
+    // C reads its last error directly, copying the bytes before the next call.
+    fn raw_error() -> (c_int, Vec<u8>) {
+        // SAFETY: the runtime is pinned before any step; the pointer is live on
+        // this thread until its next C call. Read no error through a Rust reference.
+        let error = unsafe { ffi::git_error_last().read() };
+        // SAFETY: libgit2's message is NUL-terminated and still live, copied here.
+        let bytes = unsafe { CStr::from_ptr(error.message) }.to_bytes().to_vec();
+        (error.klass, bytes)
+    }
+
+    fn raw_observation<T>(rc: c_int, value: T) -> Observation<T> {
+        let state = raw_error();
+        (
+            rc,
+            (rc == 0).then_some(value),
+            (rc < 0).then(|| state.clone()),
+            state,
+        )
+    }
+
+    fn seed(with_error: bool) {
+        clear();
+        if with_error {
+            set_str(ErrorClass::Invalid, c"parser sequence sentinel").unwrap();
+        }
+    }
+
+    fn inputs() -> Vec<Option<CString>> {
+        let mut values = vec![Some(CString::new("1kb").unwrap()), None];
+        // Suffix-tail failure comes before any new error, then again after one.
+        for value in [
+            "1kb",
+            "true",
+            "YES",
+            "On",
+            "FALSE",
+            "no",
+            "oFf",
+            "",
+            "0",
+            "-0",
+            "1",
+            "-1",
+            "+42",
+            "  \t\r\n\x0b\x0c17",
+            "010",
+            "0x10",
+            "-0X10",
+            "0xFf",
+            "1k",
+            "-1K",
+            "2m",
+            "-2M",
+            "1g",
+            "-1G",
+            "2147483647",
+            "-2147483648",
+            "2147483648",
+            "-2147483649",
+            "2097151K",
+            "2097152k",
+            "-2097152K",
+            "2g",
+            "-2G",
+            "9223372036854775807",
+            "-9223372036854775808",
+            "9223372036854775808",
+            "-9223372036854775809",
+            "8589934591G",
+            "8589934592G",
+            "-8589934592G",
+            "9007199254740992K",
+            "9007199254740992G",
+            "9007199254740992M",
+            "8796093022208G",
+            "8796093022208M",
+            "-9007199254740992k",
+            "-8796093022208m",
+            " ",
+            "+",
+            "-",
+            "0x",
+            "0xg",
+            "08",
+            "1 ",
+            "1t",
+            "1kk",
+            "1Mb",
+            "1Gb",
+            "true ",
+            " true",
+            "not-a-value",
+            "1kb",
+            "0",
+            "off",
+        ] {
+            values.push(Some(CString::new(value).unwrap()));
+        }
+        values.push(Some(CString::new([0xff, b'1']).unwrap()));
+        values.push(Some(CString::new("9".repeat(4096)).unwrap()));
+        values
+    }
+
+    #[test]
+    fn parse_sequences_match_c() {
+        // Pins the runtime for the raw calls as well; each side then resets its
+        // own thread error to the same starting state.
+        clear();
+        let c_inputs = inputs();
+        let rust_inputs = inputs();
+        macro_rules! compare {
+            ($raw:path, $safe:path, $ty:ty, $convert:expr) => {{
+                for with_error in [false, true] {
+                    seed(with_error);
+                    let c: Vec<_> = c_inputs
+                        .iter()
+                        .map(|value| {
+                            let mut out: $ty = 123;
+                            let input = value.as_ref().map_or(ptr::null(), |s| s.as_ptr());
+                            // SAFETY: one aligned writable scalar and NULL or a live
+                            // NUL-terminated read-only string; neither pointer is retained.
+                            let rc = unsafe { $raw(&mut out, input) };
+                            if rc < 0 {
+                                assert_eq!(out, 123, "C must leave failed output untouched");
+                            }
+                            raw_observation(rc, ($convert)(out))
+                        })
+                        .collect();
+                    seed(with_error);
+                    for (index, value) in rust_inputs.iter().enumerate() {
+                        let rust = rust_observation($safe(value.as_deref()));
+                        assert_eq!(c[index], rust, "input {value:?}");
+                    }
+                }
+            }};
+        }
+        compare!(ffi::git_config_parse_bool, parse_bool, c_int, |x| x != 0);
+        compare!(ffi::git_config_parse_int32, parse_int32, i32, |x| x);
+        compare!(ffi::git_config_parse_int64, parse_int64, i64, |x| x);
+    }
+}

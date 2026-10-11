@@ -154,3 +154,154 @@ fn first_configs_race_to_init() {
         },
     );
 }
+
+/// Parsers only borrow input during the call. These tests use exclusively the
+/// safe public surface: stack bounds/alignment, integer overflow, discarded
+/// inputs, retained error copies, repeated calls and concurrent error reporting.
+#[forbid(unsafe_code)]
+mod parsers {
+    use super::*;
+    use libgit2::libgit2::config::config::{parse_bool, parse_int32, parse_int64};
+    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::sys::errors::{clear, set_str};
+    use std::ffi::{CStr, CString};
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "calls libgit2; no Rust-only pointer or layout operations"
+    )]
+    fn nullable_and_boundary_inputs() {
+        assert!(parse_bool(None).unwrap());
+        assert!(!parse_bool(Some(c"")).unwrap());
+        assert!(parse_int32(None).is_err());
+        assert!(parse_int64(None).is_err());
+        assert_eq!(parse_int32(Some(c"-2147483648")).unwrap(), i32::MIN);
+        assert_eq!(parse_int32(Some(c"2147483647")).unwrap(), i32::MAX);
+        assert_eq!(
+            parse_int64(Some(c"-9223372036854775808")).unwrap(),
+            i64::MIN
+        );
+        assert_eq!(parse_int64(Some(c"9223372036854775807")).unwrap(), i64::MAX);
+        for value in [c"2147483648", c"-2147483649", c"2G"] {
+            assert!(parse_int32(Some(value)).is_err());
+            assert!(parse_bool(Some(value)).is_err());
+        }
+        for value in [
+            c"9223372036854775808",
+            c"-9223372036854775809",
+            c"8589934592G",
+            c"8796093022208m",
+            c"9007199254740992g",
+            c"9007199254740992m",
+            c"8796093022208g",
+            c"9007199254740992k",
+            c"1kb",
+            c"",
+            c"+",
+            c"-",
+            c"0x",
+        ] {
+            assert!(parse_int64(Some(value)).is_err());
+        }
+        // The NUL sits at the very end of stack/heap storage; C's suffix lookahead
+        // may read it but must not go beyond it. Invalid bytes need no UTF-8 claim.
+        for bytes in [b"1k\0".as_slice(), b"1kb\0", b"\xff\0"] {
+            let value = CStr::from_bytes_with_nul(bytes).unwrap();
+            let _ = parse_bool(Some(value));
+            let _ = parse_int32(Some(value));
+            let _ = parse_int64(Some(value));
+        }
+        let long = CString::new("9".repeat(4096)).unwrap();
+        assert!(parse_int64(Some(&long)).is_err());
+        for byte in 1..=255 {
+            let input = CString::new([byte]).unwrap();
+            let _ = parse_bool(Some(&input));
+            let _ = parse_int32(Some(&input));
+            let _ = parse_int64(Some(&input));
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn results_outlive_inputs_and_later_calls() {
+        let (boolean, small, large, error) = {
+            let input = CString::new("-2m").unwrap();
+            let invalid = CString::new([0xff, b'%']).unwrap();
+            (
+                parse_bool(Some(&input)).unwrap(),
+                parse_int32(Some(&input)).unwrap(),
+                parse_int64(Some(&input)).unwrap(),
+                parse_int64(Some(&invalid)).unwrap_err(),
+            )
+        };
+        let copy = error.clone();
+        clear();
+        set_str(ErrorClass::Invalid, c"overwrite the foreign error buffer").unwrap();
+        assert!(boolean);
+        assert_eq!(small, -2 * 1024 * 1024);
+        assert_eq!(large, i64::from(small));
+        assert_eq!(error, copy);
+        assert_eq!(error.class(), Some(ErrorClass::Config));
+        assert!(
+            error
+                .message()
+                .to_bytes()
+                .windows(2)
+                .any(|w| w == [0xff, b'%'])
+        );
+        // A new mutable use of input storage is safe after each completed call:
+        // neither C nor the returned scalar/error retained its earlier borrow.
+        let mut bytes = b"1k\0".to_vec();
+        for _ in 0..64 {
+            assert_eq!(
+                parse_int32(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
+                1024
+            );
+            bytes[0] = b'2';
+            assert_eq!(
+                parse_int64(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
+                2048
+            );
+            bytes[0] = b'1';
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn first_parser_errors_race_to_init() {
+        isolated(
+            concat!(module_path!(), "::first_parser_errors_race_to_init"),
+            || {
+                let barrier = Barrier::new(6);
+                thread::scope(|scope| {
+                    for index in 0..6 {
+                        let barrier = &barrier;
+                        scope.spawn(move || {
+                            let invalid = CString::new(format!("invalid-thread-{index}")).unwrap();
+                            barrier.wait();
+                            let mut kept = Vec::new();
+                            for _ in 0..32 {
+                                kept.push(parse_int64(Some(&invalid)).unwrap_err());
+                                kept.push(parse_int32(Some(&invalid)).unwrap_err());
+                                kept.push(parse_bool(Some(&invalid)).unwrap_err());
+                                assert!(parse_bool(None).unwrap());
+                                assert_eq!(parse_int32(Some(c"1K")).unwrap(), 1024);
+                                assert_eq!(parse_int64(Some(c"1G")).unwrap(), 1 << 30);
+                            }
+                            drop(invalid);
+                            for error in kept {
+                                assert_eq!(error.class(), Some(ErrorClass::Config));
+                                assert!(
+                                    error
+                                        .to_string()
+                                        .contains(&format!("invalid-thread-{index}"))
+                                );
+                            }
+                        });
+                    }
+                });
+            },
+        );
+    }
+}
