@@ -24,6 +24,12 @@
 //! as one, and [`Blob::into_object`] and [`BlobRef::as_object`] give a blob back as an
 //! object.
 //!
+//! A blob holds its content: [`BlobRef::content`] lends it in place, for as long as the
+//! blob is borrowed, and [`BlobRef::id`] and [`BlobRef::owner`] lend its id and its
+//! repository. [`BlobRef::filter`] copies the content out through the filters a
+//! working-directory path selects, which it loads as the [blob
+//! writers](#writing-blobs) do, refusing the paths they refuse.
+//!
 //! # Filter options
 //!
 //! A [`FilterOptions`] is a `git_blob_filter_options`, the options of `git_blob_filter`:
@@ -94,6 +100,7 @@ use std::io;
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, CZeroable, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::{ObjectType, StreamError, WriteStreamBox};
 use crate::libgit2::filter::filter::{initialise_builtin_filters, relative};
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
@@ -543,6 +550,166 @@ impl<'a, 'r> BlobRef<'a, 'r> {
         // SAFETY: the reference just counted, given to the result, which `git_blob_free`
         // releases; the blob's repository outlives `'r`, which the result carries.
         unsafe { BlobArc::from_raw(blob.as_ptr()) }.expect("a handle is never NULL")
+    }
+
+    /// The blob's id, of its repository's id type: the id it was looked up by, or the
+    /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in
+    /// the blob, which writes it once, when it is read.
+    ///
+    /// Wraps: git_blob_id
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live blob for `'a`; libgit2 only reads it, and
+        // returns the address of the id cached in its object (`&obj->cached.oid`).
+        let id = unsafe { ffi::git_blob_id(self.as_ptr()) };
+        // SAFETY: the id is part of the blob, so it is non-NULL and lives as long as the
+        // blob, past `'a`; nothing writes it once the blob is returned.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a live blob has an id")
+    }
+
+    /// The repository the blob was looked up in, borrowed for `'r`, as the shared
+    /// handle it was looked up through ([`ObjectRef::owner`] for a blob).
+    ///
+    /// The result outlives the blob, but not the repository's borrow:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::blob::Blob;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let owner = blob.as_ref().owner();
+    /// drop(repo);
+    /// let _ = owner.path();
+    /// ```
+    ///
+    /// Wraps: git_blob_owner
+    pub fn owner(&self) -> RepositoryRef<'r> {
+        // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
+        let repo = unsafe { ffi::git_blob_owner(self.as_ptr()) };
+        // SAFETY: `obj->repo` is the repository the blob was looked up in, stored
+        // without a count and never cleared. A `Blob<'r>` is only built from a
+        // `RepositoryRef<'r>` (`lookup`, `lookup_prefix`) or from an `Object<'r>`, so
+        // that repository is live and shared, not exclusively borrowed, for `'r`, on
+        // this thread.
+        unsafe { RepositoryRef::from_ptr(repo) }.expect("a blob always has a repository")
+    }
+
+    /// The blob's content, as the object database stores it, unfiltered: the
+    /// [`size`](Self::size) bytes libgit2 read, NUL bytes included. Borrowed in place
+    /// for as long as the handle: the blob holds them, and libgit2 never writes them.
+    ///
+    /// The content lives no longer than the blob's borrow:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::blob::Blob;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let content = blob.as_ref().content();
+    /// drop(blob);
+    /// let _ = content.len();
+    /// ```
+    ///
+    /// Wraps: git_blob_rawcontent
+    pub fn content(&self) -> &'a [u8] {
+        let size = usize::try_from(self.size())
+            .expect("a blob's content is held in memory, so its size fits a usize");
+        if size == 0 {
+            return &[];
+        }
+        // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
+        let data = unsafe { ffi::git_blob_rawcontent(self.as_ptr()) };
+        // SAFETY: a blob's content is the `size` bytes of the object-database object it
+        // holds a reference to (or of the buffer it was parsed from), initialised and
+        // never written, which live as long as the blob does, past `'a`; `data` is
+        // non-NULL for a non-NULL blob.
+        unsafe { core::slice::from_raw_parts(data.cast::<u8>(), size) }
+    }
+
+    /// The size of the blob's [`content`](Self::content), in bytes.
+    ///
+    /// Wraps: git_blob_rawsize
+    pub fn size(&self) -> u64 {
+        // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
+        unsafe { ffi::git_blob_rawsize(self.as_ptr()) }
+    }
+
+    /// Whether the blob's content is most likely binary, by the heuristic
+    /// [`data_is_binary`] applies, over its first 8000 bytes only (libgit2's
+    /// `GIT_FILTER_BYTES_TO_CHECK_NUL`): a NUL byte or a long run of non-printable
+    /// bytes after them is not seen.
+    ///
+    /// Wraps: git_blob_is_binary
+    pub fn is_binary(&self) -> bool {
+        // SAFETY: the handle addresses a live blob for `'a`, whose content libgit2 reads
+        // (at most 8000 bytes of it, so its `int` counters cannot overflow) and never
+        // writes; nothing is allocated and no error is set.
+        unsafe { ffi::git_blob_is_binary(self.as_ptr()) != 0 }
+    }
+
+    /// The blob's content filtered as if it were checked out to the working directory
+    /// at `as_path`, relative to it: through the filters the attributes of that path
+    /// select (CRLF conversion, `ident`, ...), as `opts` (the defaults of
+    /// [`FilterOptions::new`] for `None`) says to load them. The content is copied
+    /// into the result whether or not a filter applies.
+    ///
+    /// With [`FilterFlag::CheckForBinary`] in the options' flags (the default), a blob
+    /// that [`is_binary`](Self::is_binary) is left unfiltered, and the result is
+    /// empty, as libgit2 leaves it.
+    ///
+    /// Refuses an absolute `as_path` with libgit2's `GIT_ERROR_INTERNAL` error,
+    /// `unrecoverable internal error: '!((path)[0] == '/')'`, before reading anything
+    /// (see the [module docs](self#writing-blobs)); and, when the options load the
+    /// attributes of a commit ([`FilterFlag::AttributesFromCommit`]) whose id libgit2
+    /// would look up, an id whose type is not the repository's, as
+    /// [`Object::lookup`](crate::libgit2::object::object::Object::lookup) refuses it:
+    /// the zero id [`FilterOptions::new`] leaves, of no type, included. Fails with
+    /// `GIT_ERROR_INVALID` for options whose version is 0 or above
+    /// [`FilterOptions::VERSION`]; and with libgit2's error when the attributes or that
+    /// commit cannot be read or a filter fails.
+    ///
+    /// Wraps: git_blob_filter
+    pub fn filter(
+        &self,
+        as_path: &CStr,
+        opts: Option<FilterOptionsRef<'_>>,
+    ) -> Result<BufVal, RepositoryError> {
+        filter_path(as_path)?;
+        if let Some(opts) = opts.filter(|o| self.reads_attr_commit_id(*o)) {
+            id_fits(self.owner(), opts.attr_commit_id())?;
+        }
+        initialise_builtin_filters();
+        let mut out = Buf::new();
+        let opts = opts.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut());
+        // SAFETY: `out` is the fresh buffer above, which libgit2 fills with a copy or leaves
+        // empty; the blob is live and only read, its repository live for `'r` on this
+        // thread, whose caches libgit2 fills through it as `RepositoryRef` allows;
+        // `as_path` is NUL-terminated and relative; `opts` is NULL or live options libgit2
+        // only copies (never reading `reserved`, under `GIT_DEPRECATE_HARD`), whose commit
+        // id, if looked up, is of the repository's type (checked above).
+        let rc = unsafe {
+            ffi::git_blob_filter(
+                out.as_mut().as_mut_ptr(),
+                self.as_ptr().cast_mut(),
+                as_path.as_ptr(),
+                opts,
+            )
+        };
+        if rc < 0 { failed(rc) } else { Ok(out) }
+    }
+
+    /// Whether `git_blob_filter` would look the options' `attr_commit_id` up: it accepts
+    /// their version, does not stop at a binary blob, and loads a commit's attributes.
+    fn reads_attr_commit_id(&self, opts: FilterOptionsRef<'_>) -> bool {
+        let flags = opts.flags();
+        // libgit2 reads the version as an `unsigned int`.
+        let version = opts.version() as u32;
+        (1..=FilterOptions::VERSION as u32).contains(&version)
+            && flags.contains(FilterFlag::AttributesFromCommit)
+            && !(flags.contains(FilterFlag::CheckForBinary) && self.is_binary())
     }
 }
 
@@ -2067,5 +2234,169 @@ mod unit_tests {
         writer.write_all(b"").unwrap();
         let id = writer.commit().unwrap();
         assert_eq!(id, create_from_buffer(bare.repo(), &data).unwrap());
+    }
+
+    // --- Reading and filtering blobs -------------------------------------------------
+
+    const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+    /// Runs `body` alone in a child process: libgit2 marks a filter initialised,
+    /// unsynchronised, on the first list load, which another test's raw load may race.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The accessors read the blob in place, at the addresses C returns.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn accessors_read_the_blob_in_place() {
+        let repo = open();
+        let id = sha1(README);
+        let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+        let r = blob.as_ref();
+        let p = r.as_ptr();
+        assert_eq!(
+            (r.id().raw_kind(), r.id().id()),
+            (id.as_ref().raw_kind(), id.as_ref().id())
+        );
+        // SAFETY: the live blob the owner holds; the getters only read it.
+        let (c_id, c_owner, c_data) = unsafe {
+            (
+                ffi::git_blob_id(p),
+                ffi::git_blob_owner(p),
+                ffi::git_blob_rawcontent(p),
+            )
+        };
+        assert_eq!(r.id().as_ptr(), c_id);
+        assert_eq!(r.owner().as_ptr(), c_owner.cast_const());
+        assert_eq!(r.owner().as_ptr(), repo.as_ref().as_ptr());
+        assert_eq!(r.content().as_ptr(), c_data.cast());
+        assert_eq!(r.content(), b"hey there\n");
+        assert_eq!(r.size(), 10);
+        assert_eq!(content(r).1, r.content());
+        assert!(!r.is_binary());
+    }
+
+    /// An empty blob lends an empty slice, never read through its pointer; the binary
+    /// heuristic stops after 8000 bytes, where [`data_is_binary`] reads on.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn empty_and_late_binary_contents() {
+        let bare = Bare::new("contents");
+        let blob = |data: &[u8]| {
+            let id = create_from_buffer(bare.repo(), data).unwrap();
+            Blob::lookup(bare.repo(), id.as_ref()).unwrap()
+        };
+        let empty = blob(b"");
+        assert_eq!(
+            (empty.as_ref().size(), empty.as_ref().content()),
+            (0, &b""[..])
+        );
+        assert!(!empty.as_ref().is_binary());
+        let mut late = vec![b'a'; 8000];
+        late.push(0);
+        let late_blob = blob(&late);
+        assert_eq!(late_blob.as_ref().content(), &late[..]);
+        assert!(!late_blob.as_ref().is_binary());
+        assert!(data_is_binary(late_blob.as_ref().content()));
+        assert!(blob(b"a\0b").as_ref().is_binary());
+    }
+
+    /// `filter` refuses an absolute path before libgit2 sees it, and an attribute
+    /// commit id of another type than the repository's whenever libgit2 would look it
+    /// up: not when the flag is off, the version is refused first, or a binary blob
+    /// stops the call first.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filter_refuses_before_c() {
+        isolated(
+            concat!(module_path!(), "::filter_refuses_before_c"),
+            filter_refuses_before_c_body,
+        );
+    }
+
+    fn filter_refuses_before_c_body() {
+        let repo = open();
+        let id = sha1(README);
+        let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+        let r = blob.as_ref();
+        let e = r.filter(c"/README", None).unwrap_err();
+        assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Internal)));
+        assert_eq!(
+            e.message(),
+            c"unrecoverable internal error: '!((path)[0] == '/')'"
+        );
+        let out = r.filter(c"README", None).unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"hey there\n");
+
+        let mismatch = c"specified object ID type does not match repository object ID type";
+        let mut opts = FilterOptions::new();
+        opts.as_mut()
+            .set_flags(FilterFlag::AttributesFromCommit | FilterFlag::NoSystemAttributes);
+        // The zero id `new` leaves is of no type; a SHA-256 one is not the repository's.
+        for wrong in [None, Some(Oid::zero(OidType::Sha256))] {
+            if let Some(wrong) = &wrong {
+                opts.as_mut().set_attr_commit_id(wrong.as_ref());
+            }
+            let e = r.filter(c"README", Some(opts.as_ref())).unwrap_err();
+            assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+            assert_eq!(e.message(), mismatch);
+        }
+        // A refused version stops libgit2 before the id.
+        for version in [0, FilterOptions::VERSION + 1, -1] {
+            opts.as_mut().set_version(version);
+            let e = r.filter(c"README", Some(opts.as_ref())).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            assert_ne!(e.message(), mismatch);
+        }
+        opts.as_mut().set_version(FilterOptions::VERSION);
+        // The repository's own type passes, and so does any id with the flag off.
+        opts.as_mut().set_attr_commit_id(sha1(COMMIT).as_ref());
+        let out = r.filter(c"README", Some(opts.as_ref())).unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"hey there\n");
+        opts.as_mut()
+            .set_attr_commit_id(Oid::zero(OidType::Sha256).as_ref());
+        opts.as_mut().set_flags(FilterFlags::empty());
+        assert!(r.filter(c"README", Some(opts.as_ref())).is_ok());
+
+        // A binary blob stops libgit2 before it looks the commit up.
+        let bare = Bare::new("filter-binary");
+        let id = create_from_buffer(bare.repo(), b"\0binary").unwrap();
+        let binary = Blob::lookup(bare.repo(), id.as_ref()).unwrap();
+        opts.as_mut()
+            .set_flags(FilterFlag::CheckForBinary | FilterFlag::AttributesFromCommit);
+        let out = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap();
+        assert!(out.as_ref().is_empty() && out.as_ref().capacity() == 0);
+        opts.as_mut()
+            .set_flags(FilterFlag::AttributesFromCommit.into());
+        let e = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap_err();
+        assert_eq!(e.message(), mismatch);
+        opts.as_mut().set_flags(FilterFlags::empty());
+        let out = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"\0binary");
     }
 }

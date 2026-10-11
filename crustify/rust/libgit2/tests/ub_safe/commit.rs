@@ -1,8 +1,9 @@
 //! UB tests for `git2/commit.h`: the `Commit` owner, `CommitArc<'r>`, its lookups,
 //! handles, getters and object conversions; the `CommitArray` value held by its `CommitArrayVal`
 //! owner, its handles, the commits it lends and moves in and out, and the
-//! `git_commitarray_dispose` policy; the `Header` value; and the `CreateExtOptions`
-//! and `CreateOptions` values and their handles.
+//! `git_commitarray_dispose` policy; the `Header` value; the `CreateExtOptions` and
+//! `CreateOptions` values and their handles; reading a commit in [`reading`]; writing
+//! commits in [`creating`]; and the creation callback in [`create_callback`].
 //!
 //! Each filled array's buffer is exactly `len` commit pointers long (libgit2 detaches
 //! a `git_vector` sized to them, `set_commits` allocates that many), so ASan flags a
@@ -1010,8 +1011,8 @@ mod getters {
 /// heap slot, an element of a run that moves when it grows), through reborrows, with
 /// strings and headers on the heap dropped right after their last read (ASan: a getter
 /// reading past them or after them). libgit2 reads the options for one call and keeps
-/// nothing: one test hands them to `git_commit_create_ext`, its strings and headers on
-/// the heap, freed right after the call (ASan, BSan: a retained pointer). Options that
+/// nothing: one test hands them to `create_ext`, its strings and headers on the heap,
+/// freed right after the call (ASan, BSan: a retained pointer). Options that
 /// outlive their borrows, aliased handles and a signer that does not outlive the options
 /// do not compile (`compile_fail/` and the type's doctests). The options are neither `Send`
 /// nor `Sync`, so there is no thread test. `CreateExtOptions::new` fills the options
@@ -1150,7 +1151,7 @@ mod create_ext_options {
         let headers = vec![Header::new(c"x-a", &value), Header::new(c"x-b", c"")];
         let mut options = CreateExtOptions::new();
         write(options.as_mut(), Some(&name), Some(&encoding), &headers);
-        let text = create(&repo, &options).unwrap();
+        let text = create(&repo, &mut options).unwrap();
         drop(headers);
         drop((value, encoding));
         assert!(
@@ -1160,7 +1161,7 @@ mod create_ext_options {
         assert!(has_reference(&repo, &name));
 
         // The default options write a plain commit and move no reference.
-        let text = create(&repo, &CreateExtOptions::new()).unwrap();
+        let text = create(&repo, &mut CreateExtOptions::new()).unwrap();
         assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
     }
 
@@ -1683,16 +1684,16 @@ mod signatures {
 }
 
 /// UB tests for signing through `CreateExtOptionsMut::set_signer`, which stores a
-/// `SignatureCallback` in the options for `git_commit_create_ext` (driven through the
-/// `create_ext` fixture until that routine is wrapped).
+/// `SignatureCallback` in the options for `create_ext` (driven through the `create_ext`
+/// fixture, which reads the commit back).
 ///
 /// libgit2 calls the trampoline once per commit, with a builder lent for the call and
 /// contents it frees when a header is added: the closure reads its copy of the contents
 /// after adding headers (ASan: use after free), and its own state is written between
 /// calls (BSan: nothing keeps a pointer into it). A refusal fails the commit with its
-/// code, a panic with `GIT_EUSER`, kept until resumed. The options borrow the callback
-/// for as long as they live (`compile_fail/`), replaced and cleared ones included, and
-/// each thread signs in its own repository at once (TSan).
+/// code, a panic with `GIT_EUSER`, resumed from `create_ext`. The options borrow the
+/// callback for as long as they live (`compile_fail/`), replaced and cleared ones
+/// included, and each thread signs in its own repository at once (TSan).
 mod signers {
     use std::cell::{Cell, RefCell};
     use std::ffi::CStr;
@@ -1759,7 +1760,7 @@ mod signers {
         let mut options = CreateExtOptions::new();
         options.as_mut().set_extra_headers(&headers);
         options.as_mut().set_signer(Some(&mut signer));
-        let text = create(&repo, &options).unwrap();
+        let text = create(&repo, &mut options).unwrap();
         assert_eq!(state.calls.get(), 1);
         assert!(
             text.contains(
@@ -1772,7 +1773,7 @@ mod signers {
 
         for (code, written) in [(1, true), (-30, false), (-1, false), (-7, false)] {
             state.rc.set(code);
-            let result = create(&repo, &options);
+            let result = create(&repo, &mut options);
             assert_eq!(result.as_ref().err(), (!written).then_some(&code), "{code}");
             assert_eq!(result.map(|t| t.contains("gpgsig")).unwrap_or(false), written);
         }
@@ -1794,20 +1795,21 @@ mod signers {
         options.as_mut().set_signer(Some(&mut s1));
         options.as_mut().set_signer(Some(&mut s2));
         assert!(options.as_ref().has_signer());
-        assert!(create(&repo, &options).unwrap().contains("\ngpgsig 2\n"));
-        assert!(create(&repo, &options).unwrap().contains("\ngpgsig 2\n"));
+        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig 2\n"));
+        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig 2\n"));
         options.as_mut().set_signer(None);
         assert!(!options.as_ref().has_signer());
-        assert!(!create(&repo, &options).unwrap().contains("gpgsig"));
+        assert!(!create(&repo, &mut options).unwrap().contains("gpgsig"));
         drop((s1, s2));
         assert_eq!((first.calls.get(), second.calls.get()), (0, 2));
     }
 
-    /// A panic fails its commit with `GIT_EUSER` and every later one until it is
-    /// resumed, once the options are gone; the callback then signs again.
+    /// A panic fails its commit with `GIT_EUSER` inside libgit2, and resumes from
+    /// `create_ext` once libgit2 has returned, nothing written; the callback, still
+    /// lent to the options, then signs again.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn signer_panics_are_kept_until_resumed() {
+    fn signer_panics_resume_from_create_ext() {
         let repo = TempRepo::new("signer-panics");
         let state = Signer::new();
         let mut f = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, content: &CStr| {
@@ -1820,17 +1822,15 @@ mod signers {
         let mut signer = SignatureCallback::new(&mut f);
         let mut options = CreateExtOptions::new();
         options.as_mut().set_signer(Some(&mut signer));
-        assert!(create(&repo, &options).is_ok());
-        assert_eq!(create(&repo, &options), Err(ErrorCode::User.raw()));
-        assert_eq!(create(&repo, &options), Err(ErrorCode::User.raw()));
-        let caught = catch_unwind(AssertUnwindSafe(|| signer.resume_panic()));
+        assert!(create(&repo, &mut options).is_ok());
+        let caught = catch_unwind(AssertUnwindSafe(|| create(&repo, &mut options)));
         assert_eq!(
             caught.unwrap_err().downcast_ref::<&str>(),
             Some(&"signing panicked")
         );
-        let mut options = CreateExtOptions::new();
-        options.as_mut().set_signer(Some(&mut signer));
-        assert!(create(&repo, &options).unwrap().contains("\ngpgsig ok\n"));
+        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig ok\n"));
+        // Nothing is left to resume.
+        signer.resume_panic();
         drop(signer);
         assert_eq!(state.calls.get(), 3);
     }
@@ -1849,12 +1849,792 @@ mod signers {
                     let mut options = CreateExtOptions::new();
                     options.as_mut().set_signer(Some(&mut signer));
                     for _ in 0..4 {
-                        assert!(create(&repo, &options).unwrap().contains("\ngpgsig t\n"));
+                        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig t\n"));
                     }
                     drop(signer);
                     assert_eq!(state.calls.get(), 4);
                 });
             }
         });
+    }
+}
+
+/// UB tests for reading a commit: `CommitRef::author`, `committer` and `body`, and
+/// `author_with_mailmap` / `committer_with_mailmap`.
+///
+/// The signatures and the body are borrowed from the commit: every string is read whole
+/// through every holder of a shared commit (lookups, clones, an object view), and after
+/// the other holders are gone (ASan: use after free). libgit2 computes the body on the
+/// first call and stores it in the commit through the shared handle, as a `Cell` is
+/// written: a body read earlier stays valid while later calls return the same string
+/// (ASan; BSan: the write goes through C's pointer, never through a Rust reference). The
+/// mailmap copies are owned and released once (LSan, ASan). Commits are neither `Send`
+/// nor `Sync`: each thread reads commits of its own repository (TSan). A signature or a
+/// body outliving its commit is a doctest. Every test calls libgit2, so Miri skips them.
+mod reading {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{SignatureRef, SignatureView, Time};
+    use libgit2::libgit2::object::commit::{Commit, CommitRef, create};
+    use libgit2::libgit2::object::mailmap::Mailmap;
+    use libgit2::libgit2::object::tree::Tree;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::repository;
+
+    pub(super) const EMPTY_TREE: &CStr = c"4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    /// A signature's strings and time, copied out whole.
+    fn signature(s: SignatureRef<'_>) -> (Vec<u8>, Vec<u8>, i64, i32) {
+        let when = s.when();
+        (
+            s.name().unwrap().to_bytes().to_vec(),
+            s.email().unwrap().to_bytes().to_vec(),
+            when.seconds(),
+            when.offset_minutes(),
+        )
+    }
+
+    fn everything(c: CommitRef<'_, '_>) -> (Vec<u8>, Vec<u8>, i64, i32, Vec<u8>) {
+        let (name, email, seconds, offset) = signature(c.author());
+        let committer = signature(c.committer());
+        assert_eq!(committer.0, name);
+        let body = c.body().map(|b| b.to_bytes().to_vec()).unwrap_or_default();
+        (name, email, seconds, offset, body)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_and_bodies_are_read_through_every_holder() {
+        let temp = TempRepo::new("commit-read-holders");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        for len in [0usize, 1, 63, 64, 4097] {
+            let name = CString::new("n".repeat(len + 1))
+                .unwrap()
+                .into_boxed_c_str();
+            let email = CString::new(format!("{}@x", "e".repeat(len))).unwrap();
+            let sig = SignatureView::new(&name, &email, Time::new(len as i64, -(len as i32)));
+            let body = "b".repeat(len);
+            let message = CString::new(format!("summary\n\n{body}\n")).unwrap();
+            let id = create(
+                repo,
+                None,
+                sig.as_ref(),
+                sig.as_ref(),
+                None,
+                &message,
+                tree.as_ref(),
+                &[],
+            )
+            .unwrap();
+            drop((name, email, message));
+            let first = Commit::lookup(repo, id.as_ref()).unwrap();
+            let second = Commit::lookup(repo, id.as_ref()).unwrap();
+            let expected = everything(first.as_ref());
+            assert_eq!(expected.4, body.as_bytes());
+            let clone = first.clone();
+            let early = clone.as_ref().body();
+            let object = Commit::into_object(first);
+            let view = CommitRef::from_object(object.as_ref()).unwrap();
+            assert_eq!(everything(view), expected);
+            assert_eq!(everything(second.as_ref()), expected);
+            drop(object);
+            assert_eq!(everything(clone.as_ref()), expected);
+            drop(second);
+            assert_eq!(early.map(|b| b.to_bytes().len()).unwrap_or(0), len);
+            let author = clone.as_ref().author();
+            let late = clone.as_ref().body();
+            assert_eq!(signature(author).0.len(), len + 1);
+            assert_eq!(late.map(|b| b.to_bytes().len()).unwrap_or(0), len);
+        }
+    }
+
+    /// The body is stored in the commit on first use: earlier results stay valid while
+    /// later calls, through any holder, return the same string.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn bodies_are_cached_in_the_shared_commit() {
+        let temp = TempRepo::new("commit-body-cache");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let id = create(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"s\n\n body \n",
+            tree.as_ref(),
+            &[],
+        )
+        .unwrap();
+        let commit = Commit::lookup(repo, id.as_ref()).unwrap();
+        let other = Commit::lookup(repo, id.as_ref()).unwrap();
+        let bodies: Vec<&CStr> = (0..8)
+            .map(|i| {
+                if i % 2 == 0 {
+                    commit.as_ref()
+                } else {
+                    other.as_ref()
+                }
+                .body()
+                .unwrap()
+            })
+            .collect();
+        for b in &bodies {
+            assert_eq!(b.to_bytes(), b"body");
+        }
+        let none = create(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"only\n",
+            tree.as_ref(),
+            &[],
+        )
+        .unwrap();
+        let none = Commit::lookup(repo, none.as_ref()).unwrap();
+        for _ in 0..4 {
+            assert!(none.as_ref().body().is_none());
+        }
+        assert_eq!(bodies[7].to_bytes(), b"body");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mailmap_copies_are_owned() {
+        let temp = TempRepo::new("commit-mailmap");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"Old", c"old@x", Time::new(7, 90));
+        let id = create(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"m\n",
+            tree.as_ref(),
+            &[],
+        )
+        .unwrap();
+        let commit = Commit::lookup(repo, id.as_ref()).unwrap();
+        let text = b"New Name <new@x> <old@x>\n".to_vec().into_boxed_slice();
+        let mailmap = Mailmap::from_buffer(&text).unwrap();
+        drop(text);
+        let mut copies = Vec::new();
+        for i in 0..6 {
+            let map = (i % 3 != 0).then(|| mailmap.as_ref());
+            copies.push(if i % 2 == 0 {
+                commit.as_ref().author_with_mailmap(map).unwrap()
+            } else {
+                commit.as_ref().committer_with_mailmap(map).unwrap()
+            });
+        }
+        drop(mailmap);
+        drop(commit);
+        for (i, copy) in copies.iter().enumerate() {
+            let expected: &[u8] = if i % 3 != 0 { b"New Name" } else { b"Old" };
+            assert_eq!(copy.as_ref().name().unwrap().to_bytes(), expected);
+            assert_eq!(copy.as_ref().when().offset_minutes(), 90);
+        }
+        let clones: Vec<_> = copies.iter().map(Clone::clone).collect();
+        drop(copies);
+        assert_eq!(clones.len(), 6);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_read_commits_of_their_own_repositories() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let temp = TempRepo::new(&format!("commit-read-thread-{t}"));
+                    let repo = repository(&temp);
+                    let tree = Tree::lookup(
+                        repo,
+                        Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                            .unwrap()
+                            .as_ref(),
+                    )
+                    .unwrap();
+                    let sig = SignatureView::new(c"T", c"t@x", Time::new(t as i64, 0));
+                    for i in 0..4 {
+                        let message = CString::new(format!("s\n\nbody {t} {i}\n")).unwrap();
+                        let id = create(
+                            repo,
+                            None,
+                            sig.as_ref(),
+                            sig.as_ref(),
+                            None,
+                            &message,
+                            tree.as_ref(),
+                            &[],
+                        )
+                        .unwrap();
+                        let commit = Commit::lookup(repo, id.as_ref()).unwrap();
+                        assert_eq!(commit.as_ref().author().when().seconds(), t as i64);
+                        let body = format!("body {t} {i}");
+                        assert_eq!(commit.as_ref().body().unwrap().to_bytes(), body.as_bytes());
+                        assert!(commit.as_ref().author_with_mailmap(None).is_ok());
+                    }
+                });
+            }
+        });
+    }
+}
+
+/// UB tests for writing commits: `create`, `create_from_array`, `create_buffer`,
+/// `create_ext` and `CommitRef::amend`.
+///
+/// libgit2 reads every input for the call only: the message, the encoding and the
+/// reference name are exact-length heap strings, and the signatures are views over
+/// heap strings, all freed right after the call (ASan: a read past one; BSan: a pointer
+/// kept); the parents' pointers are passed as a run of exactly their number (ASan), or
+/// as that many variadic arguments, up to the most `create_from_array` takes. Every
+/// buffer `create_buffer` fills is released once (LSan, ASan). A signature whose offset
+/// is `i32::MIN` minutes is refused before libgit2 would negate it (UBSan: a signed
+/// overflow), and a tree or parent of another repository before libgit2 would assert or
+/// drop it. Commits are neither `Send` nor `Sync`: each thread writes into its own
+/// repository at once, without moving a reference (TSan; reference writes reach glibc's
+/// timezone state, which TSan cannot see the lock of). Every test calls libgit2, so Miri
+/// skips them all.
+mod creating {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{SignatureView, Time};
+    use libgit2::libgit2::object::commit::{
+        Commit, CommitArc, CommitRef, CreateExtOptions, Header, MAX_ARRAY_PARENTS, create,
+        create_buffer, create_ext, create_from_array,
+    };
+    use libgit2::libgit2::object::tree::Tree;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    use super::reading::EMPTY_TREE;
+    use crate::fixture::object_and_tree_entry::repository;
+    use crate::fixture::{TempRepo, isolated};
+
+    fn heap(s: &str) -> Box<CStr> {
+        CString::new(s).unwrap().into_boxed_c_str()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn inputs_are_read_for_the_call_only() {
+        let temp = TempRepo::new("commit-create-inputs");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let mut parents = Vec::new();
+        for len in [0usize, 1, 15, 16, 1000] {
+            let (name, email) = (heap(&"n".repeat(len + 1)), heap(&"e".repeat(len + 1)));
+            let sig = SignatureView::new(&name, &email, Time::new(1 << 40, 14 * 60 + 59));
+            let message = heap(&"m".repeat(len));
+            let encoding = heap(&"E".repeat(len + 1));
+            let refs: Vec<CommitRef<'_, '_>> =
+                parents.iter().map(|c: &CommitArc<'_>| c.as_ref()).collect();
+            let buf = create_buffer(
+                repo,
+                sig.as_ref(),
+                sig.as_ref(),
+                Some(&encoding),
+                &message,
+                tree.as_ref(),
+                &refs,
+            )
+            .unwrap();
+            let id = create(
+                repo,
+                None,
+                sig.as_ref(),
+                sig.as_ref(),
+                Some(&encoding),
+                &message,
+                tree.as_ref(),
+                &refs,
+            )
+            .unwrap();
+            drop(refs);
+            drop((name, email, message, encoding));
+            assert!(buf.as_ref().len() > len);
+            parents.push(Commit::lookup(repo, id.as_ref()).unwrap());
+            drop(buf);
+        }
+        // The variadic form, with every count it takes.
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let p = parents[0].as_ref();
+        let one = create_from_array(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"1\n",
+            tree.as_ref(),
+            [p],
+        )
+        .unwrap();
+        let all = create_from_array(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"16\n",
+            tree.as_ref(),
+            [p; MAX_ARRAY_PARENTS],
+        )
+        .unwrap();
+        let none = create_from_array(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"0\n",
+            tree.as_ref(),
+            [],
+        )
+        .unwrap();
+        for id in [one, all, none] {
+            assert!(Commit::lookup(repo, id.as_ref()).is_ok());
+        }
+    }
+
+    /// The options' strings and headers live on the heap, freed right after the call;
+    /// amending reads the commit's own parts when none is given.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_and_amends_read_for_the_call_only() {
+        let temp = TempRepo::new("commit-create-ext-amend");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(5, -5));
+        let (field, value, encoding) = (heap("x-field"), heap("v\nw"), heap("UTF-16"));
+        let headers = vec![Header::new(&field, &value); 3];
+        let mut options = CreateExtOptions::new();
+        options.as_mut().set_extra_headers(&headers);
+        options.as_mut().set_message_encoding(Some(&encoding));
+        let message = heap("ext\n\nbody\n");
+        let id = create_ext(
+            repo,
+            sig.as_ref(),
+            sig.as_ref(),
+            &message,
+            tree.as_ref(),
+            &[],
+            Some(options.as_mut()),
+        )
+        .unwrap();
+        drop(headers);
+        drop((field, value, encoding, message));
+        let commit = Commit::lookup(repo, id.as_ref()).unwrap();
+        assert_eq!(commit.as_ref().body().unwrap().to_bytes(), b"body");
+        let other = SignatureView::new(&heap("B"), &heap("b@x"), Time::new(6, 6))
+            .as_ref()
+            .to_signature()
+            .unwrap();
+        let amended = commit
+            .as_ref()
+            .amend(
+                None,
+                None,
+                Some(other.as_ref()),
+                None,
+                Some(&heap("amended\n")),
+                None,
+            )
+            .unwrap();
+        drop(other);
+        let amended = Commit::lookup(repo, amended.as_ref()).unwrap();
+        assert_eq!(amended.as_ref().author(), commit.as_ref().author());
+        assert_eq!(amended.as_ref().committer().name(), Some(c"B"));
+        // The extra headers are not carried over (libgit2 amends with the encoding
+        // only); everything else is the commit's own.
+        let copy = commit
+            .as_ref()
+            .amend(None, None, None, None, None, Some(tree.as_ref()))
+            .unwrap();
+        assert_ne!(copy, id);
+        let copy = Commit::lookup(repo, copy.as_ref()).unwrap();
+        assert_eq!(copy.as_ref().body(), commit.as_ref().body());
+        assert_eq!(copy.as_ref().committer(), commit.as_ref().committer());
+        let plain = create(
+            repo,
+            None,
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"p\n",
+            tree.as_ref(),
+            &[],
+        )
+        .unwrap();
+        let plain_commit = Commit::lookup(repo, plain.as_ref()).unwrap();
+        let same = plain_commit
+            .as_ref()
+            .amend(None, None, None, None, None, Some(tree.as_ref()));
+        assert_eq!(same.unwrap(), plain);
+    }
+
+    /// Inputs libgit2 cannot take are refused before it runs: an offset it would negate
+    /// out of range (UBSan), a tree or parent of another repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unwritable_inputs_are_refused_before_c() {
+        let (a, b) = (
+            TempRepo::new("commit-refuse-a"),
+            TempRepo::new("commit-refuse-b"),
+        );
+        let (ra, rb) = (repository(&a), repository(&b));
+        let empty = Oid::from_string(EMPTY_TREE, OidType::Sha1).unwrap();
+        let (ta, tb) = (
+            Tree::lookup(ra, empty.as_ref()).unwrap(),
+            Tree::lookup(rb, empty.as_ref()).unwrap(),
+        );
+        let good = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let min = SignatureView::new(c"A", c"a@x", Time::new(0, i32::MIN));
+        let (g, m) = (good.as_ref(), min.as_ref());
+        let pb = create(rb, None, g, g, None, c"b\n", tb.as_ref(), &[]).unwrap();
+        let pb = Commit::lookup(rb, pb.as_ref()).unwrap();
+        for (author, committer) in [(m, g), (g, m), (m, m)] {
+            let e =
+                create(ra, None, author, committer, None, c"x\n", ta.as_ref(), &[]).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            let e =
+                create_buffer(ra, author, committer, None, c"x\n", ta.as_ref(), &[]).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            let e = create_from_array(ra, None, author, committer, None, c"x\n", ta.as_ref(), [])
+                .unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            let e = create_ext(ra, author, committer, c"x\n", ta.as_ref(), &[], None).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            let e = pb
+                .as_ref()
+                .amend(None, Some(author), Some(committer), None, None, None)
+                .unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        }
+        let e = create(ra, None, g, g, None, c"x\n", tb.as_ref(), &[]).unwrap_err();
+        assert_eq!(
+            e.message(),
+            c"invalid argument: 'git_tree_owner(tree) == repo'"
+        );
+        let e = create(ra, None, g, g, None, c"x\n", ta.as_ref(), &[pb.as_ref()]).unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        let e = create_from_array(ra, None, g, g, None, c"x\n", ta.as_ref(), [pb.as_ref()])
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_write_into_their_own_repositories() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let temp = TempRepo::new(&format!("commit-create-thread-{t}"));
+                    let repo = repository(&temp);
+                    let tree = Tree::lookup(
+                        repo,
+                        Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                            .unwrap()
+                            .as_ref(),
+                    )
+                    .unwrap();
+                    let sig = SignatureView::new(c"T", c"t@x", Time::new(t as i64, 0));
+                    let mut tip = None;
+                    for i in 0..4 {
+                        let message = CString::new(format!("{t} {i}\n")).unwrap();
+                        let parents: Vec<_> =
+                            tip.iter().map(|c: &CommitArc<'_>| c.as_ref()).collect();
+                        let id = create(
+                            repo,
+                            None,
+                            sig.as_ref(),
+                            sig.as_ref(),
+                            None,
+                            &message,
+                            tree.as_ref(),
+                            &parents,
+                        )
+                        .unwrap();
+                        let buf = create_buffer(
+                            repo,
+                            sig.as_ref(),
+                            sig.as_ref(),
+                            None,
+                            &message,
+                            tree.as_ref(),
+                            &parents,
+                        )
+                        .unwrap();
+                        assert!(!buf.as_ref().is_empty());
+                        tip = Some(Commit::lookup(repo, id.as_ref()).unwrap());
+                    }
+                });
+            }
+        });
+    }
+
+    /// Moving references, the one path of these that writes them, alone in a child.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn references_are_moved_from_heap_names() {
+        isolated(
+            concat!(module_path!(), "::references_are_moved_from_heap_names"),
+            references_are_moved_from_heap_names_body,
+        );
+    }
+
+    fn references_are_moved_from_heap_names_body() {
+        let temp = TempRepo::new("commit-create-refs");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let name = heap("refs/heads/topic");
+        let root = create(
+            repo,
+            Some(&name),
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"r\n",
+            tree.as_ref(),
+            &[],
+        )
+        .unwrap();
+        drop(name);
+        let root = Commit::lookup(repo, root.as_ref()).unwrap();
+        let name = heap("refs/heads/topic");
+        let child = create_from_array(
+            repo,
+            Some(&name),
+            sig.as_ref(),
+            sig.as_ref(),
+            None,
+            c"c\n",
+            tree.as_ref(),
+            [root.as_ref()],
+        )
+        .unwrap();
+        let child = Commit::lookup(repo, child.as_ref()).unwrap();
+        let amended = child
+            .as_ref()
+            .amend(Some(&name), None, None, None, Some(c"c2\n"), None)
+            .unwrap();
+        drop(name);
+        let reference = std::fs::read_to_string(temp.path.join("refs/heads/topic")).unwrap();
+        assert_eq!(reference.trim(), amended.as_ref().to_hex_string().unwrap());
+    }
+}
+
+/// UB tests for the commit creation callback, `CreateCallback`, through its public
+/// [`call`](CreateCallback::call), which runs the `extern "C"` trampoline libgit2 calls.
+///
+/// The trampoline lends the closure handles over what it is given, for the call only:
+/// the closure reads every string and parent whole (ASan), and its own state is written
+/// between calls (BSan: nothing keeps a pointer into it); the strings are heap ones,
+/// freed after the call. An id it returns is copied out whole (Miri cannot run it: the
+/// trampoline reads the tree's repository through libgit2). A panic resumes from `call`
+/// without crossing the trampoline, and leaves the callback usable. Handles outliving
+/// the call and a callback crossing threads are doctests; the callback under libgit2's
+/// own caller, `git_rebase_commit`, is unit-tested beside it.
+mod create_callback {
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use libgit2::libgit2::core::types::{SignatureRef, SignatureView, StreamError, Time};
+    use libgit2::libgit2::object::commit::{Commit, CommitRef, CreateCallback, create};
+    use libgit2::libgit2::object::tree::{Tree, TreeRef};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    use super::reading::EMPTY_TREE;
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::repository;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn arguments_are_lent_for_the_call() {
+        let temp = TempRepo::new("commit-create-cb");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let mut commits = Vec::new();
+        for i in 0..5 {
+            let message = CString::new(format!("{i}\n")).unwrap();
+            let id = create(
+                repo,
+                None,
+                sig.as_ref(),
+                sig.as_ref(),
+                None,
+                &message,
+                tree.as_ref(),
+                &[],
+            )
+            .unwrap();
+            commits.push(Commit::lookup(repo, id.as_ref()).unwrap());
+        }
+        let seen = RefCell::new(Vec::new());
+        let mut f = |author: SignatureRef<'_>,
+                     committer: SignatureRef<'_>,
+                     encoding: Option<&CStr>,
+                     message: &CStr,
+                     tree: TreeRef<'_, '_>,
+                     parents: &[CommitRef<'_, '_>]| {
+            let mut s = seen.borrow_mut();
+            s.push((
+                author.name().unwrap().to_bytes().to_vec(),
+                committer.email().unwrap().to_bytes().to_vec(),
+                encoding.map(|e| e.to_bytes().to_vec()),
+                message.to_bytes().to_vec(),
+                tree.id().to_hex_string().unwrap(),
+                parents.iter().filter(|p| p.body().is_none()).count(),
+            ));
+            match s.len() % 3 {
+                0 => Ok(None),
+                1 => Ok(Some(parents.first().map_or_else(
+                    || Oid::zero(OidType::Sha1),
+                    |p| p.id().to_oid(),
+                ))),
+                _ => Err(StreamError::new(ErrorClass::Callback, c"no")),
+            }
+        };
+        let mut callback = CreateCallback::new(&mut f);
+        for n in 0..=commits.len() {
+            let (name, email) = (
+                CString::new("N".repeat(n + 1)).unwrap().into_boxed_c_str(),
+                CString::new("e".repeat(n + 1)).unwrap().into_boxed_c_str(),
+            );
+            let author = SignatureView::new(&name, &email, Time::new(n as i64, 0));
+            let message = CString::new("m".repeat(n * 100))
+                .unwrap()
+                .into_boxed_c_str();
+            let encoding = (n % 2 == 0).then(|| CString::new("E".repeat(n)).unwrap());
+            let parents: Vec<_> = commits[..n].iter().map(|c| c.as_ref()).collect();
+            let result = callback.call(
+                author.as_ref(),
+                author.as_ref(),
+                encoding.as_deref(),
+                &message,
+                tree.as_ref(),
+                &parents,
+            );
+            drop((name, email, message, encoding));
+            match (n + 1) % 3 {
+                0 => assert!(result.unwrap().is_none()),
+                1 => {
+                    let id = result.unwrap().unwrap();
+                    assert_eq!(u32::from(id.as_ref().raw_kind()), OidType::Sha1.raw());
+                }
+                _ => assert_eq!(result.unwrap_err().message(), c"no"),
+            }
+        }
+        drop(callback);
+        let seen = seen.into_inner();
+        assert_eq!(seen.len(), commits.len() + 1);
+        for (n, s) in seen.iter().enumerate() {
+            assert_eq!(s.0.len(), n + 1);
+            assert_eq!(s.3.len(), n * 100);
+            assert_eq!(s.5, n);
+            assert_eq!(s.4, EMPTY_TREE.to_str().unwrap());
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn panics_resume_and_leave_the_callback_usable() {
+        let temp = TempRepo::new("commit-create-cb-panic");
+        let repo = repository(&temp);
+        let tree = Tree::lookup(
+            repo,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        );
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@x", Time::new(0, 0));
+        let mut calls = 0;
+        let mut f = |_: SignatureRef<'_>,
+                     _: SignatureRef<'_>,
+                     _: Option<&CStr>,
+                     _: &CStr,
+                     _: TreeRef<'_, '_>,
+                     _: &[CommitRef<'_, '_>]| {
+            calls += 1;
+            if calls == 2 {
+                panic!("callback {calls}");
+            }
+            Ok::<_, StreamError>(None)
+        };
+        let mut callback = CreateCallback::new(&mut f);
+        let call = |cb: &mut CreateCallback<'_>| {
+            cb.call(sig.as_ref(), sig.as_ref(), None, c"m", tree.as_ref(), &[])
+        };
+        assert!(call(&mut callback).unwrap().is_none());
+        let caught = catch_unwind(AssertUnwindSafe(|| call(&mut callback)));
+        assert_eq!(
+            caught
+                .unwrap_err()
+                .downcast_ref::<String>()
+                .map(String::as_str),
+            Some("callback 2")
+        );
+        assert!(call(&mut callback).unwrap().is_none());
+        assert!(format!("{callback:?}").starts_with("CreateCallback { panicked: false"));
+        drop(callback);
+        assert_eq!(calls, 3);
     }
 }

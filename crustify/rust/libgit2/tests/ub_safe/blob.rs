@@ -1,6 +1,6 @@
 //! UB tests for `git2/blob.h`: `data_is_binary` (`git_blob_data_is_binary`), the
-//! filter flags in [`filter_flags`], the blob owner in [`owner`] and the filter options
-//! in [`filter_options`].
+//! filter flags in [`filter_flags`], the blob owner in [`owner`], the filter options
+//! in [`filter_options`], and reading and filtering a blob in [`reading`].
 //!
 //! libgit2 reads the slice it is given, up to four bytes at once when it looks for a
 //! byte-order mark, and nothing else. Each input sits in an exact-length heap buffer,
@@ -266,7 +266,12 @@ mod owner {
     use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
-    use crate::fixture::blob::{content, set_blob_cache_limit};
+    use crate::fixture::blob::set_blob_cache_limit;
+
+    /// A copy of the content of the blob an owner holds.
+    fn content(blob: &BlobArc<'_>) -> Vec<u8> {
+        blob.as_ref().content().to_vec()
+    }
     use crate::fixture::object_and_tree_entry::{
         object_view, open_testrepo, repository, set_cache_max_size, write_raw,
     };
@@ -573,7 +578,17 @@ mod filter_options {
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::Repository;
 
-    use crate::fixture::blob::filter;
+    /// [`BlobRef::filter`] of `blob` as `path`, with `opts` (or none): the filtered
+    /// bytes, or the code it failed with.
+    fn filter(
+        blob: &libgit2::libgit2::object::blob::BlobArc<'_>,
+        path: &std::ffi::CStr,
+        opts: Option<&mut FilterOptions>,
+    ) -> Result<Vec<u8>, std::ffi::c_int> {
+        let out = blob.as_ref().filter(path, opts.map(|o| o.as_ref()));
+        out.map(|b| b.as_ref().as_bytes().to_vec())
+            .map_err(|e| e.raw_code())
+    }
     use crate::fixture::{init, isolated};
 
     /// `crlf.git`: a CRLF text blob, a binary one, one holding `$Id$`, and the commit
@@ -1103,5 +1118,224 @@ mod writing {
                 });
             },
         );
+    }
+}
+
+/// Reading a blob: `BlobRef::content`, `size`, `id`, `owner` and `is_binary`, and
+/// `BlobRef::filter`.
+///
+/// The content is borrowed in place from the blob, which holds the object database's
+/// copy of it: every byte is read back, for blobs of many sizes (empty, around the 8000
+/// bytes `is_binary` looks at, and past libgit2's stream buffer), through every holder
+/// (lookups, clones, `to_blob`, an object view), and after the other holders of a shared
+/// blob are gone (ASan: a slice longer than its allocation, a use after free). The id
+/// and the repository are borrowed the same way. `filter` copies the content into a
+/// buffer it owns, which is read after the blob and its repository are gone and
+/// released once (ASan, LSan); filter lists race on their first load, so those tests run
+/// in isolated children. Each thread reads blobs of its own repository at once (TSan).
+/// Content outliving its blob and a repository outliving its borrow are doctests. Every
+/// test calls libgit2, so Miri skips them all.
+mod reading {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::object::blob::{
+        Blob, BlobRef, FilterFlag, FilterOptions, create_from_buffer, data_is_binary,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use crate::fixture::blob::set_blob_cache_limit;
+    use crate::fixture::object_and_tree_entry::repository;
+    use crate::fixture::{TempRepo, init, isolated};
+
+    /// Bytes `0, 1, 2, ...` wrapping at 251, `len` of them, with a NUL at `nul` if any.
+    fn bytes(len: usize, nul: Option<usize>) -> Vec<u8> {
+        let mut v: Vec<u8> = (0..len).map(|i| (i % 251) as u8 | 0x20).collect();
+        if let Some(i) = nul.filter(|&i| i < len) {
+            v[i] = 0;
+        }
+        v
+    }
+
+    /// Everything a blob lends, read whole: `(id hex, size, content, binary?)`.
+    fn read(blob: BlobRef<'_, '_>) -> (String, u64, Vec<u8>, bool) {
+        let content = blob.content();
+        assert_eq!(content.len() as u64, blob.size());
+        let sum: u64 = content.iter().map(|&b| u64::from(b)).sum();
+        assert!(sum <= 255 * content.len() as u64);
+        (
+            blob.id().to_hex_string().unwrap(),
+            blob.size(),
+            content.to_vec(),
+            blob.is_binary(),
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn contents_are_read_whole_through_every_holder() {
+        let temp = TempRepo::new("blob-read-holders");
+        let repo = repository(&temp);
+        for (len, nul) in [
+            (0, None),
+            (1, None),
+            (7, Some(3)),
+            (4096, None),
+            (8000, Some(7999)),
+            (8001, Some(8000)),
+            (70_000, None),
+            (3 << 20, Some(1)),
+        ] {
+            let data = bytes(len, nul);
+            let id = create_from_buffer(repo, &data).unwrap();
+            let first = Blob::lookup(repo, id.as_ref()).unwrap();
+            let second = Blob::lookup(repo, id.as_ref()).unwrap();
+            let (clone, copy) = (first.clone(), second.as_ref().to_blob());
+            let expected = (
+                id.as_ref().to_hex_string().unwrap(),
+                len as u64,
+                data.clone(),
+                data_is_binary(&data[..len.min(8000)]),
+            );
+            assert_eq!(read(first.as_ref()), expected, "{len}");
+            assert_eq!(first.as_ref().owner().path(), repo.path());
+            let object = Blob::into_object(first);
+            let view = BlobRef::from_object(object.as_ref()).unwrap();
+            assert_eq!(read(view), expected);
+            drop(object);
+            drop(second);
+            // The copies outlive the holders they came from.
+            assert_eq!(read(clone.as_ref()), expected);
+            assert_eq!(read(copy.as_ref()), expected);
+            let content = copy.as_ref().content();
+            drop(clone);
+            assert_eq!(content, &data[..]);
+        }
+    }
+
+    /// With blobs cached, lookups share one blob: its content stays readable through the
+    /// last holder, whichever goes first, and through the cache's own reference.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn shared_cached_blobs_lend_their_content() {
+        isolated(
+            concat!(module_path!(), "::shared_cached_blobs_lend_their_content"),
+            shared_cached_blobs_lend_their_content_body,
+        );
+    }
+
+    fn shared_cached_blobs_lend_their_content_body() {
+        init();
+        set_blob_cache_limit(1 << 20);
+        let temp = TempRepo::new("blob-read-cached");
+        let repo = repository(&temp);
+        let data = bytes(5000, None);
+        let id = create_from_buffer(repo, &data).unwrap();
+        for order in 0..3 {
+            let holders: Vec<_> = (0..3)
+                .map(|_| Blob::lookup(repo, id.as_ref()).unwrap())
+                .collect();
+            let mut holders: Vec<_> = holders.into_iter().map(Some).collect();
+            for k in 0..3 {
+                let i = (k + order) % 3;
+                let blob = holders[i].take().unwrap();
+                assert_eq!(blob.as_ref().content(), &data[..]);
+                drop(blob);
+                for other in holders.iter().flatten() {
+                    assert_eq!(other.as_ref().content(), &data[..]);
+                    assert_eq!(other.as_ref().id().id()[..20], id.as_ref().id()[..20]);
+                }
+            }
+            let again = Blob::lookup(repo, id.as_ref()).unwrap();
+            assert_eq!(again.as_ref().content(), &data[..]);
+        }
+    }
+
+    /// `filter`'s buffer is a copy of its own: read after the blob and the repository
+    /// are gone, and released once, whichever options and paths produced it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filtered_buffers_outlive_their_blob() {
+        isolated(
+            concat!(module_path!(), "::filtered_buffers_outlive_their_blob"),
+            filtered_buffers_outlive_their_blob_body,
+        );
+    }
+
+    fn filtered_buffers_outlive_their_blob_body() {
+        init();
+        let path = CString::new(format!(
+            "{}/../../../tests/resources/crlf.git",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let oid = |hex: &CStr| Oid::from_string(hex, OidType::Sha1).unwrap();
+        let repo = Repository::open(&path).unwrap();
+        let ident_commit = oid(c"b8986fec0f7bde90f78ac72706e782d82f24f2f0");
+        let mut opts = FilterOptions::new();
+        opts.as_mut()
+            .set_flags(FilterFlag::AttributesFromCommit | FilterFlag::NoSystemAttributes);
+        opts.as_mut().set_attr_commit_id(ident_commit.as_ref());
+        let mut kept = Vec::new();
+        for (blob, as_path) in [
+            (c"a9a2e8913c1dbe2812fac5e6b4e0a4bd5d0d5966", c"file.crlf"),
+            (c"85340755cfe5e28c2835781978bb1cece91b3d0f", c"file.txt"),
+            (
+                c"055c8729cdcc372500a08db659c045e16c4409fb",
+                c"ident.identlf",
+            ),
+            (
+                c"055c8729cdcc372500a08db659c045e16c4409fb",
+                c"raw/ident.bin",
+            ),
+        ] {
+            let blob = Blob::lookup(repo.as_ref(), oid(blob).as_ref()).unwrap();
+            for opts in [None, Some(opts.as_ref())] {
+                let as_path = CString::new(as_path.to_bytes()).unwrap().into_boxed_c_str();
+                let out = blob.as_ref().filter(&as_path, opts).unwrap();
+                drop(as_path);
+                kept.push((blob.as_ref().content().to_vec(), out));
+            }
+        }
+        // The id-expanding filter changed the third blob, under the options only.
+        assert_eq!(
+            kept[5].1.as_ref().as_bytes(),
+            b"$Id: 055c8729cdcc372500a08db659c045e16c4409fb $\n"
+        );
+        let copies: Vec<_> = kept
+            .iter()
+            .map(|(_, b)| b.as_ref().as_bytes().to_vec())
+            .collect();
+        drop(repo);
+        for ((_, buf), copy) in kept.iter().zip(&copies) {
+            assert_eq!(buf.as_ref().as_bytes(), &copy[..]);
+        }
+        // Released in reverse.
+        while kept.pop().is_some() {}
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn threads_read_blobs_of_their_own_repositories() {
+        init();
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let temp = TempRepo::new(&format!("blob-read-thread-{t}"));
+                    let repo = repository(&temp);
+                    for len in [0, 10, 9000] {
+                        let data = bytes(len + t, Some(len / 2));
+                        let id = create_from_buffer(repo, &data).unwrap();
+                        let blob = Blob::lookup(repo, id.as_ref()).unwrap();
+                        assert_eq!(blob.as_ref().content(), &data[..]);
+                        assert_eq!(
+                            blob.as_ref().is_binary(),
+                            data_is_binary(&data[..data.len().min(8000)])
+                        );
+                    }
+                });
+            }
+        });
     }
 }

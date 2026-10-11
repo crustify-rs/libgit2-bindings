@@ -22,7 +22,7 @@
 //!   libgit2 path produces one) reads as empty and clears to `{NULL, 0}` in Rust; C's
 //!   dispose would dereference NULL. The module's `unit_tests` cover it.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, c_int};
 use std::ptr;
 
 use libgit2::ffi;
@@ -2996,5 +2996,809 @@ mod signatures {
             }
         }
         assert!(found >= 6, "{found}");
+    }
+}
+
+/// The calling thread's last error class and message.
+fn c_last() -> (c_int, String) {
+    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+    // NUL-terminated string, live until the next libgit2 call on this thread, after the
+    // copy.
+    unsafe {
+        let e = ffi::git_error_last();
+        (
+            (*e).klass,
+            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+        )
+    }
+}
+
+const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
+
+/// Runs `body` alone in a child process.
+fn isolated(test: &str, body: fn()) {
+    let name = test.strip_prefix("equiv::").unwrap_or(test);
+    if std::env::var(CHILD).as_deref() == Ok(name) {
+        body();
+        return;
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([name, "--exact", "--test-threads=1", "--nocapture"])
+        .env(CHILD, name)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && stdout.contains("1 passed"),
+        "child `{name}` failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Reading a commit: [`CommitRef::author`], [`CommitRef::committer`] and
+/// [`CommitRef::body`], and the `_with_mailmap` copies, against `git_commit_author`,
+/// `git_commit_committer`, `git_commit_body`, `git_commit_author_with_mailmap` and
+/// `git_commit_committer_with_mailmap`.
+///
+/// Each side opens its own `testrepo.git` and looks every commit of a list up; both
+/// read each signature (name, email, seconds, offset, sign), the body (twice: libgit2
+/// computes it on the first call and keeps it), and the copies a mailmap of their own
+/// resolves (or the failure), comparing after every commit.
+///
+/// [`CommitRef::author`]: libgit2::libgit2::object::commit::CommitRef::author
+/// [`CommitRef::committer`]: libgit2::libgit2::object::commit::CommitRef::committer
+/// [`CommitRef::body`]: libgit2::libgit2::object::commit::CommitRef::body
+mod reading {
+    use std::ffi::{CStr, CString, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::SignatureRef;
+    use libgit2::libgit2::object::commit::Commit;
+    use libgit2::libgit2::object::mailmap::Mailmap;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    use super::{TESTREPO, open};
+
+    /// Commits of `testrepo.git`: merges, roots, one-line and multi-paragraph messages.
+    const COMMITS: [&str; 8] = [
+        "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        "be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+        "c47800c7266a2be04c571c04d5a6614691ea99bd",
+        "9fd738e8f7967c078dceed8190330fc8648ee56a",
+        "4a202b346bb0fb0db7eff3cffeb3c70babbd2045",
+        "5b5b025afb0b4c913b4c338a42934a3863bf3644",
+        "8496071c1b46c854b31185ea97743be6a8774479",
+        "e90810b8df3e80c413d903f631643c716887138d",
+    ];
+
+    const MAILMAP: &[u8] = b"Mapped Name <mapped@example.com> <schacon@gmail.com>\n\
+        <mapped-only@example.com> <tanoku@gmail.com>\n";
+
+    type Sig = (String, String, i64, c_int, u8);
+
+    fn c_sig(s: *const ffi::git_signature) -> Sig {
+        // SAFETY: a live signature with both strings, read and copied at once.
+        unsafe {
+            (
+                CStr::from_ptr((*s).name).to_string_lossy().into_owned(),
+                CStr::from_ptr((*s).email).to_string_lossy().into_owned(),
+                (*s).when.time,
+                (*s).when.offset,
+                (*s).when.sign as u8,
+            )
+        }
+    }
+
+    fn rust_sig(s: SignatureRef<'_>) -> Sig {
+        let when = s.when();
+        (
+            s.name().unwrap().to_string_lossy().into_owned(),
+            s.email().unwrap().to_string_lossy().into_owned(),
+            when.seconds(),
+            when.offset_minutes(),
+            when.sign(),
+        )
+    }
+
+    /// What a side reads of a commit: both signatures, the body twice, and both mailmap
+    /// copies (or the failure's code, class and message).
+    type View = (
+        Sig,
+        Sig,
+        Option<String>,
+        Option<String>,
+        Vec<Result<Sig, (c_int, c_int, String)>>,
+    );
+
+    fn c_view(commit: *mut ffi::git_commit, mailmap: *const ffi::git_mailmap) -> View {
+        let body = || {
+            // SAFETY: the live commit; the body is NULL or a string the commit keeps.
+            let b = unsafe { ffi::git_commit_body(commit) };
+            // SAFETY: as above, copied at once.
+            (!b.is_null()).then(|| unsafe { CStr::from_ptr(b) }.to_string_lossy().into_owned())
+        };
+        let mut copies = Vec::new();
+        for map in [ptr::null(), mailmap] {
+            for author in [true, false] {
+                let mut out = ptr::null_mut();
+                // SAFETY: a writable slot, the live commit and a NULL or live mailmap.
+                let rc = unsafe {
+                    if author {
+                        ffi::git_commit_author_with_mailmap(&mut out, commit, map)
+                    } else {
+                        ffi::git_commit_committer_with_mailmap(&mut out, commit, map)
+                    }
+                };
+                copies.push(if rc < 0 {
+                    let (class, message) = super::c_last();
+                    Err((rc, class, message))
+                } else {
+                    let sig = c_sig(out);
+                    // SAFETY: the fresh copy, released once.
+                    unsafe { ffi::git_signature_free(out) };
+                    Ok(sig)
+                });
+            }
+        }
+        // SAFETY: the live commit; the getter only reads it.
+        let author = unsafe { ffi::git_commit_author(commit) };
+        // SAFETY: as above.
+        let committer = unsafe { ffi::git_commit_committer(commit) };
+        (c_sig(author), c_sig(committer), body(), body(), copies)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reads_match() {
+        let c_repo = open(TESTREPO);
+        let mut c_mailmap = ptr::null_mut();
+        // SAFETY: a writable slot and `MAILMAP.len()` readable bytes.
+        let rc = unsafe {
+            ffi::git_mailmap_from_buffer(&mut c_mailmap, MAILMAP.as_ptr().cast(), MAILMAP.len())
+        };
+        assert_eq!(rc, 0);
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../");
+        let path = CString::new(format!("{root}{}", TESTREPO.to_str().unwrap())).unwrap();
+        let rust = Repository::open(&path).unwrap();
+        let mailmap = Mailmap::from_buffer(MAILMAP).unwrap();
+        for hex in COMMITS {
+            let mut raw = ffi::git_oid::default();
+            let mut commit = ptr::null_mut();
+            let c_hex = CString::new(hex).unwrap();
+            // SAFETY: writable slots, a 40-digit id and the live repository.
+            unsafe {
+                assert_eq!(
+                    ffi::git_oid_from_string(&mut raw, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
+                    0
+                );
+                assert_eq!(ffi::git_commit_lookup(&mut commit, c_repo, &raw), 0);
+            }
+            let expected = c_view(commit, c_mailmap);
+            // SAFETY: the commit, released once.
+            unsafe { ffi::git_commit_free(commit) };
+
+            let id = Oid::from_string(&c_hex, OidType::Sha1).unwrap();
+            let owner = Commit::lookup(rust.as_ref(), id.as_ref()).unwrap();
+            let r = owner.as_ref();
+            let body = || r.body().map(|b| b.to_string_lossy().into_owned());
+            let mut copies = Vec::new();
+            for map in [None, Some(mailmap.as_ref())] {
+                for author in [true, false] {
+                    let copy = if author {
+                        r.author_with_mailmap(map)
+                    } else {
+                        r.committer_with_mailmap(map)
+                    };
+                    copies.push(copy.map(|s| rust_sig(s.as_ref())).map_err(|e| {
+                        (
+                            -1,
+                            e.raw_class(),
+                            e.message().to_string_lossy().into_owned(),
+                        )
+                    }));
+                }
+            }
+            let got = (
+                rust_sig(r.author()),
+                rust_sig(r.committer()),
+                body(),
+                body(),
+                copies,
+            );
+            assert_eq!(got, expected, "{hex}");
+        }
+        // SAFETY: the C side's objects, released once.
+        unsafe {
+            ffi::git_mailmap_free(c_mailmap);
+            ffi::git_repository_free(c_repo);
+        }
+    }
+}
+
+/// Writing commits: [`create`], [`create_from_array`], [`create_buffer`],
+/// [`create_ext`] and [`CommitRef::amend`] against `git_commit_create`,
+/// `git_commit_create_v`, `git_commit_create_buffer`, `git_commit_create_ext` and
+/// `git_commit_amend`.
+///
+/// Each side writes into a fresh bare repository of its own, one script of steps in
+/// order: root commits and children, merges, every encoding and signature time (one
+/// before the epoch and one past 2106, which libgit2 writes wrapped), a reference moved
+/// from its first parent and refused from another, extra headers, amends of each part.
+/// After every step the sides compare the outcome (the new id, the buffer, or the code,
+/// class and message of the failure) and where their `HEAD` and `refs/heads/side`
+/// point. Equal ids mean equal contents. Reference writes reach glibc's timezone state,
+/// which another test's would race (TSan), so the script runs in an isolated child.
+///
+/// Documented divergence, outside these comparisons: the wrappers refuse a tree or a
+/// parent of another repository (libgit2 asserts on the first, and drops the second
+/// silently with every parent after it), and a signature libgit2 cannot write (one
+/// without its name or email, or whose offset is `i32::MIN` minutes); the unit tests of
+/// `commit.rs` hold the refusals.
+///
+/// [`create`]: libgit2::libgit2::object::commit::create
+/// [`create_from_array`]: libgit2::libgit2::object::commit::create_from_array
+/// [`create_buffer`]: libgit2::libgit2::object::commit::create_buffer
+/// [`create_ext`]: libgit2::libgit2::object::commit::create_ext
+/// [`CommitRef::amend`]: libgit2::libgit2::object::commit::CommitRef::amend
+mod creating {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::{SignatureView, Time};
+    use libgit2::libgit2::object::commit::{
+        Commit, CommitArc, CommitRef, CreateExtOptions, Header, create, create_buffer, create_ext,
+        create_from_array,
+    };
+    use libgit2::libgit2::object::tree::Tree;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    use super::init;
+
+    const EMPTY_TREE: &CStr = c"4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    /// A signature: name, email, seconds, offset.
+    type Who = (&'static CStr, &'static CStr, i64, c_int);
+
+    const ALICE: Who = (c"Alice", c"alice@example.com", 1_700_000_000, 60);
+    const BOB: Who = (c"Bob", c"bob@example.com", -5, -150);
+    const LATE: Who = (c"Late", c"late@example.com", 1 << 33, 0);
+
+    /// One step of the script; parents are indices of earlier successful commits.
+    #[derive(Clone, Debug)]
+    enum Step {
+        Create(
+            Option<&'static CStr>,
+            Who,
+            Who,
+            Option<&'static CStr>,
+            &'static CStr,
+            Vec<usize>,
+        ),
+        Array(Option<&'static CStr>, Who, &'static CStr, Vec<usize>),
+        Buffer(Who, Option<&'static CStr>, &'static CStr, Vec<usize>),
+        Ext(
+            Option<&'static CStr>,
+            Option<&'static CStr>,
+            &'static [(&'static CStr, &'static CStr)],
+            &'static CStr,
+            Vec<usize>,
+        ),
+        /// The commit, update_ref, author, committer, encoding, message, whether to
+        /// pass the tree.
+        Amend(
+            usize,
+            Option<&'static CStr>,
+            Option<Who>,
+            Option<Who>,
+            Option<&'static CStr>,
+            Option<&'static CStr>,
+            bool,
+        ),
+    }
+
+    fn script() -> Vec<Step> {
+        use Step::*;
+        let head = Some(c"HEAD");
+        let side = Some(c"refs/heads/side");
+        vec![
+            Create(head, ALICE, BOB, None, c"root\n", vec![]),
+            Create(head, ALICE, ALICE, None, c"second root\n", vec![]),
+            Create(
+                head,
+                BOB,
+                ALICE,
+                Some(c"ISO-8859-1"),
+                c"child\n\nbody\n",
+                vec![0],
+            ),
+            Create(head, LATE, LATE, None, c"not from the tip\n", vec![0]),
+            Array(head, BOB, c"merge\n", vec![1, 0]),
+            Array(side, ALICE, c"side root\n", vec![]),
+            Array(None, ALICE, c"octopus\n", vec![0, 1, 2, 3]),
+            Buffer(ALICE, None, c"buffer\n", vec![]),
+            Buffer(LATE, Some(c"UTF-16"), c"buffer\n", vec![2, 1]),
+            Ext(
+                side,
+                Some(c"UTF-8"),
+                &[(c"x-one", c"1"), (c"x-two", c"a\nb")],
+                c"ext\n",
+                vec![3],
+            ),
+            Ext(None, None, &[], c"plain ext\n", vec![]),
+            Ext(head, None, &[], c"ext from a stale parent\n", vec![0]),
+            Amend(3, None, None, None, None, None, false),
+            Amend(
+                3,
+                None,
+                Some(BOB),
+                Some(LATE),
+                Some(c"KOI8-R"),
+                Some(c"amended\n"),
+                true,
+            ),
+            Amend(0, head, None, None, None, Some(c"stale amend\n"), false),
+            Amend(2, head, None, None, None, Some(c"tip amend\n"), false),
+            Amend(5, side, None, None, None, None, false),
+            Amend(
+                5,
+                Some(c"refs/heads/missing"),
+                None,
+                None,
+                None,
+                None,
+                false,
+            ),
+            Create(
+                Some(c"refs/heads/../bad"),
+                ALICE,
+                ALICE,
+                None,
+                c"bad name\n",
+                vec![],
+            ),
+        ]
+    }
+
+    /// What a step gave: the id or buffer, or the failure.
+    type Outcome = Result<String, (c_int, c_int, String)>;
+
+    fn scratch(side: &str) -> (PathBuf, CString) {
+        init();
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-equiv-commit-create-{}-{side}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = CString::new(dir.to_str().unwrap()).unwrap();
+        (dir, path)
+    }
+
+    /// Where `HEAD` (through its branch) and `refs/heads/side` point, read back.
+    fn refs(dir: &std::path::Path) -> (Option<String>, Option<String>) {
+        let head = std::fs::read_to_string(dir.join("HEAD")).unwrap();
+        let branch = head.trim().strip_prefix("ref: ").unwrap().to_owned();
+        let read = |name: &str| {
+            std::fs::read_to_string(dir.join(name))
+                .ok()
+                .map(|t| t.trim().to_owned())
+        };
+        (read(&branch), read("refs/heads/side"))
+    }
+
+    struct CSide {
+        dir: PathBuf,
+        repo: *mut ffi::git_repository,
+        tree: *mut ffi::git_tree,
+        commits: Vec<*mut ffi::git_commit>,
+    }
+
+    impl CSide {
+        fn new() -> Self {
+            let (dir, path) = scratch("c");
+            let (mut repo, mut tree, mut id) =
+                (ptr::null_mut(), ptr::null_mut(), ffi::git_oid::default());
+            // SAFETY: writable slots, NUL-terminated strings, the live repository.
+            unsafe {
+                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
+                assert_eq!(
+                    ffi::git_oid_from_string(&mut id, EMPTY_TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                    0
+                );
+                assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &id), 0);
+            }
+            Self {
+                dir,
+                repo,
+                tree,
+                commits: Vec::new(),
+            }
+        }
+
+        fn failed(rc: c_int) -> Outcome {
+            let (class, message) = super::c_last();
+            Err((rc, class, message))
+        }
+
+        fn sig(who: Who) -> ffi::git_signature {
+            ffi::git_signature {
+                name: who.0.as_ptr().cast_mut(),
+                email: who.1.as_ptr().cast_mut(),
+                when: ffi::git_time {
+                    time: who.2,
+                    offset: who.3,
+                    sign: if who.3 < 0 { b'-' } else { b'+' } as _,
+                },
+            }
+        }
+
+        fn hex(id: &ffi::git_oid) -> String {
+            let mut out = [0u8; 41];
+            // SAFETY: a live id; 41 writable bytes, NUL included.
+            unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+            CStr::from_bytes_until_nul(&out)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned()
+        }
+
+        /// Records a written commit, looked up for later steps.
+        fn written(&mut self, rc: c_int, id: &ffi::git_oid) -> Outcome {
+            if rc < 0 {
+                return Self::failed(rc);
+            }
+            let mut commit = ptr::null_mut();
+            // SAFETY: a writable slot, the live repository and the id just written.
+            let rc = unsafe { ffi::git_commit_lookup(&mut commit, self.repo, id) };
+            assert_eq!(rc, 0);
+            self.commits.push(commit);
+            Ok(Self::hex(id))
+        }
+
+        fn run(&mut self, step: &Step) -> Outcome {
+            let s = |c: Option<&CStr>| c.map_or(ptr::null(), CStr::as_ptr);
+            let mut id = ffi::git_oid::default();
+            match step {
+                Step::Create(update_ref, a, c, enc, msg, parents) => {
+                    let ps: Vec<*const ffi::git_commit> = parents
+                        .iter()
+                        .map(|&i| self.commits[i].cast_const())
+                        .collect();
+                    let (a, c) = (Self::sig(*a), Self::sig(*c));
+                    // SAFETY: a writable id, live objects of the repository, signatures
+                    // over static strings, NULL or NUL-terminated strings.
+                    let rc = unsafe {
+                        ffi::git_commit_create(
+                            &mut id,
+                            self.repo,
+                            s(*update_ref),
+                            &a,
+                            &c,
+                            s(*enc),
+                            msg.as_ptr(),
+                            self.tree,
+                            ps.len(),
+                            ps.as_ptr().cast_mut(),
+                        )
+                    };
+                    self.written(rc, &id)
+                }
+                Step::Array(update_ref, who, msg, parents) => {
+                    let p = |k: usize| self.commits[parents[k]].cast_const();
+                    let w = Self::sig(*who);
+                    let (r, t, u, m) = (self.repo, self.tree, s(*update_ref), msg.as_ptr());
+                    // SAFETY: as above, the parents passed variadically, as many as the
+                    // count says.
+                    let rc = unsafe {
+                        match parents.len() {
+                            0 => ffi::git_commit_create_v(
+                                &mut id,
+                                r,
+                                u,
+                                &w,
+                                &w,
+                                ptr::null(),
+                                m,
+                                t,
+                                0,
+                            ),
+                            2 => ffi::git_commit_create_v(
+                                &mut id,
+                                r,
+                                u,
+                                &w,
+                                &w,
+                                ptr::null(),
+                                m,
+                                t,
+                                2,
+                                p(0),
+                                p(1),
+                            ),
+                            4 => ffi::git_commit_create_v(
+                                &mut id,
+                                r,
+                                u,
+                                &w,
+                                &w,
+                                ptr::null(),
+                                m,
+                                t,
+                                4,
+                                p(0),
+                                p(1),
+                                p(2),
+                                p(3),
+                            ),
+                            n => unreachable!("{n} parents"),
+                        }
+                    };
+                    self.written(rc, &id)
+                }
+                Step::Buffer(who, enc, msg, parents) => {
+                    let ps: Vec<*const ffi::git_commit> = parents
+                        .iter()
+                        .map(|&i| self.commits[i].cast_const())
+                        .collect();
+                    let w = Self::sig(*who);
+                    let mut buf = ffi::git_buf::default();
+                    // SAFETY: a zeroed buffer libgit2 fills; as in `Create`.
+                    let rc = unsafe {
+                        ffi::git_commit_create_buffer(
+                            &mut buf,
+                            self.repo,
+                            &w,
+                            &w,
+                            s(*enc),
+                            msg.as_ptr(),
+                            self.tree,
+                            ps.len(),
+                            ps.as_ptr().cast_mut(),
+                        )
+                    };
+                    if rc < 0 {
+                        return Self::failed(rc);
+                    }
+                    // SAFETY: libgit2 left `size` initialised bytes at `ptr`; released once.
+                    let text = unsafe {
+                        let t = String::from_utf8(
+                            std::slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size).to_vec(),
+                        )
+                        .unwrap();
+                        ffi::git_buf_dispose(&mut buf);
+                        t
+                    };
+                    Ok(text)
+                }
+                Step::Ext(update_ref, enc, headers, msg, parents) => {
+                    let ps: Vec<*mut ffi::git_commit> =
+                        parents.iter().map(|&i| self.commits[i]).collect();
+                    let hs: Vec<ffi::git_commit_header> = headers
+                        .iter()
+                        .map(|(f, v)| ffi::git_commit_header {
+                            field: f.as_ptr(),
+                            value: v.as_ptr(),
+                        })
+                        .collect();
+                    let opts = ffi::git_commit_create_ext_options {
+                        version: 1,
+                        update_ref: s(*update_ref),
+                        message_encoding: s(*enc),
+                        extra_headers: if hs.is_empty() {
+                            ptr::null()
+                        } else {
+                            hs.as_ptr()
+                        },
+                        extra_headers_len: hs.len(),
+                        ..Default::default()
+                    };
+                    let w = Self::sig(ALICE);
+                    // SAFETY: as in `Create`; options over live strings and headers.
+                    let rc = unsafe {
+                        ffi::git_commit_create_ext(
+                            &mut id,
+                            self.repo,
+                            &w,
+                            &w,
+                            msg.as_ptr(),
+                            self.tree,
+                            ps.len(),
+                            ps.as_ptr(),
+                            &opts,
+                        )
+                    };
+                    self.written(rc, &id)
+                }
+                Step::Amend(i, update_ref, a, c, enc, msg, tree) => {
+                    let (a, c) = (a.map(Self::sig), c.map(Self::sig));
+                    let sp = |x: &Option<ffi::git_signature>| {
+                        x.as_ref().map_or(ptr::null(), |x| x as *const _)
+                    };
+                    // SAFETY: as in `Create`; NULL parts are the commit's own.
+                    let rc = unsafe {
+                        ffi::git_commit_amend(
+                            &mut id,
+                            self.commits[*i],
+                            s(*update_ref),
+                            sp(&a),
+                            sp(&c),
+                            s(*enc),
+                            s(*msg),
+                            if *tree { self.tree } else { ptr::null() },
+                        )
+                    };
+                    self.written(rc, &id)
+                }
+            }
+        }
+    }
+
+    impl Drop for CSide {
+        fn drop(&mut self) {
+            // SAFETY: the side's objects, each released once, the repository last.
+            unsafe {
+                for &c in &self.commits {
+                    ffi::git_commit_free(c);
+                }
+                ffi::git_tree_free(self.tree);
+                ffi::git_repository_free(self.repo);
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn rust_failed(e: RepositoryError) -> Outcome {
+        Err((
+            e.raw_code(),
+            e.raw_class(),
+            e.message().to_string_lossy().into_owned(),
+        ))
+    }
+
+    fn view(who: Who) -> SignatureView<'static> {
+        SignatureView::new(who.0, who.1, Time::new(who.2, who.3))
+    }
+
+    /// The commits at `idx`, lent.
+    fn lent<'a, 'r>(commits: &'a [CommitArc<'r>], idx: &[usize]) -> Vec<CommitRef<'a, 'r>> {
+        idx.iter().map(|&i| commits[i].as_ref()).collect()
+    }
+
+    /// The Rust side's step, through the public API only.
+    fn rust_run<'r>(
+        repo: &'r RepositoryBox,
+        commits: &mut Vec<CommitArc<'r>>,
+        step: &Step,
+    ) -> Outcome {
+        let r = repo.as_ref();
+        let tree = Tree::lookup(
+            r,
+            Oid::from_string(EMPTY_TREE, OidType::Sha1)
+                .unwrap()
+                .as_ref(),
+        )
+        .unwrap();
+        let result = match step {
+            Step::Create(update_ref, a, c, enc, msg, parents) => {
+                let (a, c) = (view(*a), view(*c));
+                create(
+                    r,
+                    *update_ref,
+                    a.as_ref(),
+                    c.as_ref(),
+                    *enc,
+                    msg,
+                    tree.as_ref(),
+                    &lent(commits, parents),
+                )
+            }
+            Step::Array(update_ref, who, msg, parents) => {
+                let w = view(*who);
+                let ps = lent(commits, parents);
+                let (w, t) = (w.as_ref(), tree.as_ref());
+                match ps.len() {
+                    0 => create_from_array(r, *update_ref, w, w, None, msg, t, []),
+                    2 => create_from_array(r, *update_ref, w, w, None, msg, t, [ps[0], ps[1]]),
+                    4 => create_from_array(
+                        r,
+                        *update_ref,
+                        w,
+                        w,
+                        None,
+                        msg,
+                        t,
+                        [ps[0], ps[1], ps[2], ps[3]],
+                    ),
+                    n => unreachable!("{n} parents"),
+                }
+            }
+            Step::Buffer(who, enc, msg, parents) => {
+                let w = view(*who);
+                return match create_buffer(
+                    r,
+                    w.as_ref(),
+                    w.as_ref(),
+                    *enc,
+                    msg,
+                    tree.as_ref(),
+                    &lent(commits, parents),
+                ) {
+                    Ok(buf) => Ok(buf.as_ref().to_str().unwrap().to_owned()),
+                    Err(e) => rust_failed(e),
+                };
+            }
+            Step::Ext(update_ref, enc, headers, msg, parents) => {
+                let hs: Vec<Header<'static>> =
+                    headers.iter().map(|(f, v)| Header::new(f, v)).collect();
+                let mut options = CreateExtOptions::new();
+                let mut m = options.as_mut();
+                m.set_update_ref(*update_ref);
+                m.set_message_encoding(*enc);
+                m.set_extra_headers(&hs);
+                let w = view(ALICE);
+                create_ext(
+                    r,
+                    w.as_ref(),
+                    w.as_ref(),
+                    msg,
+                    tree.as_ref(),
+                    &lent(commits, parents),
+                    Some(options.as_mut()),
+                )
+            }
+            Step::Amend(i, update_ref, a, c, enc, msg, with_tree) => {
+                let (a, c) = (a.map(view), c.map(view));
+                commits[*i].as_ref().amend(
+                    *update_ref,
+                    a.as_ref().map(SignatureView::as_ref),
+                    c.as_ref().map(SignatureView::as_ref),
+                    *enc,
+                    *msg,
+                    with_tree.then(|| tree.as_ref()),
+                )
+            }
+        };
+        match result {
+            Ok(id) => {
+                commits.push(Commit::lookup(r, id.as_ref()).unwrap());
+                Ok(id.as_ref().to_hex_string().unwrap())
+            }
+            Err(e) => rust_failed(e),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn creation_scripts_match() {
+        super::isolated(
+            concat!(module_path!(), "::creation_scripts_match"),
+            creation_scripts_match_body,
+        );
+    }
+
+    fn creation_scripts_match_body() {
+        let mut c = CSide::new();
+        let (dir, path) = scratch("rust");
+        let rust = Repository::init(&path, true).unwrap();
+        let mut commits = Vec::new();
+        let mut failures = 0;
+        for (n, step) in script().iter().enumerate() {
+            let expected = c.run(step);
+            let got = rust_run(&rust, &mut commits, step);
+            assert_eq!(got, expected, "step {n}: {step:?}");
+            assert_eq!(refs(&dir), refs(&c.dir), "step {n}: {step:?}");
+            failures += usize::from(expected.is_err());
+        }
+        // The second root, the stale-parent create, ext and amend, the amend of a
+        // missing reference, and the bad name failed alike.
+        assert_eq!(failures, 6);
+        drop(commits);
+        drop(rust);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

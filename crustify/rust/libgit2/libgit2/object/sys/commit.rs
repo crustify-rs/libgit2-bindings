@@ -1,5 +1,11 @@
 //! Safe wrappers over `include/git2/sys/commit.h`.
 //!
+//! [`create_from_ids`] and [`create_from_callback`] write a commit as
+//! [`commit::create`](crate::libgit2::object::commit::create) does, of a tree and
+//! parents given by id: libgit2 then checks that they exist, with their types, unless
+//! strict object creation is turned off. An id of another type than the repository's
+//! is refused before libgit2 reads it.
+//!
 //! # Parent callbacks
 //!
 //! A [`ParentCallback`] is the closure a `git_commit_parent_callback` runs:
@@ -23,7 +29,7 @@
 //! before libgit2 writes anything, whatever its options.
 
 use core::any::Any;
-use core::ffi::c_void;
+use core::ffi::{CStr, c_void};
 use core::fmt;
 use core::ptr;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -31,8 +37,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use ffibox::CZeroable;
 
 use crate::ffi;
+use crate::libgit2::core::types::SignatureRef;
+use crate::libgit2::object::commit::writable;
+use crate::libgit2::object::object::id_fits;
 use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
-use crate::libgit2::repository::repository::RepositoryError;
+use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
 use crate::libgit2::util::sys::errors::set;
 
@@ -145,7 +154,6 @@ impl<'f> ParentCallback<'f> {
     /// trampoline over the collected ids, which hands out each in turn, then NULL, and
     /// can neither fail nor panic, so libgit2 writes the commit with exactly those
     /// parents, or fails on its own.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn walk_with<R>(
         &mut self,
         kind: OidType,
@@ -209,6 +217,123 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
         }
     };
     id.map_or(ptr::null(), |id| id.as_ref().as_ptr())
+}
+
+/// Writes a commit into `repo`'s object database and returns its id, as
+/// [`create`](crate::libgit2::object::commit::create) does, but with the tree and the
+/// parents given by id, and the parents asked from `parents` in order, until it gives
+/// `None` (see the [module docs](self#parent-callbacks)).
+///
+/// Unless strict object creation is turned off, libgit2 checks that the tree and every
+/// parent exist in the object database with their types, failing with libgit2's error
+/// otherwise (`GIT_ERROR_INVALID`, "object to set as tree does not exist", say). With an
+/// `update_ref`, the reference is moved as `create` moves it, an existing one only from
+/// the first parent.
+///
+/// Refuses, before libgit2 runs and with `GIT_ERROR_INVALID`, "specified object ID type
+/// does not match repository object ID type", a tree id or a parent id whose type is not
+/// `repo`'s, which libgit2 would format out of bounds (see the
+/// [`object` module](crate::libgit2::object::object#looking-objects-up)); and a
+/// signature `create` refuses. A panic of the callback's closure propagates before
+/// libgit2 runs.
+///
+/// Wraps: git_commit_create_from_callback
+#[allow(clippy::too_many_arguments)] // The C routine's parameters, in its order.
+pub fn create_from_callback(
+    repo: RepositoryRef<'_>,
+    update_ref: Option<&CStr>,
+    author: SignatureRef<'_>,
+    committer: SignatureRef<'_>,
+    message_encoding: Option<&CStr>,
+    message: &CStr,
+    tree: OidRef<'_>,
+    parents: &mut ParentCallback<'_>,
+) -> Result<Oid, RepositoryError> {
+    id_fits(repo, tree)?;
+    writable(author)?;
+    writable(committer)?;
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    let update_ref = update_ref.map_or(ptr::null(), CStr::as_ptr);
+    let encoding = message_encoding.map_or(ptr::null(), CStr::as_ptr);
+    let rc = parents.walk_with(repo.oid_type(), |callback, payload| {
+        // SAFETY: `out` addresses `id`, written on success; `repo` is live on this thread,
+        // written through as `RepositoryRef` allows; the signatures are live and writable
+        // and `tree` an id of the repository's type (checked above); the strings are
+        // NUL-terminated or NULL; the callback and payload are the walk's, handing out ids
+        // of that type, each live until the next call, which libgit2 copies first.
+        unsafe {
+            ffi::git_commit_create_from_callback(
+                out,
+                repo.as_ptr().cast_mut(),
+                update_ref,
+                author.as_ptr(),
+                committer.as_ptr(),
+                encoding,
+                message.as_ptr(),
+                tree.as_ptr(),
+                callback,
+                payload,
+            )
+        }
+    })?;
+    if rc < 0 {
+        Err(RepositoryError::from_libgit2(rc))
+    } else {
+        Ok(id)
+    }
+}
+
+/// [`create_from_callback`], with the parents given by id in order, as a slice.
+///
+/// Refuses what [`create_from_callback`] refuses, a parent id of another type than
+/// `repo`'s included, and fails as it does.
+///
+/// Wraps: git_commit_create_from_ids
+#[allow(clippy::too_many_arguments)] // The C routine's parameters, in its order.
+pub fn create_from_ids(
+    repo: RepositoryRef<'_>,
+    update_ref: Option<&CStr>,
+    author: SignatureRef<'_>,
+    committer: SignatureRef<'_>,
+    message_encoding: Option<&CStr>,
+    message: &CStr,
+    tree: OidRef<'_>,
+    parents: &[OidRef<'_>],
+) -> Result<Oid, RepositoryError> {
+    id_fits(repo, tree)?;
+    for parent in parents {
+        id_fits(repo, *parent)?;
+    }
+    writable(author)?;
+    writable(committer)?;
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    let mut ptrs: Vec<*const ffi::git_oid> = parents.iter().map(OidRef::as_ptr).collect();
+    let update_ref = update_ref.map_or(ptr::null(), CStr::as_ptr);
+    let encoding = message_encoding.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: as in `create_from_callback`; `ptrs` addresses `ptrs.len()` live ids of the
+    // repository's type (checked above), only read despite the `git_oid **` (an empty
+    // one is dangling and never read).
+    let rc = unsafe {
+        ffi::git_commit_create_from_ids(
+            out,
+            repo.as_ptr().cast_mut(),
+            update_ref,
+            author.as_ptr(),
+            committer.as_ptr(),
+            encoding,
+            message.as_ptr(),
+            tree.as_ptr(),
+            ptrs.len(),
+            ptrs.as_mut_ptr(),
+        )
+    };
+    if rc < 0 {
+        Err(RepositoryError::from_libgit2(rc))
+    } else {
+        Ok(id)
+    }
 }
 
 #[cfg(test)]
@@ -679,5 +804,201 @@ mod unit_tests {
                 w.create_updating(update_ref, message, cb, payload)
             })
             .unwrap()
+    }
+
+    // --- Creating commits by id ------------------------------------------------------
+
+    use crate::libgit2::core::types::{SignatureView, Time};
+    use crate::libgit2::object::commit::{Commit, create};
+    use crate::libgit2::object::tree::Tree;
+    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+    use crate::libgit2::util::errors::ErrorClass;
+
+    /// The empty tree's id, which libgit2 knows without storing it.
+    const EMPTY_TREE: &CStr = c"4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    /// A fresh bare repository, through the safe wrappers, removed when dropped.
+    struct Scratch {
+        dir: std::path::PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            assert!(runtime_pinned());
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-commit-by-id-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+            let repo = Repository::init(&path, true).unwrap();
+            Self {
+                dir,
+                repo: Some(repo),
+            }
+        }
+
+        fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn empty_tree() -> Oid {
+        Oid::from_string(EMPTY_TREE, OidType::Sha1).unwrap()
+    }
+
+    /// An id of another type than the repository's, the tree's or a parent's, is
+    /// refused before libgit2 reads it, and so is a signature libgit2 cannot write: the
+    /// closure is not asked for parents then, and nothing is written.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ids_of_another_type_are_refused_before_c() {
+        let s = Scratch::new("refused");
+        let repo = s.repo();
+        let me = SignatureView::new(c"A", c"a@example.com", Time::new(0, 0));
+        let me = me.as_ref();
+        let (tree, wide) = (empty_tree(), Oid::zero(OidType::Sha256));
+        let mismatch = c"specified object ID type does not match repository object ID type";
+        let check = |r: Result<Oid, RepositoryError>, message: &CStr| {
+            let e = r.unwrap_err();
+            assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+            assert_eq!(e.message(), message);
+        };
+        let ids = |tree: &Oid, parents: &[OidRef<'_>]| {
+            create_from_ids(repo, None, me, me, None, c"m\n", tree.as_ref(), parents)
+        };
+        check(ids(&wide, &[]), mismatch);
+        check(ids(&tree, &[tree.as_ref(), wide.as_ref()]), mismatch);
+
+        let mut asked = 0;
+        let mut next = |_: usize| {
+            asked += 1;
+            None
+        };
+        let mut callback = ParentCallback::new(&mut next);
+        let r = create_from_callback(
+            repo,
+            None,
+            me,
+            me,
+            None,
+            c"m\n",
+            wide.as_ref(),
+            &mut callback,
+        );
+        check(r, mismatch);
+        let min = SignatureView::new(c"A", c"a@example.com", Time::new(0, i32::MIN));
+        let r = create_from_callback(
+            repo,
+            None,
+            min.as_ref(),
+            me,
+            None,
+            c"m\n",
+            tree.as_ref(),
+            &mut callback,
+        );
+        check(
+            r,
+            c"failed to create commit: signature timezone offset is out of range",
+        );
+        drop(callback);
+        assert_eq!(asked, 0);
+        let mut wide_parent = |i: usize| (i == 0).then(|| Oid::zero(OidType::Sha256));
+        let mut callback = ParentCallback::new(&mut wide_parent);
+        let r = create_from_callback(
+            repo,
+            None,
+            me,
+            me,
+            None,
+            c"m\n",
+            tree.as_ref(),
+            &mut callback,
+        );
+        check(r, mismatch);
+        assert!(
+            std::fs::read_dir(s.dir.join("objects"))
+                .unwrap()
+                .all(|e| { e.unwrap().file_name().len() != 2 })
+        );
+    }
+
+    /// The id-taking forms write the commit `create` writes for the same tree and
+    /// parents; strict object creation refuses a parent the object database lacks.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn id_forms_write_what_create_writes() {
+        let s = Scratch::new("forms");
+        let repo = s.repo();
+        let me = SignatureView::new(c"A U Thor", c"a@example.com", Time::new(1_700_000_000, 60));
+        let me = me.as_ref();
+        let tree_id = empty_tree();
+        let tree = Tree::lookup(repo, tree_id.as_ref()).unwrap();
+        let root = create(repo, None, me, me, None, c"root\n", tree.as_ref(), &[]).unwrap();
+        let root_commit = Commit::lookup(repo, root.as_ref()).unwrap();
+        let expected = create(
+            repo,
+            None,
+            me,
+            me,
+            Some(c"UTF-8"),
+            c"child\n",
+            tree.as_ref(),
+            &[root_commit.as_ref(), root_commit.as_ref()],
+        )
+        .unwrap();
+        let by_ids = create_from_ids(
+            repo,
+            None,
+            me,
+            me,
+            Some(c"UTF-8"),
+            c"child\n",
+            tree_id.as_ref(),
+            &[root.as_ref(), root.as_ref()],
+        )
+        .unwrap();
+        assert_eq!(by_ids, expected);
+        let mut next = |i: usize| (i < 2).then_some(root);
+        let mut callback = ParentCallback::new(&mut next);
+        let by_callback = create_from_callback(
+            repo,
+            None,
+            me,
+            me,
+            Some(c"UTF-8"),
+            c"child\n",
+            tree_id.as_ref(),
+            &mut callback,
+        )
+        .unwrap();
+        assert_eq!(by_callback, expected);
+
+        let missing =
+            Oid::from_string(c"dededededededededededededededededededede", OidType::Sha1).unwrap();
+        let e = create_from_ids(
+            repo,
+            None,
+            me,
+            me,
+            None,
+            c"m\n",
+            tree_id.as_ref(),
+            &[missing.as_ref()],
+        )
+        .unwrap_err();
+        assert_eq!(e.raw_code(), -1);
+        let e =
+            create_from_ids(repo, None, me, me, None, c"m\n", missing.as_ref(), &[]).unwrap_err();
+        assert_eq!(e.raw_code(), -1);
     }
 }
