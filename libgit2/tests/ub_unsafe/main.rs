@@ -16,3 +16,4 @@ mod sys_odb_backend;
 mod trace;
 
 mod sys_config;
+mod diff;

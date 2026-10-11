@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `m` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/diff_exclusive_reborrow.rs:6:22
+  |
+5 |     let r = m.as_ref();
+  |             - immutable borrow occurs here
+6 |     let _exclusive = m.as_mut();
+  |                      ^^^^^^^^^^ mutable borrow occurs here
+7 |     let _ = r.len();
+  |             - immutable borrow later used here

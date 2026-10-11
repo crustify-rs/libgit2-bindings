@@ -1296,6 +1296,163 @@
    "fields": []
   },
   {
+   "name": "git_diff",
+   "defined_in": "src/libgit2/diff.h",
+   "_comment_agent": "Wrap route: opaque public declaration, no private fields exposed. Fresh constructor results have rc=1; git_diff_free downrefs and dispatches free_fn; internal git_diff_addref is not a published clone. Generated patches retain diff and can mutate deltas. Generated diffs copy tree/index entries and pool paths, retain uncounted repo and copied options (callbacks/payload/pathspec pointers require lifetime discipline for nondefault options). Parsed diffs own patches, each retaining parse ctx; ctx BORROWS input (parse.c), but paths, hunk lines and binary data are copied (patch_parse.c). After parsing, no public operation or destructor dereferences ctx input cursors: patch_parsed__free only releases ctx, whose final free clears pointers without following them. Parsed diff therefore need not borrow input. No public diff init or dup. All six generators plus from_buffer/from_buffer_ext are constructors.",
+   "fields": [
+    {
+     "name": "entrycomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    },
+    {
+     "name": "free_fn",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    },
+    {
+     "name": "patch_fn",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    },
+    {
+     "name": "pfxcomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    },
+    {
+     "name": "rc",
+     "refcount": true
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Generated diff stores uncounted repository; parsed diff NULL. Repository must outlive operations/destruction. No exposed private field."
+     }
+    },
+    {
+     "name": "strcomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    },
+    {
+     "name": "strncomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Static function chosen during parsed/generated allocation or case ordering; private callable dispatch, never freed. Fully initialized before publication."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_delta",
+   "defined_in": "include/git2/diff.h",
+   "_comment_agent": "Public read-only output. Scalars plus embedded git_diff_file pairs; no public constructor/free/dup. Generated deltas allocated by diff_delta__alloc and freed by parent; file paths point into diff pool, may alias each other. Parsed deltas allocated per patch; old/new paths owned by patch and freed on last patch ref. Internal git_diff__delta_dup copies paths to caller pool, not a public cloner. Callback deltas can be stack/temporary: lifetime bounded by callback. Mutable C transforms require exclusive parent access; no owning Delta/field mutation is exposed.",
+   "fields": []
+  },
+  {
+   "name": "git_diff_file",
+   "defined_in": "include/git2/diff.h",
+   "fields": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Generated delta paths alias pool strings; parsed paths belong to patch; buffer diff callbacks may use caller path or synthesized names. Borrow only for parent/callback lifetime; no separate free."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
@@ -9844,6 +10001,792 @@
       "nullable": false,
       "mutable": true,
       "note": "One writable out slot: initially NULL; success transfers sole reference to newly allocated config with copied backend lists/entries; git_config_free releases it. Failure frees partial construction."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_free",
+   "defined_in": "src/libgit2/diff.c",
+   "lifetime": {
+    "for": "diff",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "diff",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes one counted reference. NULL no-op; final reference dispatches concrete free_fn."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_from_buffer",
+   "defined_in": "src/libgit2/diff_parse.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "content",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:content"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Length-delimited bytes, not necessarily NUL terminated. Parser copies all paths/lines/data it later uses. Retained ctx input cursors never dereferenced after parse. NULL treated as empty by parse_ctx_init."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_from_buffer_ext",
+   "defined_in": "src/libgit2/diff_parse.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "content",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:content"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Length-delimited bytes, not necessarily NUL terminated. Parser copies all paths/lines/data it later uses. Retained ctx input cursors never dereferenced after parse. NULL treated as empty by parse_ctx_init."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_get_delta",
+   "defined_in": "src/libgit2/diff.c",
+   "ptr_args": [
+    {
+     "name": "diff",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:diff"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only diff borrow for this call."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:diff"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Parent-owned delta; NULL for out-of-bounds index. Invalidated by parent destruction or transformations."
+    }
+   }
+  },
+  {
+   "name": "git_diff_index_to_index",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "new_index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:new_index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "old_index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:old_index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_index_to_workdir",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_num_deltas",
+   "defined_in": "src/libgit2/diff.c",
+   "ptr_args": [
+    {
+     "name": "diff",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:diff"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only diff borrow for this call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_tree_to_index",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "old_tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:old_tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_tree_to_tree",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "new_tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:new_tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "old_tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:old_tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_tree_to_workdir",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "old_tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:old_tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_diff_tree_to_workdir_with_index",
+   "defined_in": "src/libgit2/diff_generate.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar out slot. Success transfers one fresh reference, rc=1, released by git_diff_free; failure cleans up and leaves NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Uncounted repository retained in generated diff; must outlive result. This revision diff_generated_alloc requires non-NULL, including index_to_index. Lazy caches may be filled."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Input snapshot consumed during call, not retained. Iterators may increment/decrement refcounts and sort index internals; no element borrow may conflict with C mutation. NULL trees mean empty; NULL optional index loads repository index."
      }
     }
    ]

@@ -2340,8 +2340,7 @@ enum Committed<'a, 'r> {
 /// Composed from the routines it calls, in its order: `git_repository_head_tree`
 /// (private to libgit2) as [`RepositoryRef::head`] and `git_reference_peel`, then
 /// `git_diff_tree_to_tree` or `git_diff_tree_to_index` with the default options, whose
-/// deltas are counted. `git2/diff.h` has no safe wrapper yet: the diff stays a raw seam,
-/// released here.
+/// deltas are counted through the safe diff owner.
 fn changes(repo: RepositoryRef<'_>, committed: Committed<'_, '_>) -> Result<(), RepositoryError> {
     let head = match repo.head() {
         Ok(head) => Some(head),
@@ -2366,46 +2365,13 @@ fn changes(repo: RepositoryRef<'_>, committed: Committed<'_, '_>) -> Result<(), 
         }
         None => None,
     };
-    let old = head_tree
-        .as_ref()
-        .map_or(ptr::null_mut(), TreeArc::as_c_ptr);
-    // The committed tree is a live tree of the repository (checked by the callers), only
-    // read despite the `git_tree *`, as `check_for_empty_commit` casts its `const` away;
-    // the index is the repository's, which the diff snapshots on this thread (an index is
-    // neither `Send` nor `Sync`), as `git_commit_create_from_stage` diffs it.
-    let (repo, mut diff) = (repo.as_ptr().cast_mut(), ptr::null_mut());
-    // SAFETY: a writable slot, NULL unless the diff succeeds; a live repository, used on
-    // this thread only, whose configuration and odb libgit2 loads through this shared
-    // handle; `old` NULL or `HEAD`'s tree, held above; the committed tree or index as
-    // above; NULL options are the defaults.
-    let rc = unsafe {
-        match committed {
-            Committed::Tree(tree) => ffi::git_diff_tree_to_tree(
-                &mut diff,
-                repo,
-                old,
-                tree.as_ptr().cast_mut(),
-                ptr::null(),
-            ),
-            Committed::Index(index) => ffi::git_diff_tree_to_index(
-                &mut diff,
-                repo,
-                old,
-                index.as_ptr().cast_mut(),
-                ptr::null(),
-            ),
-        }
-    };
-    if rc < 0 {
-        return failed(rc);
-    }
-    // SAFETY: `diff` is the live diff just handed out, which this function owns alone:
-    // its deltas are counted, then it is released once.
-    let deltas = unsafe {
-        let deltas = ffi::git_diff_num_deltas(diff);
-        ffi::git_diff_free(diff);
-        deltas
-    };
+    let old = head_tree.as_ref().map(|tree| tree.as_ref());
+    let diff = match committed {
+        Committed::Tree(tree) => crate::libgit2::diff::diff::Diff::tree_to_tree(repo, old, Some(tree)),
+        Committed::Index(index) => crate::libgit2::diff::diff::Diff::tree_to_index(repo, old, Some(index)),
+    }.map_err(|error| RepositoryError::from_libgit2(error.raw_code()))?;
+    let deltas = diff.as_ref().len();
+    drop(diff);
     if deltas == 0 {
         set(ErrorClass::Repository, c"no changes are staged for commit");
         return failed(ErrorCode::Unchanged.raw());

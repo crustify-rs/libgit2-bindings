@@ -38,3 +38,4 @@ mod transaction;
 mod tree;
 mod types;
 mod worktree;
+mod diff;
