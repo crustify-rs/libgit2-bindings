@@ -870,6 +870,217 @@
    ]
   },
   {
+   "name": "git_config_backend",
+   "defined_in": "include/git2/sys/config.h",
+   "_comment_agent": "Verified type route/wrap. C constructor allocates complete memory backend with immutable vtable, cloned option strings/input and owned list; open is one-shot parse phase. get acquires list ref; iterator owns copied list; snapshot constructor stores borrowed source used during one-time open only, thereafter snapshot owns its copied list and mutex. File open retains repository; no repository-retaining constructor exposed in this batch. free dispatch destroys enclosing allocation once. Lock is transactional write isolation, not a mutex granting Send/Sync. Config and backend do not own cfg back-pointer. No generic Clone exists; named snapshot changes read-only state. Inline init is inert resource-free template, not a complete backend allocation.",
+   "fields": [
+    {
+     "name": "cfg",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Only written by git_config_add_backend, never read by C. Non-owning registration back-pointer can dangle when open_level shares backend and original config dies. Exposed only as opaque non-dereferenceable identity, not ConfigRef."
+     }
+    },
+    {
+     "name": "del",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "del_multivar",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "free",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "get",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "iterator",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "lock",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "open",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "set",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "set_multivar",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "snapshot",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    },
+    {
+     "name": "unlock",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_backend_entry",
    "defined_in": "include/git2/sys/config.h",
    "_comment_agent": "Verified type route for wrap. entry is an inline git_config_entry at offset zero, with immutable nullable string borrows retained by backing storage. config_memory_get and config_snapshot_get increment the backing list; config_file_get takes a list reference. Lookup transfers that acquired reference, but config_iterator_next only lends entries kept alive by its iterator. git_config_list_entry_free down-refs the list, so even separately acquired references to the same entry cannot be mutated exclusively. No public constructor or clone/up-ref exists for a standalone backend entry; ConfigRef::entry plus a consuming layout-preserving conversion is the safe acquisition path. Destruction stays with git_config_entry_free/EntryFree; no arbitrary callback replacement can preserve its allocator contract. C list duplication constructs new entries, not a public per-entry clone.",
@@ -7101,6 +7312,45 @@
    ]
   },
   {
+   "name": "git_config_backend_free",
+   "defined_in": "src/libgit2/config_backend.h",
+   "lifetime": {
+    "for": "cfg",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   }
+  },
+  {
+   "name": "git_config_backend_from_string",
+   "defined_in": "src/libgit2/config_mem.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   }
+  },
+  {
+   "name": "git_config_backend_from_values",
+   "defined_in": "src/libgit2/config_mem.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   }
+  },
+  {
    "name": "git_config_backend_memory_options_init",
    "defined_in": "src/libgit2/config_mem.c",
    "lifetime": {
@@ -8079,6 +8329,20 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_config_init_backend",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "backend",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   }
   },
   {
    "name": "git_config_iterator_free",

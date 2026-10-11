@@ -91,3 +91,6 @@ git_config_backend_entry
 
 # config wave 3 batch 0: iterator layout
 git_config_iterator
+
+# config wave 4 batch 0
+git_config_backend

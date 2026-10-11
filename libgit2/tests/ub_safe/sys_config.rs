@@ -235,14 +235,14 @@ mod iterators {
         let callback = iter.as_ref().next_callback();
         let policy = iter.as_ref().release_policy();
         assert_eq!(iter.as_ref().flags(), 0);
-        assert!(iter.as_ref().backend_raw().is_none());
+        assert!(iter.as_ref().backend().is_none());
         {
             let mut m = iter.as_mut();
             m.as_mut().set_flags(u32::MAX);
             assert_eq!(m.as_ref().flags(), u32::MAX);
             let shared = m.as_ref();
             let copied = shared;
-            assert!(copied.backend_raw().is_none());
+            assert!(copied.backend().is_none());
             assert!(format!("{shared:?}").contains("flags: 4294967295"));
             m.set_flags(0);
             let mut count = 0;
@@ -452,5 +452,116 @@ mod iterators {
         }
         drop((config, empty));
         std::fs::remove_file(file).unwrap();
+    }
+}
+
+mod backends {
+    use super::*;
+    use libgit2::libgit2::config::config::ConfigLevel;
+    use libgit2::libgit2::config::sys::config::{Backend, BackendOpen};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_copied_inputs_retained_entries_and_snapshots() {
+        let pending = {
+            let data = b"[a]\nb = one\nb = two\nflag\nempty =\n".to_vec();
+            let label = CString::new(vec![b'l', 0xff]).unwrap();
+            let origin = CString::new("origin").unwrap();
+            let mut options = BackendMemoryOptions::new();
+            options.as_mut().set_backend_type(Some(&label));
+            options.as_mut().set_origin_path(Some(&origin));
+            Backend::from_string(&data, Some(options.as_ref())).unwrap()
+        };
+        assert_eq!(pending.as_ref().version(), 1);
+        assert!(pending.as_ref().is_readonly());
+        assert!(pending.as_ref().config_identity().is_none());
+        let open = pending.as_ref().open_callback();
+        let mut backend = open.call(pending, ConfigLevel::APP).unwrap();
+        let release = backend.as_ref().release_policy();
+        let entry = backend.as_mut().get(c"a.b").unwrap();
+        assert_eq!(entry.as_ref().entry().value(), Some(c"two"));
+        assert_eq!(entry.as_ref().entry().level(), ConfigLevel::APP);
+        assert_eq!(
+            entry.as_ref().entry().backend_type().unwrap().to_bytes(),
+            &[b'l', 0xff]
+        );
+        let mut snapshot = backend.as_mut().snapshot().unwrap();
+        {
+            let mut s = snapshot.as_mut();
+            assert!(s.get(c"missing.key").is_err());
+            assert!(s.set(c"a.b", c"v").is_err());
+            assert!(s.set_multivar(c"a.b", c".*", c"v").is_err());
+            assert!(s.delete(c"a.b").is_err());
+            assert!(s.delete_multivar(c"a.b", c".*").is_err());
+            assert!(s.lock().is_err());
+        }
+        {
+            let mut b = backend.as_mut();
+            let mut iter = b.iterator().unwrap();
+            let mut count = 0;
+            while let Some(entry) = iter.as_mut().advance().unwrap() {
+                assert!(entry.entry().name().is_some());
+                count += 1;
+            }
+            assert_eq!(count, 4);
+        }
+        release.release(backend);
+        assert_eq!(entry.as_ref().entry().value(), Some(c"two"));
+        assert_eq!(entry.as_ref().entry().origin_path(), Some(c"origin"));
+        let flag = snapshot.as_mut().get(c"a.flag").unwrap();
+        assert_eq!(flag.as_ref().entry().value(), None);
+        let empty = snapshot.as_mut().get(c"a.empty").unwrap();
+        assert_eq!(empty.as_ref().entry().value(), Some(c""));
+        drop(snapshot);
+        assert_eq!(flag.as_ref().entry().name(), Some(c"a.flag"));
+        drop((flag, empty, entry));
+        // A callable is not bound to the allocation that supplied its token.
+        let _ = BackendOpen;
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_values_readonly_callbacks_errors_and_failed_open() {
+        let pending = {
+            let value = CString::new(vec![b'a', b'.', b'b', b'=', 0xff]).unwrap();
+            let mut options = BackendMemoryOptions::new();
+            options.as_mut().set_backend_type(Some(c"values"));
+            options.as_mut().set_origin_path(Some(c"values-origin"));
+            Backend::from_values(&[&value, c"a.empty="], Some(options.as_ref())).unwrap()
+        };
+        let mut backend = pending.open(ConfigLevel::LOCAL).unwrap();
+        let mut b = backend.as_mut();
+        assert_eq!(
+            b.get(c"a.b")
+                .unwrap()
+                .as_ref()
+                .entry()
+                .value()
+                .unwrap()
+                .to_bytes(),
+            &[0xff]
+        );
+        let entry = b.get(c"a.b").unwrap();
+        assert_eq!(entry.as_ref().entry().backend_type(), Some(c"values"));
+        assert_eq!(entry.as_ref().entry().origin_path(), Some(c"values-origin"));
+        assert!(b.get(c"missing.key").is_err());
+        assert!(b.set(c"a.b", c"v").is_err());
+        assert!(b.set_multivar(c"a.b", c".*", c"v").is_err());
+        assert!(b.delete(c"a.b").is_err());
+        assert!(b.delete_multivar(c"a.b", c".*").is_err());
+        assert!(b.lock().is_err());
+        let _ = b.as_ref().unlock_callback();
+        assert!(Backend::from_values(&[c"missing-equals"], None).is_err());
+        let bad = Backend::from_values(&[c"=emptykey"], None).unwrap();
+        assert!(bad.open(ConfigLevel::LOCAL).is_err());
+        let bad = Backend::from_string(b"[unterminated", None).unwrap();
+        assert!(bad.open(ConfigLevel::LOCAL).is_err());
+        // Pending storage is safely released even when never opened.
+        drop(Backend::from_string(b"", None).unwrap());
+        let mut empty = Backend::from_values(&[], None)
+            .unwrap()
+            .open(ConfigLevel::LOCAL)
+            .unwrap();
+        assert!(empty.as_mut().get(c"a.b").is_err());
     }
 }

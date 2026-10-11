@@ -734,3 +734,257 @@ mod iterators {
         }
     }
 }
+
+mod backends {
+    use super::*;
+    use libgit2::libgit2::config::config::ConfigLevel;
+    use libgit2::libgit2::config::sys::config::{Backend, BackendBox};
+    use std::ptr;
+
+    struct Raw(*mut ffi::git_config_backend);
+    impl Drop for Raw {
+        fn drop(&mut self) {
+            // SAFETY: uniquely owned complete backend, callback matches allocator.
+            unsafe { ((*self.0).free.unwrap())(self.0) };
+        }
+    }
+    fn raw_values(values: &[&CStr]) -> Raw {
+        let mut out = ptr::null_mut();
+        let pointers: Vec<_> = values.iter().map(|v| v.as_ptr()).collect();
+        // SAFETY: readable array and strings, writable out; C copies all input.
+        assert_eq!(
+            // SAFETY: C copies the readable strings; out is an exclusive slot.
+            unsafe {
+                ffi::git_config_backend_from_values(
+                    &mut out,
+                    pointers.as_ptr().cast_mut(),
+                    pointers.len(),
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
+        Raw(out)
+    }
+    fn raw_string(data: &[u8]) -> Raw {
+        let mut out = ptr::null_mut();
+        // SAFETY: readable byte run and writable out; C copies input.
+        assert_eq!(
+            // SAFETY: data covers its length, and out is an exclusive slot.
+            unsafe {
+                ffi::git_config_backend_from_string(
+                    &mut out,
+                    data.as_ptr().cast(),
+                    data.len(),
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
+        Raw(out)
+    }
+    fn raw_open(raw: &Raw, level: ConfigLevel) -> i32 {
+        // SAFETY: uniquely owned pending backend, initialized matching callback;
+        // called exactly once; NULL repo is supported by memory and snapshots.
+        unsafe { ((*raw.0).open.unwrap())(raw.0, level.raw(), ptr::null()) }
+    }
+    type Entry = (
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        i32,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+    );
+    fn text(p: *const std::ffi::c_char) -> Option<Vec<u8>> {
+        if p.is_null() {
+            None
+        } else {
+            // SAFETY: all observation inputs are live immutable C entry strings.
+            Some(unsafe { CStr::from_ptr(p) }.to_bytes().to_vec())
+        }
+    }
+    fn raw_entry(e: *const ffi::git_config_entry) -> Entry {
+        // SAFETY: caller supplies an initialized live borrowed entry for this call.
+        unsafe {
+            (
+                text((*e).name),
+                text((*e).value),
+                (*e).level,
+                text((*e).backend_type),
+                text((*e).origin_path),
+            )
+        }
+    }
+    fn rust_entry(e: libgit2::libgit2::config::config::EntryRef<'_>) -> Entry {
+        (
+            e.name().map(|v| v.to_bytes().to_vec()),
+            e.value().map(|v| v.to_bytes().to_vec()),
+            e.level().raw(),
+            e.backend_type().map(|v| v.to_bytes().to_vec()),
+            e.origin_path().map(|v| v.to_bytes().to_vec()),
+        )
+    }
+    fn compare_get(raw: &Raw, rust: &mut BackendBox, key: &CStr) {
+        let mut out = ptr::null_mut();
+        // SAFETY: opened read-only backend, readable key, exclusive writable out;
+        // callback acquires a retained entry reference on success.
+        let rc = unsafe { ((*raw.0).get.unwrap())(raw.0, key.as_ptr(), &mut out) };
+        let c_error = libgit2::libgit2::util::errors::last();
+        match rust.as_mut().get(key) {
+            Ok(e) => {
+                assert_eq!(rc, 0);
+                // SAFETY: successful callback returned a retained initialized entry.
+                let value = raw_entry(unsafe { ptr::addr_of!((*out).entry) });
+                assert_eq!(value, rust_entry(e.as_ref().entry()));
+                // SAFETY: releases precisely the acquired reference above.
+                unsafe { ffi::git_config_entry_free(ptr::addr_of_mut!((*out).entry)) };
+            }
+            Err(e) => {
+                assert_eq!(rc, e.raw_code());
+                assert_eq!(&c_error, e.error());
+            }
+        }
+    }
+    fn compare_iterator(raw: &Raw, rust: &mut BackendBox) {
+        let mut out = ptr::null_mut();
+        // SAFETY: opened exclusive backend and writable output slot.
+        assert_eq!(unsafe { ((*raw.0).iterator.unwrap())(&mut out, raw.0) }, 0);
+        let mut b = rust.as_mut();
+        let mut iterator = b.iterator().unwrap();
+        loop {
+            let mut e = ptr::null_mut();
+            // SAFETY: exclusive live iterator, no entry view from the previous
+            // advance remains, and output is a writable slot.
+            let rc = unsafe { ffi::git_config_next(&mut e, out) };
+            match iterator.as_mut().advance().unwrap() {
+                None => {
+                    assert_eq!(rc, ffi::GIT_ITEROVER);
+                    break;
+                }
+                Some(entry) => {
+                    assert_eq!(rc, 0);
+                    assert_eq!(raw_entry(e), rust_entry(entry.entry()));
+                }
+            }
+        }
+        // SAFETY: releases the sole iterator allocation after all borrowed entries.
+        unsafe { ffi::git_config_iterator_free(out) };
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_memory_multicall_and_snapshot_match_c() {
+        let _runtime = libgit2::libgit2::core::global::init().unwrap();
+        for mode in [false, true] {
+            let raw = if mode {
+                raw_values(&[c"a.b=one", c"a.b=two", c"a.empty="])
+            } else {
+                raw_string(b"[a]\nb=one\nb=two\nempty=\nflag\n")
+            };
+            let pending = if mode {
+                Backend::from_values(&[c"a.b=one", c"a.b=two", c"a.empty="], None).unwrap()
+            } else {
+                Backend::from_string(b"[a]\nb=one\nb=two\nempty=\nflag\n", None).unwrap()
+            };
+            // SAFETY: initialized pending metadata, no writes happen concurrently.
+            unsafe {
+                assert_eq!((*raw.0).version, pending.as_ref().version());
+                assert_eq!((*raw.0).readonly, pending.as_ref().readonly_raw());
+                assert_eq!(
+                    (*raw.0).cfg.is_null(),
+                    pending.as_ref().config_identity().is_none()
+                );
+            }
+            assert_eq!(raw_open(&raw, ConfigLevel::GLOBAL), 0);
+            let mut rust = pending.open(ConfigLevel::GLOBAL).unwrap();
+            for key in [c"a.b", c"a.empty", c"a.flag", c"missing.key"] {
+                compare_get(&raw, &mut rust, key);
+            }
+            compare_iterator(&raw, &mut rust);
+            let mut b = rust.as_mut();
+            // SAFETY: opened exclusive backend; strings borrowed only for each call.
+            unsafe {
+                assert_eq!(
+                    ((*raw.0).set.unwrap())(raw.0, c"a.b".as_ptr(), c"v".as_ptr()),
+                    b.set(c"a.b", c"v").unwrap_err().raw_code()
+                );
+                assert_eq!(
+                    ((*raw.0).set_multivar.unwrap())(
+                        raw.0,
+                        c"a.b".as_ptr(),
+                        c".*".as_ptr(),
+                        c"v".as_ptr()
+                    ),
+                    b.set_multivar(c"a.b", c".*", c"v").unwrap_err().raw_code()
+                );
+                assert_eq!(
+                    ((*raw.0).del.unwrap())(raw.0, c"a.b".as_ptr()),
+                    b.delete(c"a.b").unwrap_err().raw_code()
+                );
+                assert_eq!(
+                    ((*raw.0).del_multivar.unwrap())(raw.0, c"a.b".as_ptr(), c".*".as_ptr()),
+                    b.delete_multivar(c"a.b", c".*").unwrap_err().raw_code()
+                );
+                assert_eq!(
+                    ((*raw.0).lock.unwrap())(raw.0),
+                    b.lock().err().unwrap().raw_code()
+                );
+            }
+            compare_get(&raw, &mut rust, c"a.b");
+            let mut snapshot = ptr::null_mut();
+            // SAFETY: exclusive live source and writable output; source kept live
+            // through the snapshot's one-time open before being dropped below.
+            assert_eq!(
+                // SAFETY: live exclusive source through the snapshot's open.
+                unsafe { ((*raw.0).snapshot.unwrap())(&mut snapshot, raw.0) },
+                0
+            );
+            let raw_snapshot = Raw(snapshot);
+            assert_eq!(raw_open(&raw_snapshot, ConfigLevel::LOCAL), 0);
+            let mut rust_snapshot = rust.as_mut().snapshot().unwrap();
+            drop((raw, rust));
+            compare_get(&raw_snapshot, &mut rust_snapshot, c"a.b");
+            compare_iterator(&raw_snapshot, &mut rust_snapshot);
+        }
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_failed_open_error_matches_c() {
+        let _runtime = libgit2::libgit2::core::global::init().unwrap();
+        for data in [
+            b"[unterminated".as_slice(),
+            b"[a]\nb=value\n[unterminated".as_slice(),
+        ] {
+            let raw = raw_string(data);
+            let rc = raw_open(&raw, ConfigLevel::LOCAL);
+            assert!(rc < 0);
+            let c_error = libgit2::libgit2::util::errors::last();
+            let error = Backend::from_string(data, None)
+                .unwrap()
+                .open(ConfigLevel::LOCAL)
+                .err()
+                .unwrap();
+            assert_eq!(rc, error.raw_code());
+            assert_eq!(&c_error, error.error());
+        }
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_template_init_matches_c() {
+        let mut raw = MaybeUninit::uninit();
+        // SAFETY: writable slot for the supported version's complete template.
+        assert_eq!(
+            // SAFETY: complete writable slot for the supported template.
+            unsafe {
+                ffi::git_config_init_backend(raw.as_mut_ptr(), ffi::GIT_CONFIG_BACKEND_VERSION)
+            },
+            0
+        );
+        // SAFETY: successful init initialized every field.
+        let raw = unsafe { raw.assume_init() };
+        let rust = Backend::new();
+        assert_eq!(raw.version, rust.as_ref().version());
+        assert_eq!(raw.readonly, rust.as_ref().readonly_raw());
+        assert_eq!(raw.cfg.is_null(), rust.as_ref().config_identity().is_none());
+        assert!(raw.open.is_none() && raw.free.is_none());
+    }
+}

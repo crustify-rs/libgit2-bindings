@@ -647,13 +647,13 @@ impl<'a, 'c> IteratorRef<'a, 'c> {
     }
 
     /// Nullable borrowed backend, never an owner. Built-in iterators leave it
-    /// NULL. This raw seam is temporary until `git_config_backend` is wrapped;
-    /// the pointer must not be dereferenced after the iterator's dependencies die.
+    /// NULL. The handle is tied to the iterator borrow and never owns the backend.
     ///
     /// Field: git_config_iterator.backend
-    pub fn backend_raw(&self) -> Option<NonNull<ffi::git_config_backend>> {
-        // SAFETY: reads only the initialized pointer slot, not its referent.
-        NonNull::new(unsafe { addr_of!((*self.as_ptr()).backend).read() })
+    pub fn backend(&self) -> Option<BackendRef<'a>> {
+        // SAFETY: the iterator contract keeps its stored backend alive and unchanged
+        // for its dependency lifetime, which outlives this shared handle.
+        unsafe { BackendRef::from_ptr(addr_of!((*self.as_ptr()).backend).read()) }
     }
 
     /// Allocation-matched dispatch, not a detachable C function pointer. The
@@ -690,16 +690,30 @@ impl<'a, 'c> IteratorMut<'a, 'c> {
         unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(flags) }
     }
 
-    /// Replaces a stored backend borrow without freeing the old one. Temporary
-    /// raw seam for the unavailable higher-layer backend wrapper.
+    /// Replaces a stored backend borrow without freeing the old one. The lifetime
+    /// is typed; allocation-specific callback compatibility remains a caller duty.
     ///
     /// # Safety
-    /// The new backend is NULL or live for `'c` (including destruction), and
-    /// replacing it preserves the enclosing iterator's next/free callback
-    /// invariants. No operation may mutate/free it incompatibly while retained.
-    /// In particular, a custom iterator may require its original backend.
-    pub unsafe fn set_backend_raw(&mut self, backend: Option<NonNull<ffi::git_config_backend>>) {
-        let backend = backend.map_or(ptr::null_mut(), NonNull::as_ptr);
+    /// The enclosing iterator's next/free callbacks must accept the supplied
+    /// backend (including None) and leave its metadata unchanged through every
+    /// call; they may not free it or mutate it incompatibly with the shared
+    /// borrow. A custom iterator may require its original backend. The typed
+    /// borrow already guarantees liveness through the dependency lifetime.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::Config;
+    /// use libgit2::libgit2::config::sys::config::Backend;
+    /// let config = Config::new().unwrap();
+    /// let mut iter = config.as_ref().iterator().unwrap();
+    /// {
+    ///     let backend = Backend::new();
+    ///     // This built-in iterator ignores the slot, but cannot retain a dead borrow.
+    ///     unsafe { iter.as_mut().set_backend(Some(backend.as_ref())) };
+    /// }
+    /// drop(iter);
+    /// ```
+    pub unsafe fn set_backend(&mut self, backend: Option<BackendRef<'c>>) {
+        let backend = backend.map_or(ptr::null_mut(), |b| b.as_ptr().cast_mut());
         // SAFETY: exclusive access to the slot; the caller guarantees keepalive
         // and compatibility with the enclosing allocation's callbacks.
         unsafe { addr_of_mut!((*self.as_mut_ptr()).backend).write(backend) }
@@ -909,12 +923,477 @@ impl fmt::Debug for IteratorRef<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Iterator")
             .field("flags", &self.flags())
-            .field("backend", &self.backend_raw())
+            .field("backend", &self.backend())
             .finish_non_exhaustive()
     }
 }
 
 impl fmt::Debug for IteratorMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+define_ctype!(
+    /// Layout-compatible backend base. Callbacks belong to the complete enclosing
+    /// allocation: they cannot be replaced or detached from that allocation.
+    /// Shared handles only inspect metadata; all dispatch requires exclusivity.
+    /// No Send/Sync or Clone is asserted for arbitrary third-party backends.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::Backend;
+    /// let backend = Backend::from_string(b"[a]\nb=c\n", None).unwrap()
+    ///     .open(libgit2::libgit2::config::config::ConfigLevel::LOCAL).unwrap();
+    /// let view = backend.as_ref();
+    /// drop(backend);
+    /// assert_eq!(view.version(), 1);
+    /// ```
+    ///
+    /// Wraps: git_config_backend
+    Backend, BackendRef, BackendMut, ffi::git_config_backend
+);
+
+/// Release dispatch selected by the allocation, not by another backend's vtable.
+///
+/// Wraps: git_config_backend_free
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BackendFree;
+
+// SAFETY: owners adopt complete backend allocations with their matching free
+// callback; dispatch consumes exactly one allocation, including its owned fields.
+unsafe impl CDrop<Backend> for BackendFree {
+    unsafe fn c_drop(&self, p: NonNull<Backend>) {
+        let p = p.as_ptr().cast::<ffi::git_config_backend>();
+        // SAFETY: the owned complete allocation has an initialized matching callback.
+        let free = unsafe { addr_of!((*p).free).read() }.expect("backend lacks free callback");
+        // SAFETY: caller surrenders the sole owner and all borrowed dependencies live.
+        unsafe { free(p) };
+    }
+}
+
+/// Sole owner of an opened backend. A snapshot is a distinct read-only owner,
+/// not a bytewise clone or an additional reference to this allocation.
+///
+/// The ffibox adoption seam requires a complete, exclusively owned, already
+/// opened backend with allocation-matched callbacks obeying this public C
+/// interface: get acquires an immutable independently retained entry; iterator
+/// owns its result; snapshot yields independently owned storage after open;
+/// input strings are not retained; snapshots set readonly nonzero. NULL slots
+/// are permitted and return errors.
+/// Repository/other external dependencies must remain live through destruction;
+/// use a lifetime-carrying owner instead for storage that retains such borrows.
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::sys::config::BackendBox;
+/// fn send(backend: BackendBox) { std::thread::spawn(move || drop(backend)); }
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::sys::config::BackendBox;
+/// fn duplicate(backend: BackendBox) { let _ = backend.clone(); }
+/// ```
+pub type BackendBox = ffibox::CBox<Backend, BackendFree>;
+
+/// Construction phase: only metadata and a consuming one-time open are available.
+/// C retains stable storage throughout initialization; failure frees it normally.
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::sys::config::Backend;
+/// let mut pending = Backend::from_string(b"[a]\nb=c\n", None).unwrap();
+/// pending.as_mut().get(c"a.b").unwrap();
+/// ```
+///
+/// Handwritten
+pub struct UnopenedBackend(BackendBox);
+
+/// Non-dereferenceable identity of C's registration back-pointer. It may be stale:
+/// open_level shares a backend and does not keep the original registering config
+/// alive. No C consumer reads this field. It is not an owned or live ConfigRef.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BackendConfigIdentity(NonNull<ffi::git_config>);
+
+impl Backend {
+    /// Inert implementation template, not an opened enclosing backend allocation.
+    /// Missing callbacks produce errors, never calls through NULL. No resource is
+    /// owned by this inline value and it must not be adopted as a BackendBox.
+    ///
+    /// Wraps: git_config_init_backend
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::uninit();
+        // SAFETY: supported version initializes the entire exclusive output slot;
+        // initialization only copies a template and retains no pointers.
+        let rc = unsafe {
+            ffi::git_config_init_backend(raw.as_mut_ptr(), ffi::GIT_CONFIG_BACKEND_VERSION)
+        };
+        assert_eq!(rc, 0, "backend init refused its own version");
+        // SAFETY: successful init wrote every field, including nullable callbacks.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Copies configuration bytes and options; parsing occurs during one-time open.
+    /// Empty and non-UTF-8 input are allowed. No input borrow is retained.
+    ///
+    /// Wraps: git_config_backend_from_string
+    pub fn from_string(
+        data: &[u8],
+        options: Option<BackendMemoryOptionsRef<'_, '_>>,
+    ) -> Result<UnopenedBackend, ConfigError> {
+        if !crate::libgit2::util::sys::errors::runtime_pinned() {
+            return Err(backend_error());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: input covers data.len bytes, out is writable, and C only reads
+        // options and copies its strings; it does not mutate or retain that struct.
+        let rc = unsafe {
+            ffi::git_config_backend_from_string(
+                &mut out,
+                data.as_ptr().cast(),
+                data.len(),
+                options.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut()),
+            )
+        };
+        backend_status(rc)?;
+        // SAFETY: success returned one complete memory allocation with its matching
+        // free callback; its copied data/options need no external keepalive.
+        Ok(UnopenedBackend(
+            unsafe { BackendBox::from_c(out) }.expect("backend constructor returned NULL"),
+        ))
+    }
+
+    /// Copies key=value strings. C subtracts a NULL strchr result for a missing
+    /// '=' during open, so malformed pairs are rejected before entering C.
+    ///
+    /// Wraps: git_config_backend_from_values
+    pub fn from_values(
+        values: &[&CStr],
+        options: Option<BackendMemoryOptionsRef<'_, '_>>,
+    ) -> Result<UnopenedBackend, ConfigError> {
+        if !crate::libgit2::util::sys::errors::runtime_pinned() {
+            return Err(backend_error());
+        }
+        if values.iter().any(|v| !v.to_bytes().contains(&b'=')) {
+            crate::libgit2::util::sys::errors::set(
+                crate::libgit2::util::errors::ErrorClass::Config,
+                c"expected key=value pair",
+            );
+            return Err(ConfigError::from_libgit2(ffi::GIT_EINVALIDSPEC));
+        }
+        let pointers: Vec<_> = values.iter().map(|v| v.as_ptr()).collect();
+        let mut out = ptr::null_mut();
+        // SAFETY: readable array and strings for the call, writable out. C copies
+        // each string and reads/copies options without retaining either input.
+        let rc = unsafe {
+            ffi::git_config_backend_from_values(
+                &mut out,
+                pointers.as_ptr().cast_mut(),
+                pointers.len(),
+                options.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut()),
+            )
+        };
+        backend_status(rc)?;
+        // SAFETY: fresh complete allocation paired with its own free callback.
+        Ok(UnopenedBackend(
+            unsafe { BackendBox::from_c(out) }.expect("backend constructor returned NULL"),
+        ))
+    }
+}
+
+impl Default for Backend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn backend_error() -> ConfigError {
+    ConfigError::from_libgit2(ffi::GIT_ERROR)
+}
+fn backend_status(rc: i32) -> Result<(), ConfigError> {
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(ConfigError::from_libgit2(rc))
+    }
+}
+
+impl UnopenedBackend {
+    pub fn as_ref(&self) -> BackendRef<'_> {
+        self.0.as_ref()
+    }
+
+    /// Opens once, without repository-dependent includes. Memory constructors
+    /// ignore repo. Repository-retaining custom/file constructors are not exposed
+    /// by this phase type and require a lifetime-carrying owner when scheduled.
+    pub fn open(
+        self,
+        level: crate::libgit2::config::config::ConfigLevel,
+    ) -> Result<BackendBox, ConfigError> {
+        BackendOpen.call(self, level)
+    }
+}
+
+/// One-time initialization callable; never accepts an already opened backend.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BackendOpen;
+impl BackendOpen {
+    pub fn call(
+        &self,
+        mut backend: UnopenedBackend,
+        level: crate::libgit2::config::config::ConfigLevel,
+    ) -> Result<BackendBox, ConfigError> {
+        let p = backend.0.as_mut().as_mut_ptr();
+        // SAFETY: initialized allocation-specific vtable; missing slot is checked.
+        let open = unsafe { addr_of!((*p).open).read() }.ok_or_else(backend_error)?;
+        // SAFETY: construction phase owns the entire allocation exclusively; NULL
+        // repo is supported, and only this consuming call can initialize it.
+        backend_status(unsafe { open(p, level.raw(), ptr::null()) })?;
+        Ok(backend.0)
+    }
+}
+
+impl BackendFree {
+    pub fn release(self, backend: BackendBox) {
+        drop(backend);
+    }
+}
+
+impl BackendRef<'_> {
+    /// Field: git_config_backend.version
+    pub fn version(&self) -> u32 {
+        // SAFETY: initialized scalar under the shared handle.
+        unsafe { addr_of!((*self.as_ptr()).version).read() }
+    }
+    /// C's integer flag, preserving noncanonical true values.
+    /// Field: git_config_backend.readonly
+    pub fn readonly_raw(&self) -> i32 {
+        // SAFETY: initialized scalar under the shared handle.
+        unsafe { addr_of!((*self.as_ptr()).readonly).read() }
+    }
+    pub fn is_readonly(&self) -> bool {
+        self.readonly_raw() != 0
+    }
+
+    /// Identity only: registering configurations can die before shared backends.
+    /// Field: git_config_backend.cfg
+    pub fn config_identity(&self) -> Option<BackendConfigIdentity> {
+        // SAFETY: reads the pointer slot only, never its possibly stale referent.
+        NonNull::new(unsafe { addr_of!((*self.as_ptr()).cfg).read() }).map(BackendConfigIdentity)
+    }
+    /// Field: git_config_backend.open
+    pub fn open_callback(&self) -> BackendOpen {
+        BackendOpen
+    }
+    /// Field: git_config_backend.free
+    pub fn release_policy(&self) -> BackendFree {
+        BackendFree
+    }
+    /// A callable which can only consume a transaction, not unlock an unrelated
+    /// backend or a borrowed allocation that has not been locked.
+    /// Field: git_config_backend.unlock
+    pub fn unlock_callback(&self) -> BackendUnlock {
+        BackendUnlock
+    }
+}
+
+impl BackendMut<'_> {
+    /// Acquires a retained immutable entry, independent of the backend lifetime.
+    /// Writable backends are first copied through their iterator. This avoids C's
+    /// file-get callback returning an uninitialized status after refresh failure.
+    /// Field: git_config_backend.get
+    pub fn get(&mut self, key: &CStr) -> Result<BackendEntryArc, ConfigError> {
+        if !self.as_ref().is_readonly() {
+            return self.snapshot()?.as_mut().get(key);
+        }
+        let p = self.as_mut_ptr();
+        // SAFETY: live initialized vtable; missing callback is checked.
+        let get = unsafe { addr_of!((*p).get).read() }.ok_or_else(backend_error)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: exclusive opened backend, readable key for this call, writable
+        // out. Read-only built-ins never refresh and retain returned entry storage.
+        backend_status(unsafe { get(p, key.as_ptr(), &mut out) })?;
+        // SAFETY: success acquires one reference with its matching free callback.
+        Ok(unsafe { BackendEntryArc::from_c(out) }.expect("backend get returned NULL"))
+    }
+
+    /// Borrows this exclusive handle for the entire iterator lifetime. Entries
+    /// lent by the iterator cannot alias a subsequent advance or backend write.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendMut;
+    /// fn alias(mut backend: BackendMut<'_>) {
+    ///     let iter = backend.iterator().unwrap();
+    ///     backend.set(c"a.b", c"new").unwrap();
+    ///     drop(iter);
+    /// }
+    /// ```
+    ///
+    /// Field: git_config_backend.iterator
+    pub fn iterator(&mut self) -> Result<IteratorBox<'_>, ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized live vtable, with NULL checked.
+        let iterator = unsafe { addr_of!((*p).iterator).read() }.ok_or_else(backend_error)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: exclusive opened backend, writable output; result retains its
+        // own entries and any borrowed backend remains frozen for this reborrow.
+        backend_status(unsafe { iterator(&mut out, p) })?;
+        // SAFETY: fresh complete iterator with its own matched free callback;
+        // backend dependencies cannot die or be mutated until this owner dies.
+        Ok(unsafe { IteratorBox::from_c(out) }.expect("backend iterator returned NULL"))
+    }
+
+    /// Immediately opens the new snapshot while its source is still borrowed.
+    /// The snapshot stores a source pointer used only during that one-time open;
+    /// subsequent get/iterator/free operations never dereference it.
+    /// Field: git_config_backend.snapshot
+    pub fn snapshot(&mut self) -> Result<BackendBox, ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized live allocation-specific callback.
+        let snapshot = unsafe { addr_of!((*p).snapshot).read() }.ok_or_else(backend_error)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: exclusive live source and writable output. C constructs a fresh
+        // snapshot borrowing source only until its one-time open below completes.
+        backend_status(unsafe { snapshot(&mut out, p) })?;
+        // SAFETY: success transfers a complete snapshot allocation and matching
+        // free callback; self remains live through its synchronous initialization.
+        let pending =
+            UnopenedBackend(unsafe { BackendBox::from_c(out) }.expect("snapshot returned NULL"));
+        pending.open(crate::libgit2::config::config::ConfigLevel::LOCAL)
+    }
+
+    /// Field: git_config_backend.set
+    pub fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized matching vtable; absent callback is rejected.
+        let set = unsafe { addr_of!((*p).set).read() }.ok_or_else(backend_error)?;
+        // SAFETY: exclusive opened backend, C reads/copies strings within the call.
+        backend_status(unsafe { set(p, key.as_ptr(), value.as_ptr()) })
+    }
+    /// Field: git_config_backend.set_multivar
+    pub fn set_multivar(
+        &mut self,
+        key: &CStr,
+        regexp: &CStr,
+        value: &CStr,
+    ) -> Result<(), ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized matching vtable; absent callback is rejected.
+        let set = unsafe { addr_of!((*p).set_multivar).read() }.ok_or_else(backend_error)?;
+        // SAFETY: exclusive opened backend; strings are readable for this call only.
+        backend_status(unsafe { set(p, key.as_ptr(), regexp.as_ptr(), value.as_ptr()) })
+    }
+    /// Field: git_config_backend.del
+    pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized matching vtable; absent callback is rejected.
+        let delete = unsafe { addr_of!((*p).del).read() }.ok_or_else(backend_error)?;
+        // SAFETY: exclusive opened backend; key is read only during this call.
+        backend_status(unsafe { delete(p, key.as_ptr()) })
+    }
+    /// Field: git_config_backend.del_multivar
+    pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized matching vtable; absent callback is rejected.
+        let delete = unsafe { addr_of!((*p).del_multivar).read() }.ok_or_else(backend_error)?;
+        // SAFETY: exclusive opened backend; strings readable only for this call.
+        backend_status(unsafe { delete(p, key.as_ptr(), regexp.as_ptr()) })
+    }
+
+    /// An exclusive transaction, not a mutex: file locks permit updates through
+    /// the transaction and commit/rollback on finish. No Send/Sync is asserted.
+    /// Field: git_config_backend.lock
+    pub fn lock(&mut self) -> Result<BackendTransaction<'_>, ConfigError> {
+        let p = self.as_mut_ptr();
+        // SAFETY: initialized matching callbacks; check unlock before acquiring.
+        let lock = unsafe { addr_of!((*p).lock).read() }.ok_or_else(backend_error)?;
+        // SAFETY: initialized matching callback under exclusive access.
+        let unlock = unsafe { addr_of!((*p).unlock).read() }.ok_or_else(backend_error)?;
+        // SAFETY: exclusive backend, no nested transaction can survive this borrow.
+        backend_status(unsafe { lock(p) })?;
+        Ok(BackendTransaction {
+            backend: self.as_mut(),
+            unlock: Some(unlock),
+        })
+    }
+}
+
+/// Exclusive transaction; dropping rolls back. It cannot expose an unrestricted
+/// mutable backend handle (which would allow reentrant locking).
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::sys::config::BackendMut;
+/// fn reenter(mut backend: BackendMut<'_>) {
+///     let transaction = backend.lock().unwrap();
+///     backend.lock().unwrap();
+///     transaction.finish(false).unwrap();
+/// }
+/// ```
+///
+/// Handwritten
+pub struct BackendTransaction<'a> {
+    backend: BackendMut<'a>,
+    unlock: Option<unsafe extern "C" fn(*mut ffi::git_config_backend, i32) -> i32>,
+}
+impl BackendTransaction<'_> {
+    pub fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        self.backend.set(key, value)
+    }
+    pub fn set_multivar(
+        &mut self,
+        key: &CStr,
+        regexp: &CStr,
+        value: &CStr,
+    ) -> Result<(), ConfigError> {
+        self.backend.set_multivar(key, regexp, value)
+    }
+    pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
+        self.backend.delete(key)
+    }
+    pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        self.backend.delete_multivar(key, regexp)
+    }
+    pub fn finish(self, commit: bool) -> Result<(), ConfigError> {
+        BackendUnlock.call(self, commit)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BackendUnlock;
+impl BackendUnlock {
+    pub fn call(
+        &self,
+        mut transaction: BackendTransaction<'_>,
+        commit: bool,
+    ) -> Result<(), ConfigError> {
+        let unlock = transaction
+            .unlock
+            .take()
+            .expect("transaction already finished");
+        // SAFETY: matching callback consumes this transaction's successful lock
+        // once; source remains exclusively borrowed until after the call returns.
+        backend_status(unsafe { unlock(transaction.backend.as_mut_ptr(), i32::from(commit)) })
+    }
+}
+impl Drop for BackendTransaction<'_> {
+    fn drop(&mut self) {
+        if let Some(unlock) = self.unlock.take() {
+            // SAFETY: matching callback rolls back the one successful lock; its
+            // exclusive backend borrow is still live, and finish did not unlock.
+            let rc = unsafe { unlock(self.backend.as_mut_ptr(), 0) };
+            assert_eq!(rc, 0, "backend rollback failed");
+        }
+    }
+}
+
+impl fmt::Debug for BackendRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Backend")
+            .field("version", &self.version())
+            .field("readonly", &self.readonly_raw())
+            .field("config", &self.config_identity())
+            .finish_non_exhaustive()
+    }
+}
+impl fmt::Debug for BackendMut<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_ref().fmt(f)
     }
@@ -1237,7 +1716,7 @@ mod unit_tests {
             let mut m = IteratorMut(IteratorRef(unsafe { CBorrowedPtr::new(p) }), PhantomData);
             m.as_mut().set_flags(u32::MAX);
             assert_eq!(m.as_ref().flags(), u32::MAX);
-            assert!(m.as_ref().backend_raw().is_none());
+            assert!(m.as_ref().backend().is_none());
             let callback = m.as_ref().next_callback();
             assert_eq!(
                 callback.call(&mut m).unwrap().unwrap().entry().name(),
@@ -1461,5 +1940,250 @@ mod unit_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod backend_unit_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct State {
+        locked: Cell<bool>,
+        writes: Cell<usize>,
+        commits: Cell<usize>,
+        rollbacks: Cell<usize>,
+        frees: Cell<usize>,
+    }
+    #[repr(C)]
+    struct Mock {
+        base: ffi::git_config_backend,
+        state: Rc<State>,
+    }
+    unsafe fn state<'a>(p: *mut ffi::git_config_backend) -> &'a State {
+        // SAFETY: mock callbacks are installed only on complete Mock Boxes. The
+        // reference covers the Rust-owned payload, not the projected C base.
+        unsafe { &*addr_of!((*p.cast::<Mock>()).state) }
+    }
+    unsafe extern "C" fn lock(p: *mut ffi::git_config_backend) -> i32 {
+        // SAFETY: matched Mock callback, allocation live for this call.
+        let s = unsafe { state(p) };
+        assert!(!s.locked.replace(true));
+        0
+    }
+    unsafe extern "C" fn unlock(p: *mut ffi::git_config_backend, commit: i32) -> i32 {
+        // SAFETY: matched Mock callback, allocation live for this call.
+        let s = unsafe { state(p) };
+        assert!(s.locked.replace(false));
+        let counter = if commit != 0 {
+            &s.commits
+        } else {
+            &s.rollbacks
+        };
+        counter.set(counter.get() + 1);
+        0
+    }
+    unsafe extern "C" fn set(
+        p: *mut ffi::git_config_backend,
+        _key: *const core::ffi::c_char,
+        _value: *const core::ffi::c_char,
+    ) -> i32 {
+        // SAFETY: matched Mock callback, allocation live for this call.
+        let s = unsafe { state(p) };
+        s.writes.set(s.writes.get() + 1);
+        0
+    }
+    unsafe extern "C" fn set_multivar(
+        p: *mut ffi::git_config_backend,
+        key: *const core::ffi::c_char,
+        _regexp: *const core::ffi::c_char,
+        value: *const core::ffi::c_char,
+    ) -> i32 {
+        // SAFETY: forwards the same matched allocation and unused string inputs.
+        unsafe { set(p, key, value) }
+    }
+    unsafe extern "C" fn delete(
+        p: *mut ffi::git_config_backend,
+        key: *const core::ffi::c_char,
+    ) -> i32 {
+        // SAFETY: forwards the same matched allocation and unused key input.
+        unsafe { set(p, key, ptr::null()) }
+    }
+    unsafe extern "C" fn delete_multivar(
+        p: *mut ffi::git_config_backend,
+        key: *const core::ffi::c_char,
+        _regexp: *const core::ffi::c_char,
+    ) -> i32 {
+        // SAFETY: forwards the same matched allocation and unused key input.
+        unsafe { delete(p, key) }
+    }
+    unsafe extern "C" fn free(p: *mut ffi::git_config_backend) {
+        // SAFETY: called once with the sole owner of the exact offset-zero Box.
+        let mock = unsafe { Box::from_raw(p.cast::<Mock>()) };
+        assert!(!mock.state.locked.get());
+        mock.state.frees.set(mock.state.frees.get() + 1);
+    }
+    fn fixture() -> (BackendBox, Rc<State>) {
+        let state = Rc::new(State::default());
+        let raw = ffi::git_config_backend {
+            version: 1,
+            readonly: 0,
+            lock: Some(lock),
+            unlock: Some(unlock),
+            set: Some(set),
+            set_multivar: Some(set_multivar),
+            del: Some(delete),
+            del_multivar: Some(delete_multivar),
+            free: Some(free),
+            ..ffi::git_config_backend::default()
+        };
+        let mock = Box::new(Mock {
+            base: raw,
+            state: state.clone(),
+        });
+        // SAFETY: fresh complete Mock allocation, offset-zero initialized ABI
+        // base with matching callbacks; no external borrow, strings not retained.
+        (
+            unsafe { BackendBox::from_c(Box::into_raw(mock).cast()) }.unwrap(),
+            state,
+        )
+    }
+    #[test]
+    fn backend_transactions_release_once_and_reborrow() {
+        let (mut backend, state) = fixture();
+        let unlock = backend.as_ref().unlock_callback();
+        {
+            let mut b = backend.as_mut();
+            let mut transaction = b.lock().unwrap();
+            transaction.set(c"a.b", c"v").unwrap();
+            transaction.set_multivar(c"a.b", c".*", c"v").unwrap();
+            transaction.delete(c"a.b").unwrap();
+            transaction.delete_multivar(c"a.b", c".*").unwrap();
+            unlock.call(transaction, true).unwrap();
+            b.lock().unwrap().finish(false).unwrap();
+            drop(b.as_mut().lock().unwrap());
+        }
+        assert_eq!(state.writes.get(), 4);
+        assert_eq!(state.commits.get(), 1);
+        assert_eq!(state.rollbacks.get(), 2);
+        assert_eq!(state.frees.get(), 0);
+        backend.as_ref().release_policy().release(backend);
+        assert_eq!(state.frees.get(), 1);
+    }
+    unsafe extern "C" fn snapshot(
+        out: *mut *mut ffi::git_config_backend,
+        _source: *mut ffi::git_config_backend,
+    ) -> i32 {
+        let data = b"[a]\nb=value\n";
+        // SAFETY: callback supplies a writable output slot; the pinned C runtime
+        // copies this static input into a fresh matching-free memory allocation.
+        unsafe {
+            ffi::git_config_backend_from_string(
+                out,
+                data.as_ptr().cast(),
+                data.len(),
+                ptr::null_mut(),
+            )
+        }
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C snapshot constructors")]
+    fn writable_get_opens_independent_snapshot_and_missing_open_cleans_up() {
+        assert!(crate::libgit2::util::sys::errors::runtime_pinned());
+        let (mut backend, state) = fixture();
+        let p = backend.as_mut().as_mut_ptr();
+        // SAFETY: exclusive fixture allocation, installs an allocation-compatible
+        // independently owning snapshot callback before any handle is shared.
+        unsafe { addr_of_mut!((*p).snapshot).write(Some(snapshot)) };
+        let entry = backend.as_mut().get(c"a.b").unwrap();
+        drop(backend);
+        assert_eq!(state.frees.get(), 1);
+        assert_eq!(entry.as_ref().entry().value(), Some(c"value"));
+        let (backend, state) = fixture();
+        // This pending fixture has a real matching free but no open slot.
+        assert!(
+            BackendOpen
+                .call(
+                    UnopenedBackend(backend),
+                    crate::libgit2::config::config::ConfigLevel::LOCAL
+                )
+                .is_err()
+        );
+        assert_eq!(state.frees.get(), 1);
+        assert!(backend_status(1).is_err());
+    }
+    #[test]
+    fn backend_rust_layout_and_stale_identity_are_not_dereferenced() {
+        assert_eq!(
+            core::mem::size_of::<Backend>(),
+            core::mem::size_of::<ffi::git_config_backend>()
+        );
+        assert_eq!(
+            core::mem::align_of::<Backend>(),
+            core::mem::align_of::<ffi::git_config_backend>()
+        );
+        let config = NonNull::<ffi::git_config>::dangling().as_ptr();
+        let mut backend = Backend(
+            ffi::git_config_backend {
+                version: u32::MAX,
+                readonly: -7,
+                cfg: config,
+                ..Default::default()
+            },
+            PhantomData,
+        );
+        assert!(backend.as_ref().config_identity().is_some());
+        assert_eq!(backend.as_ref().version(), u32::MAX);
+        assert_eq!(backend.as_mut().as_ref().readonly_raw(), -7);
+        assert!(backend.as_ref().is_readonly());
+        let r = backend.as_ref();
+        assert_eq!(r.config_identity(), r.config_identity());
+        assert!(format!("{r:?}").contains("-7"));
+        assert!(format!("{:?}", backend.as_mut()).contains("-7"));
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "error construction calls C")]
+    fn backend_missing_slots_reject_before_ffi_dispatch() {
+        let mut backend = Backend::default();
+        assert_eq!(backend.as_ref().version(), ffi::GIT_CONFIG_BACKEND_VERSION);
+        assert!(!backend.as_ref().is_readonly());
+        assert!(backend.as_ref().config_identity().is_none());
+        let mut b = backend.as_mut();
+        assert!(b.get(c"a.b").is_err());
+        assert!(b.iterator().is_err());
+        assert!(b.snapshot().is_err());
+        assert!(b.set(c"a.b", c"v").is_err());
+        assert!(b.set_multivar(c"a.b", c".*", c"v").is_err());
+        assert!(b.delete(c"a.b").is_err());
+        assert!(b.delete_multivar(c"a.b", c".*").is_err());
+        assert!(b.lock().is_err());
+        let p = b.as_mut_ptr();
+        // SAFETY: exclusive inert template; changing its scalar leaves every
+        // field initialized and permits testing the absent read-only get slot.
+        unsafe { addr_of_mut!((*p).readonly).write(1) };
+        assert!(b.get(c"a.b").is_err());
+        let (mut backend, state) = fixture();
+        let p = backend.as_mut().as_mut_ptr();
+        // SAFETY: exclusive mock fixture, no lock held; remove unlock to check
+        // rejection before the otherwise valid lock callback can mutate state.
+        unsafe { addr_of_mut!((*p).unlock).write(None) };
+        assert!(backend.as_mut().lock().is_err());
+        assert!(!state.locked.get());
+        drop(backend);
+        assert_eq!(state.frees.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod backend_input_unit_tests {
+    use super::*;
+    #[test]
+    #[cfg_attr(miri, ignore = "pins foreign runtime")]
+    fn values_missing_equals_rejected_without_constructing_backend() {
+        let error = Backend::from_values(&[c"a.b"], None).err().unwrap();
+        assert_eq!(error.raw_code(), ffi::GIT_EINVALIDSPEC);
+        assert_eq!(error.message(), c"expected key=value pair");
     }
 }
