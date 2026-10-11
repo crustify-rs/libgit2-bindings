@@ -1,0 +1,967 @@
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+22 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running tests/ub_safe/main.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/16ae9b8797456113/out/ub_safe-16ae9b8797456113)
+
+running 616 tests
+test blob::empty_slices_are_not_read ... ok
+test blob::filter_flags::sets_cross_threads ... ok
+test blob::filter_options::options_cross_threads ... ok
+test blob::reading::contents_are_read_whole_through_every_holder ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test blob::filter_options::fields_through_every_handle ... ok
+test blob::concurrent_calls_share_nothing ... ok
+test blob::owner::object_conversions_move_one_reference ... ok
+test blob::owner::lookups_retain_no_id ... ok
+test blob::slice_written_between_calls ... ok
+test blob::slices_from_any_storage_and_alignment ... ok
+test blob::owner::clone_chains_release_every_reference_in_any_order ... ok
+test blob::owner::failures_leave_nothing_behind ... ok
+test blob::owner::lookups_and_clones_count_their_own_reference ... ok
+test buffer::buffers_cross_threads ... ok
+test buffer::empty_bare_buffer_in_rust_storage ... ok
+test buffer::moves_and_replacements_release_once ... ok
+test checkout::borrowed_sources_are_released_after_the_options ... ok
+test blob::owner::cached_blobs_are_shared_and_outlive_eviction ... ok
+test checkout::getters_outlive_the_handles_and_the_options ... ok
+test checkout::defaults_then_every_setter ... ok
+test blob::reading::filtered_buffers_outlive_their_blob ... ok
+test commit::arrays_go_before_their_repository ... ok
+test annotated_commit::from_fetchhead::frees_what_libgit2_built_when_a_copy_fails ... ok
+test annotated_commit::from_ref::frees_what_libgit2_built_when_the_name_copy_fails ... ok
+test annotated_commit::from_ref::description_copy_failure_adopts_nothing ... ok
+test buffer::buffers_shared_and_sent_across_threads ... ok
+test blob::writing::buffers_are_read_whole_and_only_during_the_call ... ok
+test blob::filter_options::libgit2_reads_options_in_place_for_the_call ... ok
+test commit::commit::failing_lookups_leave_nothing ... ok
+test commit::commit::refused_derivations_leave_nothing ... ok
+test blob::filter_flags::option_niche_holds_for_every_value ... ok
+test commit::commit::derived_owners_outlive_what_they_came_from ... ok
+test commit::commit::object_conversions_move_one_reference ... ok
+test commit::arrays_on_their_own_threads ... ok
+test commit::commits_move_between_arrays_and_outlive_them ... ok
+test commit::commit::owners_share_one_commit_and_release_in_every_order ... ok
+test blob::reading::shared_cached_blobs_lend_their_content ... ok
+test commit::create_ext_options::every_field_round_trips_on_every_holder ... ok
+test annotated_commit::lookup::every_object_and_id_type ... ok
+test commit::create_callback::panics_resume_and_leave_the_callback_usable ... ok
+test blob::reading::threads_read_blobs_of_their_own_repositories ... ok
+test commit::create_ext_options::reborrows_keep_one_writer ... ok
+test annotated_commit::lookup::results_drop_on_other_threads_while_the_cache_hands_out_more ... ok
+test blob::filter_flags::flags_stay_in_range_for_every_bit_pattern ... ok
+test checkout::a_boxed_baseline_index_is_read_then_released_after_the_options ... ok
+test checkout::a_shared_baseline_index_outlives_the_options_and_the_repository ... ok
+test checkout::options_sharing_a_baseline_tree_are_dropped_before_it ... ok
+test blob::filter_flags::flag_from_raw_yields_only_valid_flags ... ok
+test commit::create_options::every_field_round_trips_on_every_holder ... ok
+test commit::create_options::reborrows_keep_one_writer ... ok
+test commit::create_ext_options::libgit2_reads_the_options_for_the_call_only ... ok
+test commit::empty_arrays_never_reach_libgit2 ... ok
+test blob::writing::disk_files_are_filtered_inside_the_workdir_only ... ok
+test commit::header::copies_are_independent ... ok
+test annotated_commit::from_ref::every_reference_kind_outliving_the_reference ... ok
+test checkout::a_baseline_tree_is_read_then_released_after_the_options ... ok
+test blob::writing::pathless_and_bare_repositories_fail_cleanly ... ok
+test buffer::buffers_before_init ... ok
+test commit::header::reborrows_keep_one_writer ... ok
+test commit::header::every_field_round_trips_on_every_holder ... ok
+test commit::create_options::options_on_many_threads ... ok
+test commit::getters::results_borrow_from_the_commit_they_read ... ok
+test annotated_commit::from_fetchhead::every_id_type_and_string ... ok
+test commit::create_callback::arguments_are_lent_for_the_call ... ok
+test commit::filled_arrays_read_clear_and_release ... ok
+test commit::creating::inputs_are_read_for_the_call_only ... ok
+test commit::creating::options_and_amends_read_for_the_call_only ... ok
+test commit::getters::header_fields_are_owned_and_newlines_never_reach_c ... ok
+test blob::writing::filtered_writes_on_many_threads ... ok
+test commit::reading::bodies_are_cached_in_the_shared_commit ... ok
+test commit::creating::unwritable_inputs_are_refused_before_c ... ok
+test commit::creating::threads_write_into_their_own_repositories ... ok
+test commit::reading::mailmap_copies_are_owned ... ok
+test commit::header::headers_cross_threads ... ok
+test commit::signatures::foreign_ids_and_empty_fields_are_refused ... ok
+test commit::getters::crafted_commits_read_in_bounds ... ok
+test commit::signatures::failures_leave_nothing_behind ... ok
+test annotated_commit::from_revspec::every_revision_kind ... ok
+test blob::writing::workdir_files_are_read_through_their_filters ... ok
+test buffer::set_bytes_at_the_capacity_boundary ... ok
+test commit::reading::threads_read_commits_of_their_own_repositories ... ok
+test commit::signatures::signatures_on_many_threads ... ok
+test blob::exact_buffers_are_read_within_bounds ... ok
+test buffer::empty_buffer_drops_do_not_race_the_first_init ... ok
+test commit::signers::replaced_and_cleared_signers ... ok
+test commit::signers::signer_panics_resume_from_create_ext ... ok
+test commit::signatures::signatures_round_trip ... ok
+test buffer::libgit2_results_are_read_reused_and_released_once ... ok
+test commit::signers::signers_sign_each_commit_once ... ok
+test commit::signers::signers_on_many_threads ... ok
+test commit::reading::signatures_and_bodies_are_read_through_every_holder ... ok
+test config::configs_build_use_and_release ... ok
+test common::options::results_outlive_later_calls ... ok
+test checkout::options_on_threads_while_libgit2_initialises ... ok
+test config::shared_configs_release_each_reference_once ... ok
+test common::values_cross_threads ... ok
+test config::repository_config_reparses_against_its_live_repository ... ok
+test commit::commit::derived_owners_survive_eviction_and_a_disabled_cache ... ok
+test checkout::borrowed_strings_and_paths_from_every_source ... ok
+test commit::committing_on_head::every_routine_reads_heap_inputs_for_the_call_only ... ok
+test commit::committing_on_head::defaults_and_refusals_without_writing ... ok
+test commit::create_ext_options::reads_stay_inside_heap_borrows ... ok
+test commit::committing_on_head::unreadable_merge_heads_leave_cached_commits_alone ... ok
+test commit::commit::owners_survive_eviction_and_a_disabled_cache ... ok
+test commit::committing_on_head::every_routine_on_many_threads ... ok
+test commit::create_options::libgit2_reads_the_options_for_the_call_only ... ok
+test errors::enums_cross_threads ... ok
+test common::options::getters_race_nothing ... ok
+test common::from_key_yields_only_valid_options ... ok
+test commit::committing_on_head::signers_refuse_panic_and_reenter_through_every_routine ... ok
+test commit::committing_on_head::head_at_a_tag_or_a_tree_is_not_written_as_a_parent ... ok
+test common::library_option_niche_holds_for_every_value ... ok
+test commit::header::reads_stay_inside_heap_strings ... ok
+test commit::creating::references_are_moved_from_heap_names ... ok
+test commit::empty_drops_do_not_race_the_first_init ... ok
+test errors::reading_threads_release_their_state ... ok
+test common::from_raw_yields_only_valid_options ... ok
+test errors::option_niche_holds_for_every_value ... ok
+test commit::getters::results_of_fresh_commits_outlive_earlier_ones ... ok
+test common::options_cross_threads ... ok
+test errors::from_raw_yields_only_valid_classes ... ok
+test errors::from_raw_yields_only_valid_codes ... ok
+test errors::copies_outlive_their_thread ... ok
+test commit::create_options::signers_sign_through_the_options ... ok
+test global::runtime_is_send_and_sync ... ok
+test index::fresh_indexes_are_released_once ... ok
+test common::build_info_from_raw_yields_only_valid_items ... ok
+test index::open_copies_its_path ... ok
+test common::options::backend_and_build_info_need_no_initialisation ... ok
+test index::open_reads_a_written_index ... ok
+test index::open_refuses_unreadable_files ... ok
+test index::index_shared_with_a_repository_is_released_once ... ok
+test index::owners_are_pointer_sized ... ok
+test common::option_niche_holds_for_every_value ... ok
+test common::options::getters_before_initialisation ... ok
+test index::shared_box_is_released_once ... ok
+test errors::last_works_before_any_init ... ok
+test index::repository_outlives_its_shared_index ... ok
+test errors::copies_outlive_the_next_errors ... ok
+test common::options::getters_read_defaults ... ok
+test index::replaced_repository_index_stays_with_its_arc ... ok
+test index::shared_index_outlives_its_repository ... ok
+test index::open_reads_every_version_and_extension ... ok
+test errors::first_reads_race_to_pin_the_runtime ... ok
+test filter::handles_reborrow_and_drop_once ... ok
+test common::feature_from_raw_yields_only_valid_features ... ok
+test filter::constructors_build_lists_freed_once ... ok
+test index::typed_indexes_are_built_and_released_once ... ok
+test filter::failed_loads_build_nothing ... ok
+test filter::with_blob::ext_checks_see_the_id_and_the_list_keeps_no_blob ... ok
+test mailmap::lookups::refused_and_replaced_entries_leave_nothing_behind ... ok
+test commit::create_options::reads_stay_inside_heap_borrows ... ok
+test config::first_configs_race_to_init ... ok
+test mailmap::nul_bytes_are_refused_without_a_leak ... ok
+test mailmap::signatures::refused_signatures_leave_nothing_behind ... ok
+test filter::first_loads_on_threads_do_not_race ... ok
+test filter::owners_shorten_their_repository_borrow ... ok
+test filter::retained_repository_across_rust_reborrows ... ok
+test mailmap::every_constructor_builds_an_owner_freed_once ... ok
+test filter::with_blob::checks_see_the_id_and_the_list_keeps_no_blob ... ok
+test buffer::views_stay_in_bounds ... ok
+test global::cycling_races_pinning ... ok
+test message::blocks_ending_mid_trailer_read_back ... ok
+test filter::with_blob::edge_cases_build_nothing_and_leave_the_blob_alone ... ok
+test message::empty_arrays_move_without_c ... ok
+test mailmap::lookups::lookups_on_many_threads ... ok
+test mailmap::signatures::resolved_signatures_outlive_the_mailmap_and_the_input ... ok
+test blob::writing::writers_commit_or_discard_what_was_written ... ok
+test global::references_cross_threads ... ok
+test message::lifetimes_follow_the_strings ... ok
+test filter::with_blob::only_blobs_are_read ... ok
+test message::arrays_cross_threads ... ok
+test mailmap::lookups::entries_are_copied_and_resolved_strings_borrow_both_sides ... ok
+test message::moved_buffers_are_freed_once ... ok
+test message::prettify::messages_are_read_during_the_call_only ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test common::features_stay_in_range_for_every_bit_pattern ... ok
+test global::references_count_and_cycle ... ok
+test global::dropping_the_runtime_keeps_pinned_state ... ok
+test filter::threads_load_and_drop_their_own_lists ... ok
+test errors::copies_cross_threads_while_they_read ... ok
+test blob::owner::contents_of_every_size_read_back_exactly has been running for over 60 seconds
+test index::open_survives_truncated_and_corrupted_files ... ok
+test message::setters_replace_one_field_and_copies_are_independent ... ok
+test filter::with_blob::blob_of_another_repository ... ok
+test checkout::reborrows_keep_the_retained_pointers_valid has been running for over 60 seconds
+test checkout::reborrows_keep_the_retained_pointers_valid ... ok
+test message::trailers_cross_threads ... ok
+test object::each_repository_has_its_own_objects ... ok
+test message::parsed_arrays_read_back ... ok
+test object::clone_chains_release_every_reference_in_any_order ... ok
+test object::derived_objects_count_their_own_reference ... ok
+test object::id_options_are_read_by_c_between_reborrows ... ok
+test mailmap::signatures::signatures_resolve_on_many_threads ... ok
+test object::ids_and_owners_borrow_from_their_object ... ok
+test object::failures_leave_nothing_behind ... ok
+test object::kinds_short_ids_and_contents::content_checks_retain_no_pointer ... ok
+test index::open_survives_corrupted_version_4_files ... ok
+test index::threads_build_their_own_indexes ... ok
+test object::lookups_and_clones_share_one_object ... ok
+test object::owners_of_written_objects ... ok
+test object::prefix_lengths_from_four_to_past_the_end ... ok
+test object::lookups_retain_no_id ... ok
+test object::type_mismatch_message ... ok
+test mailmap::mailmaps_cross_threads ... ok
+test object::kinds_short_ids_and_contents::short_ids_outlive_their_objects ... ok
+test object::refused_derivations_leave_nothing_behind ... ok
+test object::unparsable_objects_fail_and_leave_nothing_behind ... ok
+test oid::a_full_shortener_keeps_failing_safely ... ignored, tens of thousands of additions stall BorrowSanitizer; the other variants run it
+test odb::handles_are_lent_again_and_again ... ok
+test oid::copies_of_any_byte_pattern ... ok
+test index::open_survives_corrupted_extensions has been running for over 60 seconds
+test message::getters_return_the_stored_strings ... ok
+test object::id_options_apply_the_list_they_borrow ... ok
+test oid::from_prefix_reads_only_its_slice ... ok
+test mailmap::adversarial_buffers_parse_without_ub has been running for over 60 seconds
+test oid::from_raw_reads_exactly_the_type_size ... ok
+test object::derived_objects_outlive_cache_eviction ... ok
+test oid::from_string_reads_within_the_string ... ok
+test mailmap::repository_mailmaps_outlive_their_repository has been running for over 60 seconds
+test oid::hashes_read_within_the_oid ... ok
+test oid::oid_copies_cross_threads ... ok
+test message::prettify::prettify_on_many_threads ... ok
+test oid::oids_cross_threads ... ok
+test oid::shortener_lifetime_follows_its_strings ... ok
+test odb::failed_and_nested_opens_release_everything ... ok
+test oid::shorteners_are_freed_once_on_any_thread ... ok
+test oid::types_cross_threads ... ok
+test object::kinds_short_ids_and_contents::first_checks_race_initialisation ... ok
+test oid::views_stay_in_bounds ... ok
+test object::ids_of_files_apply_the_list_they_borrow ... ok
+test object::ids_of_files_read_them_whole has been running for over 60 seconds
+test object::kinds_short_ids_and_contents::content_checks_read_only_their_bytes has been running for over 60 seconds
+test oidarray::arrays_cross_threads ... ok
+test object::kinds_short_ids_and_contents::names_are_read_up_to_their_nul has been running for over 60 seconds
+test oid::from_raw_yields_only_valid_types ... ok
+test oid::thread_strings_are_copied_out_on_every_thread ... ok
+test object::without_a_cache_each_lookup_is_a_fresh_object ... ok
+test odb::a_repository_shares_the_odb_in_either_drop_order ... ok
+test object::owners_outlive_cache_eviction ... ok
+test oidarray::copies_are_independent ... ok
+test oidarray::empty_bare_array_in_rust_storage ... ok
+test odb::odbs_are_shared_and_sent_across_threads ... ok
+test odb::first_constructors_race_to_pin_the_runtime ... ok
+test oidarray::handles_reborrow ... ok
+test oid::formatters_before_init_pin_the_runtime ... ok
+test refdb::handles_reborrow_and_drop_once ... ok
+test oid::option_niche_holds_for_every_value ... ok
+test refdb::owners_shorten_their_repository_borrow ... ok
+test refdb::refdb_type::conversions_agree_across_threads ... ok
+test odb::every_constructor_builds_and_releases has been running for over 60 seconds
+test oidarray::arrays_shared_and_moved_across_threads ... ok
+test oid::add_reads_forty_digits_of_ids_it_keeps has been running for over 60 seconds
+test oid::comparisons_read_within_their_operands has been running for over 60 seconds
+test oid::constructors_before_init_pin_the_runtime has been running for over 60 seconds
+test oid::formatters_write_within_exact_buffers has been running for over 60 seconds
+test refdb::owners_drop_in_any_order ... ok
+test oid::kept_ids_are_shared_with_rust_readers has been running for over 60 seconds
+test oid::malformed_ids_leave_the_shortener_untouched has been running for over 60 seconds
+test oid::shortener_first_before_init has been running for over 60 seconds
+test oid::sizes_stay_within_a_git_oid has been running for over 60 seconds
+test oid::shortener_first_before_init ... ok
+test oidarray::arrays_before_init has been running for over 60 seconds
+test oidarray::buffers_move_between_arrays_and_owners has been running for over 60 seconds
+test oidarray::empty_array_drops_do_not_race_the_first_init has been running for over 60 seconds
+test oidarray::replacements_release_each_buffer_once has been running for over 60 seconds
+test oid::sizes_stay_within_a_git_oid ... ok
+test oidarray::views_stay_in_bounds has been running for over 60 seconds
+test refdb::refdb_type::from_raw_yields_only_valid_types has been running for over 60 seconds
+test refdb::refdb_type::option_niche_holds has been running for over 60 seconds
+test refdb::threads_open_and_drop_their_own_refdbs has been running for over 60 seconds
+test refs::clone_from_replaces_a_reference_with_a_copy has been running for over 60 seconds
+test refs::constructors_copy_their_arguments has been running for over 60 seconds
+test refs::copies_outlive_their_originals has been running for over 60 seconds
+test refs::copy_chains_release_every_copy_in_any_order has been running for over 60 seconds
+test refs::first_constructors_race_to_pin_the_runtime has been running for over 60 seconds
+test refs::handles_reborrow_the_owner has been running for over 60 seconds
+test refs::ids_of_every_type_byte_are_copied has been running for over 60 seconds
+test refs::names_of_every_length_stay_in_bounds has been running for over 60 seconds
+test refs::repositories_on_separate_threads_copy_independently has been running for over 60 seconds
+test refs::unattached_handles_and_raw_seam has been running for over 60 seconds
+test refs::unattached_references_cross_threads has been running for over 60 seconds
+test repository::head_and_lookups::cleanup_keeps_what_was_handed_out has been running for over 60 seconds
+test refs::constructors_copy_their_arguments ... ok
+test repository::head_and_lookups::detach_head_rewrites_head has been running for over 60 seconds
+test repository::head_and_lookups::failing_merge_heads_leave_the_cache_intact has been running for over 60 seconds
+test repository::head_and_lookups::fetchhead_callback_reenters_and_panics_through_c has been running for over 60 seconds
+test repository::head_and_lookups::fetchhead_walks_on_threads has been running for over 60 seconds
+test repository::head_and_lookups::first_discoveries_race_to_pin_the_runtime has been running for over 60 seconds
+test repository::head_and_lookups::owned_results_outlive_their_repository has been running for over 60 seconds
+test repository::head_and_lookups::routines_on_every_kind_of_repository has been running for over 60 seconds
+test repository::head_and_lookups::threads_use_repositories_of_their_own has been running for over 60 seconds
+test repository::head_and_lookups::worktree_heads_reach_no_freed_repository has been running for over 60 seconds
+test repository::heads_and_parts::from_env_opens_git_dir_for_a_null_start has been running for over 60 seconds
+test repository::heads_and_parts::heads_move_only_to_ids_of_the_repository_type has been running for over 60 seconds
+test repository::heads_and_parts::installed_indexes_and_configs_outlive_or_predecease_the_repository has been running for over 60 seconds
+test repository::heads_and_parts::installed_odbs_are_kept_and_replaced_once has been running for over 60 seconds
+test repository::heads_and_parts::lent_odbs_and_refdbs_are_counted_references has been running for over 60 seconds
+test repository::heads_and_parts::messages_are_read_and_removed_through_owned_buffers has been running for over 60 seconds
+test repository::heads_and_parts::open_variants_free_what_they_build has been running for over 60 seconds
+test repository::heads_and_parts::pathless_repositories_are_refused has been running for over 60 seconds
+test repository::heads_and_parts::paths_and_types_read_live_repositories has been running for over 60 seconds
+test repository::heads_and_parts::setters_free_the_strings_they_replace has been running for over 60 seconds
+test repository::heads_and_parts::states_follow_marker_files has been running for over 60 seconds
+test oid::constructors_before_init_pin_the_runtime ... ok
+test repository::heads_and_parts::the_callback_contains_panics_and_reentry has been running for over 60 seconds
+test repository::heads_and_parts::the_callback_lends_ids_for_the_call_only has been running for over 60 seconds
+test repository::heads_and_parts::worktree_repositories_outlive_their_worktree has been running for over 60 seconds
+test repository::init_flags_and_modes::flag_from_raw_yields_only_valid_flags has been running for over 60 seconds
+test repository::init_flags_and_modes::flags_stay_in_range_for_every_bit_pattern has been running for over 60 seconds
+test repository::init_flags_and_modes::mode_from_raw_reads_back_every_value has been running for over 60 seconds
+test repository::init_flags_and_modes::option_niche_holds_for_every_value has been running for over 60 seconds
+test repository::init_flags_and_modes::values_cross_threads has been running for over 60 seconds
+test repository::init_options::copies_are_independent has been running for over 60 seconds
+test repository::init_options::defaults_then_every_setter_on_every_holder has been running for over 60 seconds
+test repository::init_options::getters_outlive_the_handles_and_the_options has been running for over 60 seconds
+test repository::init_options::init_ext_reads_the_borrowed_strings_in_bounds has been running for over 60 seconds
+test repository::init_options::init_ext_refuses_the_versions_it_does_not_know has been running for over 60 seconds
+test repository::init_options::locked_options_have_one_writer_at_a_time has been running for over 60 seconds
+test repository::init_options::new_needs_no_initialised_libgit2 has been running for over 60 seconds
+test refs::clone_from_replaces_a_reference_with_a_copy ... ok
+test repository::init_options::new_races_nothing_across_threads has been running for over 60 seconds
+test repository::init_options::options_on_threads_while_libgit2_initialises has been running for over 60 seconds
+test repository::init_options::reborrows_keep_one_writer has been running for over 60 seconds
+test repository::init_options::shared_handles_read_across_threads has been running for over 60 seconds
+test repository::init_options::values_and_exclusive_handles_move_across_threads has been running for over 60 seconds
+test repository::items_and_open_flags::every_item_resolves_in_bounds has been running for over 60 seconds
+test repository::items_and_open_flags::item_from_raw_yields_only_valid_items has been running for over 60 seconds
+test repository::items_and_open_flags::open_flag_from_raw_yields_only_valid_flags has been running for over 60 seconds
+test refdb::threads_open_and_drop_their_own_refdbs ... ok
+test repository::items_and_open_flags::open_flags_stay_in_range_for_every_bit_pattern has been running for over 60 seconds
+test repository::items_and_open_flags::option_niche_holds_for_every_value has been running for over 60 seconds
+test refs::ids_of_every_type_byte_are_copied ... ok
+test oid::comparisons_read_within_their_operands ... ok
+test refs::handles_reborrow_the_owner ... ok
+test refs::copies_outlive_their_originals ... ok
+test refs::copy_chains_release_every_copy_in_any_order ... ok
+test refs::names_of_every_length_stay_in_bounds ... ok
+test oidarray::buffers_move_between_arrays_and_owners ... ok
+test repository::items_and_open_flags::values_cross_threads has been running for over 60 seconds
+test refs::unattached_handles_and_raw_seam ... ok
+test oidarray::replacements_release_each_buffer_once ... ok
+test oidarray::arrays_before_init ... ok
+test refs::unattached_references_cross_threads ... ok
+test oidarray::empty_array_drops_do_not_race_the_first_init ... ok
+test refdb::refdb_type::option_niche_holds ... ok
+test refdb::refdb_type::from_raw_yields_only_valid_types ... ok
+test repository::heads_and_parts::installed_odbs_are_kept_and_replaced_once ... ok
+test repository::repository_owner::a_failing_first_constructor_reports_its_error has been running for over 60 seconds
+test refs::repositories_on_separate_threads_copy_independently ... ok
+test repository::heads_and_parts::pathless_repositories_are_refused ... ok
+test blob::owner::contents_of_every_size_read_back_exactly ... ok
+test oid::kept_ids_are_shared_with_rust_readers ... ok
+test repository::repository_owner::every_constructor_builds_an_owner_freed_once has been running for over 60 seconds
+test odb::every_constructor_builds_and_releases ... ok
+test repository::heads_and_parts::the_callback_lends_ids_for_the_call_only ... ok
+test repository::repository_owner::failures_release_everything has been running for over 60 seconds
+test repository::heads_and_parts::the_callback_contains_panics_and_reentry ... ok
+test refs::first_constructors_race_to_pin_the_runtime ... ok
+test repository::repository_owner::first_constructors_race_to_initialise has been running for over 60 seconds
+test oidarray::views_stay_in_bounds ... ok
+test repository::heads_and_parts::worktree_repositories_outlive_their_worktree ... ok
+test repository::repository_owner::repeated_opens_free_everything has been running for over 60 seconds
+test repository::init_flags_and_modes::values_cross_threads ... ok
+test repository::repository_owner::the_owner_is_a_pointer has been running for over 60 seconds
+test repository::head_and_lookups::first_discoveries_race_to_pin_the_runtime ... ok
+test repository::init_options::getters_outlive_the_handles_and_the_options ... ok
+test repository::repository_owner::threads_build_their_own_repositories has been running for over 60 seconds
+test repository::init_options::init_ext_refuses_the_versions_it_does_not_know ... ok
+test repository::init_options::reborrows_keep_one_writer ... ok
+test repository::head_and_lookups::detach_head_rewrites_head ... ok
+test repository::init_options::values_and_exclusive_handles_move_across_threads ... ok
+test repository::routines::cleanup_state_refuses_repositories_without_paths has been running for over 60 seconds
+test repository::heads_and_parts::heads_move_only_to_ids_of_the_repository_type ... ok
+test index::open_survives_corrupted_extensions ... ok
+test repository::routines::cleanup_state_removes_through_the_exclusive_handle has been running for over 60 seconds
+test repository::items_and_open_flags::every_item_resolves_in_bounds ... ok
+test repository::init_options::init_ext_reads_the_borrowed_strings_in_bounds ... ok
+test repository::init_options::copies_are_independent ... ok
+test repository::routines::workdir_is_borrowed_from_the_repository has been running for over 60 seconds
+test repository::items_and_open_flags::values_cross_threads ... ok
+test repository::routines::wrapped_odb_lives_as_long_as_the_repository has been running for over 60 seconds
+test repository::repository_owner::the_owner_is_a_pointer ... ok
+test repository::heads_and_parts::from_env_opens_git_dir_for_a_null_start ... ok
+test repository::state::from_raw_yields_only_valid_states has been running for over 60 seconds
+test repository::routines::cleanup_state_refuses_repositories_without_paths ... ok
+test repository::state::option_niche_holds_for_every_value has been running for over 60 seconds
+test repository::repository_owner::failures_release_everything ... ok
+test repository::state::states_cross_threads has been running for over 60 seconds
+test signature::failures_release_everything has been running for over 60 seconds
+test repository::init_flags_and_modes::flags_stay_in_range_for_every_bit_pattern ... ok
+test signature::signatures_outlive_their_repository has been running for over 60 seconds
+test repository::routines::wrapped_odb_lives_as_long_as_the_repository ... ok
+test strarray::arrays_before_init has been running for over 60 seconds
+test repository::repository_owner::repeated_opens_free_everything ... ok
+test strarray::arrays_cross_threads has been running for over 60 seconds
+test repository::init_flags_and_modes::option_niche_holds_for_every_value ... ok
+test repository::repository_owner::every_constructor_builds_an_owner_freed_once ... ok
+test repository::items_and_open_flags::option_niche_holds_for_every_value ... ok
+test strarray::arrays_shared_and_moved_across_threads has been running for over 60 seconds
+test repository::routines::workdir_is_borrowed_from_the_repository ... ok
+test strarray::copies_are_independent has been running for over 60 seconds
+test repository::items_and_open_flags::item_from_raw_yields_only_valid_items ... ok
+test strarray::empty_array_drops_do_not_race_the_first_init has been running for over 60 seconds
+test repository::init_flags_and_modes::flag_from_raw_yields_only_valid_flags ... ok
+test strarray::empty_bare_array_in_rust_storage has been running for over 60 seconds
+test repository::state::states_cross_threads ... ok
+test strarray::handles_reborrow has been running for over 60 seconds
+test repository::state::option_niche_holds_for_every_value ... ok
+test strarray::libgit2_results_edit_and_release has been running for over 60 seconds
+test strarray::arrays_cross_threads ... ok
+test strarray::owned_arrays_stay_in_bounds has been running for over 60 seconds
+test strarray::replacements_release_each_string_once has been running for over 60 seconds
+test object::ids_of_files_read_them_whole ... ok
+test strarray::strings_move_between_arrays_and_owners has been running for over 60 seconds
+test repository::init_options::new_needs_no_initialised_libgit2 ... ok
+test strarray::views_stay_in_bounds has been running for over 60 seconds
+test repository::routines::cleanup_state_removes_through_the_exclusive_handle ... ok
+test repository::items_and_open_flags::open_flag_from_raw_yields_only_valid_flags ... ok
+test sys_alloc::copies_are_independent has been running for over 60 seconds
+test repository::items_and_open_flags::open_flags_stay_in_range_for_every_bit_pattern ... ok
+test sys_alloc::handles_cross_threads has been running for over 60 seconds
+test sys_alloc::libgit2_runs_on_a_rust_allocator has been running for over 60 seconds
+test repository::repository_owner::threads_build_their_own_repositories ... ok
+test sys_alloc::threads_share_a_rust_allocator has been running for over 60 seconds
+test sys_commit::creating::foreign_ids_and_unwritable_signatures_are_refused has been running for over 60 seconds
+test repository::init_options::options_on_threads_while_libgit2_initialises ... ok
+test sys_commit::creating::ids_are_read_for_the_call_only has been running for over 60 seconds
+test strarray::empty_bare_array_in_rust_storage ... ok
+test sys_commit::creating::threads_write_into_their_own_repositories has been running for over 60 seconds
+test repository::repository_owner::a_failing_first_constructor_reports_its_error ... ok
+test sys_commit::ids_are_read_back_whole has been running for over 60 seconds
+test sys_commit::panics_resume_and_leave_the_callback_usable has been running for over 60 seconds
+test sys_errors::clear_works_before_any_init has been running for over 60 seconds
+test sys_errors::errors_set_while_a_thread_exits_are_released has been running for over 60 seconds
+test strarray::copies_are_independent ... ok
+test sys_errors::first_contacts_race_to_pin_the_runtime has been running for over 60 seconds
+test sys_errors::format_directives_stay_literal has been running for over 60 seconds
+test sys_errors::messages_and_classes_are_kept_verbatim has been running for over 60 seconds
+test sys_errors::messages_are_copied_at_every_size has been running for over 60 seconds
+test strarray::handles_reborrow ... ok
+test sys_errors::set_oom_works_before_any_init has been running for over 60 seconds
+test sys_errors::set_str_works_before_any_init has been running for over 60 seconds
+test sys_errors::set_without_message_works_before_any_init has been running for over 60 seconds
+test sys_errors::set_works_before_any_init has been running for over 60 seconds
+test strarray::replacements_release_each_string_once ... ok
+test sys_errors::thread_exit_releases_the_message has been running for over 60 seconds
+test sys_errors::threads_set_and_clear_concurrently has been running for over 60 seconds
+test sys_odb_backend::box_uninit_may_drop_unfilled has been running for over 60 seconds
+test sys_odb_backend::box_zeroed_reads_zero_then_takes_writes has been running for over 60 seconds
+test sys_odb_backend::first_allocations_race_to_pin_the_runtime has been running for over 60 seconds
+test sys_odb_backend::owners_cross_threads has been running for over 60 seconds
+test sys_odb_backend::owners_work_before_any_init has been running for over 60 seconds
+test strarray::arrays_shared_and_moved_across_threads ... ok
+test sys_odb_backend::str_clone_is_independent_and_outlives_its_source has been running for over 60 seconds
+test sys_odb_backend::str_copies_strings_of_every_length has been running for over 60 seconds
+test sys_odb_backend::str_keeps_bytes_that_are_not_utf8 has been running for over 60 seconds
+test sys_odb_backend::str_owners_cross_threads has been running for over 60 seconds
+test strarray::strings_move_between_arrays_and_owners ... ok
+test sys_odb_backend::str_owners_work_before_any_init has been running for over 60 seconds
+test sys_odb_backend::str_vec_clone_is_independent_and_outlives_its_source has been running for over 60 seconds
+test repository::repository_owner::first_constructors_race_to_initialise ... ok
+test strarray::empty_array_drops_do_not_race_the_first_init ... ok
+test sys_alloc::copies_are_independent ... ok
+test sys_odb_backend::str_vec_copies_runs_of_every_shape has been running for over 60 seconds
+test sys_alloc::handles_cross_threads ... ok
+test sys_commit::creating::foreign_ids_and_unwritable_signatures_are_refused ... ok
+test strarray::arrays_before_init ... ok
+test sys_commit::ids_are_read_back_whole ... ok
+test sys_odb_backend::str_vec_elements_replace_and_move_in_place has been running for over 60 seconds
+test strarray::libgit2_results_edit_and_release ... ok
+test sys_commit::panics_resume_and_leave_the_callback_usable ... ok
+test repository::init_options::new_races_nothing_across_threads ... ok
+test repository::init_options::locked_options_have_one_writer_at_a_time ... ok
+test sys_odb_backend::str_vec_empty_forms_own_nothing has been running for over 60 seconds
+test sys_errors::format_directives_stay_literal ... ok
+test signature::failures_release_everything ... ok
+test sys_commit::creating::ids_are_read_for_the_call_only ... ok
+test sys_odb_backend::box_uninit_may_drop_unfilled ... ok
+test sys_odb_backend::box_zeroed_reads_zero_then_takes_writes ... ok
+test signature::signatures_outlive_their_repository ... ok
+test sys_odb_backend::str_clone_is_independent_and_outlives_its_source ... ok
+test sys_odb_backend::str_vec_moves_through_a_vec has been running for over 60 seconds
+test sys_odb_backend::str_keeps_bytes_that_are_not_utf8 ... ok
+test sys_commit::creating::threads_write_into_their_own_repositories ... ok
+test sys_odb_backend::str_vec_clone_is_independent_and_outlives_its_source ... ok
+test sys_errors::messages_and_classes_are_kept_verbatim ... ok
+test sys_errors::messages_are_copied_at_every_size ... ok
+test repository::heads_and_parts::open_variants_free_what_they_build ... ok
+test sys_odb_backend::vec_clone_is_independent_and_outlives_its_source has been running for over 60 seconds
+test sys_odb_backend::owners_cross_threads ... ok
+test sys_odb_backend::str_vec_elements_replace_and_move_in_place ... ok
+test sys_odb_backend::str_owners_cross_threads ... ok
+test repository::heads_and_parts::messages_are_read_and_removed_through_owned_buffers ... ok
+test sys_errors::thread_exit_releases_the_message ... ok
+test sys_alloc::threads_share_a_rust_allocator ... ok
+test sys_odb_backend::str_vec_empty_forms_own_nothing ... ok
+test sys_odb_backend::vec_copies_slices_of_every_size has been running for over 60 seconds
+test repository::init_flags_and_modes::mode_from_raw_reads_back_every_value ... ok
+test sys_errors::errors_set_while_a_thread_exits_are_released ... ok
+test repository::heads_and_parts::lent_odbs_and_refdbs_are_counted_references ... ok
+test sys_errors::set_oom_works_before_any_init ... ok
+test repository::state::from_raw_yields_only_valid_states ... ok
+test sys_odb_backend::vec_empty_forms_own_nothing has been running for over 60 seconds
+test sys_odb_backend::str_vec_moves_through_a_vec ... ok
+test sys_odb_backend::vec_rejects_oversized_requests_without_panicking has been running for over 60 seconds
+test sys_alloc::libgit2_runs_on_a_rust_allocator ... ok
+test sys_odb_backend::vec_storage_aligns_wide_elements has been running for over 60 seconds
+test sys_odb_backend::vec_uninit_clones_as_bytes_before_promotion has been running for over 60 seconds
+test sys_odb_backend::vec_uninit_may_drop_partially_filled has been running for over 60 seconds
+test sys_odb_backend::vec_zeroed_is_zero_and_writable_to_the_end has been running for over 60 seconds
+test sys_path::files_cross_threads has been running for over 60 seconds
+test sys_path::filesystem::every_raw_value_converts_to_a_variant_or_none has been running for over 60 seconds
+test repository::heads_and_parts::states_follow_marker_files ... ok
+test sys_path::filesystem::filesystems_cross_threads has been running for over 60 seconds
+test sys_path::from_raw_yields_only_valid_files has been running for over 60 seconds
+test sys_path::is_gitfile::reads_stop_at_the_nul has been running for over 60 seconds
+test sys_path::is_gitfile::threads_check_before_initialisation has been running for over 60 seconds
+test sys_path::option_niche_holds_for_every_value has been running for over 60 seconds
+test sys_repository::new_options::copies_are_independent has been running for over 60 seconds
+test sys_repository::new_options::equality_and_hash_follow_the_fields has been running for over 60 seconds
+test sys_repository::new_options::every_field_round_trips_on_every_holder has been running for over 60 seconds
+test sys_repository::new_options::locked_options_have_one_writer_at_a_time has been running for over 60 seconds
+test sys_repository::new_options::new_ext_reads_the_options_on_any_thread has been running for over 60 seconds
+test sys_repository::new_options::new_needs_no_initialised_libgit2 has been running for over 60 seconds
+test sys_repository::new_options::new_races_nothing_across_threads has been running for over 60 seconds
+test repository::heads_and_parts::paths_and_types_read_live_repositories ... ok
+test sys_repository::new_options::reborrows_keep_one_writer has been running for over 60 seconds
+test sys_repository::new_options::shared_handles_read_across_threads has been running for over 60 seconds
+test sys_repository::new_options::try_from_refuses_every_unnamed_oid_type has been running for over 60 seconds
+test sys_errors::first_contacts_race_to_pin_the_runtime ... ok
+test sys_repository::new_options::values_and_exclusive_handles_move_across_threads has been running for over 60 seconds
+test sys_odb_backend::str_owners_work_before_any_init ... ok
+test sys_repository::new_options::with_oid_type_builds_its_options_safely has been running for over 60 seconds
+test sys_odb_backend::vec_clone_is_independent_and_outlives_its_source ... ok
+test sys_errors::set_without_message_works_before_any_init ... ok
+test sys_repository::submodule_cache::cached_submodules_outlive_the_cache_and_the_repository has been running for over 60 seconds
+test sys_errors::set_str_works_before_any_init ... ok
+test sys_errors::clear_works_before_any_init ... ok
+test sys_repository::submodule_cache::failed_loads_leave_nothing_behind has been running for over 60 seconds
+test sys_odb_backend::first_allocations_race_to_pin_the_runtime ... ok
+test sys_repository::submodule_cache::reloads_and_clears_release_every_cache has been running for over 60 seconds
+test sys_errors::set_works_before_any_init ... ok
+test sys_repository::submodule_cache::repositories_without_a_working_directory_cache_nothing has been running for over 60 seconds
+test tag::concurrent_first_calls has been running for over 60 seconds
+test repository::heads_and_parts::setters_free_the_strings_they_replace ... ok
+test tag::long_names_are_copied_and_released has been running for over 60 seconds
+test oid::formatters_write_within_exact_buffers ... ok
+test sys_odb_backend::vec_empty_forms_own_nothing ... ok
+test sys_odb_backend::vec_rejects_oversized_requests_without_panicking ... ok
+test tag::name_rewritten_between_calls has been running for over 60 seconds
+test tag::names_are_read_up_to_their_nul has been running for over 60 seconds
+test sys_odb_backend::vec_storage_aligns_wide_elements ... ok
+test tag::repository_tags::annotated_tags_borrow_their_arguments_for_the_call has been running for over 60 seconds
+test sys_odb_backend::vec_uninit_clones_as_bytes_before_promotion ... ok
+test tag::repository_tags::callbacks_lend_names_and_ids_for_the_call has been running for over 60 seconds
+test tag::repository_tags::failed_listings_report_errors has been running for over 60 seconds
+test sys_odb_backend::vec_uninit_may_drop_partially_filled ... ok
+test tag::repository_tags::refused_buffers_never_reach_libgit2 has been running for over 60 seconds
+test sys_odb_backend::vec_zeroed_is_zero_and_writable_to_the_end ... ok
+test tag::repository_tags::tags_are_created_listed_and_deleted has been running for over 60 seconds
+test sys_odb_backend::vec_copies_slices_of_every_size ... ok
+test tag::repository_tags::tags_on_threads has been running for over 60 seconds
+test sys_path::files_cross_threads ... ok
+test tag::repository_tags::walks_lend_names_and_ids_and_survive_their_closure has been running for over 60 seconds
+test sys_path::filesystem::filesystems_cross_threads ... ok
+test tag::repository_tags::walks_on_threads has been running for over 60 seconds
+test sys_odb_backend::owners_work_before_any_init ... ok
+test tag::tag_object::failures_leave_nothing_behind has been running for over 60 seconds
+test sys_repository::new_options::copies_are_independent ... ok
+test sys_repository::new_options::equality_and_hash_follow_the_fields ... ok
+test tag::tag_object::getters_lend_what_the_last_owner_keeps has been running for over 60 seconds
+test sys_repository::new_options::reborrows_keep_one_writer ... ok
+test sys_repository::new_options::new_ext_reads_the_options_on_any_thread ... ok
+test sys_path::filesystem::every_raw_value_converts_to_a_variant_or_none ... ok
+test tag::tag_object::getters_survive_cache_eviction has been running for over 60 seconds
+test sys_path::is_gitfile::reads_stop_at_the_nul ... ok
+test sys_repository::new_options::values_and_exclusive_handles_move_across_threads ... ok
+test sys_repository::new_options::with_oid_type_builds_its_options_safely ... ok
+test sys_repository::new_options::new_races_nothing_across_threads ... ok
+test tag::tag_object::lookups_clones_and_conversions_share_one_tag has been running for over 60 seconds
+test sys_repository::new_options::shared_handles_read_across_threads ... ok
+test sys_repository::new_options::every_field_round_trips_on_every_holder ... ok
+test tag::tag_object::lookups_retain_no_id has been running for over 60 seconds
+test tag::tag_object::owners_outlive_cache_eviction has been running for over 60 seconds
+test sys_repository::submodule_cache::failed_loads_leave_nothing_behind ... ok
+test tag::tag_object::reference_chains_release_every_reference_in_any_order has been running for over 60 seconds
+test sys_repository::submodule_cache::repositories_without_a_working_directory_cache_nothing ... ok
+test tag::name_rewritten_between_calls ... ok
+test tag::tag_object::shared_handles_coexist has been running for over 60 seconds
+test tag::names_are_read_up_to_their_nul ... ok
+test tag::tag_object::taggers_are_read_from_many_threads has been running for over 60 seconds
+test sys_repository::submodule_cache::reloads_and_clears_release_every_cache ... ok
+test tag::repository_tags::callbacks_lend_names_and_ids_for_the_call ... ok
+test sys_repository::submodule_cache::cached_submodules_outlive_the_cache_and_the_repository ... ok
+test sys_errors::threads_set_and_clear_concurrently ... ok
+test tag::tag_object::tags_reach_their_repository_across_reborrows has been running for over 60 seconds
+test tag::tag_object::targets_and_peels_outlive_their_tag has been running for over 60 seconds
+test sys_path::option_niche_holds_for_every_value ... ok
+test sys_repository::new_options::locked_options_have_one_writer_at_a_time ... ok
+test tag::long_names_are_copied_and_released ... ok
+test tag::tag_object::threads_with_their_own_repositories has been running for over 60 seconds
+test tag::tag_object::failures_leave_nothing_behind ... ok
+test sys_repository::new_options::try_from_refuses_every_unnamed_oid_type ... ok
+test tag::tag_object::getters_lend_what_the_last_owner_keeps ... ok
+test tag::tag_object::unparsable_tags_fail_and_leave_nothing_behind has been running for over 60 seconds
+test tag::tag_object::lookups_clones_and_conversions_share_one_tag ... ok
+test tag::tag_object::without_a_cache_each_lookup_is_a_fresh_tag has been running for over 60 seconds
+test sys_path::is_gitfile::threads_check_before_initialisation ... ok
+test tag::tag_object::lookups_retain_no_id ... ok
+test tag::tag_object::shared_handles_coexist ... ok
+test trace::callback::calls_from_many_threads_race_nothing has been running for over 60 seconds
+test tag::tag_object::tags_reach_their_repository_across_reborrows ... ok
+test tag::tag_object::taggers_are_read_from_many_threads ... ok
+test tag::tag_object::reference_chains_release_every_reference_in_any_order ... ok
+test tag::tag_object::threads_with_their_own_repositories ... ok
+test trace::callback::calls_from_many_threads_race_nothing ... ok
+test tag::tag_object::targets_and_peels_outlive_their_tag ... ok
+test trace::callback::freed_messages_leave_copies_intact has been running for over 60 seconds
+test object::kinds_short_ids_and_contents::content_checks_read_only_their_bytes ... ok
+test tag::repository_tags::walks_lend_names_and_ids_and_survive_their_closure ... ok
+test tag::tag_object::unparsable_tags_fail_and_leave_nothing_behind ... ok
+test trace::callback::libgit2_traces_from_several_threads has been running for over 60 seconds
+test mailmap::repository_mailmaps_outlive_their_repository ... ok
+test tag::concurrent_first_calls ... ok
+test trace::callback::panicking_tracer_aborts ... ignored, the child's abort path spins under BorrowSanitizer
+test trace::callback::reentrant_calls_nest has been running for over 60 seconds
+test trace::from_raw_yields_only_valid_levels has been running for over 60 seconds
+test trace::levels_cross_threads has been running for over 60 seconds
+test tree::builder::builders_follow_their_repository_across_reborrows has been running for over 60 seconds
+test tree::builder::builders_free_every_entry has been running for over 60 seconds
+test tree::builder::builders_of_several_repositories has been running for over 60 seconds
+test tree::builder::builders_on_threads has been running for over 60 seconds
+test tree::builder::cleared_builders_write_the_empty_tree has been running for over 60 seconds
+test tree::builder::empty_builders_build_clear_and_release has been running for over 60 seconds
+test tree::builder::lengths_follow_the_entries has been running for over 60 seconds
+test tree::builder::only_trees_seed_builders has been running for over 60 seconds
+test tree::builder::trees_of_another_object_id_type_stay_in_bounds has been running for over 60 seconds
+test tree::builder::trees_seed_builders_of_another_repository has been running for over 60 seconds
+test tree::builder::trees_seed_builders_of_their_own_repository has been running for over 60 seconds
+test tree::conversions_agree_across_threads has been running for over 60 seconds
+test tree::from_raw_yields_only_valid_modes has been running for over 60 seconds
+test tree::option_niche_holds has been running for over 60 seconds
+test tree::routines::entries_are_inserted_replaced_and_removed has been running for over 60 seconds
+test tree::routines::ids_of_another_type_are_refused_before_the_lookup has been running for over 60 seconds
+test tree::routines::inserts_reach_the_repository_across_reborrows has been running for over 60 seconds
+test tree::routines::lent_entries_copy_out has been running for over 60 seconds
+test tree::routines::lent_entry_copies_cross_threads has been running for over 60 seconds
+test tree::routines::refused_inserts_leave_the_builder_unchanged has been running for over 60 seconds
+test tree::routines::routines_on_threads has been running for over 60 seconds
+test tree::routines::walk_callbacks_lend_entries_for_the_call has been running for over 60 seconds
+test tree::routines::walk_callbacks_resume_panics_and_nest has been running for over 60 seconds
+test tree::routines::writes_without_an_object_database_fail has been running for over 60 seconds
+test tree::tree_entry::copies_outlive_the_tree_and_the_repository has been running for over 60 seconds
+test tree::tree_entry::copy_chains_release_every_copy_in_any_order has been running for over 60 seconds
+test tree::tree_entry::entries_cross_threads has been running for over 60 seconds
+test tree::tree_entry::filters_lend_entries_for_the_call has been running for over 60 seconds
+test tree::tree_entry::getters_cross_threads has been running for over 60 seconds
+test tree::tree_entry::getters_lend_from_the_entry has been running for over 60 seconds
+test tree::tree_entry::missing_subtrees_fail_with_libgit2s_error has been running for over 60 seconds
+test tree::tree_entry::names_of_every_length_copy_whole has been running for over 60 seconds
+test tree::tree_entry::objects_outlive_their_entries has been running for over 60 seconds
+test tree::tree_entry::only_trees_are_looked_into has been running for over 60 seconds
+test tree::tree_entry::path_lookups_own_their_entry_alone has been running for over 60 seconds
+test tree::tree_entry::shared_handles_coexist has been running for over 60 seconds
+test sys_repository::new_options::new_needs_no_initialised_libgit2 ... ok
+test tree::tree_object::failures_leave_nothing_behind has been running for over 60 seconds
+test tree::tree_object::lookups_clones_and_conversions_share_one_tree has been running for over 60 seconds
+test tree::tree_object::lookups_retain_no_id has been running for over 60 seconds
+test tree::tree_object::owners_outlive_cache_eviction has been running for over 60 seconds
+test tree::tree_object::reference_chains_release_every_reference_in_any_order has been running for over 60 seconds
+test trace::callback::reentrant_calls_nest ... ok
+test tree::tree_object::shared_handles_coexist has been running for over 60 seconds
+test tag::repository_tags::annotated_tags_borrow_their_arguments_for_the_call ... ok
+test sys_path::from_raw_yields_only_valid_files ... ok
+test trace::levels_cross_threads ... ok
+test tree::builder::builders_follow_their_repository_across_reborrows ... ok
+test tree::tree_object::threads_with_their_own_repositories has been running for over 60 seconds
+test repository::head_and_lookups::owned_results_outlive_their_repository ... ok
+test tag::repository_tags::failed_listings_report_errors ... ok
+test tag::repository_tags::tags_are_created_listed_and_deleted ... ok
+test tag::tag_object::owners_outlive_cache_eviction ... ok
+test trace::from_raw_yields_only_valid_levels ... ok
+test tree::tree_object::trees_reach_their_repository_across_reborrows has been running for over 60 seconds
+test tree::builder::builders_of_several_repositories ... ok
+test tree::builder::builders_free_every_entry ... ok
+test tree::builder::cleared_builders_write_the_empty_tree ... ok
+test tree::builder::empty_builders_build_clear_and_release ... ok
+test tree::tree_object::unparsable_trees_fail_and_leave_nothing_behind has been running for over 60 seconds
+test tree::builder::builders_on_threads ... ok
+test tree::tree_object::without_a_cache_each_lookup_is_a_fresh_tree has been running for over 60 seconds
+test tag::tag_object::getters_survive_cache_eviction ... ok
+test tag::repository_tags::walks_on_threads ... ok
+test tree::tree_reads::filtered_builders_write_what_they_kept has been running for over 60 seconds
+test tag::tag_object::without_a_cache_each_lookup_is_a_fresh_tag ... ok
+test tag::repository_tags::tags_on_threads ... ok
+test tree::builder::only_trees_seed_builders ... ok
+test tree::builder::trees_of_another_object_id_type_stay_in_bounds ... ok
+test tree::tree_reads::filters_free_what_they_remove has been running for over 60 seconds
+test tree::builder::trees_seed_builders_of_another_repository ... ok
+test tree::conversions_agree_across_threads ... ok
+test tree::tree_reads::getters_lend_entries_for_the_tree_borrow has been running for over 60 seconds
+test trace::callback::libgit2_traces_from_several_threads ... ok
+test tree::tree_reads::ids_of_every_kind_are_compared_in_bounds has been running for over 60 seconds
+test tree::tree_reads::names_of_every_length_are_looked_up_in_bounds has been running for over 60 seconds
+test tree::tree_reads::reads_walks_and_filters_on_threads has been running for over 60 seconds
+test tree::tree_reads::walks_into_missing_or_mistyped_subtrees_fail_cleanly has been running for over 60 seconds
+test tree::builder::trees_seed_builders_of_their_own_repository ... ok
+test tree::tree_reads::walks_lend_entries_for_the_call has been running for over 60 seconds
+test tree::tree_reads::walks_resume_panics_and_skip has been running for over 60 seconds
+test repository::heads_and_parts::installed_indexes_and_configs_outlive_or_predecease_the_repository ... ok
+test tree::routines::inserts_reach_the_repository_across_reborrows ... ok
+test tree::tree_update::copies_are_independent has been running for over 60 seconds
+test tree::tree_update::id_handles_rewrite_in_place has been running for over 60 seconds
+test tree::routines::lent_entries_copy_out ... ok
+test tree::tree_update::paths_of_every_length_read_back_whole has been running for over 60 seconds
+test tree::tree_update::slices_of_updates has been running for over 60 seconds
+test tree::tree_update::updates_cross_threads has been running for over 60 seconds
+test tree::routines::ids_of_another_type_are_refused_before_the_lookup ... ok
+test tree::updates::baselines_of_other_repositories_stay_in_bounds has been running for over 60 seconds
+test tree::updates::paths_are_read_for_the_call_only has been running for over 60 seconds
+test tree::routines::writes_without_an_object_database_fail ... ok
+test tree::updates::refusals_release_everything has been running for over 60 seconds
+test tree::routines::walk_callbacks_resume_panics_and_nest ... ok
+test tree::updates::updates_on_threads has been running for over 60 seconds
+test tree::routines::walk_callbacks_lend_entries_for_the_call ... ok
+test types::a_locked_time_has_one_writer_at_a_time has been running for over 60 seconds
+test tree::routines::lent_entry_copies_cross_threads ... ok
+test types::branch_types_cross_threads has been running for over 60 seconds
+test tree::routines::routines_on_threads ... ok
+test types::copies_are_independent has been running for over 60 seconds
+test tree::tree_entry::copies_outlive_the_tree_and_the_repository ... ok
+test tree::routines::refused_inserts_leave_the_builder_unchanged ... ok
+test types::defaults_are_valid_variants has been running for over 60 seconds
+test tree::tree_entry::copy_chains_release_every_copy_in_any_order ... ok
+test types::equality_and_hash_never_read_padding has been running for over 60 seconds
+test tree::tree_entry::filters_lend_entries_for_the_call ... ok
+test tree::option_niche_holds ... ok
+test types::errors_format_every_extreme has been running for over 60 seconds
+test tree::tree_entry::missing_subtrees_fail_with_libgit2s_error ... ok
+test types::every_field_round_trips_on_every_holder has been running for over 60 seconds
+test types::every_raw_value_converts_to_a_variant_or_none has been running for over 60 seconds
+test tree::tree_entry::only_trees_are_looked_into ... ok
+test types::from_raw_yields_only_valid_modes has been running for over 60 seconds
+test tree::tree_entry::path_lookups_own_their_entry_alone ... ok
+test types::from_raw_yields_only_valid_variants has been running for over 60 seconds
+test types::mode_option_niche_holds_for_every_value has been running for over 60 seconds
+test tree::tree_entry::shared_handles_coexist ... ok
+test types::modes_cross_threads has been running for over 60 seconds
+test tree::tree_entry::getters_lend_from_the_entry ... ok
+test types::object_and_reference_option_niches_hold has been running for over 60 seconds
+test repository::head_and_lookups::worktree_heads_reach_no_freed_repository ... ok
+test tree::tree_object::lookups_retain_no_id ... ok
+test types::object_from_raw_yields_only_valid_types has been running for over 60 seconds
+test tree::tree_object::shared_handles_coexist ... ok
+test types::option_niche_holds_for_every_value has been running for over 60 seconds
+test tree::tree_object::threads_with_their_own_repositories ... ok
+test tree::tree_object::failures_leave_nothing_behind ... ok
+test types::raw_values_convert_both_ways has been running for over 60 seconds
+test tree::tree_object::trees_reach_their_repository_across_reborrows ... ok
+test types::reborrows_keep_one_writer has been running for over 60 seconds
+test tree::routines::entries_are_inserted_replaced_and_removed ... ok
+test types::reference_from_raw_yields_only_valid_types has been running for over 60 seconds
+test tree::tree_object::lookups_clones_and_conversions_share_one_tree ... ok
+test types::shared_handles_read_across_threads has been running for over 60 seconds
+test types::signatures::constructors_run_concurrently has been running for over 60 seconds
+test tree::tree_entry::objects_outlive_their_entries ... ok
+test types::signatures::handed_out_values_outlive_the_signature has been running for over 60 seconds
+test types::signatures::libgit2_reads_while_strings_are_borrowed has been running for over 60 seconds
+test tree::tree_entry::entries_cross_threads ... ok
+test types::signatures::now_stays_in_bounds has been running for over 60 seconds
+test tree::tree_object::reference_chains_release_every_reference_in_any_order ... ok
+test tree::tree_object::unparsable_trees_fail_and_leave_nothing_behind ... ok
+test tree::tree_entry::names_of_every_length_copy_whole ... ok
+test repository::head_and_lookups::routines_on_every_kind_of_repository ... ok
+test tree::tree_reads::filters_free_what_they_remove ... ok
+test repository::head_and_lookups::fetchhead_walks_on_threads ... ok
+test tree::tree_reads::ids_of_every_kind_are_compared_in_bounds ... ok
+test types::signatures::owned_signatures_stay_in_bounds has been running for over 60 seconds
+test tree::tree_reads::filtered_builders_write_what_they_kept ... ok
+test types::signatures::refused_constructions_leave_nothing has been running for over 60 seconds
+test types::signatures::repeated_replacement_releases_each_string_once has been running for over 60 seconds
+test tree::from_raw_yields_only_valid_modes ... ok
+test types::signatures::signatures_before_init has been running for over 60 seconds
+test repository::head_and_lookups::cleanup_keeps_what_was_handed_out ... ok
+test tree::tree_reads::walks_into_missing_or_mistyped_subtrees_fail_cleanly ... ok
+test types::signatures::signatures_cross_threads has been running for over 60 seconds
+test strarray::owned_arrays_stay_in_bounds ... ok
+test types::signatures::signatures_do_not_race_the_first_init has been running for over 60 seconds
+test tag::repository_tags::refused_buffers_never_reach_libgit2 ... ok
+test tree::tree_reads::walks_resume_panics_and_skip ... ok
+test tree::tree_update::copies_are_independent ... ok
+test tree::tree_reads::reads_walks_and_filters_on_threads ... ok
+test tree::tree_object::without_a_cache_each_lookup_is_a_fresh_tree ... ok
+test tree::updates::refusals_release_everything ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test tree::tree_update::slices_of_updates ... ok
+test repository::head_and_lookups::threads_use_repositories_of_their_own ... ok
+test types::signatures::view_copies_outlive_the_borrowed_strings has been running for over 60 seconds
+test tree::tree_object::owners_outlive_cache_eviction ... ok
+test types::branch_types_cross_threads ... ok
+test types::copies_are_independent ... ok
+test types::defaults_are_valid_variants ... ok
+test tree::tree_update::updates_cross_threads ... ok
+test repository::head_and_lookups::fetchhead_callback_reenters_and_panics_through_c ... ok
+test tree::tree_reads::names_of_every_length_are_looked_up_in_bounds ... ok
+test tree::tree_reads::getters_lend_entries_for_the_tree_borrow ... ok
+test types::signatures::views_read_in_place has been running for over 60 seconds
+test types::equality_and_hash_never_read_padding ... ok
+test repository::head_and_lookups::failing_merge_heads_leave_the_cache_intact ... ok
+test types::errors_format_every_extreme ... ok
+test types::every_field_round_trips_on_every_holder ... ok
+test tree::builder::lengths_follow_the_entries ... ok
+test types::modes_cross_threads ... ok
+test types::submodule_ignore_conversions_never_build_an_invalid_variant has been running for over 60 seconds
+test tree::tree_entry::getters_cross_threads ... ok
+test types::every_raw_value_converts_to_a_variant_or_none ... ok
+test types::raw_values_convert_both_ways ... ok
+test types::reborrows_keep_one_writer ... ok
+test tree::tree_reads::walks_lend_entries_for_the_call ... ok
+test types::types_cross_threads has been running for over 60 seconds
+test types::signatures::libgit2_reads_while_strings_are_borrowed ... ok
+test strarray::views_stay_in_bounds ... ok
+test types::shared_handles_read_across_threads ... ok
+test types::signatures::constructors_run_concurrently ... ok
+test types::signatures::handed_out_values_outlive_the_signature ... ok
+test types::signatures::refused_constructions_leave_nothing ... ok
+test types::a_locked_time_has_one_writer_at_a_time ... ok
+test types::option_niche_holds_for_every_value ... ok
+test types::values_and_exclusive_handles_move_across_threads has been running for over 60 seconds
+test types::signatures::repeated_replacement_releases_each_string_once ... ok
+test types::signatures::views_read_in_place ... ok
+test types::signatures::signatures_cross_threads ... ok
+test types::values_cross_threads has been running for over 60 seconds
+test types::reference_from_raw_yields_only_valid_types ... ok
+test types::types_cross_threads ... ok
+test types::values_and_exclusive_handles_move_across_threads ... ok
+test types::write_streams::blob_stream_close_consumes_it has been running for over 60 seconds
+test types::from_raw_yields_only_valid_modes ... ok
+test types::from_raw_yields_only_valid_variants ... ok
+test types::write_streams::blob_stream_drops_unwritten_and_written has been running for over 60 seconds
+test types::write_streams::blob_stream_close_consumes_it ... ok
+test types::values_cross_threads ... ok
+test types::write_streams::blob_stream_is_written_and_committed has been running for over 60 seconds
+test types::write_streams::borrowed_writer_outlives_the_stream ... ok
+test types::mode_option_niche_holds_for_every_value ... ok
+test types::write_streams::c_keeps_no_pointer_past_the_call ... ok
+test types::submodule_ignore_conversions_never_build_an_invalid_variant ... ok
+test types::write_streams::every_owner_drops_the_writer_exactly_once ... ok
+test types::write_streams::handles_and_writer_access_alternate ... ok
+test trace::callback::freed_messages_leave_copies_intact ... ok
+test types::write_streams::c_streams_on_many_threads ... ok
+test types::signatures::signatures_before_init ... ok
+test types::write_streams::rust_stream_is_shared_read_only ... ok
+test types::write_streams::rust_stream_moves_between_threads ... ok
+test types::write_streams::blob_stream_drops_unwritten_and_written ... ok
+test types::signatures::signatures_do_not_race_the_first_init ... ok
+test tree::tree_update::paths_of_every_length_read_back_whole ... ok
+test types::write_streams::rust_target_behind_a_c_filter_stream ... ok
+test types::write_streams::rust_target_closed_when_a_filter_fails_to_start ... ok
+test types::object_from_raw_yields_only_valid_types ... ok
+test types::write_streams::writer_errors_come_back_whole ... ok
+test types::write_streams::blob_stream_is_written_and_committed ... ok
+test worktree::add_options::reborrows_keep_one_writer ... ok
+test worktree::add_options::c_reads_between_reborrows ... ok
+test types::write_streams::rust_target_is_written_and_closed_by_c ... ok
+test types::write_streams::rust_filter_stream_is_freed_by_c has been running for over 60 seconds
+test types::object_and_reference_option_niches_hold ... ok
+test worktree::add_options::checkout_options_borrows_are_read_by_c ... ok
+test types::write_streams::streams_on_many_threads_share_a_writer ... ok
+test worktree::add_options::every_field_round_trips_on_every_holder ... ok
+test worktree::add_options::refused_reference_leaves_nothing_behind ... ok
+test worktree::add_options::borrowed_reference_is_read_by_c_and_released_once ... ok
+test worktree::add_options::many_threads_build_and_use_their_own ... ok
+test worktree::add_options::reference_from_another_repository_is_only_read ... ok
+test worktree::adding::added_worktree_outlives_its_repository_and_options ... ok
+test worktree::adding::a_repository_without_paths_is_refused ... ok
+test types::write_streams::rust_stream_takes_writes_of_every_size ... ok
+test worktree::prune_options::copies_are_independent ... ok
+test tree::tree_update::id_handles_rewrite_in_place ... ok
+test types::write_streams::rust_filter_stream_is_freed_by_c ... ok
+test worktree::prune_options::equality_and_hash_follow_the_fields ... ok
+test worktree::adding::threads_add_to_their_own_repositories ... ok
+test worktree::prune_options::every_field_round_trips_on_every_holder ... ok
+test worktree::adding::lent_references_are_read_for_the_call_only ... ok
+test worktree::add_options::new_needs_no_initialised_libgit2 ... ok
+test types::write_streams::writer_error_before_init_pins_the_runtime ... ok
+test worktree::add_options::default_options_create_a_branch_at_head ... ok
+test worktree::adding::failing_adds_release_everything ... ok
+test worktree::prune_options::new_races_nothing_across_threads ... ok
+test worktree::prune_options::reborrows_keep_one_writer ... ok
+test worktree::prune_options::raw_values_convert_both_ways ... ok
+test worktree::prune_options::values_and_exclusive_handles_move_across_threads ... ok
+test worktree::prune_options::flag_from_raw_yields_only_valid_flags ... ok
+test worktree::prune_options::shared_handles_read_across_threads ... ok
+test types::signatures::now_stays_in_bounds ... ok
+test worktree::adding::adds_without_options_create_their_branch ... ok
+test worktree::prune_options::locked_options_have_one_writer_at_a_time ... ok
+test worktree::routines::exclusive_handle_locks_on_another_thread ... ok
+test worktree::routines::repositories_without_paths_are_refused_before_c ... ok
+test worktree::routines::lists_cross_threads_and_outlive_the_repository ... ok
+test worktree::routines::failed_lookups_release_everything ... ok
+test worktree::prune_options::option_niche_holds_for_every_value ... ok
+test worktree::routines::lock_reasons_release_their_buffers ... ok
+test worktree::prune_options::flags_stay_in_range_for_every_bit_pattern ... ok
+test worktree::routines::pruned_worktree_stays_readable ... ok
+test worktree::routines::strings_live_as_long_as_the_handle ... ok
+test worktree::routines::worktree_opened_from_its_repository_outlives_it ... ok
+test worktree::prune_options::new_needs_no_initialised_libgit2 ... ok
+test worktree::worktree_box::worktrees_cross_threads ... ok
+test worktree::worktree_box::c_writes_between_reborrows ... ok
+test worktree::routines::shared_readers_race_nothing ... ok
+test worktree::worktree_box::replaced_box_is_released_once ... ok
+test worktree::worktree_box::shared_box_reads_race_nothing ... ok
+test worktree::worktree_box::worktree_outlives_its_repository ... ok
+test worktree::worktree_box::lookups_release_everything ... ok
+test worktree::worktree_box::box_moves_to_another_thread_and_drops_there ... ok
+test worktree::routines::lists_release_every_string ... ok
+test oid::add_reads_forty_digits_of_ids_it_keeps ... ok
+test tree::updates::baselines_of_other_repositories_stay_in_bounds ... ok
+test tree::updates::paths_are_read_for_the_call_only ... ok
+test object::kinds_short_ids_and_contents::names_are_read_up_to_their_nul ... ok
+test sys_odb_backend::str_copies_strings_of_every_length ... ok
+test tree::updates::updates_on_threads ... ok
+test mailmap::adversarial_buffers_parse_without_ub ... ok
+test types::signatures::view_copies_outlive_the_borrowed_strings ... ok
+test repository::init_options::shared_handles_read_across_threads ... ok
+test types::signatures::owned_signatures_stay_in_bounds ... ok
+test sys_odb_backend::str_vec_copies_runs_of_every_shape ... ok
+test repository::init_options::defaults_then_every_setter_on_every_holder ... ok
+test oid::malformed_ids_leave_the_shortener_untouched ... ok
+
+test result: ok. 611 passed; 0 failed; 5 ignored; 0 measured; 1 filtered out; finished in 456.79s
+

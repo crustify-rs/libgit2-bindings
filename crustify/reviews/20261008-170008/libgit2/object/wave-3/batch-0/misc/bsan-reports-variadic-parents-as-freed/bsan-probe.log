@@ -1,0 +1,56 @@
+$ BSAN_OPTIONS=stacktrace_max_len=6 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run -- 1 (exit status below)
+1: 4324365da6bea6f2e24023987cf4330d2be63903
+exit status: 0
+
+$ BSAN_OPTIONS=stacktrace_max_len=6 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run -- 2 (exit status below)
+error: Undefined Behavior: trying to access an allocation that has been freed.
+   --> /target/src/libgit2/oid.c:242:2
+    |
+242 | memcpy(out, src, sizeof(git_oid));
+    | ^
+
+stack backtrace:
+0: git_oid_cpy
+      at /target/src/libgit2/oid.c:242:2
+1: validate_tree_and_parents
+      at /target/src/libgit2/commit.c:171:3
+2: git_commit__create_internal
+      at /target/src/libgit2/commit.c:225:53
+3: git_commit_create_v
+      at /target/src/libgit2/commit.c:321:10
+4: libgit2::libgit2::object::commit::create_from_array::<2>
+      at /target/crustify/rust/libgit2/libgit2/object/commit.rs:2122:25
+5: varargs_probe::main
+      at ./src/main.rs:28:16
+
+note: stack trace was truncated after 6 frames; set stacktrace_max_len (e.g. BSAN_OPTIONS=stacktrace_max_len=32) to capture more.
+exit status: 1
+
+$ BSAN_OPTIONS=stacktrace_max_len=6 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run -- 2same (exit status below)
+error: Undefined Behavior: trying to access an allocation that has been freed.
+   --> /target/src/libgit2/oid.c:242:2
+    |
+242 | memcpy(out, src, sizeof(git_oid));
+    | ^
+
+stack backtrace:
+0: git_oid_cpy
+      at /target/src/libgit2/oid.c:242:2
+1: validate_tree_and_parents
+      at /target/src/libgit2/commit.c:171:3
+2: git_commit__create_internal
+      at /target/src/libgit2/commit.c:225:53
+3: git_commit_create_v
+      at /target/src/libgit2/commit.c:321:10
+4: libgit2::libgit2::object::commit::create_from_array::<2>
+      at /target/crustify/rust/libgit2/libgit2/object/commit.rs:2122:25
+5: varargs_probe::main
+      at ./src/main.rs:29:20
+
+note: stack trace was truncated after 6 frames; set stacktrace_max_len (e.g. BSAN_OPTIONS=stacktrace_max_len=32) to capture more.
+exit status: 1
+
+$ BSAN_OPTIONS=stacktrace_max_len=6 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run -- slice2 (exit status below)
+slice2: 0ca162afdb9ea6c87304e52affd131afce5b3807
+exit status: 0
+

@@ -1,0 +1,15 @@
+build start Sun Oct 11 05:04:09 UTC 2026
+build rc=0 Sun Oct 11 05:04:57 UTC 2026
+run libgit2_sys start Sun Oct 11 05:04:57 UTC 2026
+run ub_unsafe start Sun Oct 11 05:04:57 UTC 2026
+run libgit2_lib start Sun Oct 11 05:04:57 UTC 2026
+run ub_safe start Sun Oct 11 05:04:57 UTC 2026
+run equiv start Sun Oct 11 05:04:57 UTC 2026
+run libgit2_sys rc=0 Sun Oct 11 05:04:58 UTC 2026
+run libgit2_lib rc=0 Sun Oct 11 05:05:50 UTC 2026
+run ub_unsafe rc=0 Sun Oct 11 05:06:10 UTC 2026
+run ub_safe rc=0 Sun Oct 11 05:12:35 UTC 2026
+run equiv rc=124 Sun Oct 11 05:44:57 UTC 2026
+gate done Sun Oct 11 05:44:57 UTC 2026
+rerun equiv (content_checks_match_c marked) build+run start Sun Oct 11 05:46:07 UTC 2026
+rerun equiv rc=0 Sun Oct 11 06:09:26 UTC 2026

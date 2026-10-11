@@ -1,0 +1,90 @@
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+22 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running tests/equiv/main.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/513596211f61704a/out/equiv-513596211f61704a)
+
+running 1 test
+test signature::identity_and_dates_from_the_environment ... FAILED
+
+failures:
+
+---- signature::identity_and_dates_from_the_environment stdout ----
+
+thread 'signature::identity_and_dates_from_the_environment' (2437825) panicked at libgit2/tests/equiv/signature.rs:72:5:
+child `signature::identity_and_dates_from_the_environment` failed:
+
+running 1 test
+test signature::identity_and_dates_from_the_environment ... 
+error: Undefined Behavior: an access of size 1b at offset 0xfffff4200ca486a4 is out of bounds for alloc12416 of size 18b.
+   --> /target/src/util/date.c:347:10
+    |
+347 | switch (*end) {
+    |         ^
+
+stack backtrace:
+0: match_digit
+      at /target/src/util/date.c:347:10
+1: user_from_env
+      at /target/src/libgit2/signature.c:264:16
+2: git_signature_default_from_env
+      at /target/src/libgit2/signature.c:305:18
+3: equiv::signature::c_calls
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:157:13
+4: equiv::signature::compare
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:242:17
+5: equiv::signature::identity_and_dates_from_the_environment::{closure#0}
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:296:13
+6: <equiv::signature::identity_and_dates_from_the_environment::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+      at /root/.rustup/toolchains/bsan/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+7: equiv::signature::isolated
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:48:9
+8: equiv::signature::identity_and_dates_from_the_environment
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:284:5
+9: equiv::signature::identity_and_dates_from_the_environment::{closure#0}
+      at /tmp/crustify-ow3rb0/tip/crustify/rust/libgit2/tests/equiv/signature.rs:283:45
+10: <equiv::signature::identity_and_dates_from_the_environment::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+      at /root/.rustup/toolchains/bsan/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+11: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+      at /root/.rustup/toolchains/bsan/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+
+note: stack trace was truncated after 12 frames; set stacktrace_max_len (e.g. BSAN_OPTIONS=stacktrace_max_len=32) to capture more.
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    signature::identity_and_dates_from_the_environment
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 364 filtered out; finished in 1.39s
+
+error: test failed, to rerun pass `-p libgit2 --test equiv`
+rc=101
