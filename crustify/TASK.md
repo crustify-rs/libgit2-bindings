@@ -22,7 +22,7 @@
 
 5. **Do you want agentic review after translated work lands? If so, which
    model and billing should perform each review?** (`id: review-agent`)
-   - Answer: `openrouter/anthropic/claude-fable-5.1, api`, after each wave
+   - Answer: `openrouter/anthropic/claude-opus-5.5, api`, after each wave
 
 6. **Should I run fully autonomously end to end?** (`id: autonomy`)
    - Answer: `no`
