@@ -1725,9 +1725,8 @@ pub mod head_and_lookups {
 
 // --- `git2/tree.h`: `git_treebuilder` ----------------------------------------------
 
-/// Fixtures over the tree builders the tests drive: the safe builder and entry getters,
-/// and raw stand-ins for the `git_tree` entry routines; replace each stand-in once its
-/// safe counterpart lands.
+/// Fixtures over the trees and tree builders the tests drive, through their safe
+/// getters.
 pub mod tree {
     use std::ffi::{CStr, CString};
 
@@ -1735,23 +1734,15 @@ pub mod tree {
     use libgit2::libgit2::object::tree::{TreeArc, TreeBuilderBox};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
 
-    /// `git_tree_entrycount` and each entry's name and raw file mode, of `tree`; stands
-    /// in for the `git_tree` getters.
+    /// Each entry's name and raw file mode, of `tree`, through the safe getters.
     pub fn entries(tree: &TreeArc<'_>) -> Vec<(CString, ffi::git_filemode_t)> {
-        let tree = tree.as_c_ptr();
-        // SAFETY: the owner's live tree, only read; each entry lives with it and is
-        // copied out.
-        unsafe {
-            (0..ffi::git_tree_entrycount(tree))
-                .map(|i| {
-                    let entry = ffi::git_tree_entry_byindex(tree, i);
-                    (
-                        CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned(),
-                        ffi::git_tree_entry_filemode_raw(entry),
-                    )
-                })
-                .collect()
-        }
+        let tree = tree.as_ref();
+        let entries: Vec<_> = tree
+            .iter()
+            .map(|entry| (entry.name().to_owned(), entry.filemode_raw()))
+            .collect();
+        assert_eq!(entries.len(), tree.len());
+        entries
     }
 
     /// A SHA1 object id of `byte` repeated, for entries libgit2 does not check.

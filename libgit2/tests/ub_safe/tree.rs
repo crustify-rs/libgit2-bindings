@@ -9,7 +9,8 @@
 //!
 //! The tree object's tests are in [`tree_object`], the tree builder's in [`builder`], its
 //! routines' and the walk callback's in [`routines`], the tree entry's in [`tree_entry`],
-//! the tree update's in [`tree_update`].
+//! the tree update's in [`tree_update`], the tree's getters, walk and the builder's
+//! filter in [`tree_reads`].
 
 use std::collections::HashSet;
 use std::hint::black_box;
@@ -2215,5 +2216,511 @@ mod tree_object {
         let object: ObjectArc<'_> = a.as_object().to_object();
         assert_eq!(object_view(&object).0, NESTED);
         assert_eq!(format!("{b:?}"), "Tree { .. }");
+    }
+}
+
+mod tree_reads {
+    //! UB tests for `git2/tree.h`'s tree reading routines: the id and repository of a
+    //! tree, its entries by index, name and id and in order, the walk over it and its
+    //! subtrees, and a tree builder's filter (`remove_if`).
+    //!
+    //! A tree's entries are an array the tree owns, their names pointing into the raw
+    //! object data it keeps: every lent entry, name and id is read in full while only one
+    //! owner keeps the tree, and copied out to outlive it and its repository (ASan: a
+    //! read past or after the tree's storage). Lookups by name probe names of every
+    //! length around the 16 bits a tree stores one in, past it included, and lookups by
+    //! id probe ids of every type byte and tail (ASan: a read past the name or the id).
+    //! The getters returning nothing on a miss are checked at both ends of the index
+    //! range.
+    //!
+    //! A walk looks each subtree up in the repository and frees it once walked: the
+    //! closure copies what it keeps, walks the same tree again from inside, looks other
+    //! trees up and drops clones of the walked tree meanwhile, under a cache that evicts
+    //! as fast as trees come (ASan: an entry or root used after its subtree is freed). A
+    //! panic resumes after the walk, which leaves the tree usable, and a walk failing on
+    //! a missing or mistyped subtree leaves nothing behind (LSan). A filter frees each
+    //! entry it removes right after its call: the closure copies entries out, panics,
+    //! and drives another builder meanwhile (ASan, LSan). Walks and filters run on
+    //! threads, each over its own repository (TSan).
+    //!
+    //! An entry, id or repository outliving what keeps it alive, a closure reaching the
+    //! builder it filters, or the repository's exclusive handle from a walk do not
+    //! compile (`compile_fail/` and doctests). Every test calls libgit2, so Miri skips
+    //! them all.
+
+    use std::ffi::{CStr, CString};
+    use std::ops::ControlFlow;
+    use std::panic::{self, AssertUnwindSafe};
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::{FileMode, ObjectType};
+    use libgit2::libgit2::object::tree::{
+        Tree, TreeArc, TreeBuilder, TreeBuilderBox, TreeBuilderFilter, TreeEntryBox, TreeEntryRef,
+        TreeRef, WalkAction, WalkCallback, WalkMode,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::RepositoryBox;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+
+    use crate::fixture::object_and_tree_entry::{
+        entry_view, open_testrepo, repository, set_cache_max_size, write_raw,
+    };
+    use crate::fixture::tree::{entries, id};
+    use crate::fixture::{TempRepo, isolated};
+
+    /// Trees of `testrepo.git`: `HEAD`'s, commit `763d71a`'s (nesting `ab/de/fgh`), its
+    /// subtrees `ab`, `ab/c`, `ab/de` and `ab/de/fgh`, and more commits' trees.
+    const TREES: [&str; 9] = [
+        "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162",
+        "ae90f12eea699729ed24555e40b9fd669da12a12",
+        "f1425cef211cc08caa31e7b545ffb232acb098c3",
+        "9a03079b8a8ee85a0bee58bf9be3da8b62414ed4",
+        "b6361fc6a97178d8fc8639fdeed71c775ab52593",
+        "3259a6bd5b57fb9c1281bb7ed3167b50f224cb54",
+        "53fc32d17276939fc79ed05badaef2db09990016",
+        "1810dff58d8a660512d4832e740f692884338ccd",
+        "181037049a54a1eb5fab404658a3a250b44335d7",
+    ];
+    const NESTED: &str = "ae90f12eea699729ed24555e40b9fd669da12a12";
+
+    fn sha1(hex: &str) -> Oid {
+        Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap()
+    }
+
+    /// An entry's name, hex id and raw mode, read through its getters.
+    fn view(entry: TreeEntryRef<'_>) -> (CString, String, u32) {
+        let id = entry.id().to_hex_string().unwrap();
+        (entry.name().to_owned(), id, entry.filemode_raw())
+    }
+
+    /// Every getter agrees with the iterator on every tree, each lent entry read in full
+    /// with only one owner left; the copies outlive the tree and the repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_lend_entries_for_the_tree_borrow() {
+        let mut copies: Vec<(TreeEntryBox, (CString, String, u32))> = Vec::new();
+        {
+            let repo = open_testrepo();
+            for hex in TREES {
+                let tree = Tree::lookup(repo.as_ref(), sha1(hex).as_ref()).unwrap();
+                // A second owner, dropped before the reads: the first keeps the tree.
+                let other = tree.clone();
+                let t: TreeRef<'_, '_> = other.as_ref();
+                assert_eq!(t.id().to_hex_string().unwrap(), hex);
+                assert_eq!(t.owner().path(), repo.as_ref().path());
+                drop(other);
+                let t = tree.as_ref();
+                let all: Vec<_> = t.iter().collect();
+                assert_eq!(all.len(), t.len());
+                assert!(!t.is_empty());
+                for (i, entry) in all.iter().enumerate() {
+                    let seen = view(*entry);
+                    assert_eq!(t.get(i).map(view), Some(seen.clone()));
+                    let named = t.get_by_name(entry.name()).unwrap();
+                    assert_eq!(view(named), seen);
+                    // The first entry naming the same object.
+                    let first = all.iter().position(|e| e.id() == entry.id()).unwrap();
+                    assert_eq!(view(t.get_by_id(entry.id()).unwrap()), view(all[first]));
+                    copies.push((entry.to_tree_entry().unwrap(), seen));
+                }
+                for i in [t.len(), t.len() + 1, usize::MAX / 2, usize::MAX] {
+                    assert!(t.get(i).is_none());
+                }
+                assert_eq!(t.iter().rev().count(), t.len());
+                assert_eq!(entries(&tree).len(), t.len());
+                let owner = t.owner();
+                drop(tree);
+                // The repository outlives the tree it was read from.
+                assert_eq!(owner.path(), repo.as_ref().path());
+            }
+        }
+        for (copy, seen) in &copies {
+            assert_eq!(view(copy.as_ref()), *seen);
+            assert_eq!(entry_view(copy), *seen);
+        }
+    }
+
+    /// Names around every length a tree stores, past 65535 bytes included, where libgit2
+    /// truncates the length it searches with: each lookup reads within the name, finds
+    /// only the entry of the very same bytes, and an overlong one leaves libgit2's
+    /// "path too long" error.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn names_of_every_length_are_looked_up_in_bounds() {
+        let temp = TempRepo::new("tree-reads-names");
+        let lengths = [1usize, 2, 255, 256, 4096, 65534, 65535];
+        let name = |len: usize, last: u8| {
+            let mut bytes = vec![b'n'; len];
+            *bytes.last_mut().unwrap() = last;
+            CString::new(bytes).unwrap()
+        };
+        let mut builder = TreeBuilder::new(repository(&temp)).unwrap();
+        for (i, &len) in lengths.iter().enumerate() {
+            let entry_id = id(i as u8 + 1);
+            builder
+                .as_mut()
+                .insert(&name(len, b'x'), entry_id.as_ref(), FileMode::Commit)
+                .unwrap();
+        }
+        let written = builder.as_mut().write().unwrap();
+        drop(builder);
+        let tree = Tree::lookup(repository(&temp), written.as_ref()).unwrap();
+        let t = tree.as_ref();
+        assert_eq!(t.len(), lengths.len());
+        for &len in &lengths {
+            let exact = name(len, b'x');
+            let found = t.get_by_name(&exact).unwrap();
+            assert_eq!(found.name().count_bytes(), len);
+            assert!(t.get_by_name(&name(len, b'y')).is_none());
+            // The entry's own bytes, one longer or one shorter: no entry of the others'.
+            let mut longer = exact.as_bytes().to_vec();
+            longer.push(b'x');
+            assert!(t.get_by_name(&CString::new(longer).unwrap()).is_none());
+            let shorter = &exact.as_bytes()[..len - 1];
+            assert!(t.get_by_name(&CString::new(shorter).unwrap()).is_none());
+        }
+        assert!(t.get_by_name(c"").is_none());
+        // 65536 bytes search with a 16-bit length of 0, and the others wrap likewise.
+        for len in [65536, 65537, 65536 + 255, 131071, 131072, 200_000] {
+            assert!(t.get_by_name(&name(len, b'x')).is_none(), "{len}");
+            let e = last();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            assert_eq!(e.message(), c"tree entry path too long");
+        }
+    }
+
+    /// Ids of every type byte, and SHA-1 ids with a non-zero tail, are compared within
+    /// the `git_oid` and match nothing; the tree's own ids match their first entry.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ids_of_every_kind_are_compared_in_bounds() {
+        let repo = open_testrepo();
+        let tree = Tree::lookup(repo.as_ref(), sha1(NESTED).as_ref()).unwrap();
+        let t = tree.as_ref();
+        for entry in t {
+            let raw = entry.id().id();
+            let mut probe = Oid::from_raw(&raw[..20], OidType::Sha1).unwrap();
+            assert!(t.get_by_id(probe.as_ref()).is_some());
+            let mut tail = raw;
+            tail[31] = 1;
+            probe.as_mut().set_id(tail);
+            assert!(t.get_by_id(probe.as_ref()).is_none());
+            probe.as_mut().set_id(raw);
+            for kind in [0u8, 2, 3, 0x7f, u8::MAX] {
+                probe.as_mut().set_raw_kind(kind);
+                assert!(t.get_by_id(probe.as_ref()).is_none(), "{kind}");
+            }
+            let wide = Oid::from_raw(&raw, OidType::Sha256).unwrap();
+            assert!(t.get_by_id(wide.as_ref()).is_none());
+        }
+        for probe in [
+            Oid::zero(OidType::Sha1),
+            Oid::zero(OidType::Sha256),
+            id(0xee),
+        ] {
+            assert!(t.get_by_id(probe.as_ref()).is_none());
+        }
+    }
+
+    /// One walk's visits: the path under the root, and a copy of the entry.
+    type Visit = (String, TreeEntryBox);
+
+    fn path_of(root: &CStr, entry: TreeEntryRef<'_>) -> String {
+        format!(
+            "{}{}",
+            root.to_str().unwrap(),
+            entry.name().to_str().unwrap()
+        )
+    }
+
+    /// Walks `tree` in `mode`, copying each entry out, answering `answer`.
+    fn walk_copying(
+        tree: TreeRef<'_, '_>,
+        mode: WalkMode,
+        mut answer: impl FnMut(&str, TreeEntryRef<'_>) -> WalkAction,
+    ) -> (ControlFlow<()>, Vec<Visit>) {
+        let mut visits = Vec::new();
+        let mut f = |root: &CStr, entry: TreeEntryRef<'_>| {
+            let path = path_of(root, entry);
+            visits.push((path.clone(), entry.to_tree_entry().unwrap()));
+            answer(&path, entry)
+        };
+        let mut callback = WalkCallback::new(&mut f);
+        let walked = tree.walk(mode, &mut callback).unwrap();
+        drop(callback);
+        (walked, visits)
+    }
+
+    /// Under a cache evicting as fast as trees come, a walk's subtrees are freed as soon
+    /// as walked: the closure copies what it keeps, walks the tree again from inside,
+    /// looks other trees up and drops clones of the walked tree. Stopping at every visit
+    /// in both orders ends the walk there; the copies outlive the walks.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walks_lend_entries_for_the_call() {
+        isolated(
+            concat!(module_path!(), "::walks_lend_entries_for_the_call"),
+            || {
+                let repo = open_testrepo();
+                set_cache_max_size(1);
+                let tree = Tree::lookup(repo.as_ref(), sha1(NESTED).as_ref()).unwrap();
+                let mut kept = Vec::new();
+                for mode in [WalkMode::PreOrder, WalkMode::PostOrder] {
+                    let (walked, all) =
+                        walk_copying(tree.as_ref(), mode, |_, _| WalkAction::Continue);
+                    assert_eq!(walked, ControlFlow::Continue(()));
+                    assert!(all.iter().any(|(p, _)| p == "ab/de/fgh/1.txt"));
+                    for stop in 0..all.len() {
+                        let mut n = 0;
+                        let (walked, visits) = walk_copying(tree.as_ref(), mode, |_, _| {
+                            n += 1;
+                            if n > stop {
+                                WalkAction::Stop
+                            } else {
+                                WalkAction::Continue
+                            }
+                        });
+                        assert_eq!(walked, ControlFlow::Break(()));
+                        assert_eq!(visits.len(), stop + 1);
+                        kept.extend(visits);
+                    }
+                    kept.extend(all);
+                }
+
+                // From inside: a nested walk of the same tree, lookups and clones.
+                let mut inner_visits = 0;
+                let mut outer = |root: &CStr, entry: TreeEntryRef<'_>| {
+                    let clone = tree.clone();
+                    let mut inner = |r: &CStr, e: TreeEntryRef<'_>| {
+                        inner_visits += 1;
+                        let _ = path_of(r, e);
+                        WalkAction::Skip
+                    };
+                    let mut nested = WalkCallback::new(&mut inner);
+                    let walked = clone.as_ref().walk(WalkMode::PreOrder, &mut nested);
+                    assert_eq!(walked.unwrap(), ControlFlow::Continue(()));
+                    drop(clone);
+                    if entry.kind() == ObjectType::Tree {
+                        let sub = Tree::lookup(repo.as_ref(), entry.id()).unwrap();
+                        assert_eq!(sub.as_ref().id().id(), entry.id().id());
+                        assert!(!sub.as_ref().is_empty());
+                    }
+                    let _ = path_of(root, entry);
+                    WalkAction::Continue
+                };
+                let mut callback = WalkCallback::new(&mut outer);
+                let walked = tree.as_ref().walk(WalkMode::PostOrder, &mut callback);
+                assert_eq!(walked.unwrap(), ControlFlow::Continue(()));
+                drop(callback);
+                assert!(inner_visits > 0);
+                drop(tree);
+                drop(repo);
+                for (path, entry) in &kept {
+                    assert!(path.ends_with(entry.as_ref().name().to_str().unwrap()));
+                }
+            },
+        );
+    }
+
+    /// A panic of the closure stops the walk, resumes once libgit2 has returned, and
+    /// leaves the tree and the callback usable; skips keep the walk out of subtrees,
+    /// which are then never looked up.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walks_resume_panics_and_skip() {
+        let repo = open_testrepo();
+        let tree = Tree::lookup(repo.as_ref(), sha1(NESTED).as_ref()).unwrap();
+        for mode in [WalkMode::PreOrder, WalkMode::PostOrder] {
+            let mut calls = 0;
+            let mut f = |_: &CStr, entry: TreeEntryRef<'_>| {
+                calls += 1;
+                if calls == 3 {
+                    panic!("walk panicked at {:?}", entry.name());
+                }
+                WalkAction::Continue
+            };
+            let mut callback = WalkCallback::new(&mut f);
+            let caught =
+                panic::catch_unwind(AssertUnwindSafe(|| tree.as_ref().walk(mode, &mut callback)));
+            assert!(caught.is_err());
+            assert!(callback.stopped());
+            let walked = tree.as_ref().walk(mode, &mut callback).unwrap();
+            assert_eq!(walked, ControlFlow::Continue(()));
+            assert!(!callback.stopped());
+            drop(callback);
+            assert!(calls > 3);
+        }
+        let (walked, visits) = walk_copying(tree.as_ref(), WalkMode::PreOrder, |_, entry| {
+            if entry.kind() == ObjectType::Tree {
+                WalkAction::Skip
+            } else {
+                WalkAction::Continue
+            }
+        });
+        assert_eq!(walked, ControlFlow::Continue(()));
+        assert_eq!(visits.len(), tree.as_ref().len());
+        assert!(visits.iter().all(|(path, _)| !path.contains('/')));
+    }
+
+    /// Walks reaching a subtree the object database lacks, or whose object is a blob,
+    /// fail with the lookup's error after the visits before it, leaving nothing behind
+    /// (LSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walks_into_missing_or_mistyped_subtrees_fail_cleanly() {
+        let temp = TempRepo::new("tree-reads-broken");
+        let blob = write_raw(&temp, b"leaf\n", ffi::GIT_OBJECT_BLOB);
+        for target in [[0x77u8; 20].as_slice(), &blob.as_ref().id()[..20]] {
+            let mut data = b"160000 a\0".to_vec();
+            data.extend_from_slice(&[0x11; 20]);
+            data.extend_from_slice(b"40000 broken\0");
+            data.extend_from_slice(target);
+            let broken = write_raw(&temp, &data, ffi::GIT_OBJECT_TREE);
+            let tree = Tree::lookup(repository(&temp), broken.as_ref()).unwrap();
+            for mode in [WalkMode::PreOrder, WalkMode::PostOrder] {
+                let mut visits = Vec::new();
+                let mut f = |root: &CStr, entry: TreeEntryRef<'_>| {
+                    visits.push(path_of(root, entry));
+                    WalkAction::Continue
+                };
+                let mut callback = WalkCallback::new(&mut f);
+                let e = tree.as_ref().walk(mode, &mut callback).unwrap_err();
+                assert!(!callback.stopped());
+                drop(callback);
+                assert_eq!(e.code(), Some(ErrorCode::NotFound), "{e:?}");
+                let want: &[&str] = match mode {
+                    WalkMode::PreOrder => &["a", "broken"],
+                    _ => &["a"],
+                };
+                assert_eq!(visits, want);
+            }
+        }
+    }
+
+    /// A builder seeded with `TREES[1]`'s entries, of `repo`.
+    fn seeded(repo: &RepositoryBox) -> TreeBuilderBox<'_> {
+        let tree = Tree::lookup(repo.as_ref(), sha1(NESTED).as_ref()).unwrap();
+        TreeBuilder::from_tree(repo.as_ref(), tree.as_ref()).unwrap()
+    }
+
+    /// Whether the entry's id starts with an even byte: what the filters below remove.
+    fn even(entry: TreeEntryRef<'_>) -> bool {
+        entry.id().id()[0].is_multiple_of(2)
+    }
+
+    /// Filters free each entry they remove right after its call, whatever the closure
+    /// copies out or drives meanwhile (another builder); a panicking closure keeps the
+    /// rest and resumes after the filter.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filters_free_what_they_remove() {
+        let repo = open_testrepo();
+        let mut builder = seeded(&repo);
+        let all = builder.as_ref().len();
+        let mut other = seeded(&repo);
+        let mut copies = Vec::new();
+        let mut f = |entry: TreeEntryRef<'_>| {
+            copies.push(entry.to_tree_entry().unwrap());
+            let name = entry.name().to_owned();
+            other.as_mut().remove(&name).unwrap();
+            even(entry)
+        };
+        builder
+            .as_mut()
+            .remove_if(&mut TreeBuilderFilter::new(&mut f));
+        assert_eq!(copies.len(), all);
+        assert!(other.as_ref().is_empty());
+        for copy in &copies {
+            let kept = builder.as_ref().get(copy.as_ref().name()).is_some();
+            assert_eq!(kept, !even(copy.as_ref()));
+        }
+        let removed = copies.iter().filter(|c| even(c.as_ref())).count();
+        assert_eq!(builder.as_ref().len(), all - removed);
+
+        // A panic on the second call: the first entry goes, the rest stay.
+        let mut builder = seeded(&repo);
+        let mut calls = 0;
+        let mut boom = |_: TreeEntryRef<'_>| {
+            calls += 1;
+            assert!(calls <= 2, "called after the panic");
+            if calls == 2 {
+                panic!("filter panicked");
+            }
+            true
+        };
+        let mut filter = TreeBuilderFilter::new(&mut boom);
+        let caught =
+            panic::catch_unwind(AssertUnwindSafe(|| builder.as_mut().remove_if(&mut filter)));
+        assert!(caught.is_err());
+        drop(filter);
+        assert_eq!(builder.as_ref().len(), all - 1);
+
+        // Removing everything, twice: the second filter sees nothing.
+        let mut everything = |_: TreeEntryRef<'_>| true;
+        let mut filter = TreeBuilderFilter::new(&mut everything);
+        builder.as_mut().remove_if(&mut filter);
+        builder.as_mut().remove_if(&mut filter);
+        drop(filter);
+        assert!(builder.as_ref().is_empty());
+    }
+
+    /// The written tree of a filtered builder lists what the filter kept.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filtered_builders_write_what_they_kept() {
+        let temp = TempRepo::new("tree-reads-filter-write");
+        let mut builder = TreeBuilder::new(repository(&temp)).unwrap();
+        for i in 0..32u8 {
+            let name = CString::new(format!("e{i:02}")).unwrap();
+            builder
+                .as_mut()
+                .insert(&name, id(i + 1).as_ref(), FileMode::Commit)
+                .unwrap();
+        }
+        let mut odd = |entry: TreeEntryRef<'_>| entry.name().to_bytes()[2] % 2 == 1;
+        builder
+            .as_mut()
+            .remove_if(&mut TreeBuilderFilter::new(&mut odd));
+        let written = builder.as_mut().write().unwrap();
+        drop(builder);
+        let tree: TreeArc<'_> = Tree::lookup(repository(&temp), written.as_ref()).unwrap();
+        let names: Vec<_> = tree.as_ref().iter().map(|e| e.name().to_owned()).collect();
+        let want: Vec<_> = (0..32)
+            .step_by(2)
+            .map(|i| CString::new(format!("e{i:02}")).unwrap())
+            .collect();
+        assert_eq!(names, want);
+    }
+
+    /// Walks, reads and filters on threads, each over its own repository.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reads_walks_and_filters_on_threads() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let repo = open_testrepo();
+                    for round in 0..4 {
+                        let hex = TREES[(t + round) % TREES.len()];
+                        let tree = Tree::lookup(repo.as_ref(), sha1(hex).as_ref()).unwrap();
+                        let names: Vec<_> = tree.as_ref().iter().map(view).collect();
+                        let mode = [WalkMode::PreOrder, WalkMode::PostOrder][round % 2];
+                        let (walked, visits) =
+                            walk_copying(tree.as_ref(), mode, |_, _| WalkAction::Continue);
+                        assert_eq!(walked, ControlFlow::Continue(()));
+                        assert!(visits.len() >= names.len());
+                        let mut builder =
+                            TreeBuilder::from_tree(repo.as_ref(), tree.as_ref()).unwrap();
+                        let mut first = true;
+                        let mut f = |_: TreeEntryRef<'_>| std::mem::take(&mut first);
+                        builder
+                            .as_mut()
+                            .remove_if(&mut TreeBuilderFilter::new(&mut f));
+                        assert_eq!(builder.as_ref().len(), names.len() - 1);
+                    }
+                });
+            }
+        });
     }
 }

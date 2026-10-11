@@ -855,7 +855,12 @@ mod builder {
         //!   [`WalkCallback::call`] and returning its answer, visit the same entries under
         //!   the same roots and return and leave the same, in both orders, for answers that
         //!   continue, skip and stop with `GIT_EUSER`, and for a subtree the object
-        //!   database lacks.
+        //!   database lacks. The public walk, `TreeRef::walk`, over a tree of the Rust
+        //!   side's own repository, must do the same as `git_tree_walk` over the C side's,
+        //!   its `Ok(Continue)` standing for 0 and `Ok(Break)` for `GIT_EUSER`.
+        //! - Filters: `TreeBuilderMut::remove_if` and `git_treebuilder_filter`, over
+        //!   builders filled alike, lend the same entries in the same order, remove the
+        //!   same ones and leave the same builders, run after run.
         //!
         //! Documented divergences, outside these comparisons:
         //!
@@ -872,9 +877,12 @@ mod builder {
         //!   any negative value.
 
         use super::*;
-        use libgit2::libgit2::object::tree::{TreeEntryRef, WalkAction, WalkCallback};
+        use libgit2::libgit2::object::tree::{
+            TreeBuilderFilter, TreeEntryRef, WalkAction, WalkCallback, WalkMode,
+        };
         use libgit2::libgit2::util::errors::ErrorCode;
         use std::ffi::c_char;
+        use std::ops::ControlFlow;
 
         /// An id each side spells alike: `id(byte)`, the zero id, or an object written
         /// into each side's repository.
@@ -1429,6 +1437,218 @@ mod builder {
                 assert_eq!(c.1.len(), if mode == ffi::GIT_TREEWALK_PRE { 2 } else { 1 });
             }
             free_tree(tree);
+        }
+
+        /// The public walk: [`TreeRef::walk`] over the Rust side's own tree, with a closure
+        /// answering as `rule` does, its result read back as the return it stands for:
+        /// `Continue` as 0, `Break` as `GIT_EUSER`, a failure as its code, whose error
+        /// must be the thread's.
+        ///
+        /// [`TreeRef::walk`]: libgit2::libgit2::object::tree::TreeRef::walk
+        fn public_walk(tree: TreeRef<'_, '_>, mode: ffi::git_treewalk_mode, rule: Rule) -> Walked {
+            let mut visits = Vec::new();
+            let mut f = |root: &CStr, entry: TreeEntryRef<'_>| {
+                let seen = entry_view(entry);
+                let rc = rule(root, &seen.0);
+                visits.push((root.to_owned(), seen));
+                match rc {
+                    0 => WalkAction::Continue,
+                    1.. => WalkAction::Skip,
+                    _ => WalkAction::Stop,
+                }
+            };
+            let mut callback = WalkCallback::new(&mut f);
+            // SAFETY: no arguments.
+            unsafe { ffi::git_error_clear() };
+            let walked = tree.walk(WalkMode::from_raw(mode).unwrap(), &mut callback);
+            let rc = match walked {
+                Ok(ControlFlow::Continue(())) => 0,
+                Ok(ControlFlow::Break(())) => {
+                    assert!(callback.stopped());
+                    ErrorCode::User.raw()
+                }
+                Err(e) => {
+                    assert!(!callback.stopped());
+                    assert_eq!(rust_error(e.error()), c_last());
+                    e.raw_code()
+                }
+            };
+            drop(callback);
+            (rc, visits, c_last())
+        }
+
+        /// [`TreeRef::walk`] over the Rust side's tree matches `git_tree_walk` with a C
+        /// callback over the C side's, each in a repository of its own: the same visits
+        /// under the same roots, return and error, in both orders, for answers that
+        /// continue, skip and stop, twice over; and the same failure for a subtree the
+        /// object database lacks.
+        ///
+        /// [`TreeRef::walk`]: libgit2::libgit2::object::tree::TreeRef::walk
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn public_walks_match_c_walks() {
+            super::super::init();
+            let c_temp = TempRepo::new("public-walk-c");
+            let rust_temp = TempRepo::new("public-walk-rust");
+            let c_root = hex(&nested_tree(c_temp.repo().as_c_ptr()));
+            let rust_root = hex(&nested_tree(rust_temp.repo().as_c_ptr()));
+            assert_eq!(c_root, rust_root);
+            let c_tree = lookup(c_temp.repo(), &c_root, OidType::Sha1);
+            let rust_tree = lookup_object(rust_temp.repo(), &rust_root, OidType::Sha1);
+            for round in 0..2 {
+                for mode in [ffi::GIT_TREEWALK_PRE, ffi::GIT_TREEWALK_POST] {
+                    for (i, rule) in RULES.into_iter().enumerate() {
+                        let c = walk(c_tree, mode, rule, false);
+                        let rust = public_walk(rust_tree.as_ref(), mode, rule);
+                        assert_eq!(c, rust, "round {round} mode {mode} rule {i}");
+                    }
+                }
+            }
+            free_tree(c_tree);
+            drop(rust_tree);
+
+            let c_broken = hex(&broken_tree(c_temp.repo().as_c_ptr()));
+            let rust_broken = hex(&broken_tree(rust_temp.repo().as_c_ptr()));
+            let c_tree = lookup(c_temp.repo(), &c_broken, OidType::Sha1);
+            let rust_tree = lookup_object(rust_temp.repo(), &rust_broken, OidType::Sha1);
+            for mode in [ffi::GIT_TREEWALK_PRE, ffi::GIT_TREEWALK_POST] {
+                for rule in [RULES[0], RULES[1]] {
+                    let c = walk(c_tree, mode, rule, false);
+                    assert_eq!(
+                        c,
+                        public_walk(rust_tree.as_ref(), mode, rule),
+                        "mode {mode}"
+                    );
+                }
+            }
+            free_tree(c_tree);
+        }
+
+        /// What a filter picks, from an entry as C reads it.
+        type Pick = fn(&View) -> bool;
+
+        /// A filter run's visits, in the order the builder lent its entries.
+        struct Filtering {
+            pick: Pick,
+            visits: Vec<View>,
+        }
+
+        unsafe extern "C" fn c_filter(
+            entry: *const ffi::git_tree_entry,
+            payload: *mut c_void,
+        ) -> c_int {
+            // SAFETY: `payload` is the run's state; `entry` is live for the call.
+            let state = unsafe { &mut *payload.cast::<Filtering>() };
+            let seen = view(entry);
+            let remove = (state.pick)(&seen);
+            state.visits.push(seen);
+            c_int::from(remove)
+        }
+
+        const PICKS: [Pick; 6] = [
+            |_| false,
+            |(name, ..)| name.to_bytes().ends_with(b"3") || name.as_bytes() == b"link",
+            |(.., mode)| *mode == ffi::GIT_FILEMODE_TREE,
+            |(_, id, _)| id.as_bytes()[0] % 2 == 0,
+            |(name, ..)| name.as_bytes().first() == Some(&b's'),
+            |_| true,
+        ];
+
+        /// The builder of each side, filled alike: a blob, an executable, a link, the
+        /// empty tree, and submodules `s00` to `s19`.
+        fn fill(builder: &mut dyn FnMut(Op<'_>) -> Outcome, names: &[CString]) {
+            for op in [
+                Op::Insert(c"blob", Id::Blob, FileMode::Blob),
+                Op::Insert(c"exec", Id::Blob, FileMode::BlobExecutable),
+                Op::Insert(c"link", Id::Blob, FileMode::Link),
+                Op::Insert(c"tree", Id::EmptyTree, FileMode::Tree),
+            ] {
+                builder(op).unwrap();
+            }
+            for (i, name) in names.iter().enumerate() {
+                builder(Op::Insert(
+                    name,
+                    Id::Byte(i as u8 * 7 + 1),
+                    FileMode::Commit,
+                ))
+                .unwrap();
+            }
+        }
+
+        /// [`TreeBuilderMut::remove_if`] matches `git_treebuilder_filter`, each over a
+        /// builder of its own filled alike: the closure and the C callback are lent the
+        /// same entries in the same order, the same ones go, and the builders' states
+        /// (count, every name's mode, the tree written) match after each run. The runs
+        /// keep nothing, pick by name, mode and id, and finally remove everything; the
+        /// builders are filled again in between.
+        ///
+        /// [`TreeBuilderMut::remove_if`]: libgit2::libgit2::object::tree::TreeBuilderMut::remove_if
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn filters_match_c() {
+            super::super::init();
+            let (c_temp, c_blob, c_tree) = setup("filter-c");
+            let (rust_temp, rust_blob, rust_tree) = setup("filter-rust");
+            let submodules: Vec<CString> = (0..20)
+                .map(|i| CString::new(format!("s{i:02}")).unwrap())
+                .collect();
+            let mut all = names();
+            all.extend(submodules.iter().cloned());
+
+            let mut c_builder = ptr::null_mut();
+            // SAFETY: a writable slot and the live repository, which outlives the builder.
+            let rc = unsafe {
+                ffi::git_treebuilder_new(&mut c_builder, c_temp.repo().as_c_ptr(), ptr::null())
+            };
+            assert_eq!(rc, 0);
+            let mut rust_builder = TreeBuilder::new(rust_temp.repo().as_ref()).unwrap();
+            for round in 0..2 {
+                fill(
+                    &mut |op| c_step(c_builder, op, &c_blob, &c_tree),
+                    &submodules,
+                );
+                fill(
+                    &mut |op| rust_step(&mut rust_builder, op, &rust_blob, &rust_tree),
+                    &submodules,
+                );
+                for (i, pick) in PICKS.into_iter().enumerate() {
+                    let mut state = Filtering {
+                        pick,
+                        visits: Vec::new(),
+                    };
+                    // SAFETY: a live builder, unaliased; the callback and its state are
+                    // live for the call.
+                    let rc = unsafe {
+                        ffi::git_treebuilder_filter(
+                            c_builder,
+                            Some(c_filter),
+                            (&raw mut state).cast(),
+                        )
+                    };
+                    assert_eq!(rc, 0);
+
+                    let mut visits = Vec::new();
+                    let mut f = |entry: TreeEntryRef<'_>| {
+                        let seen = entry_view(entry);
+                        let remove = pick(&seen);
+                        visits.push(seen);
+                        remove
+                    };
+                    let mut filter = TreeBuilderFilter::new(&mut f);
+                    rust_builder.as_mut().remove_if(&mut filter);
+                    drop(filter);
+                    assert_eq!(state.visits, visits, "round {round} pick {i}");
+                    assert_eq!(
+                        c_snapshot(c_builder, &all),
+                        rust_snapshot(&mut rust_builder, &all),
+                        "round {round} pick {i}"
+                    );
+                }
+                assert_eq!(rust_builder.as_ref().len(), 0);
+            }
+            drop(rust_builder);
+            // SAFETY: the builder made above, released once.
+            unsafe { ffi::git_treebuilder_free(c_builder) };
         }
 
         /// Runs `c` and then `rust` with the `k`-th libgit2 allocation of each failing, for
@@ -2705,13 +2925,19 @@ mod tree_object {
     //! repository's is refused by the wrappers (code `-1`, `GIT_ERROR_INVALID`), where the
     //! C routines format it out of bounds; the unit tests of `tree.rs` hold the refusal.
     //!
+    //! [`getters_match_c`] compares the tree getters with `git_tree_id`, `_owner`,
+    //! `_entrycount` and `git_tree_entry_byindex`, `_byname` and `_byid`, on every tree
+    //! of `testrepo.git`, with probes around both ends of the index range, names a byte
+    //! longer or shorter than the tree's and past 65535 bytes, and ids of another type or
+    //! tail: the entries found, the misses, and the thread's error after each call.
+    //!
     //! [`TreeRef::to_tree`]: libgit2::libgit2::object::tree::TreeRef::to_tree
 
     use std::ffi::{CStr, CString, c_int};
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::tree::{Tree, TreeArc};
+    use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeEntryRef, TreeRef};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
 
@@ -3086,5 +3312,220 @@ mod tree_object {
         assert_eq!(compare(CSide::open(&path_str), &rust, &steps), 4);
         drop(rust);
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// What a getter gave: the entry as the side's own getters read it (name, raw file
+    /// mode, id), or nothing, and the thread's error right after the call.
+    type Got = (Option<Entry>, (c_int, String));
+
+    /// Everything the tree getters give for one tree, in call order.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Read {
+        id: String,
+        owner: Option<String>,
+        len: usize,
+        in_order: Vec<Entry>,
+        by_index: Vec<Got>,
+        by_name: Vec<Got>,
+        by_id: Vec<Got>,
+    }
+
+    /// Indices around both ends of `len`.
+    fn indices(len: usize) -> Vec<usize> {
+        vec![0, 1, len.saturating_sub(1), len, len + 1, usize::MAX]
+    }
+
+    /// The names probed: every entry's, with a byte more and one less, and names no
+    /// tree holds, past the 65535 bytes a tree stores included.
+    fn name_probes(names: &[String]) -> Vec<CString> {
+        let mut probes: Vec<CString> = Vec::new();
+        for name in names {
+            probes.push(CString::new(name.as_str()).unwrap());
+            probes.push(CString::new(format!("{name}x")).unwrap());
+            probes.push(CString::new(&name.as_bytes()[..name.len() - 1]).unwrap());
+            probes.push(CString::new(format!("{name}/")).unwrap());
+        }
+        for extra in ["", "nope", "ab/de", "zzzz"] {
+            probes.push(CString::new(extra).unwrap());
+        }
+        for len in [65535, 65536, 65537, 70000] {
+            probes.push(CString::new(vec![b'a'; len]).unwrap());
+        }
+        probes
+    }
+
+    /// The ids probed, as raw `git_oid`s: every entry's, with a non-zero tail and as
+    /// SHA-256, the zero id and a missing one.
+    fn id_probes(ids: &[ffi::git_oid]) -> Vec<ffi::git_oid> {
+        let mut probes = Vec::new();
+        for id in ids {
+            probes.push(*id);
+            let mut tail = *id;
+            tail.id[31] = 1;
+            probes.push(tail);
+            let mut wide = *id;
+            wide.type_ = ffi::GIT_OID_SHA256 as u8;
+            probes.push(wide);
+        }
+        let mut missing = ffi::git_oid {
+            type_: ffi::GIT_OID_SHA1 as u8,
+            id: [0; 32],
+        };
+        probes.push(missing);
+        missing.id[..20].fill(0xde);
+        probes.push(missing);
+        probes
+    }
+
+    /// C's view of the entry `e`, or nothing.
+    fn c_entry(e: *const ffi::git_tree_entry) -> Option<Entry> {
+        // SAFETY: NULL or a live entry of a live tree; its name and id are copied at once.
+        unsafe {
+            e.as_ref()?;
+            Some((
+                CStr::from_ptr(ffi::git_tree_entry_name(e))
+                    .to_string_lossy()
+                    .into_owned(),
+                ffi::git_tree_entry_filemode_raw(e),
+                hex_of(ffi::git_tree_entry_id(e)),
+            ))
+        }
+    }
+
+    /// The Rust getters' view of a lent entry, or nothing.
+    fn rust_entry(e: Option<TreeEntryRef<'_>>) -> Option<Entry> {
+        let e = e?;
+        Some((
+            e.name().to_string_lossy().into_owned(),
+            e.filemode_raw(),
+            e.id().to_hex_string().unwrap(),
+        ))
+    }
+
+    /// Runs `call` with the thread's error cleared, and pairs its result with the error
+    /// it left.
+    fn got(call: impl FnOnce() -> Option<Entry>) -> Got {
+        // SAFETY: no arguments.
+        unsafe { ffi::git_error_clear() };
+        let entry = call();
+        (entry, last_error())
+    }
+
+    /// The C side's reads of a live tree, with the probes.
+    fn c_read(tree: *mut ffi::git_tree, names: &[CString], ids: &[ffi::git_oid]) -> Read {
+        // SAFETY: a live tree of a live repository, only read; every returned entry and
+        // id lives with it and is copied at once; the probes are live for each call.
+        unsafe {
+            let len = ffi::git_tree_entrycount(tree);
+            let path = ffi::git_repository_path(ffi::git_tree_owner(tree));
+            Read {
+                id: hex_of(ffi::git_tree_id(tree)),
+                owner: path
+                    .as_ref()
+                    .map(|_| CStr::from_ptr(path).to_string_lossy().into_owned()),
+                len,
+                in_order: (0..len)
+                    .map(|i| c_entry(ffi::git_tree_entry_byindex(tree, i)).unwrap())
+                    .collect(),
+                by_index: indices(len)
+                    .into_iter()
+                    .map(|i| got(|| c_entry(ffi::git_tree_entry_byindex(tree, i))))
+                    .collect(),
+                by_name: names
+                    .iter()
+                    .map(|n| got(|| c_entry(ffi::git_tree_entry_byname(tree, n.as_ptr()))))
+                    .collect(),
+                by_id: ids
+                    .iter()
+                    .map(|id| got(|| c_entry(ffi::git_tree_entry_byid(tree, id))))
+                    .collect(),
+            }
+        }
+    }
+
+    /// The Rust side's reads of a tree, through the public getters, with the probes.
+    fn rust_read(tree: TreeRef<'_, '_>, names: &[CString], ids: &[ffi::git_oid]) -> Read {
+        let ids: Vec<Oid> = ids
+            .iter()
+            .map(|raw| {
+                let mut id = Oid::zero(OidType::Sha1);
+                id.as_mut().set_raw_kind(raw.type_);
+                id.as_mut().set_id(raw.id);
+                id
+            })
+            .collect();
+        Read {
+            id: tree.id().to_hex_string().unwrap(),
+            owner: tree
+                .owner()
+                .path()
+                .map(|p| p.to_string_lossy().into_owned()),
+            len: tree.len(),
+            in_order: tree.iter().map(|e| rust_entry(Some(e)).unwrap()).collect(),
+            by_index: indices(tree.len())
+                .into_iter()
+                .map(|i| got(|| rust_entry(tree.get(i))))
+                .collect(),
+            by_name: names
+                .iter()
+                .map(|n| got(|| rust_entry(tree.get_by_name(n))))
+                .collect(),
+            by_id: ids
+                .iter()
+                .map(|id| got(|| rust_entry(tree.get_by_id(id.as_ref()))))
+                .collect(),
+        }
+    }
+
+    /// The tree getters ([`TreeRef::id`], `owner`, `len`, `get`, `get_by_name`,
+    /// `get_by_id`, `iter`) read what `git_tree_id`, `_owner`, `_entrycount`,
+    /// `_entry_byindex`, `_entry_byname` and `_entry_byid` read, on every tree of
+    /// `testrepo.git`, each side over its own repository: the same entries, the same
+    /// misses, and the same thread error after each call (the "path too long" error an
+    /// overlong name leaves included). Then again with only a copy of each tree alive.
+    ///
+    /// [`TreeRef::id`]: libgit2::libgit2::object::tree::TreeRef::id
+    #[test]
+    fn getters_match_c() {
+        init();
+        let mut c = CSide::open(TESTREPO);
+        let rust = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+        let mut held = Vec::new();
+        let mut probes = Vec::new();
+        for hex in TREES {
+            let step = Step { hex, len: None };
+            let (Outcome::Found(_, _, entries), _) = c.run(step) else {
+                panic!("{hex} is a tree");
+            };
+            let names: Vec<_> = entries.iter().map(|e| e.0.clone()).collect();
+            let ids: Vec<_> = c
+                .held
+                .last()
+                .map(|&t| {
+                    // SAFETY: a live tree; each entry's id is copied at once.
+                    (0..entries.len())
+                        .map(|i| unsafe {
+                            *ffi::git_tree_entry_id(ffi::git_tree_entry_byindex(t, i))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap();
+            let (names, ids) = (name_probes(&names), id_probes(&ids));
+            let tree = run_rust(&rust, &mut held, step);
+            assert!(tree.1.is_none());
+            let tree = held.last().unwrap();
+            assert_eq!(
+                c_read(*c.held.last().unwrap(), &names, &ids),
+                rust_read(tree.as_ref(), &names, &ids),
+                "{hex}"
+            );
+            probes.push((names, ids));
+        }
+        c.copy_and_release();
+        let copies: Vec<_> = held.iter().map(TreeArc::clone).collect();
+        drop(held);
+        for ((&t, copy), (names, ids)) in c.held.iter().zip(&copies).zip(&probes) {
+            assert_eq!(c_read(t, names, ids), rust_read(copy.as_ref(), names, ids));
+        }
     }
 }

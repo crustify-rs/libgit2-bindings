@@ -1,0 +1,12 @@
+error[E0502]: cannot borrow `repo` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_walk_closure_takes_repository_mut.rs:12:17
+   |
+11 |     let tree = Tree::lookup(repo.as_ref(), id.as_ref()).unwrap();
+   |                             ---- immutable borrow occurs here
+12 |     let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+13 |         let _ = repo.as_mut();
+   |                 ---- second borrow occurs due to use of `repo` in closure
+...
+17 |     let _ = tree.as_ref().walk(WalkMode::PreOrder, &mut callback);
+   |             ---- immutable borrow later used here

@@ -11191,6 +11191,155 @@
    ]
   },
   {
+   "name": "git_tree_entry_byid",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Not NULL-checked: git_oid_equal memcmps the whole git_oid (type byte and all 32 id bytes) against each entry's, for the call only. An id of another type, or a SHA-1 id with non-zero tail bytes, matches nothing; reads stay within the struct."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL; entries scanned linearly, only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:tree"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "First entry whose id equals id, or NULL (no error set). An element of tree->entries, valid while the tree lives. Rust: Option<TreeEntryRef<'a>>."
+    }
+   }
+  },
+  {
+   "name": "git_tree_entry_byindex",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL; only read (git_array_get bounds-checks idx)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:tree"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "NULL when idx >= entrycount (no error set); else &tree->entries.ptr[idx], live and unchanged while the tree lives. Rust: Option<TreeEntryRef<'a>>."
+    }
+   }
+  },
+  {
+   "name": "git_tree_entry_byname",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "filename",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filename"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated name, strlen'd and compared for the call only; asserted non-NULL. Longer than UINT16_MAX: TREE_ENTRY_CHECK_NAMELEN sets GIT_ERROR_INVALID 'tree entry path too long' yet goes on with the length truncated to 16 bits for the homing compare (reads stay within the name) and the full length for the match, so NULL."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL (else NULL, GIT_ERROR_INVALID). Only read: binary homing search over tree->entries then a linear scan."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:tree"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "NULL on a miss (no error set, except for an overlong name). Otherwise an element of tree->entries, whose filename points into the tree's odb_obj data: valid while the tree lives, never written after the parse, never freed by the caller. Rust: TreeEntryRef<'a> tied to the shared tree borrow."
+    }
+   }
+  },
+  {
    "name": "git_tree_entry_bypath",
    "defined_in": "src/libgit2/tree.c",
    "lifetime": {
@@ -11595,6 +11744,29 @@
    ]
   },
   {
+   "name": "git_tree_entrycount",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL asserts and returns 0; otherwise only tree->entries.size is read."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tree_free",
    "defined_in": "src/libgit2/object_api.c",
    "lifetime": {
@@ -11621,6 +11793,45 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_tree_id",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_object_id behind a cast; asserted non-NULL; only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&obj->object.cached.oid: lives as long as the tree, written once at parse. Rust: OidRef<'a>."
+    }
+   }
   },
   {
    "name": "git_tree_lookup",
@@ -11763,6 +11974,102 @@
    ]
   },
   {
+   "name": "git_tree_owner",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_object_owner behind a cast; asserted non-NULL; only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj->repo"
+     },
+     "nullable": false,
+     "mutable": true,
+     "note": "obj->object.repo, stored uncounted at lookup and never cleared: valid while the repository the tree was looked up in lives. Non-const: callers look objects up through it. Rust: RepositoryRef<'r>, the handle the tree was looked up through."
+    }
+   }
+  },
+  {
+   "name": "git_tree_walk",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "callback",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:callback"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Not NULL-checked: called synchronously with (path, entry, payload) for each entry, path the subtree prefix ('' at the root, 'a/b/'), entry borrowed for the call (a subtree's entries are freed after it is walked). Negative stops, returned, with git_error_set_after_callback_function naming git_tree_walk only when no error is set; positive skips the subtree in pre-order, ignored in post-order."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque payload passed through to callback, never dereferenced or kept past the call."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Not NULL-checked (dereferenced for its entries). Only read; each subtree is looked up through tree->object.repo (filling its cache) and freed once walked, so the repository must be live and usable on this thread."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_treebuilder_clear",
    "defined_in": "src/libgit2/tree.c",
    "lifetime": {
@@ -11811,6 +12118,63 @@
       "nullable": true,
       "mutable": false,
       "note": "Non-const in the signature but only reads the map size; NULL returns 0."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_treebuilder_filter",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "bld",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:bld"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Asserted non-NULL. Iterates its entry map, removing and git_tree_entry_free'ing each entry the filter returns non-zero for; never reaches the repository. Always returns 0 otherwise."
+     }
+    },
+    {
+     "name": "filter",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:filter"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Asserted non-NULL; called synchronously once per entry with (entry, payload); entry is freed right after a non-zero answer, so it is borrowed for the call only. Iteration cannot be stopped."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque payload passed through to filter, never dereferenced or kept past the call."
      }
     }
    ]

@@ -1,0 +1,23 @@
+error[E0502]: cannot borrow `builder` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/tree_builder_filter_reaches_builder.rs:8:5
+  |
+6 |     let mut f = |_: TreeEntryRef<'_>| builder.as_ref().is_empty();
+  |                 --------------------- ------- first borrow occurs due to use of `builder` in closure
+  |                 |
+  |                 immutable borrow occurs here
+7 |     let mut filter = TreeBuilderFilter::new(&mut f);
+8 |     builder.as_mut().remove_if(&mut filter);
+  |     ^^^^^^^^^^^^^^^^           ----------- immutable borrow later used here
+  |     |
+  |     mutable borrow occurs here
+
+error[E0502]: cannot borrow `builder` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/tree_builder_filter_reaches_builder.rs:14:5
+   |
+12 |     let entry = builder.as_ref().get(c"README");
+   |                 ------- immutable borrow occurs here
+13 |     let mut f = |_: TreeEntryRef<'_>| true;
+14 |     builder.as_mut().remove_if(&mut TreeBuilderFilter::new(&mut f));
+   |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+15 |     let _ = entry;
+   |             ----- immutable borrow later used here
