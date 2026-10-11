@@ -137,6 +137,29 @@ impl Pathspec {
     }
 }
 
+impl PathspecRef<'_> {
+    /// Whether `path` matches the compiled patterns. Only
+    /// [`NO_GLOB`](PathspecFlags::NO_GLOB) and
+    /// [`IGNORE_CASE`](PathspecFlags::IGNORE_CASE) are consulted: matching is
+    /// case-sensitive unless `IGNORE_CASE` is set, whatever the platform, and every
+    /// other bit is ignored. A pathspec with no effective pattern matches every path.
+    /// Otherwise patterns are tried in order and the first that decides a path wins:
+    /// `!pattern` excludes a path only ahead of any pattern that includes it. A
+    /// literal pattern also matches the paths below it as a directory.
+    ///
+    /// libgit2 only reads the pathspec and `path`, retains neither, and reports no
+    /// error: its sole failure path rejects a NULL argument, which cannot occur here.
+    ///
+    /// Wraps: git_pathspec_matches_path
+    pub fn matches_path(&self, flags: PathspecFlags, path: &CStr) -> bool {
+        let (pathspec, path) = (self.as_ptr(), path.as_ptr());
+        // SAFETY: this handle keeps the initialized pathspec alive and unwritten for
+        // the call, and `path` is NUL-terminated. C reads both without retaining them.
+        let rc = unsafe { ffi::git_pathspec_matches_path(pathspec, flags.bits(), path) };
+        rc > 0
+    }
+}
+
 /// Whether libgit2 can parse `patterns` as a pathspec, setting a `GIT_ERROR_INVALID`
 /// error when it cannot. Once one pattern is not empty, libgit2 parses every one, and
 /// reads the byte after an empty pattern's terminator (`parse_optimized_patterns`,

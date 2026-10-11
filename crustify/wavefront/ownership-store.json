@@ -15356,6 +15356,44 @@
    ]
   },
   {
+   "name": "git_pathspec_matches_path",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated path read during matching only, never retained or copied (GIT_ASSERT_ARG: NULL returns -1). Reads stop at its terminator: the directory-prefix and negative '!' probes index path[len] / path[len+1] only after strncmp proved those bytes exist. Rust: &CStr."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live compiled pathspec, only read for the call (GIT_ASSERT_ARG: NULL returns -1 with an error set); no refcount change, nothing retained. Rust: PathspecRef::matches_path, reachable from PathspecBox, PathspecMut and PathspecArc."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_pathspec_new",
    "defined_in": "src/libgit2/pathspec.c",
    "lifetime": {
