@@ -12,6 +12,8 @@ use libgit2::libgit2::util::errors::ErrorClass;
 use reuc::{IndexFile, Record, extension_bytes, snapshot, sorted};
 use std::ffi::CString;
 
+mod reuc_edits;
+
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn names_survive_inputs_and_reborrow_before_clear() {

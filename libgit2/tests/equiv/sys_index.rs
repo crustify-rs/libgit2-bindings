@@ -10,6 +10,8 @@ use reuc::{IndexFile, Record, Snapshot, snapshot, sorted};
 use std::ffi::{CStr, CString, c_int};
 use std::ptr;
 
+mod reuc_edits;
+
 type Names = [Option<CString>; 3];
 
 fn raw_names(index: &IndexBox) -> Vec<Names> {
