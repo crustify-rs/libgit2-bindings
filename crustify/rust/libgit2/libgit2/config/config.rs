@@ -1376,11 +1376,7 @@ impl ConfigRef<'_, '_> {
         if last() != before {
             // A lower backend's failure was spent: leave the thread's error as
             // a successful C lookup does.
-            match before.class() {
-                Some(ErrorClass::None) => clear(),
-                Some(class) => set(class, before.message()),
-                None => {}
-            }
+            restore_last(&before);
         }
         // SAFETY: success returned one reference paired with entry_free; the
         // entry pins the snapshot's list, not the snapshot dropped below.
@@ -1428,52 +1424,35 @@ impl ConfigRef<'_, '_> {
     }
 }
 
+/// Puts `before` back as the thread's last error, verbatim. `set` would format
+/// it again, and for `GIT_ERROR_OS` libgit2 appends `errno`'s description.
+fn restore_last(before: &ErrorBuf) {
+    if before.class() == Some(ErrorClass::None) {
+        clear();
+    } else {
+        // SAFETY: the caller has just called libgit2, so the runtime is pinned;
+        // the message is NUL-terminated and copied during the call. The class is
+        // stored, never interpreted, so an unknown one is restored as it was.
+        unsafe { ffi::git_error_set_str(before.raw_class(), before.message().as_ptr()) };
+    }
+}
+
 impl ConfigRef<'_, '_> {
     /// Maps the highest-priority value of `name` through the ordered table.
     /// A valueless entry is passed as `None`, not as an empty string.
     ///
-    /// Uses the refresh-and-snapshot path of [`entry`](Self::entry) before
-    /// calling C's mapper: C's direct lookup forms an uninitialized entry
-    /// pointer on a backend refresh error. The same snapshot costs, lower-level
-    /// refresh differences, and C allocation-failure limitations apply here.
-    /// Mapping itself retains C's first-match semantics and error reporting.
+    /// Composed as `git_config_get_mapped` is, from [`entry`](Self::entry) and
+    /// [`lookup_map_value`]: C's direct lookup forms an uninitialized entry
+    /// pointer on a backend refresh error, and C's mapper formats a valueless
+    /// entry through `%s` when no rule matches it. The snapshot costs,
+    /// lower-level refresh differences, and C allocation-failure limitations of
+    /// `entry` apply here. Mapping retains C's first-match semantics and error
+    /// reporting.
     ///
     /// Wraps: git_config_get_mapped
     pub fn get_mapped(&self, name: &CStr, maps: &[ConfigMap<'_>]) -> Result<i32, ConfigError> {
-        let before = last();
-        if let Some(failure) = self.reread_through(name)? {
-            return Err(failure);
-        }
-        let snapshot = self.snapshot()?;
-        if last() != before {
-            // Restore any error spent while refreshing lower-priority backends
-            // before the mapper, which may itself set errors even on success.
-            match before.class() {
-                Some(ErrorClass::None) => clear(),
-                Some(class) => set(class, before.message()),
-                None => {}
-            }
-        }
-        let mut out = 0;
-        // SAFETY: the snapshot stays live and never refreshes its backends;
-        // out is writable and name is NUL-terminated. ConfigMap is transparent
-        // over git_configmap, every string rule has a live non-NULL C string,
-        // and the slice supplies the exact element count. C retains no table
-        // pointer and acquires/releases its own temporary entry reference.
-        let rc = unsafe {
-            ffi::git_config_get_mapped(
-                &mut out,
-                snapshot.as_c_ptr(),
-                name.as_ptr(),
-                maps.as_ptr().cast(),
-                maps.len(),
-            )
-        };
-        if rc < 0 {
-            Err(ConfigError::from_libgit2(rc))
-        } else {
-            Ok(out)
-        }
+        let entry = self.entry(name)?;
+        lookup_map_value(maps, entry.as_ref().value())
     }
 }
 
@@ -1487,9 +1466,18 @@ impl ConfigRef<'_, '_> {
 /// speculative parsers may leave a last error even when a later rule succeeds;
 /// this wrapper preserves that behavior.
 ///
+/// Only a boolean-true rule matches `None`. Without one, C would report the
+/// failure by formatting the NULL value through `%s`, which ISO C leaves
+/// undefined; the wrapper reports it itself, spelling the value `(null)` as
+/// libgit2's parsers and glibc do.
+///
 /// Wraps: git_config_lookup_map_value
 pub fn lookup_map_value(maps: &[ConfigMap<'_>], value: Option<&CStr>) -> Result<i32, ConfigError> {
     if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    if value.is_none() && !maps.iter().any(|m| m.as_ref().map_type() == MapType::True) {
+        set(ErrorClass::Config, c"failed to map '(null)'");
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
     }
     let mut out = 0;
@@ -2039,6 +2027,13 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
 
 #[cfg(test)]
 mod unit_tests {
+    use super::*;
+    use crate::libgit2::util::errors::ErrorCode;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+    use core::ffi::{CStr, c_int, c_void};
+    use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     /// Rust-only fixture for the borrowed callback seam; never adopted as an
     /// owner, since it lacks the enclosing C backend-entry release callback.
@@ -2130,6 +2125,53 @@ mod unit_tests {
         std::fs::remove_file(file).unwrap();
     }
 
+    /// Nothing but a boolean-true rule maps a valueless setting, and C reports the
+    /// miss by formatting its NULL value through `%s`. The wrapper reports the miss
+    /// itself, worded as glibc renders C's, and still leaves tables with a true rule
+    /// to C, whose speculative integer parse error survives the match.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn valueless_misses_never_reach_c_formatting() {
+        let missing = [
+            ConfigMap::new(MapMatch::Int32, 1),
+            ConfigMap::new(MapMatch::False, 2),
+            ConfigMap::new(MapMatch::String(c"x"), 3),
+        ];
+        let with_true = [
+            ConfigMap::new(MapMatch::Int32, 1),
+            ConfigMap::new(MapMatch::True, 5),
+        ];
+        let file =
+            std::env::temp_dir().join(format!("crustify-valueless-map-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\n flag\n").unwrap();
+        let config = Config::open(&CString::new(file.to_str().unwrap()).unwrap()).unwrap();
+        for maps in [&[][..], &missing[..1], &missing[..]] {
+            set(ErrorClass::Odb, c"previous");
+            let lookup = lookup_map_value(maps, None).unwrap_err();
+            set(ErrorClass::Odb, c"previous");
+            let mapped = config.as_ref().get_mapped(c"a.flag", maps).unwrap_err();
+            for error in [lookup, mapped] {
+                assert_eq!(error.raw_code(), ffi::GIT_ERROR);
+                assert_eq!(error.class(), Some(ErrorClass::Config));
+                assert_eq!(error.message(), c"failed to map '(null)'");
+            }
+            assert_eq!(last().message(), c"failed to map '(null)'");
+        }
+        clear();
+        assert_eq!(lookup_map_value(&with_true, None).unwrap(), 5);
+        let parse_error = c"failed to parse '(null)' as a 32-bit integer";
+        assert_eq!(last().message(), parse_error);
+        clear();
+        assert_eq!(
+            config.as_ref().get_mapped(c"a.flag", &with_true).unwrap(),
+            5
+        );
+        assert_eq!(last().message(), parse_error);
+        clear();
+        drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn mapped_snapshot_construction_failure_reports_oom() {
@@ -2193,13 +2235,6 @@ mod unit_tests {
         drop(cfg);
         std::fs::remove_file(file).unwrap();
     }
-    use super::*;
-    use crate::libgit2::util::errors::ErrorCode;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-    use core::ffi::{CStr, c_int, c_void};
-    use core::mem::size_of;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     #[test]
     fn mapping_layout_borrows_clone_and_seams() {

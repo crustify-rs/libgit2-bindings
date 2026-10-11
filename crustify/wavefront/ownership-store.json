@@ -7582,7 +7582,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "Read-only config borrow; get_entry may refresh. On failed refresh C derives an uninitialized entry pointer, so wrap through reread + snapshot before calling mapper."
+      "note": "Read-only config borrow; get_entry may refresh. On a failed refresh C derives an uninitialized entry pointer, and a valueless entry reaches lookup_map_value's NULL %s miss report, so the safe wrapper composes get_entry's reread + snapshot acquisition with the safe lookup_map_value."
      }
     },
     {
@@ -7922,7 +7922,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Writable scalar; successful Int32 returns parsed input, not map_value. Failed parse may touch output; safe API exposes no failure output."
+      "note": "Writable scalar, written only on success: map_value for a boolean/string match, the parsed input for an Int32 match (git_config_parse_int32 stores only after a full parse). Failure leaves it untouched."
      }
     },
     {
@@ -7937,7 +7937,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "NULL denotes valueless boolean true; empty denotes false. NUL bytes read only during call, case-insensitive string matching."
+      "note": "NULL denotes a valueless setting: only a GIT_CONFIGMAP_TRUE rule matches it (parse_bool(NULL) is true). With no such rule C reports the miss via git_error_set(\"failed to map '%s'\", value), formatting NULL through %s (ISO C UB; glibc prints (null)); a safe caller must not pass NULL then. Empty text means false. Read only during the call; string rules compare case-insensitively."
      }
     }
    ]
