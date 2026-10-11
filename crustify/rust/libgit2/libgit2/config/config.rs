@@ -75,7 +75,7 @@ use std::panic::{self, AssertUnwindSafe};
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
-use crate::libgit2::config::sys::config::{IteratorBox, IteratorMut};
+use crate::libgit2::config::sys::config::{BackendMut, IteratorBox, IteratorMut};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 
@@ -1792,6 +1792,162 @@ impl ConfigRef<'_, '_> {
             rc
         });
         foreach_result(rc, callback)
+    }
+}
+
+impl BackendMut<'_> {
+    /// Visits this opened backend's entries whose normalized names match the C
+    /// regex. `None` and an empty pattern visit all entries, including duplicates.
+    /// Entries are lent only for the callback; the backend remains exclusively
+    /// borrowed throughout. Stops preserve their nonzero code, and panics resume
+    /// after both C's regex and the Rust-held iterator have been released.
+    ///
+    /// C leaks its regex on iterator-construction failure and hides negative next
+    /// statuses. A prepared iterator adapter keeps C's matching/callback behavior
+    /// while releasing resources on every path and reporting those backend errors.
+    /// Iterator construction precedes C regex compilation in this wrapper. A
+    /// nameless entry is allowed without a pattern, but rejected when matching
+    /// would pass its NULL name to C's regex engine.
+    ///
+    /// The walked backend cannot be reentered or dropped through the callback:
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{ConfigLevel, EntryRef, ForeachCallback};
+    /// use libgit2::libgit2::config::sys::config::Backend;
+    /// use std::ops::ControlFlow;
+    /// let mut backend = Backend::from_values(&[c"a.b=1"], None).unwrap()
+    ///     .open(ConfigLevel::LOCAL).unwrap();
+    /// let mut view = backend.as_mut();
+    /// let mut f = |_: EntryRef<'_>| {
+    ///     backend.as_mut().get(c"a.b").unwrap();
+    ///     ControlFlow::Continue(())
+    /// };
+    /// view.foreach_match(None, &mut ForeachCallback::new(&mut f)).unwrap();
+    /// ```
+    ///
+    /// Wraps: git_config_backend_foreach_match
+    pub fn foreach_match(
+        &mut self,
+        regexp: Option<&CStr>,
+        callback: &mut ForeachCallback<'_>,
+    ) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+        let (rc, failure) = callback.walk_with(|cb, payload| {
+            let inner = match self.iterator() {
+                Ok(inner) => inner,
+                Err(error) => return (error.raw_code(), Some(error)),
+            };
+            let mut prepared = PreparedBackendWalk {
+                backend: ffi::git_config_backend {
+                    version: ffi::GIT_CONFIG_BACKEND_VERSION,
+                    iterator: Some(PreparedBackendWalk::iterator),
+                    ..Default::default()
+                },
+                iterator: ffi::git_config_iterator {
+                    backend: ptr::null_mut(),
+                    flags: 0,
+                    next: Some(PreparedBackendWalk::next),
+                    free: Some(PreparedBackendWalk::free),
+                },
+                state: PreparedWalkState {
+                    inner,
+                    failure: None,
+                    require_name: regexp.is_some(),
+                },
+            };
+            let p = ptr::from_mut(&mut prepared);
+            // SAFETY: project and initialize through the same raw provenance C
+            // will use; a fresh Rust reborrow would invalidate that retained tag.
+            unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
+            // SAFETY: stable Rust-owned ABI bases with matched adapter callbacks.
+            // C reads only backend.iterator, calls next/free synchronously, and
+            // retains nothing. The prepared owner pins entries and backend; the
+            // callback payload is exclusive and the optional NUL pattern is live.
+            let rc = unsafe {
+                ffi::git_config_backend_foreach_match(
+                    p.cast(),
+                    regexp.map_or(ptr::null(), CStr::as_ptr),
+                    cb,
+                    payload,
+                )
+            };
+            // The inner iterator is dropped before walk_with can resume a panic.
+            (rc, prepared.state.failure.take())
+        });
+        if callback.stopped().is_none()
+            && let Some(error) = failure
+        {
+            return Err(error);
+        }
+        foreach_result(rc, callback)
+    }
+}
+
+/// Private, borrowed ABI adapter; no C release owns these stack bases. Its Rust
+/// state alone owns the foreign iterator via ffibox. It is never exposed as an
+/// opened Backend or adopted by an owner, and is not moved during the C call.
+/// Handwritten
+#[repr(C)]
+struct PreparedBackendWalk<'c> {
+    backend: ffi::git_config_backend,
+    iterator: ffi::git_config_iterator,
+    state: PreparedWalkState<'c>,
+}
+struct PreparedWalkState<'c> {
+    inner: IteratorBox<'c>,
+    failure: Option<ConfigError>,
+    require_name: bool,
+}
+impl PreparedBackendWalk<'_> {
+    unsafe extern "C" fn iterator(
+        out: *mut *mut ffi::git_config_iterator,
+        backend: *mut ffi::git_config_backend,
+    ) -> c_int {
+        // SAFETY: only this adapter installs the callback; backend is its offset-zero
+        // base, out is writable, and the enclosing stable stack object outlives C.
+        unsafe { out.write(addr_of_mut!((*backend.cast::<Self>()).iterator)) };
+        0
+    }
+    unsafe extern "C" fn next(
+        out: *mut *mut ffi::git_config_backend_entry,
+        iterator: *mut ffi::git_config_iterator,
+    ) -> c_int {
+        // SAFETY: iterator is this adapter's live base, with the enclosing pointer
+        // installed before C. State is Rust-owned, exclusively used synchronously;
+        // the reference covers no C-owned layout or pointee.
+        let state = unsafe {
+            let p = addr_of!((*iterator).backend).read().cast::<Self>();
+            &mut *addr_of_mut!((*p).state)
+        };
+        let mut m = state.inner.as_mut();
+        match m.advance() {
+            Ok(Some(entry)) => {
+                // Entry handles permit nullable names; C's regex matcher does not.
+                // No pattern still supports such entries through the typed callback.
+                if state.require_name && entry.entry().name().is_none() {
+                    set(
+                        ErrorClass::Config,
+                        c"config backend iterator returned an entry without a name",
+                    );
+                    let error = ConfigError::from_libgit2(ffi::GIT_EINVALIDSPEC);
+                    let rc = error.raw_code();
+                    state.failure = Some(error);
+                    return rc;
+                }
+                // SAFETY: out is writable; inner pins this immutable entry through
+                // C's callback until next/free, and no Rust entry borrow escapes.
+                unsafe { out.write(entry.as_ptr().cast_mut()) };
+                0
+            }
+            Ok(None) => ffi::GIT_ITEROVER,
+            Err(error) => {
+                let rc = error.raw_code();
+                state.failure = Some(error);
+                rc
+            }
+        }
+    }
+    unsafe extern "C" fn free(_: *mut ffi::git_config_iterator) {
+        // C borrows the stack iterator. The enclosing Rust state releases the
+        // real owner immediately after C returns (also on callback panic).
     }
 }
 
@@ -3620,6 +3776,210 @@ pub(crate) mod unit_tests {
                 // callback matches; static strings, and no config dependency.
                 unsafe { IteratorBox::from_c(Box::into_raw(value).cast()) }.unwrap()
             }
+        }
+
+        /// Rust-only adapter/provenance test. Manually dispatches the allocation's
+        /// Rust releaser instead of libgit2's dispatcher so Miri can execute it.
+        #[test]
+        fn backend_walk_adapter_borrowed_bases_and_lending() {
+            let releases = Rc::new(Cell::new(0));
+            let inner = Scripted::adopt(&[0, ffi::GIT_ITEROVER], releases.clone());
+            let mut prepared = PreparedBackendWalk {
+                backend: ffi::git_config_backend {
+                    version: 1,
+                    iterator: Some(PreparedBackendWalk::iterator),
+                    ..Default::default()
+                },
+                iterator: ffi::git_config_iterator {
+                    backend: ptr::null_mut(),
+                    flags: 0,
+                    next: Some(PreparedBackendWalk::next),
+                    free: Some(PreparedBackendWalk::free),
+                },
+                state: PreparedWalkState {
+                    inner,
+                    failure: None,
+                    require_name: false,
+                },
+            };
+            let p = ptr::from_mut(&mut prepared);
+            // SAFETY: project and initialize through the same raw provenance C
+            // will use; a fresh Rust reborrow would invalidate that retained tag.
+            unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
+            let mut iterator = ptr::null_mut();
+            // SAFETY: exclusive stable initialized Rust-owned adapter; writable out.
+            assert_eq!(
+                // SAFETY: exclusive stable initialized Rust-owned adapter; writable out.
+                unsafe { PreparedBackendWalk::iterator(&mut iterator, p.cast()) },
+                0
+            );
+            assert_eq!(iterator, addr_of_mut!(prepared.iterator));
+            let mut entry = ptr::null_mut();
+            // SAFETY: adapter's exclusive matched iterator; writable slot. The
+            // inner Rust callback lends a static-string entry without foreign calls.
+            assert_eq!(
+                // SAFETY: adapter's exclusive matched iterator; writable slot. The
+                // inner Rust callback lends a static-string entry without foreign calls.
+                unsafe { PreparedBackendWalk::next(&mut entry, iterator) },
+                0
+            );
+            // SAFETY: previous successful advance lends an initialized live entry
+            // until the next advance. A shared view does not release its storage.
+            let view = unsafe { EntryRef::from_ptr(entry.cast()) }.unwrap();
+            assert_eq!(view.name(), Some(c"scripted.key"));
+            // SAFETY: prior entry borrow is over; same exclusive iterator and slot.
+            assert_eq!(
+                // SAFETY: prior entry borrow is over; same exclusive iterator and slot.
+                unsafe { PreparedBackendWalk::next(&mut entry, iterator) },
+                ffi::GIT_ITEROVER
+            );
+            // SAFETY: this base is borrowed stack storage; the matching free is a
+            // no-op and neither consumes nor changes the Rust owner.
+            unsafe { PreparedBackendWalk::free(iterator) };
+            assert_eq!(releases.get(), 0);
+            assert!(prepared.state.failure.is_none());
+            let raw = prepared.state.inner.into_c();
+            // SAFETY: consumes exactly the complete Scripted Box created above,
+            // via its own Rust callback, after all borrowed entry views ended.
+            unsafe { Scripted::free(raw) };
+            assert_eq!(releases.get(), 1);
+        }
+
+        #[repr(C)]
+        struct WalkBackend {
+            base: ffi::git_config_backend,
+            script: &'static [c_int],
+            releases: Rc<Cell<usize>>,
+        }
+        impl WalkBackend {
+            unsafe extern "C" fn iterator(
+                out: *mut *mut ffi::git_config_iterator,
+                backend: *mut ffi::git_config_backend,
+            ) -> c_int {
+                // SAFETY: callback only belongs to this Rust-owned offset-zero
+                // fixture; state is immutable for this synchronous exclusive call.
+                let state = unsafe { &*backend.cast::<Self>() };
+                if state.script == [-100] {
+                    set(ErrorClass::Config, c"mock iterator construction failure");
+                    return -7;
+                }
+                let script = if state.script == [42] {
+                    &[0, ffi::GIT_ITEROVER]
+                } else {
+                    state.script
+                };
+                let mut owner = Scripted::adopt(script, state.releases.clone());
+                if state.script == [42] {
+                    // SAFETY: uniquely owned complete Scripted fixture, before any
+                    // entry is lent. NULL is a valid optional name for EntryRef.
+                    unsafe {
+                        addr_of_mut!(
+                            (*owner.as_mut().as_mut_ptr().cast::<Scripted>())
+                                .entry
+                                .entry
+                                .name
+                        )
+                        .write(ptr::null())
+                    };
+                }
+                // SAFETY: C supplies writable out; transfers one complete iterator
+                // allocation with matching callbacks and only static dependencies.
+                unsafe { out.write(owner.into_c()) };
+                0
+            }
+            fn new(script: &'static [c_int], releases: Rc<Cell<usize>>) -> Self {
+                Self {
+                    base: ffi::git_config_backend {
+                        version: 1,
+                        iterator: Some(Self::iterator),
+                        ..Default::default()
+                    },
+                    script,
+                    releases,
+                }
+            }
+            fn as_mut(&mut self) -> BackendMut<'_> {
+                // SAFETY: exclusive borrowed initialized backend fixture; this
+                // allocation-compatible iterator needs no separate open, and no
+                // owner adopts the base or dispatches its absent free callback.
+                unsafe { BackendMut::from_ptr(addr_of_mut!(self.base)) }.unwrap()
+            }
+        }
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C walk and iterator release")]
+        fn backend_walk_reports_masked_next_errors_and_cleans_failure_paths() {
+            let _runtime = Config::new().unwrap();
+            for script in [&[-100][..], &[-7][..], &[0, -7][..], &[3][..]] {
+                for pattern in [None, Some(c".*")] {
+                    let releases = Rc::new(Cell::new(0));
+                    let mut backend = WalkBackend::new(script, releases.clone());
+                    let mut calls = 0;
+                    let mut f = |_: EntryRef<'_>| {
+                        calls += 1;
+                        ControlFlow::Continue(())
+                    };
+                    let mut callback = ForeachCallback::new(&mut f);
+                    let error = backend
+                        .as_mut()
+                        .foreach_match(pattern, &mut callback)
+                        .unwrap_err();
+                    assert_eq!(
+                        error.raw_code(),
+                        if script == [3] { ffi::GIT_ERROR } else { -7 }
+                    );
+                    assert_eq!(error.class(), Some(ErrorClass::Config));
+                    assert_eq!(callback.stopped(), None);
+                    drop(callback);
+                    assert_eq!(calls, usize::from(script[0] == 0));
+                    assert_eq!(releases.get(), usize::from(script != [-100]));
+                }
+            }
+            let releases = Rc::new(Cell::new(0));
+            let mut backend = WalkBackend::new(&[0, ffi::GIT_ITEROVER], releases.clone());
+            let mut f = |_: EntryRef<'_>| ControlFlow::Continue(());
+            let mut callback = ForeachCallback::new(&mut f);
+            assert!(
+                backend
+                    .as_mut()
+                    .foreach_match(Some(c"["), &mut callback)
+                    .is_err()
+            );
+            assert_eq!(releases.get(), 1); // even regex compilation failure frees inner
+            assert_eq!(
+                backend.as_mut().foreach_match(None, &mut callback).unwrap(),
+                ControlFlow::Continue(())
+            );
+            assert_eq!(releases.get(), 2);
+            let mut nameless = WalkBackend::new(&[42], releases.clone());
+            let mut f = |entry: EntryRef<'_>| {
+                assert_eq!(entry.name(), None);
+                ControlFlow::Continue(())
+            };
+            assert_eq!(
+                nameless
+                    .as_mut()
+                    .foreach_match(None, &mut ForeachCallback::new(&mut f))
+                    .unwrap(),
+                ControlFlow::Continue(())
+            );
+            let error = nameless
+                .as_mut()
+                .foreach_match(Some(c".*"), &mut ForeachCallback::new(&mut f))
+                .unwrap_err();
+            assert_eq!(error.raw_code(), ffi::GIT_EINVALIDSPEC);
+            assert_eq!(
+                error.message(),
+                c"config backend iterator returned an entry without a name"
+            );
+            let mut inline = crate::libgit2::config::sys::config::Backend::new();
+            assert_eq!(
+                inline
+                    .as_mut()
+                    .foreach_match(None, &mut callback)
+                    .unwrap_err()
+                    .message(),
+                c"config backend does not implement 'iterator'"
+            );
         }
 
         /// `git_config_next` dispatches the allocation's own callback and lends

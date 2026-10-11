@@ -3371,3 +3371,149 @@ mod iterator_entries {
         }
     }
 }
+
+mod backend_walk {
+    use libgit2::ffi;
+    use libgit2::libgit2::config::config::{ConfigLevel, EntryRef, ForeachCallback};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::util::errors::last;
+    use libgit2::libgit2::util::sys::errors::clear;
+    use std::ffi::{CStr, c_int, c_void};
+    use std::num::NonZeroI32;
+    use std::ops::ControlFlow;
+    use std::ptr;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Record(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, c_int);
+    struct Capture {
+        records: Vec<Record>,
+        stop: c_int,
+    }
+    unsafe extern "C" fn capture(
+        entry: *const ffi::git_config_entry,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: raw walk supplies live immutable entry/string borrows for this
+        // call; payload is the exclusively used Rust capture. Only copies escape.
+        unsafe {
+            let capture = &mut *payload.cast::<Capture>();
+            let entry = entry.read();
+            let bytes = |p: *const std::ffi::c_char| {
+                if p.is_null() {
+                    None
+                } else {
+                    Some(CStr::from_ptr(p).to_bytes().to_vec())
+                }
+            };
+            capture.records.push(Record(
+                bytes(entry.name).unwrap(),
+                bytes(entry.value),
+                bytes(entry.backend_type),
+                entry.level,
+            ));
+            capture.stop
+        }
+    }
+    struct RawBackend(*mut ffi::git_config_backend);
+    impl Drop for RawBackend {
+        fn drop(&mut self) {
+            // SAFETY: uniquely owned complete opened allocation and matching releaser.
+            unsafe { ((*self.0).free.unwrap())(self.0) };
+        }
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn backend_walk_multicall_callbacks_errors_and_stops_match_c() {
+        let input = b"[A]\n b=one\n b=two\n flag\n empty=\n[section \"Case\"]\n key=\xff\n";
+        let mut rust = Backend::from_string(input, None)
+            .unwrap()
+            .open(ConfigLevel::LOCAL)
+            .unwrap();
+        let mut c = ptr::null_mut();
+        // SAFETY: readable independent bytes; constructor copies input into a fresh
+        // complete backend with its own free callback, transferred through out.
+        assert_eq!(
+            // SAFETY: readable independent bytes; constructor copies input into a fresh
+            // complete backend with its own free callback, transferred through out.
+            unsafe {
+                ffi::git_config_backend_from_string(
+                    &mut c,
+                    input.as_ptr().cast(),
+                    input.len(),
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let c = RawBackend(c);
+        // SAFETY: exclusively owned unopened backend, valid level and NULL repository.
+        assert_eq!(
+            // SAFETY: exclusively owned unopened backend, valid level and NULL repository.
+            unsafe { ((*c.0).open.unwrap())(c.0, ConfigLevel::LOCAL.raw(), ptr::null()) },
+            0
+        );
+        for pattern in [
+            None,
+            Some(c""),
+            Some(c"^a\\."),
+            Some(c"^section\\.Case\\.key$"),
+            Some(c"missing"),
+            Some(c"["),
+            Some(c".*"),
+        ] {
+            for stop in [0, 1, -7, ffi::GIT_ITEROVER, i32::MIN, i32::MAX] {
+                let mut capture_state = Capture {
+                    records: Vec::new(),
+                    stop,
+                };
+                clear();
+                // SAFETY: exclusive opened backend and synchronous capture payload;
+                // optional immutable NUL regex, no entry/payload borrow retained.
+                let rc = unsafe {
+                    ffi::git_config_backend_foreach_match(
+                        c.0,
+                        pattern.map_or(ptr::null(), CStr::as_ptr),
+                        Some(capture),
+                        ptr::from_mut(&mut capture_state).cast(),
+                    )
+                };
+                let c_error = last();
+                let mut records = Vec::new();
+                let mut f = |entry: EntryRef<'_>| {
+                    records.push(Record(
+                        entry.name().unwrap().to_bytes().to_vec(),
+                        entry.value().map(|v| v.to_bytes().to_vec()),
+                        entry.backend_type().map(|v| v.to_bytes().to_vec()),
+                        entry.level().raw(),
+                    ));
+                    NonZeroI32::new(stop).map_or(ControlFlow::Continue(()), ControlFlow::Break)
+                };
+                clear();
+                let result = rust
+                    .as_mut()
+                    .foreach_match(pattern, &mut ForeachCallback::new(&mut f));
+                let rust_rc = match result {
+                    Ok(ControlFlow::Continue(())) => 0,
+                    Ok(ControlFlow::Break(c)) => c.get(),
+                    Err(e) => e.raw_code(),
+                };
+                assert_eq!(rc, rust_rc, "pattern={pattern:?}, stop={stop}");
+                assert_eq!(capture_state.records, records);
+                assert_eq!(c_error, last());
+            }
+        }
+        // Multi-call sequence also repeats against a snapshot after source release.
+        let mut snapshot = rust.as_mut().snapshot().unwrap();
+        drop(rust);
+        let mut calls = 0;
+        let mut f = |_: EntryRef<'_>| {
+            calls += 1;
+            ControlFlow::Continue(())
+        };
+        let _ = snapshot
+            .as_mut()
+            .foreach_match(None, &mut ForeachCallback::new(&mut f))
+            .unwrap();
+        assert_eq!(calls, 5);
+    }
+}

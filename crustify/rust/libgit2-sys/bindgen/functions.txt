@@ -430,3 +430,7 @@ git_config_iterator_glob_new
 git_config_init_backend
 git_config_backend_from_string
 git_config_backend_from_values
+
+# config wave 5 batch 0: backend registration and enumeration
+git_config_add_backend
+git_config_backend_foreach_match

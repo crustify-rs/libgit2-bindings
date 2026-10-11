@@ -21,7 +21,9 @@ use std::ffi::CString;
 
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, define_ctype};
 
-use crate::libgit2::config::config::{ConfigError, ConfigLevel, EntryArc, EntryMut, EntryRef};
+use crate::libgit2::config::config::{
+    ConfigError, ConfigLevel, ConfigMut, EntryArc, EntryMut, EntryRef,
+};
 use crate::libgit2::util::errors::ErrorClass;
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
@@ -1138,6 +1140,80 @@ impl UnopenedBackend {
     }
 }
 
+impl<'a, 'r> ConfigMut<'a, 'r> {
+    /// Opens and transfers a backend into this configuration, optionally replacing
+    /// the existing priority. The backend is consumed on failure too: C may already
+    /// have opened it, so it cannot safely be returned to the construction phase.
+    /// Successful registration is released by the config (or its last level view).
+    ///
+    /// Priorities must be in `0..i32::MAX`, as with `add_file`. A repository, when
+    /// supplied, stays borrowed for the configuration's `'r`; memory backends ignore
+    /// it. This phase currently constructs only independently owned memory backends.
+    ///
+    /// An opened backend cannot be registered a second time:
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    /// use libgit2::libgit2::config::sys::config::Backend;
+    /// let mut config = Config::new().unwrap();
+    /// let backend = Backend::from_values(&[c"a.b=1"], None).unwrap()
+    ///     .open(ConfigLevel::LOCAL).unwrap();
+    /// config.as_mut().add_backend(backend, ConfigLevel::LOCAL, None, false).unwrap();
+    /// ```
+    ///
+    /// Registration moves the owner, not a stored Rust borrow:
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    /// use libgit2::libgit2::config::sys::config::Backend;
+    /// let mut config = Config::new().unwrap();
+    /// let backend = Backend::from_values(&[c"a.b=1"], None).unwrap();
+    /// config.as_mut().add_backend(backend, ConfigLevel::LOCAL, None, false).unwrap();
+    /// let _ = backend.as_ref();
+    /// ```
+    ///
+    /// Wraps: git_config_add_backend
+    pub fn add_backend(
+        &mut self,
+        mut backend: UnopenedBackend,
+        level: ConfigLevel,
+        repository: Option<crate::libgit2::repository::repository::RepositoryRef<'r>>,
+        force: bool,
+    ) -> Result<(), ConfigError> {
+        if !(0..i32::MAX).contains(&level.raw()) {
+            set(
+                ErrorClass::Invalid,
+                c"configuration priority must be in 0..i32::MAX",
+            );
+            return Err(ConfigError::from_libgit2(ffi::GIT_EINVALID));
+        }
+        let p = backend.0.as_mut().as_mut_ptr();
+        // SAFETY: the construction-phase owner has an initialized vtable. C calls
+        // open unconditionally, so reject a missing slot before entering it.
+        if unsafe { addr_of!((*p).open).read() }.is_none() {
+            return Err(missing_slot("open"));
+        }
+        // SAFETY: config and backend are exclusive live allocations; the bounded
+        // priority cannot overflow C's comparators. Repository is NULL or kept live
+        // for 'r. C opens once, retaining backend only on success; on failure the
+        // still-owned allocation is released by its matching policy here.
+        let rc = unsafe {
+            ffi::git_config_add_backend(
+                self.as_mut_ptr(),
+                p,
+                level.raw(),
+                repository.map_or(ptr::null(), |r| r.as_ptr()),
+                i32::from(force),
+            )
+        };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // Only success transfers ownership; freeing this allocation now would
+        // invalidate C's backend instance and cause a second free on config drop.
+        let _ = backend.0.into_c();
+        Ok(())
+    }
+}
+
 /// One-time initialization callable; never accepts an already opened backend.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BackendOpen;
@@ -1840,6 +1916,8 @@ mod unit_tests {
             frees: Cell<usize>,
             reads: Cell<usize>,
             fail_rollback: Cell<bool>,
+            opens: Cell<usize>,
+            open_status: Cell<i32>,
         }
         #[repr(C)]
         struct Mock {
@@ -1935,6 +2013,138 @@ mod unit_tests {
             // base with matching callbacks; no external borrow, strings not retained.
             let backend = unsafe { BackendBox::from_c(Box::into_raw(mock).cast()) };
             (backend.unwrap(), state)
+        }
+        unsafe extern "C" fn registration_open(
+            p: *mut ffi::git_config_backend,
+            _level: ffi::git_config_level_t,
+            _repo: *const ffi::git_repository,
+        ) -> i32 {
+            // SAFETY: only complete Mock allocations install this callback; its
+            // Rust-owned state is live, and the construction phase is exclusive.
+            let s = unsafe { state(p) };
+            s.opens.set(s.opens.get() + 1);
+            if s.open_status.get() < 0 {
+                crate::libgit2::util::sys::errors::set(ErrorClass::Config, c"mock open failure");
+            }
+            s.open_status.get()
+        }
+        fn pending() -> (UnopenedBackend, Rc<State>) {
+            let (mut owner, state) = fixture();
+            // SAFETY: exclusive complete Mock fixture, its compatible construction
+            // callback is installed before any open or registration is possible.
+            unsafe {
+                addr_of_mut!((*owner.as_mut().as_mut_ptr()).open).write(Some(registration_open))
+            };
+            (UnopenedBackend(owner), state)
+        }
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2 registration")]
+        fn backend_registration_open_transfer_errors_and_release_counts() {
+            use crate::libgit2::config::config::Config;
+            let mut config = Config::new().unwrap();
+            let (backend, kept) = pending();
+            config
+                .as_mut()
+                .add_backend(backend, ConfigLevel::LOCAL, None, false)
+                .unwrap();
+            assert_eq!(kept.opens.get(), 1);
+            assert_eq!(kept.frees.get(), 0);
+            let (backend, duplicate) = pending();
+            let error = config
+                .as_mut()
+                .add_backend(backend, ConfigLevel::LOCAL, None, false)
+                .unwrap_err();
+            assert_eq!(error.raw_code(), ffi::GIT_EEXISTS);
+            assert_eq!((duplicate.opens.get(), duplicate.frees.get()), (1, 1));
+            let (backend, failed) = pending();
+            failed.open_status.set(-7);
+            let error = config
+                .as_mut()
+                .add_backend(backend, ConfigLevel::LOCAL, None, true)
+                .unwrap_err();
+            assert_eq!(error.raw_code(), -7);
+            assert_eq!((failed.opens.get(), failed.frees.get()), (1, 1));
+            assert_eq!(kept.frees.get(), 0); // failed open precedes replacement
+            let (backend, replacement) = pending();
+            config
+                .as_mut()
+                .add_backend(backend, ConfigLevel::LOCAL, None, true)
+                .unwrap();
+            assert_eq!(kept.frees.get(), 1);
+            drop(config);
+            assert_eq!(replacement.frees.get(), 1);
+            let mut config = Config::new().unwrap();
+            let (backend, missing) = fixture(); // free is valid, open is absent
+            let error = config
+                .as_mut()
+                .add_backend(UnopenedBackend(backend), ConfigLevel::LOCAL, None, false)
+                .unwrap_err();
+            assert_eq!(error.message(), c"config backend does not implement 'open'");
+            assert_eq!(missing.frees.get(), 1);
+            let (mut backend, bad_version) = pending();
+            // SAFETY: fixture is uniquely owned; version refusal precedes dispatch.
+            unsafe { addr_of_mut!((*backend.0.as_mut().as_mut_ptr()).version).write(2) };
+            assert!(
+                config
+                    .as_mut()
+                    .add_backend(backend, ConfigLevel::LOCAL, None, false)
+                    .is_err()
+            );
+            assert_eq!((bad_version.opens.get(), bad_version.frees.get()), (0, 1));
+            let (backend, bad_priority) = pending();
+            assert!(
+                config
+                    .as_mut()
+                    .add_backend(backend, ConfigLevel::HIGHEST, None, false)
+                    .is_err()
+            );
+            assert_eq!((bad_priority.opens.get(), bad_priority.frees.get()), (0, 1));
+        }
+        #[test]
+        #[cfg_attr(miri, ignore = "installs C allocator and calls registration")]
+        fn backend_registration_allocator_failures_release_owned_inputs() {
+            use crate::libgit2::config::config::{Config, unit_tests::*};
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::backend_registration_allocator_failures_release_owned_inputs"
+                ),
+                || {
+                    install_refusing();
+                    let mut config = Config::new().unwrap();
+                    // Warm thread error storage before restricting allocations.
+                    assert!(config.as_ref().get_i32(c"a.b").is_err());
+                    for granted in [0, 1] {
+                        // instance calloc, then backend_entry malloc
+                        let (backend, state) = pending();
+                        ALLOWED_ALLOCATIONS.store(granted, std::sync::atomic::Ordering::SeqCst);
+                        let result =
+                            config
+                                .as_mut()
+                                .add_backend(backend, ConfigLevel::LOCAL, None, false);
+                        ALLOWED_ALLOCATIONS.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+                        assert_eq!(result.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                        assert_eq!((state.opens.get(), state.frees.get()), (1, 1));
+                    }
+                    for raw in 0..8 {
+                        config
+                            .as_mut()
+                            .add_backend(pending().0, ConfigLevel::from_raw(raw), None, false)
+                            .unwrap();
+                    }
+                    let (backend, state) = pending();
+                    // Instance/entry allocate; readers vector growth is refused. Do not
+                    // refuse writers after readers insertion: C leaves a dangling entry.
+                    ALLOWED_ALLOCATIONS.store(2, std::sync::atomic::Ordering::SeqCst);
+                    let result =
+                        config
+                            .as_mut()
+                            .add_backend(backend, ConfigLevel::from_raw(8), None, false);
+                    ALLOWED_ALLOCATIONS.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+                    assert_eq!(result.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                    assert_eq!(state.frees.get(), 1);
+                },
+            );
         }
         #[test]
         fn backend_transactions_release_once_and_reborrow() {

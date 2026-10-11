@@ -1985,3 +1985,128 @@ mod iterator_entries {
         });
     }
 }
+
+mod backend_walk {
+    #![forbid(unsafe_code)]
+    use super::*;
+    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use std::num::NonZeroI32;
+    use std::ops::ControlFlow;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn backend_walk_patterns_stops_panics_and_independent_reentry() {
+        let mut backend = Backend::from_string(
+            b"[A]\n b=one\n b=two\n flag\n empty=\n[section \"Case\"]\n key=\xff\n",
+            None,
+        )
+        .unwrap()
+        .open(ConfigLevel::LOCAL)
+        .unwrap();
+        let mut nested = Backend::from_values(&[c"nested.key=1"], None)
+            .unwrap()
+            .open(ConfigLevel::APP)
+            .unwrap();
+        for (pattern, expected) in [
+            (None, 5),
+            (Some(c""), 5),
+            (Some(c"^a\\."), 4),
+            (Some(c"^section\\.Case\\.key$"), 1),
+            (Some(c"missing"), 0),
+        ] {
+            let mut seen = Vec::new();
+            let mut f = |entry: EntryRef<'_>| {
+                seen.push((
+                    entry.name().unwrap().to_owned(),
+                    entry.value().map(CStr::to_owned),
+                ));
+                let mut inner = |_: EntryRef<'_>| ControlFlow::Continue(());
+                let _ = nested
+                    .as_mut()
+                    .foreach_match(None, &mut ForeachCallback::new(&mut inner))
+                    .unwrap();
+                ControlFlow::Continue(())
+            };
+            assert_eq!(
+                backend
+                    .as_mut()
+                    .as_mut()
+                    .foreach_match(pattern, &mut ForeachCallback::new(&mut f))
+                    .unwrap(),
+                ControlFlow::Continue(())
+            );
+            assert_eq!(seen.len(), expected);
+        }
+        for raw in [
+            1,
+            -1,
+            i32::MIN,
+            i32::MAX,
+            ErrorCode::IterOver.raw(),
+            ErrorCode::User.raw(),
+        ] {
+            let code = NonZeroI32::new(raw).unwrap();
+            let mut calls = 0;
+            let mut f = |_: EntryRef<'_>| {
+                calls += 1;
+                ControlFlow::Break(code)
+            };
+            let mut callback = ForeachCallback::new(&mut f);
+            for _ in 0..2 {
+                assert_eq!(
+                    backend
+                        .as_mut()
+                        .foreach_match(Some(c".*"), &mut callback)
+                        .unwrap(),
+                    ControlFlow::Break(code)
+                );
+                assert_eq!(callback.stopped(), Some(code));
+            }
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+        let mut panic_once = true;
+        let mut f = |_: EntryRef<'_>| {
+            if std::mem::take(&mut panic_once) {
+                panic!("walk panic");
+            }
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut f);
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| backend
+                .as_mut()
+                .foreach_match(Some(c".*"), &mut callback)))
+            .is_err()
+        );
+        assert_eq!(
+            backend.as_mut().foreach_match(None, &mut callback).unwrap(),
+            ControlFlow::Continue(())
+        );
+        assert!(
+            backend
+                .as_mut()
+                .foreach_match(Some(c"["), &mut callback)
+                .is_err()
+        );
+        assert_eq!(callback.stopped(), None);
+        assert_eq!(
+            backend.as_mut().foreach_match(None, &mut callback).unwrap(),
+            ControlFlow::Continue(())
+        );
+        drop(backend);
+        let mut empty = Backend::from_values(&[], None)
+            .unwrap()
+            .open(ConfigLevel::LOCAL)
+            .unwrap();
+        assert_eq!(
+            empty
+                .as_mut()
+                .foreach_match(Some(c".*"), &mut callback)
+                .unwrap(),
+            ControlFlow::Continue(())
+        );
+    }
+}
