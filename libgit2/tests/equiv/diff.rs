@@ -2,10 +2,15 @@
 mod support;
 use core::{ffi::CStr, ptr};
 use libgit2::ffi;
-use libgit2::libgit2::diff::diff::Diff;
+use libgit2::libgit2::core::types::FileMode;
+use libgit2::libgit2::diff::diff::{Diff, DiffBox, DiffError};
 use libgit2::libgit2::index::index::Index;
+use libgit2::libgit2::object::blob;
+use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeBuilder};
 use libgit2::libgit2::oid::oid::OidType;
+use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::last;
+use std::ffi::CString;
 use support::{DeltaSnapshot, FileSnapshot, PATCH, RENAME, Repo};
 
 struct RawDiff(*mut ffi::git_diff);
@@ -272,5 +277,227 @@ fn progress_cancellation_codes_match_c() {
         assert_eq!(safe.raw_code(), rc);
         let error = last();
         assert_eq!(safe.error(), &error);
+    }
+}
+
+/// Compares a safe generator's result with the C call's `rc`/`out` on independent
+/// inputs: the deltas on success, the code and the thread's error on failure.
+fn assert_generated_like_c(
+    safe: Result<DiffBox<'_>, DiffError>,
+    rc: i32,
+    out: *mut ffi::git_diff,
+    step: &str,
+) {
+    match safe {
+        Ok(safe) => {
+            assert_eq!(rc, 0, "{step}");
+            let expected = raw_snapshot(&RawDiff(out));
+            let actual: Vec<_> = (0..safe.as_ref().len())
+                .map(|i| support::delta(safe.as_ref().get(i).unwrap()))
+                .collect();
+            assert_eq!(actual, expected, "{step}");
+        }
+        Err(e) => {
+            let ce = last();
+            assert_eq!((e.raw_code(), out.is_null()), (rc, true), "{step}");
+            assert_eq!(e.error(), &ce, "{step}");
+        }
+    }
+}
+
+/// A tree of `files` written to `fixture`'s object database.
+fn tree_of<'r>(fixture: &'r Repo, files: &[(&CStr, &[u8])]) -> TreeArc<'r> {
+    let repo = fixture.get().as_ref();
+    let mut builder = TreeBuilder::new(repo).unwrap();
+    for (name, text) in files {
+        let id = blob::create_from_buffer(repo, text).unwrap();
+        builder
+            .as_mut()
+            .insert(name, id.as_ref(), FileMode::Blob)
+            .unwrap();
+    }
+    let id = builder.as_mut().write().unwrap();
+    Tree::lookup(repo, id.as_ref()).unwrap()
+}
+
+struct RawIndex(*mut ffi::git_index);
+impl Drop for RawIndex {
+    fn drop(&mut self) {
+        // SAFETY: releases the one counted reference git_repository_index handed out.
+        unsafe { ffi::git_index_free(self.0) }
+    }
+}
+
+/// Generators over a populated working directory and a case-insensitive repository
+/// index: C re-sorts the deltas case-insensitively for tree/index and index/index
+/// diffs, whether the index is passed or loaded from the repository, and ignores a
+/// failed reload of the repository's index. Workdir diffs on a bare repository fail
+/// with the same code and error.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn case_insensitive_populated_and_bare_generators_match_c() {
+    let rust = Repo::new();
+    let c = Repo::new();
+    let mut indices = Vec::new();
+    for fixture in [&rust, &c] {
+        for (name, text) in [("B", "b\n"), ("a", "a\n"), ("c", "untracked\n")] {
+            std::fs::write(fixture.path.join(name), text).unwrap();
+        }
+        let mut index = ptr::null_mut();
+        // SAFETY: writable slot and a live repository; the counted reference is
+        // released by RawIndex, and both are used on this thread only.
+        let rc = unsafe { ffi::git_repository_index(&mut index, fixture.get().as_c_ptr()) };
+        assert_eq!(rc, 0);
+        let index = RawIndex(index);
+        // SAFETY: the live repository index, used on this thread only; C copies the
+        // paths and reads the staged files from the working directory.
+        unsafe {
+            let caps = ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE;
+            assert_eq!(ffi::git_index_set_caps(index.0, caps), 0);
+            for path in [c"B", c"a"] {
+                assert_eq!(ffi::git_index_add_bypath(index.0, path.as_ptr()), 0);
+            }
+        }
+        std::fs::write(fixture.path.join("a"), "changed a\n").unwrap();
+        indices.push(index);
+    }
+    let (rust_raw_index, c_index) = (&indices[0], &indices[1]);
+    let rust_index = rust.get().as_ref().index().unwrap();
+    assert_eq!(rust_index.as_c_ptr(), rust_raw_index.0);
+    let files: [(&CStr, &[u8]); 2] = [(c"B", b"old b\n"), (c"a", b"a\n")];
+    let (rust_tree, c_tree) = (tree_of(&rust, &files), tree_of(&c, &files));
+    let (rust_empty, c_empty) = (Index::new().unwrap(), Index::new().unwrap());
+    for step in 0..5 {
+        let r = rust.get().as_ref();
+        let safe = match step {
+            0 => Diff::tree_to_index(r, Some(rust_tree.as_ref()), Some(rust_index.as_ref())),
+            1 => Diff::tree_to_index(r, Some(rust_tree.as_ref()), None),
+            2 => Diff::index_to_index(r, rust_index.as_ref(), rust_empty.as_ref()),
+            3 => Diff::index_to_workdir(r, Some(rust_index.as_ref())),
+            _ => Diff::tree_to_workdir_with_index(r, Some(rust_tree.as_ref())),
+        };
+        if step == 2 {
+            let diff = safe.as_ref().unwrap().as_ref();
+            let paths: Vec<_> = (0..diff.len())
+                .map(|i| diff.get(i).unwrap().old_file().path().unwrap())
+                .collect();
+            assert_eq!(paths, [c"a", c"B"]);
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: independently owned repository, tree and indices, live for each
+        // synchronous default-options call and outliving the raw diff it returns.
+        let rc = unsafe {
+            let repo = c.get().as_c_ptr();
+            match step {
+                0 => ffi::git_diff_tree_to_index(
+                    &mut out,
+                    repo,
+                    c_tree.as_c_ptr(),
+                    c_index.0,
+                    ptr::null(),
+                ),
+                1 => ffi::git_diff_tree_to_index(
+                    &mut out,
+                    repo,
+                    c_tree.as_c_ptr(),
+                    ptr::null_mut(),
+                    ptr::null(),
+                ),
+                2 => ffi::git_diff_index_to_index(
+                    &mut out,
+                    repo,
+                    c_index.0,
+                    c_empty.as_c_ptr(),
+                    ptr::null(),
+                ),
+                3 => ffi::git_diff_index_to_workdir(&mut out, repo, c_index.0, ptr::null()),
+                _ => ffi::git_diff_tree_to_workdir_with_index(
+                    &mut out,
+                    repo,
+                    c_tree.as_c_ptr(),
+                    ptr::null(),
+                ),
+            }
+        };
+        assert_generated_like_c(safe, rc, out, &format!("populated step {step}"));
+    }
+    // An index file that no longer parses: reloading the repository's index fails,
+    // and C clears that error and diffs whatever the failed reload left in memory.
+    for fixture in [&rust, &c] {
+        std::fs::write(fixture.path.join(".git/index"), b"not an index").unwrap();
+    }
+    for step in 0..2 {
+        let r = rust.get().as_ref();
+        let safe = match step {
+            0 => Diff::tree_to_index(r, Some(rust_tree.as_ref()), None),
+            _ => Diff::index_to_workdir(r, None),
+        };
+        assert!(safe.is_ok());
+        let mut out = ptr::null_mut();
+        // SAFETY: an independently owned live repository and tree; NULL loads the
+        // repository's own index, as on the Rust side.
+        let rc = unsafe {
+            let repo = c.get().as_c_ptr();
+            match step {
+                0 => ffi::git_diff_tree_to_index(
+                    &mut out,
+                    repo,
+                    c_tree.as_c_ptr(),
+                    ptr::null_mut(),
+                    ptr::null(),
+                ),
+                _ => ffi::git_diff_index_to_workdir(&mut out, repo, ptr::null_mut(), ptr::null()),
+            }
+        };
+        assert_generated_like_c(safe, rc, out, &format!("unparsable index step {step}"));
+    }
+    drop(rust_index);
+    let bare = |tag: &str| {
+        let path =
+            std::env::temp_dir().join(format!("crustify-diff-bare-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        let repo = Repository::init(&CString::new(path.to_str().unwrap()).unwrap(), true);
+        Repo {
+            repo: Some(repo.unwrap()),
+            path,
+        }
+    };
+    let (rust, c) = (bare("rust"), bare("c"));
+    for step in 0..4 {
+        let r = rust.get().as_ref();
+        let safe = match step {
+            0 => Diff::index_to_workdir(r, None),
+            1 => Diff::tree_to_workdir(r, None),
+            2 => Diff::tree_to_workdir_with_index(r, None),
+            _ => Diff::tree_to_index(r, None, None),
+        };
+        // Only the working-directory generators need a working directory.
+        assert_eq!(
+            safe.as_ref().err().map(DiffError::raw_code),
+            (step < 3).then_some(ffi::GIT_EBAREREPO)
+        );
+        let mut out = ptr::null_mut();
+        // SAFETY: an independently owned live repository and NULL optional inputs.
+        let rc = unsafe {
+            let repo = c.get().as_c_ptr();
+            match step {
+                0 => ffi::git_diff_index_to_workdir(&mut out, repo, ptr::null_mut(), ptr::null()),
+                1 => ffi::git_diff_tree_to_workdir(&mut out, repo, ptr::null_mut(), ptr::null()),
+                2 => ffi::git_diff_tree_to_workdir_with_index(
+                    &mut out,
+                    repo,
+                    ptr::null_mut(),
+                    ptr::null(),
+                ),
+                _ => ffi::git_diff_tree_to_index(
+                    &mut out,
+                    repo,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null(),
+                ),
+            }
+        };
+        assert_generated_like_c(safe, rc, out, &format!("bare step {step}"));
     }
 }

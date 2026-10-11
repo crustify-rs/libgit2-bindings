@@ -430,9 +430,10 @@ impl MatchList<'static> {
                 pathspec.as_ref().as_ptr().cast_mut(),
             )
         };
-        // SAFETY: success transfers a fresh initialized list; failure frees and
-        // nulls any list it allocated (or leaves our initial NULL unchanged).
-        unsafe { finish(rc, out) }
+        // SAFETY: success transfers a fresh initialized list, released by
+        // MatchListFree; failure frees and nulls any list it allocated (or leaves
+        // our initial NULL unchanged), adopted as None.
+        constructed(rc, unsafe { MatchListBox::from_c(out) })
     }
 
     /// Match a tree; the result copies filenames and need not retain the tree.
@@ -455,8 +456,9 @@ impl MatchList<'static> {
                 pathspec.as_ref().as_ptr().cast_mut(),
             )
         };
-        // SAFETY: fresh initialized list on success, NULL on failure.
-        unsafe { finish(rc, out) }
+        // SAFETY: fresh initialized list on success, released by MatchListFree;
+        // NULL on failure, adopted as None.
+        constructed(rc, unsafe { MatchListBox::from_c(out) })
     }
 
     /// Match the working directory, excluding ignored untracked files. A bare
@@ -480,8 +482,9 @@ impl MatchList<'static> {
                 pathspec.as_ref().as_ptr().cast_mut(),
             )
         };
-        // SAFETY: fresh initialized list on success, NULL on failure.
-        unsafe { finish(rc, out) }
+        // SAFETY: fresh initialized list on success, released by MatchListFree;
+        // NULL on failure, adopted as None.
+        constructed(rc, unsafe { MatchListBox::from_c(out) })
     }
 }
 
@@ -523,25 +526,23 @@ impl<'diff> MatchList<'diff> {
                 pathspec.as_ref().as_ptr().cast_mut(),
             )
         };
-        // SAFETY: fresh initialized list on success, NULL on failure; its borrowed
-        // deltas have the lifetime guaranteed by the shared diff handle.
-        unsafe { finish(rc, out) }
+        // SAFETY: fresh initialized list on success, NULL on failure (adopted as
+        // None); its borrowed deltas stay alive and unchanged for 'diff, which the
+        // shared diff handle guarantees.
+        constructed(rc, unsafe { MatchListBox::from_c(out) })
     }
 }
 
-/// # Safety
-/// `out` is NULL on error, or a freshly transferred initialized list on success.
-/// Any borrowed deltas must remain alive and unchanged throughout `'diff`.
-unsafe fn finish<'diff>(
+/// The list a matcher returning `rc` handed out, or its error. Every matcher leaves its
+/// output NULL on failure, so a failure adopts nothing.
+fn constructed<'diff>(
     rc: i32,
-    out: *mut ffi::git_pathspec_match_list,
+    list: Option<MatchListBox<'diff>>,
 ) -> Result<MatchListBox<'diff>, RepositoryError> {
     if rc < 0 {
         return Err(RepositoryError::from_libgit2(rc));
     }
-    // SAFETY: the successful constructor transferred one unique allocation,
-    // released by MatchListFree; retained deltas satisfy the lifetime contract.
-    unsafe { MatchListBox::from_c(out) }.ok_or_else(|| RepositoryError::from_libgit2(-1))
+    list.ok_or_else(|| RepositoryError::from_libgit2(-1))
 }
 
 #[cfg(test)]
@@ -674,12 +675,10 @@ mod unit_tests {
                 if FAIL_AT.load(SeqCst) == isize::MAX || FAIL_AT.fetch_sub(1, SeqCst) == 0 {
                     return None;
                 }
+                let old = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
                 // SAFETY: caller transfers a live libc block (or null) on success;
                 // libgit2 never requests realloc of a live block to zero bytes.
-                let result = NonNull::new(
-                    unsafe { libc::realloc(p.map_or(ptr::null_mut(), |p| p.as_ptr().cast()), n) }
-                        .cast(),
-                );
+                let result = NonNull::new(unsafe { libc::realloc(old, n) }.cast());
                 if p.is_none() && result.is_some() {
                     LIVE.fetch_add(1, SeqCst);
                 }

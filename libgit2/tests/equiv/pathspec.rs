@@ -89,9 +89,9 @@ fn construction_copy_and_release_sequences() {
         // SAFETY: release exactly the independently allocated reference; no handles
         // to it remain. The Rust owner is a different allocation and stays live.
         unsafe { ffi::git_pathspec_free(raw) };
+        let path = c"src/a.rs".as_ptr();
         // SAFETY: the Rust owner still keeps its own compiled patterns alive.
-        let _ =
-            unsafe { ffi::git_pathspec_matches_path(shared.as_c_ptr(), 0, c"src/a.rs".as_ptr()) };
+        let _ = unsafe { ffi::git_pathspec_matches_path(shared.as_c_ptr(), 0, path) };
     }
 }
 
