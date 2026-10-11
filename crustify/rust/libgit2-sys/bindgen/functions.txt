@@ -448,3 +448,8 @@ git_index_name_clear
 git_index_name_entrycount
 git_index_name_get_byindex
 git_index_entry_stage
+
+# index wave 0 batch 3: iterator lifecycle, next for lifecycle equivalence evidence
+git_index_iterator_new
+git_index_iterator_free
+git_index_iterator_next

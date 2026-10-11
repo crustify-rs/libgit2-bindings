@@ -1502,6 +1502,34 @@
    "fields": []
   },
   {
+   "name": "git_index_entry_flag_t",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "Resource-free enum of combinable EXTENDED (0x4000) and VALID (0x8000) flags. Entry flags also carry name length and stage bits; retain unnamed bits. No lifecycle or pointer slots.",
+   "fields": []
+  },
+  {
+   "name": "git_index_iterator",
+   "defined_in": "src/libgit2/index.h",
+   "_comment_agent": "C-allocated sole-owned iterator; new calloc + snapshot_new; free snapshot_release + git__free. snap owns its buffer, references index entries; cur mutable cursor. Public opaque ABI only. Construct from IndexArc so C retention never violates IndexBox sole ownership. No Send/Sync; no clone.",
+   "fields": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "git_index_snapshot_new increments rc/readers; snapshot_release decrements readers and calls git_index_free. Non-null retained counted reference; snap owns pointer vector but borrows entries protected against removal by readers. No public fields; no copy/init API."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_name_entry",
    "defined_in": "include/git2/sys/index.h",
    "_comment_agent": "No public standalone allocation, clone or release. git_index_name_add constructs in index->names; git_index_name_clear and index free/read clear invalidate all entry and string borrows. Internal free helper is static. Returned entries must borrow an exclusively accessible index because get_byindex sorts the names vector. checkout consumers only read/copy fields. C owns all storage; safe wrapper exposes only borrowed getters.",
@@ -10250,6 +10278,87 @@
       "nullable": true,
       "mutable": true,
       "note": "Releases one counted reference: NULL is a no-op; GIT_REFCOUNT_DEC frees through index_free (clears entries, names, reuc, extensions, deleted, the entry map, index_file_path, then git__free on the zeroed struct) once the count reaches 0 while rc.owner is NULL. Every reference handed out by git_index_open/open_ext/new/new_ext, git_repository_index, git_rebase_inmemory_index and the merge/cherrypick/revert/apply index results is released here; the repository releases its own through set_index. Rust: the c_drop of IndexFree for both CBox<Index> (sole reference) and CArc<Index> (shared counted reference)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_iterator_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "it",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "it",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "NULL no-op; otherwise frees vector, decrements index readers/refcount, and frees iterator storage."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_iterator_new",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "iterator_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrows input while building, sorts entries and increments rc/readers. On success iterator owns an additional counted reference, not the caller reference; on failure snapshot_release balances it."
+     }
+    },
+    {
+     "name": "iterator_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:iterator_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes fresh owned iterator only on success; leaves output unchanged on failure. Caller releases with git_index_iterator_free."
      }
     }
    ]

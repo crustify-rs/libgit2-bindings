@@ -23,11 +23,12 @@
 //! behind it, invalidating whatever an [`IndexRef`] borrowed from it.
 //!
 //! An [`IndexBox`] stays the only reference only while every routine handed its pointer
-//! returns without keeping one. libgit2's iterators, index writers and
-//! `git_checkout_index` count a reference for the duration of a call or of a borrow
-//! tied to the handle; `git_repository_set_index` keeps one for the repository. A
-//! wrapper of such a retaining routine must take an [`IndexArc`] (into which the box
-//! converts), never an [`IndexMut`] or [`IndexRef`] of a box.
+//! returns without keeping one. Index writers and `git_checkout_index` can count a
+//! reference for the duration of a call or a borrow tied to the handle;
+//! `git_repository_set_index` keeps one for the repository. [`IndexIterator::new`]
+//! retains one independently of the caller's borrow. Such an independently retaining
+//! wrapper must take an [`IndexArc`] (into which the box converts), never an
+//! [`IndexMut`] or [`IndexRef`] of a box.
 //!
 //! `git_index_owner` lends the repository that keeps a reference to the index, if any,
 //! without counting it: libgit2 clears it when that repository releases the index.
@@ -718,6 +719,160 @@ impl Stage {
     }
 }
 
+/// The combinable flags of an index entry. Name-length and stage bits, and any
+/// future unnamed bits, survive a round trip through this value.
+///
+/// This is the C enum's integer layout, not the narrower `git_index_entry.flags`
+/// field. It owns no resources and requires no foreign allocation or teardown.
+///
+/// Wraps: git_index_entry_flag_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct EntryFlags(ffi::git_index_entry_flag_t);
+
+impl EntryFlags {
+    /// The entry carries extended flags on disk.
+    pub const EXTENDED: Self = Self(ffi::GIT_INDEX_ENTRY_EXTENDED);
+    /// Assume the entry is valid (Git's assume-unchanged bit).
+    pub const VALID: Self = Self(ffi::GIT_INDEX_ENTRY_VALID);
+
+    /// No flags set.
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    /// Preserves all bits, including those not named by this enum.
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The underlying bit pattern.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Whether every bit in `flags` is present.
+    pub const fn contains(self, flags: Self) -> bool {
+        self.0 & flags.0 == flags.0
+    }
+
+    /// Adds the selected bits without changing any others.
+    pub fn insert(&mut self, flags: Self) {
+        self.0 |= flags.0;
+    }
+
+    /// Removes the selected bits without changing any others.
+    pub fn remove(&mut self, flags: Self) {
+        self.0 &= !flags.0;
+    }
+}
+
+impl core::ops::BitOr for EntryFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitOrAssign for EntryFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.insert(rhs);
+    }
+}
+
+define_ctype!(
+    /// An opaque, C-allocated snapshot iterator over an index's entries.
+    ///
+    /// The snapshot retains a counted index reference and its own vector of
+    /// entry pointers. C defers freeing removed entries until readers finish.
+    /// There are no public fields, clone operations, or in-place initializers.
+    /// Neither this type nor its handles/owner is `Send` or `Sync`: the retained
+    /// index can still be accessed by other C owners without a common lock.
+    ///
+    /// Wraps: git_index_iterator
+    IndexIterator, IndexIteratorRef, IndexIteratorMut, ffi::git_index_iterator
+);
+
+/// Releases the snapshot vector, its counted index reference, and the iterator.
+///
+/// Wraps: git_index_iterator_free
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IndexIteratorFree;
+
+impl_cdrop!(
+    IndexIteratorFree,
+    IndexIterator,
+    ffi::git_index_iterator_free
+);
+
+/// The sole owner of an [`IndexIterator`]. Its shared/exclusive handles borrow
+/// it; neither can outlive it. The retained index may be dropped first.
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::index::index::{Index, IndexArc, IndexIterator};
+/// let index: IndexArc = Index::new().unwrap().into();
+/// let iterator = IndexIterator::new(&index).unwrap();
+/// let handle = iterator.as_ref();
+/// drop(iterator);
+/// let _ = handle;
+/// ```
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::index::index::{Index, IndexArc, IndexIterator};
+/// let index: IndexArc = Index::new().unwrap().into();
+/// let mut iterator = IndexIterator::new(&index).unwrap();
+/// let mut handle = iterator.as_mut();
+/// let shared = handle.as_ref();
+/// let exclusive = handle.as_mut();
+/// let _ = (shared, exclusive);
+/// ```
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::index::{Index, IndexArc, IndexIterator};
+/// let index: IndexArc = Index::new().unwrap().into();
+/// let iterator = IndexIterator::new(&index).unwrap();
+/// std::thread::spawn(move || drop(iterator));
+/// ```
+pub type IndexIteratorBox = CBox<IndexIterator, IndexIteratorFree>;
+
+impl IndexIterator {
+    /// Snapshots the index in path order, retaining its own counted reference.
+    /// The returned owner is independent of `index`'s Rust lifetime.
+    ///
+    /// Requires a shared owner because C keeps an additional reference until
+    /// iterator destruction. Convert an [`IndexBox`] with `.into()` first;
+    /// accepting its borrowed handle would leave a supposedly sole owner while
+    /// the iterator still retains the index. Snapshot creation can sort the
+    /// private entry vector, but does not change the entries themselves.
+    ///
+    /// A sole-owner borrow cannot be retained:
+    ///
+    /// ```compile_fail,E0308
+    /// use libgit2::libgit2::index::index::{Index, IndexIterator};
+    /// let index = Index::new().unwrap();
+    /// let _ = IndexIterator::new(&index);
+    /// ```
+    ///
+    /// Wraps: git_index_iterator_new
+    pub fn new(index: &IndexArc) -> Result<IndexIteratorBox, ErrorBuf> {
+        let mut out = ptr::null_mut();
+        // SAFETY: the arc keeps a live index and the runtime alive; it has no
+        // exclusive handle. C borrows the output slot for this call, retaining
+        // its own counted index reference only on success. Neither owner is
+        // Send/Sync, and no Rust reference covers C's index or entry vector.
+        let rc = unsafe { ffi::git_index_iterator_new(&mut out, index.as_c_ptr()) };
+        if rc < 0 {
+            return Err(last());
+        }
+        // SAFETY: success writes a fresh, initialized, uniquely owned iterator
+        // paired with git_index_iterator_free; its retained index needs no Rust
+        // keepalive. Failure leaves out untouched and was handled above.
+        Ok(unsafe { IndexIteratorBox::from_c(out) }.expect("successful iterator constructor"))
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -743,6 +898,85 @@ mod unit_tests {
         assert_eq!(
             align_of::<Stage>(),
             align_of::<crate::ffi::git_index_stage_t>()
+        );
+    }
+
+    #[test]
+    fn entry_flags_value_operations_and_layout() {
+        assert_eq!(
+            size_of::<EntryFlags>(),
+            size_of::<ffi::git_index_entry_flag_t>()
+        );
+        assert_eq!(
+            align_of::<EntryFlags>(),
+            align_of::<ffi::git_index_entry_flag_t>()
+        );
+        assert_eq!(EntryFlags::default(), EntryFlags::empty());
+        assert!(EntryFlags::empty().contains(EntryFlags::empty()));
+        let flags = EntryFlags::EXTENDED | EntryFlags::VALID;
+        assert!(flags.contains(EntryFlags::EXTENDED));
+        assert!(flags.contains(EntryFlags::VALID));
+        assert!(flags.contains(flags));
+        assert!(!EntryFlags::EXTENDED.contains(flags));
+        let mut flags = flags;
+        flags |= EntryFlags::from_bits_retain(0x8000_1234);
+        assert_eq!(flags.bits(), 0x8000_d234);
+        flags.remove(EntryFlags::EXTENDED | EntryFlags::VALID);
+        assert_eq!(flags.bits(), 0x8000_1234);
+        let copy = flags;
+        assert_eq!(copy, flags);
+        assert!(format!("{flags:?}").starts_with("EntryFlags("));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn iterator_constructor_allocation_failures_are_balanced() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::iterator_constructor_allocation_failures_are_balanced"
+            ),
+            || {
+                install_countdown();
+                assert!(runtime_pinned());
+                set(ErrorClass::Invalid, c"allocate error state");
+                for populated in [false, true] {
+                    let index: IndexArc = Index::new().unwrap().into();
+                    if populated {
+                        let entry = ffi::git_index_entry {
+                            mode: 0o100644,
+                            path: c"entry".as_ptr(),
+                            ..Default::default()
+                        };
+                        // SAFETY: live index with no outstanding entry borrow; C copies
+                        // this initialized entry and static NUL path during the call.
+                        assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+                    }
+                    let baseline = LIVE.load(SeqCst);
+                    let allocations = if populated { 2 } else { 1 };
+                    for n in 0..=allocations {
+                        ALLOWED.store(n, SeqCst);
+                        REFUSING.store(true, SeqCst);
+                        let result = IndexIterator::new(&index);
+                        REFUSING.store(false, SeqCst);
+                        if n < allocations {
+                            let error = result.unwrap_err();
+                            assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                            assert_eq!(error.message(), c"Out of memory");
+                        } else {
+                            let iterator = result.unwrap();
+                            let ptr = iterator.into_c();
+                            // SAFETY: the sole live iterator just relinquished above,
+                            // with its retained index reference; adopt exactly once.
+                            drop(unsafe { IndexIteratorBox::from_c(ptr) }.unwrap());
+                        }
+                        assert_eq!(LIVE.load(SeqCst), baseline);
+                    }
+                    // Failure in snapshot allocation must also balance index rc/readers;
+                    // LeakSanitizer observes the final index release below.
+                    drop(index);
+                }
+            },
         );
     }
 

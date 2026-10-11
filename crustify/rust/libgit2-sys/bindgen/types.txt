@@ -105,3 +105,7 @@ git_index_matched_path_cb
 # index wave 0 batch 4
 git_index_name_entry
 git_index_stage_t
+
+# index wave 0 batch 3: opaque snapshot iterator and entry flag enum
+git_index_iterator
+git_index_entry_flag_t
