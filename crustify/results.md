@@ -148,9 +148,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 | `libgit2/core` | `16` | `12` | `5h06m51s` | `$96.92` | `$70.82` | `$167.74` | `$10.48` | `$13.98` |
 | `libgit2/repository` | `23` | `75` | `8h27m28s` | `$227.32` | `$123.41` | `$350.73` | `$15.25` | `$4.68` |
 | `libgit2/object` | `21` | `152` | `12h10m54s` | `$279.41` | `$232.10` | `$511.51` | `$24.36` | `$3.37` |
-| `libgit2/config` | `9` | `47` | `6h09m05s` | `$24.53` | `$85.11` | `$109.64` | `$12.18` | `$2.33` |
+| `libgit2/config` | `9` | `47` | `6h09m05s` | `$36.16` | `$85.11` | `$121.27` | `$13.47` | `$2.58` |
 | orchestrator | `<n>` | `<n>` | — | — | — | `$<n>`+ | — | — |
-| **Σ recorded agents** | **`77`** | **`314`** | **`40h20m`** | **`$689.06`** | **`$625.31`** | **`$1314.37`** | **`$17.07`** | **`$4.19`** |
+| **Σ recorded agents** | **`77`** | **`314`** | **`40h20m`** | **`$700.69`** | **`$625.31`** | **`$1326.00`** | **`$17.22`** | **`$4.22`** |
 
 ## Raw lifetime discovery
 
@@ -226,7 +226,8 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`2`|`0`| `1` | `2` |`+487/-1`| `42.74`% / `98.75`% | `+0` | `+0` | `$1.67` | `16m30s` | `$1.67` | `$0.83` |
 |`libgit2/config`|`3`|`0`| `1` | `4` |`+1131/-24`| `42.79`% / `98.76`% | `+2` | `+1` | `$1.95` | `19m01s` | `$1.95` | `$0.49` |
 |`libgit2/config`|`4`|`0`| `1` | `14` |`+1118/-35`| `43.11`% / `98.77`% | `+0` | `+0` | `$2.49` | `24m50s` | `$2.49` | `$0.18` |
-| **Σ** |  |  | **`77`** | **`109`** | **`+77785/-1441`** | **`43.11`% / `98.77`%** | **`+16`** | **`+17`** | **`$384.58`** | — | **`$4.99`** | **`$3.53`** |
+|`libgit2/config`|`4`|`0`| `1` | `14` |`+2746/-5`| `42.84`% / `98.75`% | `+0` | `+0` | `$11.63` | `39m04s` | `$11.63` | `$0.83` |
+| **Σ** |  |  | **`78`** | **`123`** | **`+80531/-1446`** | **`42.84`% / `98.75`%** | **`+16`** | **`+17`** | **`$396.21`** | — | **`$5.08`** | **`$3.22`** |
 
 ### Batches — wrap: tests
 
@@ -280,7 +281,8 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`2`|`0`|`+1` (`-0.04`/`-0.03` pp)|`+0` (`-0.49`/`-0.02` pp)|`+1` (`-0.02`/`-0.02` pp)|`+2` (`+0.01`/`+0.02` pp)|
 |`libgit2/config`|`3`|`0`|`+4` (`-0.01`/`+0.25` pp)|`+1` (`+0.03`/`+0.21` pp)|`+1` (`+0.01`/`+0.19` pp)|`+3` (`+0.02`/`-0.03` pp)|
 |`libgit2/config`|`4`|`0`|`+2` (`+0.32`/`+0.09` pp)|`+0` (`-0.55`/`-0.03` pp)|`+3` (`+0.25`/`+0.09` pp)|`+5` (`+0.14`/`-0.09` pp)|
-| **Σ** |  |  | **`+380` (`+23.24`/`+1.16` pp)** | **`+49` (`+16.28`/`-19.22` pp)** | **`+217` (`+29.44`/`-6.69` pp)** | **`+393` (`+12.13`/`+13.29` pp)** |
+|`libgit2/config`|`4`|`0`|`+9` (`+0.03`/`+0.90` pp)|`+0` (`+0.22`/`-0.13` pp)|`+3` (`+0.01`/`+0.43` pp)|`+9` (`+0.00`/`+0.06` pp)|
+| **Σ** |  |  | **`+389` (`+23.27`/`+2.06` pp)** | **`+49` (`+16.50`/`-19.35` pp)** | **`+220` (`+29.45`/`-6.26` pp)** | **`+402` (`+12.13`/`+13.35` pp)** |
 
 ### Batches — port
 
@@ -910,15 +912,36 @@ place. Review wave 1 found a safe-API UB in a wave 1 wrapper
 helper published as a raw `unsafe fn`. Review wave 4 found a transaction rollback that panics
 in `Drop` (`internal`) and a writable `get` that ignored the backend's `get` slot (`equiv`).
 
-Wave 4 batch 0 (`git_config_backend`) edited the C target. It changed
-`git_config_backend_from_string` and `git_config_backend_from_values` from `extern` to
-`GIT_EXTERN` in `include/git2/sys/config.h`, so that `libgit2.so` exports them, and wrapped
-them as constructors. The Scope note excluded those two declarations as unlinkable. The
-batch validated against private C builds, its reviewer kept the change, and the shared
-prebuilds were then rebuilt from the promoted tree (13 objects per variant, `build.json`
-unchanged at version `1`). Plain `offline` and `util` ctest still pass. Before the refresh,
-the tree at that landing did not link its tests against the shared builds, so its coverage
-cells were measured on the refreshed `coverage` build, with a recomputed zero baseline.
+Wave 4 batch 0 (`git_config_backend`) edited the C target. It found
+`git_config_backend_from_string` and `git_config_backend_from_values` listed as the type's
+allocating constructors, wrapped them, and when they failed to link (they are declared
+`extern`, not `GIT_EXTERN`, under `-fvisibility=hidden`), it marked them `GIT_EXTERN` in
+`include/git2/sys/config.h` and validated against private C builds. The Scope note excluded
+those two declarations as unlinkable. Nothing in a translator's context says so: the
+exclusion lives only here, and the translator prompt allows C changes as long as they are
+built privately. The reviewer kept the change, and the shared prebuilds were rebuilt with it
+after review wave 4.
+
+After the sub-campaign, by the operator's decision, the orchestrator reverted the export
+(`c5440d3ee`). The commit restores the header, removes `Backend::from_string`/`from_values`
+and their allowlist entries, and deletes the 16 tests, their helpers, 4 emptied test modules
+and 5 `compile_fail` examples that depended on them (`-1347` lines). It rebuilds
+the shared prebuilds without the exports. Plain and ASan+UBSan workspace tests, clippy, and
+plain `offline`/`util` ctest pass after it. Union coverage fell from `43.17`% to `42.82`% C
+(`98.80`% to `98.75`% Rust).
+
+The two functions had been the only working way to build a backend, so the operator had
+`git_config_backend` translated again in one `claude-opus-5.5` batch, shown as the second
+`libgit2/config` wave `4` batch `0` row. Its `batch.json` is the scheduled entry verbatim,
+landed through `crustify/waves/20261008-170008/libgit2/config/wave-4-followup`. Shared
+memory told it why the batch was rerun. It added the public constructor through the
+author's path. A `CustomBackend` trait puts a Rust store behind every slot.
+`UnopenedBackend::new`/`new_readonly` box it after a `git_config_init_backend`-initialized
+base, with trampolines that refuse reentry and defer a release requested mid-callback. The
+batch also rebuilt the `BackendMut` tests on such a store: unit (Miri), `ub_safe`, and
+`equiv` against a C-ABI backend serving the same store. It cost `$11.63` over `39m04s`,
+with no C change and no smell delta. The Overview's `config` row includes its cost but not
+its wall time, and it has no review pass yet.
 
 Codex agents do not load the shared agent memory that Claude Code reads at startup, so
 `config`'s translators worked without the campaign's notes and wrote none back. Wave 0
