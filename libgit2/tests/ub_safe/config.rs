@@ -426,3 +426,322 @@ mod entry_and_map_types {
         assert_eq!(cloned.as_ref().map_value(), i32::MIN);
     }
 }
+
+#[cfg(not(miri))]
+mod file_access {
+    use super::*;
+    use libgit2::libgit2::config::config::{
+        ConfigLevel, find_global, find_system, find_xdg, parse_path,
+    };
+    use std::ffi::CString;
+
+    #[test]
+    fn file_api_sequences() {
+        let file = scratch("file-api");
+        std::fs::write(
+            file.to_str().unwrap(),
+            b"[a]\n flag\n empty =\n path = relative/path\n multi = first\n multi = second\n",
+        )
+        .unwrap();
+        let mut cfg = Config::open_ondisk(&file).unwrap();
+        assert!(cfg.as_ref().get_bool(c"a.flag").unwrap());
+        assert_eq!(
+            cfg.as_ref()
+                .get_string_buf(c"a.flag")
+                .unwrap()
+                .as_ref()
+                .as_bytes(),
+            b""
+        );
+        assert!(cfg.as_ref().get_path(c"a.flag").is_err());
+        assert_eq!(
+            cfg.as_ref()
+                .get_path(c"a.path")
+                .unwrap()
+                .as_ref()
+                .as_bytes(),
+            b"relative/path"
+        );
+        assert!(cfg.as_ref().get_string(c"a.path").is_err());
+        let retained = cfg.as_ref().get_string_buf(c"a.path").unwrap();
+        for value in [i32::MIN, -1, 0, 1, i32::MAX] {
+            cfg.as_mut().set_i32(c"a.number", value).unwrap();
+            assert_eq!(cfg.as_ref().get_i32(c"a.number").unwrap(), value);
+        }
+        for value in [i64::MIN, i64::MAX, 0, -1] {
+            cfg.as_mut().set_i64(c"a.number", value).unwrap();
+            assert_eq!(cfg.as_ref().get_i64(c"a.number").unwrap(), value);
+        }
+        for value in [true, false] {
+            cfg.as_mut().set_bool(c"a.flag", value).unwrap();
+            assert_eq!(cfg.as_ref().get_bool(c"a.flag").unwrap(), value);
+        }
+        let input = CString::new("copied").unwrap();
+        cfg.as_mut()
+            .set_multivar(c"a.multi", c"first", &input)
+            .unwrap();
+        drop(input);
+        cfg.as_mut().delete_multivar(c"a.multi", c"second").unwrap();
+        assert_eq!(
+            cfg.as_ref()
+                .get_string_buf(c"a.multi")
+                .unwrap()
+                .as_ref()
+                .as_bytes(),
+            b"copied"
+        );
+        assert!(cfg.as_mut().set_multivar(c"a.multi", c"[", c"bad").is_err());
+        assert!(cfg.as_mut().delete_multivar(c"a.multi", c"[").is_err());
+        cfg.as_mut().delete_entry(c"a.multi").unwrap();
+        assert!(cfg.as_ref().get_i32(c"a.multi").is_err());
+        assert!(cfg.as_mut().delete_entry(c"a.missing").is_err());
+        assert!(cfg.as_ref().get_i64(c"invalid").is_err());
+        assert!(cfg.as_mut().set_i32(c"invalid", 0).is_err());
+        let path = CString::new(file.to_bytes()).unwrap();
+        assert!(
+            cfg.as_mut()
+                .add_file_ondisk(&path, ConfigLevel::LOCAL, None, false)
+                .is_err()
+        );
+        cfg.as_mut()
+            .add_file_ondisk(&path, ConfigLevel::LOCAL, None, true)
+            .unwrap();
+        drop(path);
+        let mut parent = cfg.as_mut();
+        let mut highest = parent.open_level(ConfigLevel::HIGHEST).unwrap();
+        assert!(highest.as_mut().set_i32(c"a.view", 99).is_err());
+        let extra = scratch("highest-max-priority");
+        highest
+            .as_mut()
+            .add_file_ondisk(&extra, ConfigLevel::from_raw(i32::MAX - 1), None, false)
+            .unwrap();
+        highest.as_mut().set_i32(c"a.extra", 3).unwrap();
+        drop(highest);
+        std::fs::remove_file(extra.to_str().unwrap()).unwrap();
+        let mut view = parent.open_level(ConfigLevel::LOCAL).unwrap();
+        view.as_mut().set_i32(c"a.view", 99).unwrap();
+        view.as_mut().set_bool(c"a.tx", false).unwrap();
+        view.as_mut()
+            .set_multivar(c"a.txmulti", c".*", c"first")
+            .unwrap();
+        {
+            let mut tx = view.as_mut().lock().unwrap();
+            tx.set_i32(c"a.view", 100).unwrap();
+            tx.set_i64(c"a.large", i64::MAX).unwrap();
+            tx.set_bool(c"a.tx", true).unwrap();
+            tx.set_multivar(c"a.txmulti", c".*", c"first").unwrap();
+            tx.delete_multivar(c"a.txmulti", c"first").unwrap();
+            tx.delete_entry(c"a.tx").unwrap();
+            // C stages locked writes without updating the published values.
+            assert_eq!(tx.config().get_i32(c"a.view").unwrap(), 99);
+        } // abort staged changes and release the retained backend
+        assert!(
+            !std::fs::read(file.to_str().unwrap())
+                .unwrap()
+                .windows(3)
+                .any(|w| w == b"100")
+        );
+        drop(view);
+        // Aborted staged writes leave both disk and published values untouched.
+        let expected = cfg.as_ref().get_i32(c"a.view").unwrap();
+        let shared = cfg.as_ref().open_level(ConfigLevel::LOCAL).unwrap();
+        assert_eq!(shared.as_ref().get_i32(c"a.view").unwrap(), expected);
+        drop(shared);
+        drop(cfg);
+        assert_eq!(retained.as_ref().as_bytes(), b"relative/path");
+        std::fs::remove_file(file.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn default_search_and_path_buffers() {
+        let _cfg = Config::open_default().unwrap();
+        // Environment-dependent find failures are valid results, but all returned
+        // allocations must survive other calls and be dropped exactly once.
+        let outputs = [find_global(), find_xdg(), find_system()];
+        let copied = parse_path(c"relative/\xff").unwrap();
+        for input in [c"", c"~", c"~/child", c"~named/child"] {
+            let _ = parse_path(input);
+        }
+        for output in outputs.into_iter().flatten() {
+            assert!(!output.as_ref().as_bytes().is_empty());
+        }
+        assert_eq!(copied.as_ref().as_bytes(), b"relative/\xff");
+    }
+
+    #[test]
+    fn file_constructor_error_cleanup() {
+        let malformed = scratch("malformed-input");
+        std::fs::write(malformed.to_str().unwrap(), b"[unfinished\n").unwrap();
+        assert!(Config::open_ondisk(&malformed).is_err());
+        let mut cfg = Config::new().unwrap();
+        #[cfg(unix)]
+        {
+            let circular = scratch("circular-symlink");
+            let path = circular.to_str().unwrap();
+            std::os::unix::fs::symlink(path, path).unwrap();
+            assert!(Config::open_ondisk(&circular).is_err());
+            assert!(
+                cfg.as_mut()
+                    .add_file_ondisk(&circular, ConfigLevel::LOCAL, None, false)
+                    .is_err()
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+
+        assert!(
+            cfg.as_mut()
+                .add_file_ondisk(&malformed, ConfigLevel::LOCAL, None, false)
+                .is_err()
+        );
+        assert!(cfg.as_ref().get_bool(c"a.missing").is_err());
+        assert!(cfg.as_ref().get_i32(c"a.missing").is_err());
+        assert!(cfg.as_ref().get_i64(c"a.missing").is_err());
+        drop(cfg);
+        std::fs::remove_file(malformed.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn independent_file_owners_on_threads() {
+        let threads: Vec<_> = (0..8)
+            .map(|index| {
+                std::thread::spawn(move || {
+                    let file = scratch(&format!("file-thread-{index}"));
+                    let mut cfg = Config::open_ondisk(&file).unwrap();
+                    for value in [i64::MIN, 0, i64::MAX] {
+                        cfg.as_mut().set_i64(c"a.value", value).unwrap();
+                        assert_eq!(cfg.as_ref().get_i64(c"a.value").unwrap(), value);
+                    }
+                    let out = cfg.as_ref().get_string_buf(c"a.value").unwrap();
+                    drop(cfg);
+                    std::fs::remove_file(file.to_str().unwrap()).unwrap();
+                    out // buffer (not the config) may be released on the joining thread
+                })
+            })
+            .collect();
+        for thread in threads {
+            assert!(!thread.join().unwrap().as_ref().as_bytes().is_empty());
+        }
+    }
+
+    #[test]
+    fn search_locations_in_isolated_environment() {
+        let dir =
+            std::env::temp_dir().join(format!("crustify-config-search-{}", std::process::id()));
+        if std::env::var_os("CRUSTIFY_CONFIG_SEARCH_CHILD").is_some() {
+            let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+            assert_eq!(
+                find_global().unwrap().as_ref().as_bytes(),
+                home.join(".gitconfig").to_str().unwrap().as_bytes()
+            );
+            let xdg = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap());
+            assert_eq!(
+                find_xdg().unwrap().as_ref().as_bytes(),
+                xdg.join("git/config").to_str().unwrap().as_bytes()
+            );
+            let cfg = Config::open_default().unwrap();
+            assert_eq!(cfg.as_ref().get_i32(c"a.value").unwrap(), 11);
+            assert_eq!(
+                cfg.as_ref()
+                    .open_global()
+                    .unwrap()
+                    .as_ref()
+                    .get_i32(c"a.value")
+                    .unwrap(),
+                22
+            );
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("xdg/git")).unwrap();
+        std::fs::write(dir.join(".gitconfig"), b"[a]\n value = 11\n").unwrap();
+        std::fs::write(dir.join("xdg/git/config"), b"[a]\n value = 22\n").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "config::file_access::search_locations_in_isolated_environment",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("HOME", &dir)
+            .env("XDG_CONFIG_HOME", dir.join("xdg"))
+            .env("CRUSTIFY_CONFIG_SEARCH_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn global_views_and_repository_keepalive() {
+        let global = scratch("global-view");
+        let xdg = scratch("xdg-view");
+        let mut cfg = Config::new().unwrap();
+        cfg.as_mut()
+            .add_file_ondisk(&global, ConfigLevel::GLOBAL, None, false)
+            .unwrap();
+        let mut parent = cfg.as_mut();
+        let mut view = parent.open_global().unwrap();
+        view.as_mut().set_i32(c"a.value", 1).unwrap();
+        drop(view);
+        parent
+            .add_file_ondisk(&xdg, ConfigLevel::XDG, None, false)
+            .unwrap();
+        let mut view = parent.open_global().unwrap();
+        view.as_mut().set_i32(c"a.value", 2).unwrap();
+        drop(view);
+        let shared = cfg.as_ref().open_global().unwrap();
+        assert_eq!(shared.as_ref().get_i32(c"a.value").unwrap(), 2);
+        drop(shared);
+        drop(cfg);
+        for file in [global, xdg] {
+            std::fs::remove_file(file.to_str().unwrap()).unwrap();
+        }
+
+        let dir =
+            std::env::temp_dir().join(format!("crustify-safe-config-repo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = CString::new(dir.to_str().unwrap()).unwrap();
+        let repo = Repository::init(&path, true).unwrap();
+        let file = CString::new(dir.join("config").to_str().unwrap()).unwrap();
+        let included = dir.join("included.cfg");
+        std::fs::write(&included, b"[a]\n conditional = 41\n").unwrap();
+        let mut contents = std::fs::read(dir.join("config")).unwrap();
+        contents.extend_from_slice(
+            format!(
+                "\n[includeIf \"gitdir:{}\"]\n path = included.cfg\n",
+                dir.display()
+            )
+            .as_bytes(),
+        );
+        std::fs::write(dir.join("config"), contents).unwrap();
+
+        // The explicit annotation narrows Config::new's covariant static owner.
+        fn bound<'r>(
+            repo: libgit2::libgit2::repository::repository::RepositoryRef<'r>,
+            file: &std::ffi::CStr,
+        ) -> ConfigBox<'r> {
+            let mut cfg: ConfigBox<'r> = Config::new().unwrap();
+            cfg.as_mut()
+                .add_file_ondisk(file, ConfigLevel::LOCAL, Some(repo), false)
+                .unwrap();
+            cfg
+        }
+        let mut cfg = bound(repo.as_ref(), &file);
+        assert_eq!(cfg.as_ref().get_i32(c"a.conditional").unwrap(), 41);
+        std::fs::write(&included, b"[a]\n conditional = 12345\n").unwrap();
+        assert_eq!(cfg.as_ref().get_i32(c"a.conditional").unwrap(), 12345);
+
+        cfg.as_mut().set_bool(c"a.flag", true).unwrap();
+        let snapshot = repo.as_ref().config_snapshot().unwrap();
+        let text = snapshot.as_ref().get_string(c"a.flag").unwrap();
+        drop(snapshot);
+        assert_eq!(text, c"true");
+        drop(cfg);
+        drop(repo);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
