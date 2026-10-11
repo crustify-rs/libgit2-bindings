@@ -29,6 +29,8 @@
 //! retains one independently of the caller's borrow. Such an independently retaining
 //! wrapper must take an [`IndexArc`] (into which the box converts), never an
 //! [`IndexMut`] or [`IndexRef`] of a box.
+//! [`ConflictIterator::new`] instead borrows without retaining: its lifetime
+//! keeps the index alive and unmodified.
 //!
 //! `git_index_owner` lends the repository that keeps a reference to the index, if any,
 //! without counting it: libgit2 clears it when that repository releases the index.
@@ -873,6 +875,229 @@ impl IndexIterator {
     }
 }
 
+/// Opaque conflict cursor, borrowing one exclusively held index for `'index`.
+///
+/// C neither retains the index nor snapshots its entries. The exclusive borrow
+/// prevents every other safe index operation until the cursor is dropped. No
+/// fields are public in C, and there is no clone or reference-count operation.
+/// Unlike the ordinary index iterator, this cursor does not retain an index ref.
+///
+/// The index cannot be dropped first:
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::index::index::{Index, ConflictIterator};
+/// let mut index = Index::new().unwrap();
+/// let cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// drop(index);
+/// drop(cursor);
+/// ```
+/// Nor borrowed again while iteration is live:
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::index::index::{Index, ConflictIterator};
+/// let mut index = Index::new().unwrap();
+/// let cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// let second = index.as_mut();
+/// drop((cursor, second));
+/// ```
+/// A shared index cannot guarantee that another C holder leaves entries alone:
+/// ```compile_fail
+/// use libgit2::libgit2::index::index::{Index, IndexArc, ConflictIterator};
+/// let index: IndexArc = Index::new().unwrap().into();
+/// let cursor = ConflictIterator::new(index.as_ref());
+/// ```
+///
+/// Wraps: git_index_conflict_iterator
+/// Handwritten
+#[repr(transparent)]
+pub struct ConflictIterator<'index>(
+    ffi::git_index_conflict_iterator,
+    core::marker::PhantomData<&'index mut Index>,
+);
+
+/// Copyable shared handle to a conflict cursor; it cannot advance the cursor.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct ConflictIteratorRef<'a, 'index>(ffibox::CBorrowedPtr<'a, ConflictIterator<'index>>);
+
+/// Exclusive cursor handle. Reborrowing freezes the original handle.
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::index::index::{Index, ConflictIterator};
+/// let mut index = Index::new().unwrap();
+/// let mut cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// let mut handle = cursor.as_mut();
+/// let shared = handle.as_ref();
+/// let exclusive = handle.as_mut();
+/// drop((shared, exclusive));
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::index::index::ConflictIteratorMut;
+/// fn shorten<'a, 'i>(m: ConflictIteratorMut<'a, 'static>) -> ConflictIteratorMut<'a, 'i> { m }
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct ConflictIteratorMut<'a, 'index>(
+    ConflictIteratorRef<'a, 'index>,
+    core::marker::PhantomData<&'a mut ConflictIterator<'index>>,
+);
+
+// SAFETY: all three types are transparent over their C layout or CBorrowedPtr
+// respectively, with zero-sized lifetime markers and no handle Drop. The mutable
+// handle is invariant in the pointee, including its index lifetime. No reference
+// to foreign storage is formed. Index's marker withholds Send and Sync.
+unsafe impl<'index> ffibox::CCell for ConflictIterator<'index> {
+    type C = ffi::git_index_conflict_iterator;
+    type Ref<'a>
+        = ConflictIteratorRef<'a, 'index>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = ConflictIteratorMut<'a, 'index>
+    where
+        Self: 'a;
+}
+
+impl ConflictIteratorRef<'_, '_> {
+    #[allow(dead_code)] // Used by the following symbol wave.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_index_conflict_iterator {
+        self.0.as_non_null().as_ptr().cast()
+    }
+}
+
+impl<'index> ConflictIteratorMut<'_, 'index> {
+    #[allow(dead_code)] // Used by the following symbol wave.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_index_conflict_iterator {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    pub fn as_ref(&self) -> ConflictIteratorRef<'_, 'index> {
+        self.0
+    }
+
+    pub fn as_mut(&mut self) -> ConflictIteratorMut<'_, 'index> {
+        ConflictIteratorMut(self.0, core::marker::PhantomData)
+    }
+}
+
+/// Frees the cursor allocation only; the borrowed index is not released.
+///
+/// Wraps: git_index_conflict_iterator_free
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConflictIteratorFree;
+
+// SAFETY: each live initialized cursor from git_index_conflict_iterator_new is
+// released once by git_index_conflict_iterator_free; there are no clone policies.
+unsafe impl<'index> ffibox::CDrop<ConflictIterator<'index>> for ConflictIteratorFree {
+    unsafe fn c_drop(&self, cursor: NonNull<ConflictIterator<'index>>) {
+        // SAFETY: the caller transfers the sole C allocation; the wrapper is
+        // layout-compatible. C frees only the cursor and retains nothing.
+        unsafe { ffi::git_index_conflict_iterator_free(cursor.as_ptr().cast()) }
+    }
+}
+
+/// Sole C-allocated owner, with the index kept exclusively borrowed until drop.
+/// Neither owners nor handles can cross threads.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::index::ConflictIteratorBox;
+/// fn send<T: Send>() {}
+/// send::<ConflictIteratorBox<'static>>();
+/// ```
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::index::ConflictIteratorBox;
+/// fn sync<T: Sync>() {}
+/// sync::<ConflictIteratorBox<'static>>();
+/// ```
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::index::index::{Index, ConflictIterator};
+/// let mut index = Index::new().unwrap();
+/// let cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// let handle = cursor.as_ref();
+/// drop(cursor);
+/// let _copy = handle;
+/// ```
+pub type ConflictIteratorBox<'index> = CBox<ConflictIterator<'index>, ConflictIteratorFree>;
+
+impl<'index> ConflictIterator<'index> {
+    /// Creates a cursor positioned before the first conflict. The index must
+    /// have a sole owner: an `IndexArc` cannot provide this exclusive handle.
+    /// Returns the C allocation error without retaining a borrow on failure.
+    ///
+    /// Wraps: git_index_conflict_iterator_new
+    pub fn new(mut index: IndexMut<'index>) -> Result<ConflictIteratorBox<'index>, ErrorBuf> {
+        let mut out = ptr::null_mut();
+        // SAFETY: index is live and exclusively borrowed for the returned
+        // cursor's lifetime. C stores its pointer without retaining a ref; out
+        // is a writable slot and C writes a fresh initialized cursor on success.
+        let rc = unsafe { ffi::git_index_conflict_iterator_new(&mut out, index.as_mut_ptr()) };
+        if rc < 0 {
+            return Err(last());
+        }
+        // SAFETY: success transfers one initialized allocation paired with the
+        // policy's destructor. The index borrow is carried in the layout type.
+        unsafe { ConflictIteratorBox::from_c(out) }.ok_or_else(last)
+    }
+}
+
+/// Extended entry bitmasks, including the on-disk mask and the in-memory flag.
+/// Unknown bits are retained, not interpreted as enum discriminants. This is a
+/// scalar value, not a C allocation; copying it copies no pointers or resources.
+/// The entry field itself is `u16`; the enum's ABI representation is preserved.
+///
+/// Wraps: git_index_entry_extended_flag_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct EntryExtendedFlags(ffi::git_index_entry_extended_flag_t);
+
+impl EntryExtendedFlags {
+    pub const EMPTY: Self = Self(0);
+    pub const INTENT_TO_ADD: Self = Self(ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD);
+    pub const SKIP_WORKTREE: Self = Self(ffi::GIT_INDEX_ENTRY_SKIP_WORKTREE);
+    /// The union of flags serialized to disk (not a third independent bit).
+    pub const ON_DISK: Self = Self(ffi::GIT_INDEX_ENTRY_EXTENDED_FLAGS);
+    pub const UP_TO_DATE: Self = Self(ffi::GIT_INDEX_ENTRY_UPTODATE);
+
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Whether every bit of `flags` is present, including unknown bits.
+    pub const fn contains(self, flags: Self) -> bool {
+        self.0 & flags.0 == flags.0
+    }
+
+    pub fn insert(&mut self, flags: Self) {
+        self.0 |= flags.0;
+    }
+
+    pub fn remove(&mut self, flags: Self) {
+        self.0 &= !flags.0;
+    }
+}
+
+impl core::ops::BitOr for EntryExtendedFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitAnd for EntryExtendedFlags {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -976,6 +1201,113 @@ mod unit_tests {
                     // LeakSanitizer observes the final index release below.
                     drop(index);
                 }
+            },
+        );
+    }
+
+    #[test]
+    fn extended_flags_preserve_bits_and_combine() {
+        use EntryExtendedFlags as F;
+        assert_eq!(F::INTENT_TO_ADD | F::SKIP_WORKTREE, F::ON_DISK);
+        assert!(!F::ON_DISK.contains(F::UP_TO_DATE));
+        for bits in 0..=u16::MAX as u32 {
+            let mut f = F::from_bits_retain(bits);
+            assert_eq!(f.bits(), bits);
+            f.insert(F::UP_TO_DATE);
+            assert!(f.contains(F::UP_TO_DATE));
+            f.remove(F::ON_DISK);
+            assert_eq!(f.bits(), (bits | 4) & !0x6000);
+            assert_eq!((f & F::ON_DISK), F::EMPTY);
+        }
+        assert_eq!(F::from_bits_retain(u32::MAX).bits(), u32::MAX);
+        assert_eq!(F::default(), F::EMPTY);
+        assert_eq!(format!("{:?}", F::EMPTY), "EntryExtendedFlags(0)");
+    }
+
+    /// Miri exercises the hand-written transparent handle layout without FFI.
+    /// This Rust-owned opaque placeholder is never passed to libgit2 or freed as
+    /// a C cursor; only pointer identity and reborrow layout are tested.
+    #[test]
+    fn conflict_cursor_handle_layout() {
+        use core::mem::{align_of, size_of};
+        assert_eq!(
+            size_of::<ConflictIterator<'_>>(),
+            size_of::<ffi::git_index_conflict_iterator>()
+        );
+        assert_eq!(
+            align_of::<ConflictIterator<'_>>(),
+            align_of::<ffi::git_index_conflict_iterator>()
+        );
+        assert_eq!(
+            size_of::<EntryExtendedFlags>(),
+            size_of::<ffi::git_index_entry_extended_flag_t>()
+        );
+        assert_eq!(
+            align_of::<EntryExtendedFlags>(),
+            align_of::<ffi::git_index_entry_extended_flag_t>()
+        );
+        assert_eq!(
+            size_of::<ConflictIteratorMut<'_, '_>>(),
+            size_of::<*mut ()>()
+        );
+        assert_eq!(
+            size_of::<ConflictIteratorRef<'_, '_>>(),
+            size_of::<*mut ()>()
+        );
+        // SAFETY: bindgen represents this opaque declaration by a zero-sized
+        // byte array, for which every bit pattern is valid. It is only a Rust
+        // layout fixture, never used as a real C cursor.
+        let raw = unsafe { core::mem::zeroed::<ffi::git_index_conflict_iterator>() };
+        let mut slot = ConflictIterator(raw, core::marker::PhantomData);
+        let p = NonNull::from(&mut slot);
+        // SAFETY: initialized Rust-owned opaque layout lives through all handles;
+        // no access reaches C, and the original place is not reborrowed meanwhile.
+        let shared = ConflictIteratorRef(unsafe { ffibox::CBorrowedPtr::new(p) });
+        let mut handle = ConflictIteratorMut(shared, core::marker::PhantomData);
+        assert_eq!(
+            handle.as_mut_ptr().cast::<ConflictIterator<'_>>(),
+            p.as_ptr()
+        );
+        assert_eq!(
+            handle.as_mut().as_ref().as_ptr().cast_mut().cast(),
+            p.as_ptr()
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn conflict_cursor_round_trip_and_allocation_failure() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::conflict_cursor_round_trip_and_allocation_failure"
+            ),
+            || {
+                install_countdown();
+                let mut index = Index::new().unwrap();
+                set(ErrorClass::Invalid, c"preallocate error state");
+                ALLOWED.store(0, SeqCst);
+                REFUSING.store(true, SeqCst);
+                let failed = ConflictIterator::new(index.as_mut());
+                REFUSING.store(false, SeqCst);
+                let error = failed.err().unwrap();
+                assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                assert_eq!(error.message(), c"Out of memory");
+                let before = LIVE.load(SeqCst);
+                for _ in 0..3 {
+                    let mut cursor = ConflictIterator::new(index.as_mut()).unwrap();
+                    let p = cursor.as_c_ptr();
+                    assert_eq!(cursor.as_ref().as_ptr(), p);
+                    assert_eq!(cursor.as_mut().as_mut().as_mut_ptr(), p);
+                    let p = cursor.into_c();
+                    // SAFETY: this pointer is the just-released sole C allocation;
+                    // index remains live and unused until the readopted owner drops.
+                    let cursor = unsafe { ConflictIteratorBox::from_c(p) }.unwrap();
+                    drop(cursor);
+                    assert_eq!(LIVE.load(SeqCst), before);
+                }
+                // SAFETY: C explicitly accepts NULL as a no-op destructor argument.
+                unsafe { ffi::git_index_conflict_iterator_free(ptr::null_mut()) };
             },
         );
     }

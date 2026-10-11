@@ -655,3 +655,42 @@ fn entry_flags_all_storage_bits() {
         std::hint::black_box(flags.bits());
     }
 }
+
+/// C retains the parent pointer across Rust handle reborrows. No Rust reference
+/// covers C memory, and the owner releases the cursor before releasing its index.
+mod conflict_cursor {
+    #![forbid(unsafe_code)]
+    use libgit2::libgit2::index::index::{ConflictIterator, EntryExtendedFlags, Index};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn retained_parent_and_reborrows() {
+        let mut index = Index::new().unwrap();
+        for _ in 0..32 {
+            let mut parent = index.as_mut();
+            let mut cursor = ConflictIterator::new(parent.as_mut()).unwrap();
+            let first = cursor.as_ref();
+            let second = first;
+            let _ = (first, second);
+            {
+                let mut handle = cursor.as_mut();
+                let mut nested = handle.as_mut();
+                let _shared = nested.as_ref();
+                let _exclusive = nested.as_mut();
+            }
+            drop(cursor);
+            // The parent is usable again after cursor destruction.
+            let _parent = parent.as_mut();
+        }
+    }
+
+    #[test]
+    fn extended_flag_values_are_plain_data() {
+        // Scalar flag values, unlike C owners, are naturally Send + Sync.
+        let flags = EntryExtendedFlags::from_bits_retain(u32::MAX);
+        std::thread::scope(|s| {
+            s.spawn(|| assert!(flags.contains(EntryExtendedFlags::ON_DISK)));
+            s.spawn(move || assert_eq!(flags.bits(), u32::MAX));
+        });
+    }
+}

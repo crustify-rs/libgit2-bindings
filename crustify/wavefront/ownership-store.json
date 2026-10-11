@@ -1502,6 +1502,36 @@
    "fields": []
   },
   {
+   "name": "git_index_conflict_iterator",
+   "defined_in": "src/libgit2/index.h",
+   "_comment_agent": "Opaque public type: no public fields. Only calloc constructor and cursor-only free; no copy or retain. cur is private cursor state. checkout_conflicts_foreach keeps index stable until cursor release. Mutable index access also includes sorting through git_index_get_byindex.",
+   "fields": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "src/libgit2/index.c:2102-2166: new stores index directly, without refcount or snapshot; next reads/sorts its entries via get_byindex; free releases only cursor. Parent must remain alive and unmodified. Rust constructor consumes IndexMut for a lifetime-carrying CBox; no shared-index constructor."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_entry_extended_flag_t",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "Resource-free combinable enum bitmasks; INTENT_TO_ADD and SKIP_WORKTREE union is EXTENDED_FLAGS, UPTODATE is memory-only. git_index_add masks flags_extended to EXTENDED_FLAGS; writer persists that mask. Rust transparent scalar bitset preserves unknown bits, with u32 enum ABI (entry field is u16). No allocation/clone/free primitives.",
+   "fields": []
+  },
+  {
    "name": "git_index_entry_flag_t",
    "defined_in": "include/git2/index.h",
    "_comment_agent": "Resource-free enum of combinable EXTENDED (0x4000) and VALID (0x8000) flags. Entry flags also carry name length and stage bits; retain unnamed bits. No lifecycle or pointer slots.",
@@ -10250,6 +10280,176 @@
       "nullable": true,
       "mutable": true,
       "note": "Stored uncounted in the list (source.repo) and read by filters while the list is applied, so it must outlive the list. Its attribute/config caches are filled during load."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_iterator_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "iterator",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "iterator",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes cursor only. NULL is a no-op; never frees or downrefs borrowed index."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_iterator_new",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "iterator_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Stored without upref; must outlive cursor and not be modified while iterating. next may sort entries. Exclusive lifetime-carrying index borrow in Rust."
+     }
+    },
+    {
+     "name": "iterator_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Required output slot, unchanged on OOM; success transfers sole calloc cursor paired with git_index_conflict_iterator_free."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_next",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "ancestor_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "other"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
+     }
+    },
+    {
+     "name": "iterator",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive borrowed cursor, advances cur. Stored index must be live and unmodified; no ownership transfer."
+     }
+    },
+    {
+     "name": "our_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "other"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
+     }
+    },
+    {
+     "name": "their_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "other"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
      }
     }
    ]
