@@ -34,6 +34,7 @@ git_checkout_index
 git_checkout_options_init
 git_checkout_tree
 git_commit_amend
+git_commit_amend_from_stage
 git_commit_amend_from_tree
 git_commit_author
 git_commit_author_with_mailmap
@@ -46,6 +47,7 @@ git_commit_create_ext
 git_commit_create_ext_options_init
 git_commit_create_from_callback
 git_commit_create_from_ids
+git_commit_create_from_stage
 git_commit_create_from_tree
 git_commit_create_options_init
 git_commit_create_v

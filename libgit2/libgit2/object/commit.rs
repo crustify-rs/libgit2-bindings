@@ -1626,9 +1626,10 @@ type SignFn<'f> =
     dyn FnMut(CommitBuilderMut<'_>, RepositoryRef<'_>, &CStr) -> Result<(), StreamError> + 'f;
 
 /// A commit signing callback (`git_commit_signature_cb`): the routines writing a commit
-/// with options (`git_commit_create_ext`, `git_commit_create_from_stage`) call it once,
-/// on the calling thread, with the commit's builder, its repository and its contents,
-/// before writing it, so that it can add a signature header.
+/// with options (`git_commit_create_ext`, and the `git_commit_create_from_*` and
+/// `git_commit_amend_from_*` routines) call it once, on the calling thread, with the
+/// commit's builder, its repository and its contents, before writing it, so that it can
+/// add a signature header.
 ///
 /// Built over a closure with [`new`](Self::new). Its `extern "C"` trampoline lends the
 /// closure a [`CommitBuilderMut`] and a [`RepositoryRef`] valid for the call only, and a
@@ -1690,9 +1691,10 @@ impl<'f> SignatureCallback<'f> {
     }
 
     /// Resumes a panic the closure raised inside a libgit2 call it was lent to through
-    /// [`CreateExtOptionsMut::set_signer`], if any: that call failed with `GIT_EUSER`,
-    /// and the callback refuses to sign until the panic is resumed. A wrapper that runs
-    /// the call itself ([`create_ext`]) resumes it on its own.
+    /// [`CreateExtOptionsMut::set_signer`] or [`CreateOptionsMut::set_signer`], if any:
+    /// that call failed with `GIT_EUSER`, and the callback refuses to sign until the
+    /// panic is resumed. A wrapper that runs the call itself ([`create_ext`]) resumes it
+    /// on its own.
     pub fn resume_panic(&mut self) {
         if let Some(panic) = self.panic.take() {
             resume_unwind(panic);
@@ -3487,7 +3489,8 @@ impl<'a, 'o> CreateOptionsRef<'a, 'o> {
 
     /// Whether a commit that changes nothing is written; `false`, the default, fails
     /// the commit (class `GIT_ERROR_REPOSITORY`, "no changes are staged for commit")
-    /// when the tree is the one `HEAD` points at, or empty on an unborn `HEAD`:
+    /// when the tree committed (the index's, for `git_commit_create_from_stage`) is the
+    /// one `HEAD` points at, or empty on an unborn `HEAD`, before anything is written:
     /// `git_commit_create_from_stage` returns `GIT_EUNCHANGED`, while
     /// `git_commit_create_from_tree` returns `-1` (`GIT_ERROR`) for the same check.
     /// Only the routines creating a commit read it; amending ignores it.
@@ -3704,8 +3707,10 @@ impl<'a, 'o> CreateOptionsMut<'a, 'o> {
     /// Sets the signing callback, borrowed exclusively for `'o`; `None` signs nothing.
     /// libgit2 calls it once per commit created or amended with these options, after
     /// building the commit and before writing it, with the builder to add the
-    /// signature header to (see [`SignatureCallback`]); an error fails the call,
-    /// nothing written.
+    /// signature header to (see [`SignatureCallback`]); an error fails the call before
+    /// the commit is written or `HEAD` moves. The routines committing the index
+    /// (`git_commit_create_from_stage`, `git_commit_amend_from_stage`) have written its
+    /// tree into the object database by then, and leave it there.
     ///
     /// The options store the callback's trampoline and, as its payload, the callback
     /// itself, which they borrow until they are dropped: it cannot be used, moved or
