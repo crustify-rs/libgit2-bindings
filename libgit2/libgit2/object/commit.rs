@@ -1198,12 +1198,11 @@ unsafe impl<'r> CCell for CommitArray<'r> {
 pub struct CommitArrayDispose;
 
 // SAFETY: `git_commitarray_dispose` releases each of the first `count` commits once,
-// frees `commits` once and never the struct, which it zeroes. It accepts every state
-// the safe API reaches: a buffer libgit2 filled (whose allocation initialised the
-// library, so the allocator it reads is settled), adopted through `from_raw` under that
-// function's contract, or one `set_commits` allocated through libgit2's allocator;
-// `clear` and `take` leave the empty array, as `new` builds it, which owns nothing and
-// is released without C.
+// frees `commits` once and never the struct, which it zeroes. It accepts every state the
+// safe API reaches: a buffer libgit2 filled (so the allocator it reads is settled), one
+// adopted through `from_raw` under that function's contract, or one `set_commits`
+// allocated through libgit2's allocator; `clear` and `take` leave the empty array `new`
+// builds, which owns nothing and is released without C.
 unsafe impl<'r> CDispose<CommitArray<'r>> for CommitArrayDispose {
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<CommitArray<'r>>) {
@@ -2593,8 +2592,8 @@ pub fn create_from_tree<'r>(
 /// options leave the author unset and libgit2 writes that commit's author: `Ok(None)`
 /// when the commit cannot be had (libgit2 then fails the same way, setting its own
 /// error) or the options set an author, the refusal of [`writable`] for an author it
-/// cannot write. Held for the call, the commit stays in the object cache, from which
-/// libgit2's own lookup of the same id takes it.
+/// cannot write. Held for the call, the commit lends libgit2 the author checked here
+/// ([`amend_on_head`]).
 fn head_commit<'r>(
     repo: RepositoryRef<'r>,
     options: Option<CreateOptionsRef<'_, '_>>,
@@ -2635,15 +2634,30 @@ fn amend_on_head<'r>(
     let opts = options.as_ref().map(|o| o.as_ref());
     options_writable(opts)?;
     let held = head_commit(repo, opts)?;
+    // libgit2 writes `HEAD`'s commit's author from a parse of its own, which shares the
+    // checked one only through the object cache, and that keeps no commit over 4096
+    // bytes: the checked author is set in a copy of the options (C's defaults for none).
+    let with_author = held.as_ref().map(|commit| {
+        let mut copy = match opts {
+            // SAFETY: a read of the live options through the shared handle's pointer.
+            Some(o) => unsafe { o.as_ptr().read() },
+            None => CreateOptions::new().0,
+        };
+        copy.author = commit.as_ref().author().as_ptr();
+        copy
+    });
     let mut id = Oid::zeroed();
     let (out, raw) = (id.as_mut().as_mut_ptr(), repo.as_ptr().cast_mut());
     let message = message.map_or(ptr::null(), CStr::as_ptr);
-    let opts = opts.map_or(ptr::null(), |o| o.as_ptr());
-    // `opts` is NULL or the live options this function borrows exclusively, only read by
-    // libgit2 with the signatures (writable, checked above), strings and headers they
-    // borrow for their `'o`; their signing callback, if any, is the trampoline over the
-    // `SignatureCallback` they borrow exclusively, which libgit2 calls on this thread.
-    // `HEAD`'s commit, whose author is written when the options set none, is writable.
+    let opts = match &with_author {
+        Some(copy) => ptr::from_ref(copy),
+        None => opts.map_or(ptr::null(), |o| o.as_ptr()),
+    };
+    // `opts` is NULL, the live options this function borrows exclusively, or their copy
+    // with the author of `held`, released after the call; only read by libgit2, with the
+    // signatures (writable, checked above), strings and headers they borrow for `'o`.
+    // Their signing callback, if any, is the trampoline over the `SignatureCallback` they
+    // borrow exclusively, which libgit2 calls on this thread, through the copy if made.
     // SAFETY: `out` addresses `id`, written on success; `repo` is live on this thread, its
     // index, references, odb and caches written through this shared handle as
     // `RepositoryRef` allows; `tree` is a live tree of `repo` (checked by the caller);
@@ -4377,6 +4391,9 @@ mod unit_tests {
     static REFUSING: AtomicBool = AtomicBool::new(false);
     /// An allocation length [`Refusing`] refuses besides; 0 for none.
     static REFUSED_LEN: AtomicUsize = AtomicUsize::new(0);
+    /// How many fresh blocks of `REFUSED_LEN` bytes [`Refusing`] grants before it
+    /// refuses them.
+    static REFUSED_LEN_GRANTS: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
@@ -4385,13 +4402,18 @@ mod unit_tests {
     }
 
     /// libc's allocator, refusing everything while `REFUSING` is set, and fresh blocks of
-    /// `REFUSED_LEN` bytes.
+    /// `REFUSED_LEN` bytes once `REFUSED_LEN_GRANTS` of them are granted.
     struct Refusing;
 
     // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
     unsafe impl Alloc for Refusing {
         fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
-            if REFUSING.load(SeqCst) || REFUSED_LEN.load(SeqCst) == len {
+            let granted = || {
+                REFUSED_LEN_GRANTS
+                    .try_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+                    .is_ok()
+            };
+            if REFUSING.load(SeqCst) || (REFUSED_LEN.load(SeqCst) == len && !granted()) {
                 return None;
             }
             // SAFETY: plain libc allocation.
@@ -6683,6 +6705,10 @@ mod unit_tests {
     /// writes for the same parents.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "BorrowSanitizer reports git_commit_create_v's later variadic parents as freed"
+    )]
     fn every_array_length_writes_the_slice_commit() {
         let s = Scratch::new("array-lengths");
         let (repo, tree) = (s.repo(), s.empty_tree());
@@ -7261,6 +7287,59 @@ mod unit_tests {
         );
     }
 
+    /// The amended commit's author the wrappers check is the one libgit2 writes, also
+    /// when the object cache does not keep the commit (libgit2 caches none over 4096
+    /// bytes), so that every lookup parses it anew: a parse of libgit2's own losing the
+    /// author's name after the wrapper's kept it writes no `(null)` author.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn uncached_amended_authors_are_the_ones_checked() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::uncached_amended_authors_are_the_ones_checked"
+            ),
+            || {
+                install_refusing();
+                let s = Scratch::new("uncached-author");
+                let (repo, tree) = (s.repo(), s.empty_tree());
+                let name = std::ffi::CString::new("N".repeat(200)).unwrap();
+                let author = SignatureView::new(&name, c"a@example.com", Time::new(5, 0));
+                let me = who(0);
+                let message = std::ffi::CString::new(format!("{}\n", "m".repeat(5000))).unwrap();
+                let root = (author.as_ref(), me.as_ref(), message.as_c_str());
+                create(
+                    repo,
+                    Some(c"HEAD"),
+                    root.0,
+                    root.1,
+                    None,
+                    root.2,
+                    tree.as_ref(),
+                    &[],
+                )
+                .unwrap();
+                let mut options = CreateOptions::new();
+                options.as_mut().set_committer(Some(me.as_ref()));
+                for stage in [false, true] {
+                    // The name's copy is the parse's only block of its length: the first
+                    // parse of `HEAD`'s commit keeps it, every later one loses it.
+                    REFUSED_LEN_GRANTS.store(1, SeqCst);
+                    REFUSED_LEN.store(201, SeqCst);
+                    let amended = if stage {
+                        amend_from_stage(repo, None, Some(options.as_mut()))
+                    } else {
+                        amend_from_tree(repo, tree.as_ref(), None, Some(options.as_mut()))
+                    };
+                    REFUSED_LEN.store(0, SeqCst);
+                    let amended = Commit::lookup(repo, amended.unwrap().as_ref()).unwrap();
+                    assert_eq!(amended.as_ref().author().name(), Some(name.as_c_str()));
+                    assert_eq!(amended.as_ref().message(), message.as_c_str());
+                }
+            },
+        );
+    }
+
     /// What `git_commit_create_from_tree` or `git_commit_create_from_stage` (for `None`)
     /// gives on `repo`'s `HEAD` with an empty commit allowed: the code, class and message,
     /// or 0.
@@ -7292,6 +7371,52 @@ mod unit_tests {
         }
         let e = last();
         (rc, e.class(), e.message().to_string_lossy().into_owned())
+    }
+
+    /// With empty commits allowed, the composed creating routines go on to the parents,
+    /// and fail as libgit2's do where `HEAD` cannot be read: libgit2 fails collecting them
+    /// before it holds any commit, so its routines are safe to compare with here.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unreadable_heads_fail_collecting_parents_as_libgit2_does() {
+        let s = Scratch::new("unreadable-head");
+        let (repo, tree) = (s.repo(), s.empty_tree());
+        let me = who(0);
+        let mut options = CreateOptions::new();
+        let mut m = options.as_mut();
+        m.set_allow_empty_commit(true);
+        m.set_author(Some(me.as_ref()));
+        m.set_committer(Some(me.as_ref()));
+        std::fs::write(s.dir.join("HEAD"), "not a reference\n").unwrap();
+        let before = s.objects();
+        for staged in [false, true] {
+            let mut id = ffi::git_oid::default();
+            let (raw, opts) = (repo.as_ptr().cast_mut(), m.as_ref().as_ptr());
+            // SAFETY: a writable id; the live repository and a live tree of it; a
+            // NUL-terminated message; options Rust holds, borrowing signatures that
+            // outlive the call. libgit2 fails reading `HEAD`, before it collects a parent.
+            let rc = unsafe {
+                if staged {
+                    ffi::git_commit_create_from_stage(&mut id, raw, c"m\n".as_ptr(), opts)
+                } else {
+                    let t = tree.as_ref().as_ptr();
+                    ffi::git_commit_create_from_tree(&mut id, raw, t, c"m\n".as_ptr(), opts)
+                }
+            };
+            let theirs = (
+                rc,
+                last().class(),
+                last().message().to_string_lossy().into_owned(),
+            );
+            let ours = if staged {
+                create_from_stage(repo, c"m\n", Some(m.as_mut()))
+            } else {
+                super::create_from_tree(repo, tree.as_ref(), c"m\n", Some(m.as_mut()))
+            };
+            assert_eq!(refusal(ours.unwrap_err()), theirs);
+            assert_eq!(theirs.0, -1);
+        }
+        assert!(s.objects() <= before + 1, "at most the index's tree");
     }
 
     /// The composed creating routines fail as libgit2's do where `HEAD` cannot be

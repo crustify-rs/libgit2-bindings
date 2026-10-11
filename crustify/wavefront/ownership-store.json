@@ -16445,7 +16445,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author, read from libgit2's own git_reference_peel of HEAD: a fresh parse unless the object cache holds the commit, and the cache keeps no commit over 4096 bytes nor any with caching off, so it need not be the parse a caller looked up and checked, and a parse that ran out of memory leaves its name/email NULL while succeeding), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
      }
     },
     {
@@ -16517,7 +16517,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author, read from libgit2's own git_reference_peel of HEAD: a fresh parse unless the object cache holds the commit, and the cache keeps no commit over 4096 bytes nor any with caching off, so it need not be the parse a caller looked up and checked, and a parse that ran out of memory leaves its name/email NULL while succeeding), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
      }
     },
     {

@@ -2312,6 +2312,20 @@ mod create_options {
         sign: None,
     };
 
+    /// A header making a commit larger than the 4096 bytes libgit2's object cache keeps
+    /// one of.
+    const BIG: &[(&CStr, &CStr)] = {
+        const VALUE: [u8; 5001] = {
+            let mut value = [b'b'; 5001];
+            value[5000] = 0;
+            value
+        };
+        match CStr::from_bytes_with_nul(&VALUE) {
+            Ok(value) => &[(c"x-big", value)],
+            Err(_) => panic!("one NUL, at the end"),
+        }
+    };
+
     fn script() -> Vec<Step> {
         vec![
             // The empty tree on an unborn `HEAD` changes nothing.
@@ -2524,6 +2538,32 @@ mod create_options {
             },
             Step {
                 op: Op::Amend(0, Some(c"fixed identities\n")),
+                ..BASE
+            },
+            // Commits too large to be cached: every amend without an author reads `HEAD`'s
+            // commit anew, and writes its author.
+            Step {
+                op: Op::Create(1),
+                allow_empty: true,
+                headers: BIG,
+                ..BASE
+            },
+            Step {
+                op: Op::Amend(0, None),
+                author: false,
+                headers: BIG,
+                ..BASE
+            },
+            Step {
+                op: Op::AmendStage(1, false, None),
+                author: false,
+                headers: BIG,
+                ..BASE
+            },
+            // No options with the default identity still broken: it fails after the peel.
+            Step {
+                op: Op::Amend(0, None),
+                null: true,
                 ..BASE
             },
         ]
@@ -3001,7 +3041,7 @@ mod create_options {
         // Every signing step reached its callback: none fails before signing.
         assert_eq!(c.signer.calls.get(), 10);
         assert_eq!(rust.signer.calls.get(), 10);
-        assert_eq!((c.history.len(), rust.history.len()), (21, 21));
+        assert_eq!((c.history.len(), rust.history.len()), (24, 24));
         assert!(c.staged_written() && rust.staged_written());
     }
 }
@@ -4120,6 +4160,10 @@ mod creating {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "BorrowSanitizer reports git_commit_create_v's later variadic parents as freed"
+    )]
     fn creation_scripts_match() {
         super::isolated(
             concat!(module_path!(), "::creation_scripts_match"),
@@ -4175,6 +4219,10 @@ mod creating {
     /// resolved for `update_ref` when the write fails.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "BorrowSanitizer reports git_commit_create_v's later variadic parents as freed"
+    )]
     fn unwritable_object_databases_fail_alike() {
         super::isolated(
             concat!(module_path!(), "::unwritable_object_databases_fail_alike"),

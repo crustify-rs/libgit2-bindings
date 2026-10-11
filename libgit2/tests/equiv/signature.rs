@@ -280,6 +280,10 @@ fn identity_from_the_configuration() {
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[cfg_attr(
+    bsan,
+    ignore = "BorrowSanitizer reports the end pointer glibc's strtoul writes for a date as out of bounds"
+)]
 fn identity_and_dates_from_the_environment() {
     isolated(
         concat!(module_path!(), "::identity_and_dates_from_the_environment"),

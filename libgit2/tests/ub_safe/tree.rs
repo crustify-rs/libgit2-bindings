@@ -2864,6 +2864,10 @@ mod updates {
     /// Every refusal, libgit2's and the wrapper's, releases what the call built.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn refusals_release_everything() {
         let sandbox = Sandbox::new("refusals");
         let repo = sandbox.repo();
