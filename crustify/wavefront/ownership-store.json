@@ -11758,7 +11758,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "git_tag_foreach_cb, called synchronously on the calling thread with the full refname (borrowed from the iterator) and a stack-local resolved id, both valid for the call only; a non-zero return stops the walk and is returned (git_error_set_after_callback_function sets GIT_ERROR_CALLBACK if no error)."
+      "note": "git_tag_foreach_cb, called synchronously on the calling thread with the full refname (borrowed from the iterator) and a stack-local resolved id, both valid for the call only; a non-zero return stops the walk (git_error_set_after_callback_function sets GIT_ERROR_CALLBACK if no error is set yet) and is returned, EXCEPT GIT_ITEROVER (-31): git_reference_foreach_name maps it to 0 after the break, so a callback stopping with -31 is indistinguishable from a finished walk by the return code. A wrapper recording the callback's stop code must not assert rc == code for -31."
      }
     },
     {

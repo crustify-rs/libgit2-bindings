@@ -1461,6 +1461,49 @@ mod repository_tags {
         );
     }
 
+    /// A walk whose callback breaks with `GIT_ITEROVER` (-31) at the first tag: both
+    /// sides visit that tag alone and leave the same error ("git_tag_foreach callback
+    /// returned -31", unless loading the references left one, such as a missing global
+    /// configuration file). Documented divergence: libgit2's reference walk takes -31 for its
+    /// own end and returns 0, where [`foreach`] reports the break, `Break(-31)` (held by
+    /// `tag.rs`'s unit test `foreach_tells_breaks_from_failures`). Before the fix the
+    /// wrapper's debug assertion that libgit2 returned the code panicked here.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn iterover_breaks_match_c_but_for_the_code() {
+        init();
+        let stop = Some((0, ffi::GIT_ITEROVER));
+        let c = CSide::open(&CString::new(TESTREPO).unwrap());
+        super::clear();
+        let Outcome::Walk(c_seen, c_rc, None) = c.walk(stop) else {
+            panic!("C reported the break")
+        };
+        let c_error = c_last();
+        let repo = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+        super::clear();
+        let mut seen = Vec::new();
+        let mut f = |name: &CStr, id: OidRef<'_>| {
+            seen.push((
+                name.to_str().unwrap().to_owned(),
+                id.to_hex_string().unwrap(),
+            ));
+            ControlFlow::Break(NonZero::new(ffi::GIT_ITEROVER).unwrap())
+        };
+        let mut callback = ForeachCallback::new(&mut f);
+        let walked = foreach(repo.as_ref(), &mut callback);
+        drop(callback);
+        let e = last();
+        let rust_error = (e.raw_class(), e.message().to_string_lossy().into_owned());
+        assert_eq!(seen, c_seen);
+        assert_eq!(seen.len(), 1);
+        assert_eq!(rust_error, c_error);
+        assert_eq!(c_rc, 0);
+        assert_eq!(
+            walked,
+            Ok(ControlFlow::Break(NonZero::new(ffi::GIT_ITEROVER).unwrap()))
+        );
+    }
+
     /// A tag object written into a repository without an object database (one without
     /// a git directory, its target from another) fails as libgit2 fails it, on both
     /// sides; [`create`] refuses the foreign target first, as libgit2 does.

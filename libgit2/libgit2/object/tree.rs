@@ -1384,13 +1384,11 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live tree for `'a`, which libgit2 only reads.
         let repo = unsafe { ffi::git_tree_owner(self.as_ptr()) };
-        // SAFETY: the tree's `object.repo` is the repository it was looked up in, stored
-        // without a count and never cleared. Every `Tree<'r>` was looked up through a
-        // `RepositoryRef<'r>`, directly (`lookup`, `lookup_prefix`) or through an object
-        // of that repository (`from_object`, a commit's tree), its `'r` only ever
-        // shrunk, so that repository is live and shared, not exclusively borrowed, for
-        // `'r`, on this thread: the handle returned is the one the tree was looked up
-        // through.
+        // SAFETY: `object.repo`, stored uncounted and never cleared, is the repository
+        // the tree was looked up in, through a `RepositoryRef<'r>` (`lookup*`, or an
+        // object of it: `from_object`, a commit's tree), its `'r` only ever shrunk: it
+        // is live and shared, not exclusively borrowed, for `'r`, on this thread, and the
+        // result is the handle the tree was looked up through.
         unsafe { RepositoryRef::from_ptr(repo) }.expect("a tree always has a repository")
     }
 
@@ -1886,12 +1884,11 @@ impl<'r> TreeBuilder<'r> {
         if !runtime_pinned() {
             return Err(last());
         }
-        let mut out = ptr::null_mut();
+        let (mut out, repo) = (ptr::null_mut(), repo.as_ptr().cast_mut());
         // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
         // the builder only records; no source tree. The runtime is pinned, so a failure
         // is reported on live thread-local state.
-        let rc =
-            unsafe { ffi::git_treebuilder_new(&mut out, repo.as_ptr().cast_mut(), ptr::null()) };
+        let rc = unsafe { ffi::git_treebuilder_new(&mut out, repo, ptr::null()) };
         // SAFETY: on success `git_treebuilder_new` writes a fresh builder for `repo` that
         // the caller owns alone, released by `git_treebuilder_free` as `TreeBuilderFree`
         // does; it keeps `repo`, which outlives `'r`. On failure it leaves `out` NULL.

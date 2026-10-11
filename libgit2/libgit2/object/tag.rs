@@ -1057,8 +1057,12 @@ fn listed(
 /// Returns [`ControlFlow::Continue`] once every tag was visited, and
 /// [`ControlFlow::Break`] with the code the closure stopped the walk with; libgit2
 /// then leaves a `GIT_ERROR_CALLBACK` error ("git_tag_foreach callback returned …") on
-/// the thread, unless the closure set one. A panic in the closure stops the walk and
-/// resumes here.
+/// the thread, unless one is set already (by a libgit2 call the closure made, say). A
+/// panic in the closure stops the walk and resumes here.
+///
+/// A break with `GIT_ITEROVER` (-31) is reported as that break, although libgit2
+/// returns 0 for it: its reference walk takes the callback's code for the end of the
+/// iteration, so C cannot tell that walk from a finished one.
 ///
 /// Fails with libgit2's error when the references cannot be listed, or a tag's
 /// reference cannot be resolved to an id (a symbolic reference under `refs/tags/`
@@ -1080,8 +1084,9 @@ pub fn foreach(
         unsafe { ffi::git_tag_foreach(repo.as_ptr().cast_mut(), cb, payload) }
     });
     if let Some(code) = callback.stopped {
-        // libgit2 stops at the first non-zero answer, and returns it.
-        debug_assert_eq!(rc, code.get());
+        // libgit2 stops at the first non-zero answer, and returns it, but for
+        // `GIT_ITEROVER`, which `git_reference_foreach_name` turns into 0.
+        debug_assert!(rc == code.get() || (rc == 0 && code.get() == ffi::GIT_ITEROVER));
         return Ok(ControlFlow::Break(code));
     }
     if rc != 0 {
@@ -1889,7 +1894,14 @@ mod unit_tests {
     fn foreach_tells_breaks_from_failures() {
         let sandbox = Sandbox::new("foreach-breaks");
         let repo = sandbox.open();
-        for code in [-1, 42, i32::MIN, ErrorCode::NotFound.raw()] {
+        // libgit2 returns 0 for a break with `GIT_ITEROVER`, which is still a break.
+        for code in [
+            -1,
+            42,
+            i32::MIN,
+            ErrorCode::NotFound.raw(),
+            ffi::GIT_ITEROVER,
+        ] {
             let mut calls = 0;
             let mut stop = |_: &CStr, _: OidRef<'_>| {
                 calls += 1;
