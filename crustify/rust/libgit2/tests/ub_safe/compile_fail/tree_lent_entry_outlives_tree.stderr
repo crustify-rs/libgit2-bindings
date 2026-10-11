@@ -1,0 +1,17 @@
+error[E0505]: cannot move out of `tree` because it is borrowed
+  --> tests/ub_safe/compile_fail/tree_lent_entry_outlives_tree.rs:11:10
+   |
+ 5 | fn escape(tree: TreeArc<'_>) {
+   |           ---- binding `tree` declared here
+ 6 |     let handle = tree.as_ref();
+   |                  ---- borrow of `tree` occurs here
+...
+11 |     drop(tree);
+   |          ^^^^ move out of `tree` occurs here
+12 |     let _ = lent.iter().map(|entry| entry.name()).count();
+   |             ---- borrow later used here
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+ 6 |     let handle = tree.clone().as_ref();
+   |                      ++++++++

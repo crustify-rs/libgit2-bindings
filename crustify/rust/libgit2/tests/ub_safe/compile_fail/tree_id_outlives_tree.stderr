@@ -1,0 +1,17 @@
+error[E0505]: cannot move out of `tree` because it is borrowed
+ --> tests/ub_safe/compile_fail/tree_id_outlives_tree.rs:7:10
+  |
+4 | fn escape(tree: TreeArc<'_>) {
+  |           ---- binding `tree` declared here
+5 |     let handle = tree.as_ref();
+  |                  ---- borrow of `tree` occurs here
+6 |     let id = handle.id();
+7 |     drop(tree);
+  |          ^^^^ move out of `tree` occurs here
+8 |     let _ = id.id();
+  |             -- borrow later used here
+  |
+help: consider cloning the value if the performance cost is acceptable
+  |
+5 |     let handle = tree.clone().as_ref();
+  |                      ++++++++
