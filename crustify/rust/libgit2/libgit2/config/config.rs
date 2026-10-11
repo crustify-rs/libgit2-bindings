@@ -273,11 +273,11 @@ impl ConfigMut<'_, '_> {
     ///
     /// Wraps: git_config_set_string
     pub fn set_string(&mut self, name: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        let config = self.as_mut_ptr();
         // SAFETY: the exclusive handle permits mutation and keeps any repository
         // the backend reads live. Both strings are nonnull and NUL-terminated;
         // C reads/copies them during this call and retains neither pointer.
-        let rc =
-            unsafe { ffi::git_config_set_string(self.as_mut_ptr(), name.as_ptr(), value.as_ptr()) };
+        let rc = unsafe { ffi::git_config_set_string(config, name.as_ptr(), value.as_ptr()) };
         config_status(rc)
     }
 
@@ -319,6 +319,30 @@ fn config_status(rc: c_int) -> Result<(), ConfigError> {
     } else {
         Ok(())
     }
+}
+
+/// The status of a delete of `name`, called with the thread's error cleared.
+///
+/// `git_config_delete_entry` and `git_config_delete_multivar` return `GIT_EREADONLY`
+/// without setting an error when the config has no writer, so `GIT_ERROR_NONE` after
+/// that code is libgit2's silence: report it as `git_config_set_string` reports the
+/// same condition.
+fn delete_status(rc: c_int, name: &CStr) -> Result<(), ConfigError> {
+    if rc == ffi::GIT_EREADONLY && last().class() == Some(ErrorClass::None) {
+        set(ErrorClass::Config, &readonly_delete_error(name));
+    }
+    config_status(rc)
+}
+
+/// The error a delete of `name` reports for a config without a writer.
+fn readonly_delete_error(name: &CStr) -> CString {
+    let message = [
+        b"cannot delete '".as_slice(),
+        name.to_bytes(),
+        b"': the configuration is read-only",
+    ]
+    .concat();
+    CString::new(message).expect("a C string's bytes and the message hold no NUL")
 }
 
 fn validate_write_order_len(len: usize) -> Result<(), ConfigError> {
@@ -434,11 +458,12 @@ const _: () = assert!(
 
 // Config constructors and accessors keep foreign ownership inside ffibox owners.
 impl Config<'_> {
-    /// Opens a file backend. Missing files are accepted and created by a later write.
-    /// The path is copied; no repository is retained.
+    /// Opens the file at `path` as the only backend, at [`ConfigLevel::LOCAL`]. Missing
+    /// files are accepted and created by a later write. The path is copied; no
+    /// repository is retained.
     ///
     /// Wraps: git_config_open_ondisk
-    pub fn open_ondisk(path: &CStr) -> Result<ConfigBox<'static>, ConfigError> {
+    pub fn open(path: &CStr) -> Result<ConfigBox<'static>, ConfigError> {
         if !runtime_pinned() {
             return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
         }
@@ -645,7 +670,7 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// in a view opened with HIGHEST, which C registers internally at -1.
     ///
     /// Wraps: git_config_add_file_ondisk
-    pub fn add_file_ondisk(
+    pub fn add_file(
         &mut self,
         path: &CStr,
         level: ConfigLevel,
@@ -718,10 +743,10 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     ///
     /// Wraps: git_config_set_bool
     pub fn set_bool(&mut self, name: &CStr, value: bool) -> Result<(), ConfigError> {
+        let config = self.as_mut_ptr();
         // SAFETY: exclusive live config and a NUL-terminated name borrowed only
         // for this call. C formats and copies the scalar, retaining neither input.
-        let rc =
-            unsafe { ffi::git_config_set_bool(self.as_mut_ptr(), name.as_ptr(), value.into()) };
+        let rc = unsafe { ffi::git_config_set_bool(config, name.as_ptr(), value.into()) };
         if rc < 0 {
             Err(ConfigError::from_libgit2(rc))
         } else {
@@ -757,40 +782,45 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
         }
     }
 
-    /// Deletes the entry or matching multivar values in the writer backend.
-    /// Strings are borrowed only for this call; replacement values are copied.
+    /// Deletes a single-valued entry from the writer backend. The file backend
+    /// refuses a multivar (use [`delete_multivar`](Self::delete_multivar)) and a
+    /// missing key. The name is borrowed only for this call.
+    ///
+    /// Without a writable backend this fails with [`ErrorCode::ReadOnly`] and a
+    /// configuration error saying so. libgit2 sets no error on that path, leaving
+    /// whatever an earlier call set, so the wrapper clears the thread's error before
+    /// the call and sets its own; a success therefore leaves no earlier error behind.
     ///
     /// Wraps: git_config_delete_entry
     pub fn delete_entry(&mut self, name: &CStr) -> Result<(), ConfigError> {
-        // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
-        // Rust pointers. Backend code owns regex compilation, copying and cleanup.
+        clear();
+        // SAFETY: exclusive live config, live NUL-terminated name, no retained Rust
+        // pointer: the backend normalizes and copies the name during the call.
         let rc = unsafe { ffi::git_config_delete_entry(self.as_mut_ptr(), name.as_ptr()) };
-        if rc < 0 {
-            Err(ConfigError::from_libgit2(rc))
-        } else {
-            Ok(())
-        }
+        delete_status(rc, name)
     }
 
-    /// Deletes the entry or matching multivar values in the writer backend.
-    /// Strings are borrowed only for this call; replacement values are copied.
+    /// Deletes the values of a multivar that match `regexp` from the writer backend.
+    /// Both strings are borrowed only for this call; the backend compiles and frees
+    /// its own regex.
+    ///
+    /// Without a writable backend this fails as [`delete_entry`](Self::delete_entry)
+    /// does, with an error of its own.
     ///
     /// Wraps: git_config_delete_multivar
     pub fn delete_multivar(&mut self, name: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        clear();
         // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
         // Rust pointers. Backend code owns regex compilation, copying and cleanup.
         let rc = unsafe {
             ffi::git_config_delete_multivar(self.as_mut_ptr(), name.as_ptr(), regexp.as_ptr())
         };
-        if rc < 0 {
-            Err(ConfigError::from_libgit2(rc))
-        } else {
-            Ok(())
-        }
+        delete_status(rc, name)
     }
 
-    /// Replaces matching values or appends when none match in the writer backend.
-    /// Strings are borrowed only for this call; replacement values are copied.
+    /// Replaces the values of a multivar that match `regexp`, or appends `value` when
+    /// none match, in the writer backend. Strings are borrowed only for this call;
+    /// the value is copied.
     ///
     /// Wraps: git_config_set_multivar
     pub fn set_multivar(
@@ -820,6 +850,14 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 // Transaction mutations are distinct safe variants: the transaction already owns
 // the exclusive config borrow and must not expose it for recursive locking.
 impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_set_string
+    pub fn set_string(&mut self, name: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        self.config_mut().set_string(name, value)
+    }
+
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
@@ -1626,7 +1664,7 @@ mod unit_tests {
         for value in [i32::MIN, -2, -1, i32::MAX] {
             let error = cfg
                 .as_mut()
-                .add_file_ondisk(c"unused", super::ConfigLevel::from_raw(value), None, false)
+                .add_file(c"unused", super::ConfigLevel::from_raw(value), None, false)
                 .unwrap_err();
             assert_eq!(error.raw_code(), crate::ffi::GIT_EINVALID);
             assert_eq!(error.class(), Some(super::ErrorClass::Invalid));
@@ -1640,7 +1678,7 @@ mod unit_tests {
             std::env::temp_dir().join(format!("crustify-get-i64-silent-{}", std::process::id()));
         std::fs::write(&file, b"[a]\n number = 1kb\n").unwrap();
         let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
-        let cfg = super::Config::open_ondisk(&path).unwrap();
+        let cfg = super::Config::open(&path).unwrap();
         super::set(super::ErrorClass::Invalid, c"unrelated earlier failure");
         let error = cfg.as_ref().get_i64(c"a.number").unwrap_err();
         assert_eq!(error.class(), Some(super::ErrorClass::Config));
@@ -1652,7 +1690,6 @@ mod unit_tests {
         std::fs::remove_file(file).unwrap();
     }
     use super::*;
-
 
     #[test]
     fn mapping_layout_borrows_clone_and_seams() {
@@ -1729,7 +1766,6 @@ mod unit_tests {
         let mut exclusive = unsafe { EntryMut::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(exclusive.as_ref().origin_path(), Some(c"origin"));
         assert_eq!(exclusive.as_mut().as_ref().value(), None);
-
     }
     use crate::libgit2::util::errors::ErrorCode;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
@@ -1819,7 +1855,10 @@ mod unit_tests {
                     .join(format!("crustify-snapshot-oom-{}", std::process::id()));
                 std::fs::write(&path, "[a]\n b = 12\n").unwrap();
                 let file = CString::new(path.to_str().unwrap()).unwrap();
-                source.as_mut().add_file_ondisk(&file, ConfigLevel::LOCAL, None, false).unwrap();
+                source
+                    .as_mut()
+                    .add_file(&file, ConfigLevel::LOCAL, None, false)
+                    .unwrap();
                 assert_eq!(get(source.as_ref(), c"a.b"), Ok(12));
                 // Prime TLS error storage before refusing allocations. The fresh
                 // output config and its two vectors need three allocations; the
@@ -1864,6 +1903,7 @@ mod unit_tests {
         }
     }
 
+    // SAFETY: libc's allocator, declared with its C signatures.
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
         fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
@@ -2091,7 +2131,101 @@ mod unit_tests {
                 assert_eq!(parse_bool(None).unwrap_err(), error);
                 assert_eq!(parse_i32(Some(c"1")).unwrap_err(), error);
                 assert_eq!(parse_i64(Some(c"1")).unwrap_err(), error);
+                // So does every constructor and search routine that needs no config.
+                let failures = [
+                    Config::open(c"unused").map(drop),
+                    Config::open_default().map(drop),
+                    find_global().map(drop),
+                    find_system().map(drop),
+                    find_xdg().map(drop),
+                    parse_path(c"~/unused").map(drop),
+                ];
+                for failure in failures {
+                    let failure = failure.unwrap_err();
+                    assert_eq!(failure.code(), Some(ErrorCode::Generic));
+                    assert_eq!(*failure.error(), error);
+                }
             },
+        );
+    }
+
+    /// Out of memory, the view, opening and file-adding routines report libgit2's error
+    /// and free what they built (LSan), whether the new config or its backend entry
+    /// failed to allocate, and the parent stays usable.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn opening_routines_report_allocation_failure() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::opening_routines_report_allocation_failure"
+            ),
+            || {
+                install_refusing();
+                let dir =
+                    std::env::temp_dir().join(format!("crustify-open-oom-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&dir);
+                std::fs::create_dir_all(&dir).unwrap();
+                let file = |name: &str| {
+                    let path = dir.join(name);
+                    std::fs::write(&path, "[a]\n b = 1\n").unwrap();
+                    CString::new(path.to_str().unwrap()).unwrap()
+                };
+                let (local, xdg) = (file("local"), file("xdg"));
+                let mut parent = Config::open(&local).unwrap();
+                parent
+                    .as_mut()
+                    .add_file(&xdg, ConfigLevel::XDG, None, false)
+                    .unwrap();
+                // A first error allocates the thread's error state.
+                assert_eq!(get(parent.as_ref(), c"a.c"), Err(ErrorCode::NotFound.raw()));
+                REFUSING.store(true, SeqCst);
+                let failures = [
+                    parent.as_ref().open_level(ConfigLevel::LOCAL).map(drop),
+                    parent.as_ref().open_global().map(drop),
+                    parent.as_mut().open_level(ConfigLevel::LOCAL).map(drop),
+                    parent.as_mut().open_global().map(drop),
+                    Config::open(&local).map(drop),
+                    Config::open_default().map(drop),
+                    parent
+                        .as_mut()
+                        .add_file(&local, ConfigLevel::APP, None, false),
+                ];
+                REFUSING.store(false, SeqCst);
+                // The new config and its two vectors allocate; the backend entry fails.
+                ALLOWED_ALLOCATIONS.store(3, SeqCst);
+                let entry = parent.as_ref().open_level(ConfigLevel::LOCAL).map(drop);
+                ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
+                for failure in failures.into_iter().chain([entry]) {
+                    let failure = failure.unwrap_err();
+                    assert_eq!(failure.class(), Some(ErrorClass::NoMemory), "{failure:?}");
+                }
+                assert_eq!(get(parent.as_ref(), c"a.b"), Ok(1));
+                let view = parent.as_ref().open_global().unwrap();
+                assert_eq!(get(view.as_ref(), c"a.b"), Ok(1));
+                drop(view);
+                drop(parent);
+                std::fs::remove_dir_all(dir).unwrap();
+            },
+        );
+    }
+
+    /// A write order of `INT_MAX` levels is refused before C through the public method
+    /// too. The levels are calloc'd and never touched, so this costs no memory.
+    #[test]
+    #[cfg_attr(miri, ignore = "allocates 8 GiB of address space; calls libgit2")]
+    fn write_order_refuses_oversized_slices() {
+        let raw = vec![0 as ffi::git_config_level_t; c_int::MAX as usize];
+        let (levels, len) = (raw.as_ptr().cast::<ConfigLevel>(), raw.len());
+        // SAFETY: `ConfigLevel` is `#[repr(transparent)]` over `git_config_level_t`;
+        // the slice covers the vector's zeroed elements and is only read.
+        let levels = unsafe { core::slice::from_raw_parts(levels, len) };
+        let mut cfg = Config::new().unwrap();
+        let error = cfg.as_mut().set_write_order(levels).unwrap_err();
+        assert_eq!(error.class(), Some(ErrorClass::Invalid));
+        assert_eq!(
+            error.message(),
+            c"write order length must be less than INT_MAX"
         );
     }
 
@@ -2211,5 +2345,75 @@ mod unit_tests {
         let unnamed = ConfigError::from_libgit2(-1000);
         assert_eq!((unnamed.code(), unnamed.raw_code()), (None, -1000));
         assert!(format!("{unnamed:?}").starts_with("ConfigError { code: -1000,"));
+    }
+
+    /// libgit2 sets no error when a delete finds no writer: the wrappers report that
+    /// failure themselves, not with the thread's earlier error (or "no error"), for an
+    /// empty config and a snapshot alike, and through a borrowed exclusive handle.
+    /// The backend's own errors pass through, and a success leaves no earlier error.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn readonly_deletes_report_their_own_error() {
+        let mut empty = Config::new().unwrap();
+        let mut snapshot = empty.as_ref().snapshot().unwrap();
+        for config in [&mut empty, &mut snapshot] {
+            for seeded in [false, true] {
+                for multivar in [false, true] {
+                    clear();
+                    if seeded {
+                        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+                    }
+                    let mut m = config.as_mut();
+                    let error = if multivar {
+                        m.delete_multivar(c"a.b%s", c".*").unwrap_err()
+                    } else {
+                        m.delete_entry(c"a.b%s").unwrap_err()
+                    };
+                    assert_eq!(error.code(), Some(ErrorCode::ReadOnly));
+                    assert_eq!(error.class(), Some(ErrorClass::Config));
+                    assert_eq!(
+                        error.message(),
+                        c"cannot delete 'a.b%s': the configuration is read-only"
+                    );
+                    assert_eq!(
+                        last(),
+                        *error.error(),
+                        "the thread's error describes it too"
+                    );
+                }
+            }
+        }
+        let file =
+            std::env::temp_dir().join(format!("crustify-delete-readonly-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\n b = 1\n m = 1\n m = 2\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let mut writable = Config::open(&path).unwrap();
+        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+        let error = writable.as_mut().delete_entry(c"a.missing").unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::NotFound));
+        assert_eq!(error.message(), c"could not find key 'a.missing' to delete");
+        let error = writable.as_mut().delete_entry(c"a.m").unwrap_err();
+        assert_eq!(error.class(), Some(ErrorClass::Config));
+        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+        writable.as_mut().delete_multivar(c"a.m", c"2").unwrap();
+        assert_eq!(last().class(), Some(ErrorClass::None));
+        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+        writable.as_mut().delete_entry(c"a.b").unwrap();
+        assert_eq!(last().class(), Some(ErrorClass::None));
+        drop(writable);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    /// The message quotes the name's bytes as they are; a `%` stays literal.
+    #[test]
+    fn readonly_delete_error_quotes_the_name() {
+        assert_eq!(
+            readonly_delete_error(c"").as_c_str(),
+            c"cannot delete '': the configuration is read-only"
+        );
+        assert_eq!(
+            readonly_delete_error(c"a.\xff%s").as_c_str(),
+            c"cannot delete 'a.\xff%s': the configuration is read-only"
+        );
     }
 }

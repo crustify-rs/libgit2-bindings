@@ -590,14 +590,9 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
 
 // --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
 
-/// Fixtures over the repositories that hand out commit arrays and configs, and
-/// standing in for the config-routine wrappers the tests read through; replace each
-/// once its safe counterpart lands.
+/// Fixtures over the repositories that hand out commit arrays and configs, through the
+/// safe wrappers.
 pub mod commit_and_config {
-    use std::ffi::{CStr, c_int};
-    use std::ptr;
-
-    use libgit2::ffi;
     use libgit2::libgit2::config::config::ConfigArc;
     use libgit2::libgit2::object::commit::CommitArrayVal;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
@@ -632,44 +627,6 @@ pub mod commit_and_config {
     /// borrows the repository (its file backends read it on every reparse).
     pub fn config(repo: &OpenRepo) -> ConfigArc<'_> {
         repo.0.as_ref().config().unwrap()
-    }
-
-    /// `git_config_get_int32` on the config an owner's `as_c_ptr` gives; the value or
-    /// the return code.
-    pub fn get_int32(config: *mut ffi::git_config, name: &CStr) -> Result<i32, c_int> {
-        let mut value = 0;
-        // SAFETY: the tests pass a live owner's pointer; the call only reads it.
-        let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
-        if rc < 0 { Err(rc) } else { Ok(value) }
-    }
-
-    /// `git_config_set_int32` on the config an owner's `as_c_ptr` gives; the return
-    /// code.
-    pub fn set_int32(config: *mut ffi::git_config, name: &CStr, value: i32) -> c_int {
-        // SAFETY: the tests pass a live owner's pointer; the name is NUL-terminated.
-        unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) }
-    }
-
-    /// `git_config_add_file_ondisk` then `git_config_set_int32`; the status of each.
-    pub fn write_through_file(
-        config: *mut ffi::git_config,
-        file: &CStr,
-        name: &CStr,
-        value: i32,
-    ) -> (c_int, c_int) {
-        // SAFETY: the tests pass a live owner's pointer; the path is copied.
-        let added = unsafe {
-            ffi::git_config_add_file_ondisk(
-                config,
-                file.as_ptr(),
-                ffi::GIT_CONFIG_LEVEL_LOCAL,
-                ptr::null(),
-                0,
-            )
-        };
-        // SAFETY: as above; the name is NUL-terminated.
-        let set = unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) };
-        (added, set)
     }
 }
 
