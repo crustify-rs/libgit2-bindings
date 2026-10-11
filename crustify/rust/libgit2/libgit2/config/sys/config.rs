@@ -9,20 +9,31 @@
 //! Acquired references use [`BackendEntryArc`]; borrowed handles never release
 //! storage. [`BackendEntry::from_entry`] safely exposes the full backend layout
 //! of the public entry owner's already-required enclosing allocation.
+//!
+//! A backend is an interface its author implements: `git_config_init_backend`
+//! initialises the base, the author fills the callback slots, and the config the
+//! backend is added to calls its `free` slot. A [`CustomBackend`] is that author in
+//! Rust: [`UnopenedBackend::new`] boxes it behind the base with trampolines in every
+//! slot, and [`ConfigMut::add_backend`] hands it over. Its answers are
+//! [`BackendEntry::new`] entries, which Rust allocates and releases.
 
-use core::ffi::CStr;
+use core::cell::Cell;
+use core::ffi::{CStr, c_char, c_int};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::collections::HashMap;
 use std::ffi::CString;
+use std::rc::Rc;
 
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, define_ctype};
 
 use crate::libgit2::config::config::{
     ConfigError, ConfigLevel, ConfigMut, EntryArc, EntryMut, EntryRef,
 };
-use crate::libgit2::util::errors::ErrorClass;
+use crate::libgit2::repository::repository::RepositoryRef;
+use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
 use crate::libgit2::util::sys::errors::set;
 
 use crate::ffi;
@@ -375,7 +386,80 @@ unsafe impl CDrop<BackendEntry> for BackendEntryFree {
 /// One acquired reference; intentionally neither cloneable nor mutable.
 pub type BackendEntryArc = CArc<BackendEntry, BackendEntryFree>;
 
+/// Where a Rust-built entry says it came from: C's `backend_type` (`"file"`, say),
+/// `origin_path` and `include_depth`. libgit2 only hands them on to readers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EntryOrigin<'s> {
+    pub backend_type: Option<&'s CStr>,
+    pub origin_path: Option<&'s CStr>,
+    pub include_depth: u32,
+}
+
+/// A Rust-built entry's allocation: the C entry first, so a pointer to it is a
+/// pointer to the box, then the strings its pointers address.
+///
+/// Handwritten
+#[repr(C)]
+struct OwnedEntry {
+    base: ffi::git_config_backend_entry,
+    name: CString,
+    value: Option<CString>,
+    backend_type: Option<CString>,
+    origin_path: Option<CString>,
+}
+
+impl OwnedEntry {
+    /// `git_config_backend_entry.free`: drops the box, strings and all.
+    unsafe extern "C" fn free(entry: *mut ffi::git_config_backend_entry) {
+        // SAFETY: only `BackendEntry::new` installs this callback, on the base of an
+        // `OwnedEntry` box whose one reference the caller gives up here.
+        drop(unsafe { Box::from_raw(entry.cast::<Self>()) });
+    }
+}
+
 impl BackendEntry {
+    /// A new entry, built and released by Rust: what a [`CustomBackend`] answers a
+    /// lookup or iteration with. Every string is copied.
+    ///
+    /// libgit2 compares names as given, so pass them normalized, as git stores them:
+    /// section and key lowercased (`core.filemode`), the subsection as written.
+    pub fn new(
+        name: &CStr,
+        value: Option<&CStr>,
+        level: ConfigLevel,
+        origin: EntryOrigin<'_>,
+    ) -> BackendEntryArc {
+        let mut entry = Box::new(OwnedEntry {
+            base: ffi::git_config_backend_entry {
+                entry: ffi::git_config_entry {
+                    name: ptr::null(),
+                    value: ptr::null(),
+                    backend_type: ptr::null(),
+                    origin_path: ptr::null(),
+                    include_depth: origin.include_depth,
+                    level: level.raw(),
+                },
+                free: Some(OwnedEntry::free),
+            },
+            name: name.to_owned(),
+            value: value.map(CStr::to_owned),
+            backend_type: origin.backend_type.map(CStr::to_owned),
+            origin_path: origin.origin_path.map(CStr::to_owned),
+        });
+        // Point the C entry at the strings only once they are in place: moving a
+        // `CString` reasserts its unique ownership of the bytes.
+        let pointer = |s: &Option<CString>| s.as_deref().map_or(ptr::null(), CStr::as_ptr);
+        entry.base.entry.name = entry.name.as_ptr();
+        entry.base.entry.value = pointer(&entry.value);
+        entry.base.entry.backend_type = pointer(&entry.backend_type);
+        entry.base.entry.origin_path = pointer(&entry.origin_path);
+        // SAFETY: a complete box with the entry at offset zero, whose strings live
+        // and stay unchanged until `OwnedEntry::free` drops the box with them, once,
+        // for this one reference.
+        unsafe { BackendEntryArc::from_c(Box::into_raw(entry).cast()) }
+            .expect("a box is never NULL")
+    }
+
     /// Promotes an acquired public entry to its full backend layout, without
     /// copying or acquiring another reference. `EntryArc`'s release contract
     /// already requires this larger allocation, unlike an arbitrary `EntryRef`.
@@ -1045,6 +1129,50 @@ fn backend_status(rc: i32) -> Result<(), ConfigError> {
 }
 
 impl UnopenedBackend {
+    /// A backend over a store implemented in Rust, its base initialised by C's
+    /// template and every slot calling into `backend`. Writable: the highest-priority
+    /// one takes a config's writes.
+    ///
+    /// The store must borrow nothing, since the config frees it whenever its last
+    /// reference goes:
+    ///
+    /// ```compile_fail,E0597
+    /// use std::ffi::CStr;
+    /// use libgit2::libgit2::config::config::ConfigError;
+    /// use libgit2::libgit2::config::sys::config::{BackendEntryArc, CustomBackend, UnopenedBackend};
+    ///
+    /// struct Borrowing<'a>(&'a str);
+    /// impl CustomBackend for Borrowing<'static> {
+    ///     type Entries = std::iter::Empty<Result<BackendEntryArc, ConfigError>>;
+    ///     fn get(&mut self, _: &CStr) -> Option<BackendEntryArc> { None }
+    ///     fn iterator(&mut self) -> Result<Self::Entries, ConfigError> { Ok(std::iter::empty()) }
+    ///     fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
+    ///         Ok(UnopenedBackend::new_readonly(Borrowing(self.0)))
+    ///     }
+    /// }
+    ///
+    /// let local = String::from("local");
+    /// let _ = UnopenedBackend::new(Borrowing(&local));
+    /// ```
+    ///
+    /// The backend stays on its thread, whatever the store:
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::config::sys::config::UnopenedBackend;
+    /// fn send(backend: UnopenedBackend) { std::thread::spawn(move || drop(backend)); }
+    /// ```
+    ///
+    /// Wraps: git_config_init_backend
+    pub fn new<B: CustomBackend>(backend: B) -> Self {
+        Self(Custom::boxed(backend, false))
+    }
+
+    /// As [`new`](Self::new), marked read-only: a config skips it when choosing where
+    /// to write, as it skips snapshots.
+    pub fn new_readonly<B: CustomBackend>(backend: B) -> Self {
+        Self(Custom::boxed(backend, true))
+    }
+
     pub fn as_ref(&self) -> BackendRef<'_> {
         self.0.as_ref()
     }
@@ -1363,6 +1491,651 @@ impl Drop for BackendTransaction<'_> {
             // exclusive backend borrow is still live, and finish did not unlock.
             unsafe { unlock(self.backend.as_mut_ptr(), 0) };
         }
+    }
+}
+
+// --- Backends implemented in Rust ----------------------------------------------------
+
+/// A configuration store implemented in Rust, which [`UnopenedBackend::new`] turns into
+/// a `git_config_backend` for [`ConfigMut::add_backend`].
+///
+/// libgit2 calls these methods through the backend's callback slots, from whichever
+/// routine reaches the backend: the getters through [`get`](Self::get), iterators and
+/// `foreach` walks through [`iterator`](Self::iterator), snapshots (and so
+/// [`ConfigRef::entry`](crate::libgit2::config::config::ConfigRef::entry)) through
+/// [`snapshot`](Self::snapshot), the setters, deletions and transactions on the
+/// highest-priority writable backend. Strings are borrowed for the call only.
+///
+/// C calls most slots without checking them for NULL, so every slot is filled: the
+/// writes and `lock`/`unlock` default to a `Config`-class error naming the slot, which
+/// suits a read-only store; `open` defaults to success.
+///
+/// A store that keeps a config or repository through which a callback reaches its own
+/// backend again is refused there, rather than lent twice: `get` answers not found, the
+/// other callbacks fail with a `Config`-class error, and a release requested meanwhile
+/// waits for the outer callback to return. A panic aborts the process, since it cannot
+/// unwind into C.
+///
+/// ```
+/// use std::collections::BTreeMap;
+/// use std::ffi::{CStr, CString};
+/// use libgit2::libgit2::config::config::{Config, ConfigError, ConfigLevel};
+/// use libgit2::libgit2::config::sys::config::{
+///     BackendEntry, BackendEntryArc, CustomBackend, EntryOrigin, UnopenedBackend,
+/// };
+///
+/// #[derive(Clone, Default)]
+/// struct Map(BTreeMap<CString, CString>);
+///
+/// fn entry(name: &CStr, value: &CStr) -> BackendEntryArc {
+///     BackendEntry::new(name, Some(value), ConfigLevel::APP, EntryOrigin::default())
+/// }
+///
+/// impl CustomBackend for Map {
+///     type Entries = std::vec::IntoIter<Result<BackendEntryArc, ConfigError>>;
+///
+///     fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
+///         self.0.get(key).map(|value| entry(key, value))
+///     }
+///     fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
+///         let entries: Vec<_> = self.0.iter().map(|(k, v)| Ok(entry(k, v))).collect();
+///         Ok(entries.into_iter())
+///     }
+///     fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
+///         Ok(UnopenedBackend::new_readonly(self.clone()))
+///     }
+///     fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
+///         self.0.insert(key.to_owned(), value.to_owned());
+///         Ok(())
+///     }
+/// }
+///
+/// let mut config = Config::new().unwrap();
+/// let backend = UnopenedBackend::new(Map::default());
+/// config.as_mut().add_backend(backend, ConfigLevel::APP, None, false).unwrap();
+/// config.as_mut().set_string(c"core.editor", c"vi").unwrap();
+/// let value = config.as_ref().entry(c"core.editor").unwrap();
+/// assert_eq!(value.as_ref().value(), Some(c"vi"));
+/// ```
+///
+/// Handwritten
+pub trait CustomBackend: 'static {
+    /// What [`iterator`](Self::iterator) walks: entries in order, or the failure that
+    /// ends the walk. Nothing follows a failure.
+    type Entries: core::iter::Iterator<Item = Result<BackendEntryArc, ConfigError>> + 'static;
+
+    /// Prepares the store once, before any other call, for `level`. A repository is
+    /// lent for the call when the registering caller supplied one.
+    fn open(
+        &mut self,
+        level: ConfigLevel,
+        repository: Option<RepositoryRef<'_>>,
+    ) -> Result<(), ConfigError> {
+        let _ = (level, repository);
+        Ok(())
+    }
+
+    /// The entry holding the normalized `key`, or `None`, which libgit2 reads as
+    /// `GIT_ENOTFOUND` and moves on to the next backend. The key is lent for the
+    /// call only:
+    ///
+    /// ```compile_fail
+    /// use std::ffi::CStr;
+    /// use libgit2::libgit2::config::config::ConfigError;
+    /// use libgit2::libgit2::config::sys::config::{BackendEntryArc, CustomBackend, UnopenedBackend};
+    ///
+    /// struct Keeping(Option<&'static CStr>);
+    /// impl CustomBackend for Keeping {
+    ///     type Entries = std::iter::Empty<Result<BackendEntryArc, ConfigError>>;
+    ///     fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
+    ///         self.0 = Some(key);
+    ///         None
+    ///     }
+    ///     fn iterator(&mut self) -> Result<Self::Entries, ConfigError> { Ok(std::iter::empty()) }
+    ///     fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
+    ///         Ok(UnopenedBackend::new_readonly(Keeping(None)))
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// A lookup cannot fail otherwise: libgit2's `get_entry` takes the entry of every
+    /// other failure without checking that it was written (`config.c`), and its
+    /// `*_force` getters then read it as found.
+    fn get(&mut self, key: &CStr) -> Option<BackendEntryArc>;
+
+    /// The entries, for one walk. They must not borrow the store: the walk may outlive
+    /// the call, while the store answers others.
+    fn iterator(&mut self) -> Result<Self::Entries, ConfigError>;
+
+    /// A read-only copy of the store, which libgit2 opens and reads independently. The
+    /// result is marked read-only whichever constructor built it.
+    fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError>;
+
+    /// Sets `key` to `value`, replacing a single existing value.
+    fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        let _ = (key, value);
+        Err(unimplemented_slot("set"))
+    }
+
+    /// Sets the values of the multivar `key` that match `regexp` to `value`.
+    fn set_multivar(&mut self, key: &CStr, regexp: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        let _ = (key, regexp, value);
+        Err(unimplemented_slot("set_multivar"))
+    }
+
+    /// Deletes the single value of `key`.
+    fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
+        let _ = key;
+        Err(unimplemented_slot("del"))
+    }
+
+    /// Deletes the values of the multivar `key` that match `regexp`.
+    fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        let _ = (key, regexp);
+        Err(unimplemented_slot("del_multivar"))
+    }
+
+    /// Begins a transaction: writes stay invisible to other readers until
+    /// [`unlock`](Self::unlock) commits them. libgit2 unlocks only after a successful
+    /// lock, so implement both or neither.
+    fn lock(&mut self) -> Result<(), ConfigError> {
+        Err(unimplemented_slot("lock"))
+    }
+
+    /// Ends the transaction, committing its writes when `commit` is true and rolling
+    /// them back otherwise.
+    fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
+        let _ = commit;
+        Err(unimplemented_slot("unlock"))
+    }
+}
+
+/// A default [`CustomBackend`] write's refusal, worded as [`missing_slot`]'s.
+fn unimplemented_slot(slot: &str) -> ConfigError {
+    let message = format!("config backend does not implement '{slot}'");
+    let message = CString::new(message).expect("slot names contain no NUL");
+    ConfigError::new(ErrorClass::Config, &message)
+}
+
+/// A callback that reached its own backend while another of its callbacks ran.
+fn reentered() -> ConfigError {
+    ConfigError::new(
+        ErrorClass::Config,
+        c"config backend reentered from its own callback",
+    )
+}
+
+/// A NULL string handed to a Rust backend's callback, which no libgit2 caller passes.
+fn null_argument() -> ConfigError {
+    ConfigError::new(
+        ErrorClass::Invalid,
+        c"NULL string passed to a config backend",
+    )
+}
+
+/// A Rust backend's answer to a lookup it cannot satisfy, worded as libgit2's.
+fn not_found(key: &CStr) -> c_int {
+    let message = format!("config value '{}' was not found", key.to_string_lossy());
+    let message = CString::new(message).expect("a C string's bytes contain no NUL");
+    let error = ConfigError::new(ErrorClass::Config, &message).with_code(ErrorCode::NotFound);
+    error.raise()
+}
+
+/// A Rust callback's result as its slot's return: 0, or the error's code once it is
+/// the thread's last libgit2 error.
+fn returned(result: Result<(), ConfigError>) -> c_int {
+    match result {
+        Ok(()) => 0,
+        Err(error) => error.raise(),
+    }
+}
+
+/// Which callback of a [`Custom`] backend runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dispatch {
+    Idle,
+    Running,
+    /// Running, and C has released the backend meanwhile.
+    Released,
+}
+
+/// A Rust backend's allocation: the C base first, so a pointer to it is a pointer to
+/// the box, then the dispatch state, the lookups a read-only backend keeps (by key)
+/// and the store.
+///
+/// Handwritten
+#[repr(C)]
+struct Custom<B> {
+    base: ffi::git_config_backend,
+    state: Cell<Dispatch>,
+    kept: HashMap<CString, Vec<Rc<BackendEntryArc>>>,
+    backend: B,
+}
+
+/// One callback's exclusive access to a [`Custom`] backend's store. Dropping it marks
+/// the backend idle again, and completes a release C requested meanwhile.
+struct Entered<'a, B> {
+    custom: NonNull<Custom<B>>,
+    _store: PhantomData<&'a mut B>,
+}
+
+impl<B> Entered<'_, B> {
+    /// Enters the backend `p` heads; `None` while another of its callbacks runs.
+    ///
+    /// # Safety
+    ///
+    /// `p` is the base of a live `Custom<B>` box. It stays allocated while the result
+    /// lives: only its `free` callback releases it, and that defers to the result.
+    unsafe fn from_ptr(p: *mut ffi::git_config_backend) -> Option<Self> {
+        let custom = NonNull::new(p.cast::<Custom<B>>())?;
+        // SAFETY: per this function's contract; the cell is Rust-owned and only ever
+        // reached through shared references.
+        let state = unsafe { &*addr_of!((*custom.as_ptr()).state) };
+        if state.get() != Dispatch::Idle {
+            return None;
+        }
+        state.set(Dispatch::Running);
+        Some(Self {
+            custom,
+            _store: PhantomData,
+        })
+    }
+
+    fn backend(&mut self) -> &mut B {
+        // SAFETY: the box is live (per `from_ptr`), and the `Running` state keeps every
+        // other callback away from the store until this value drops.
+        unsafe { &mut *addr_of_mut!((*self.custom.as_ptr()).backend) }
+    }
+
+    /// A lookup's answer, as handed to C. A read-only backend keeps the answer until
+    /// it is released and hands out a reference to it: `git_config_get_string`, which
+    /// only reads read-only configs, frees the entry it looked up and returns its
+    /// value, "valid until the config is freed" (`git2/config.h`), and libgit2 reads
+    /// such values (`git_signature_default`). Equal answers to a key share one entry.
+    fn answer(&mut self, key: &CStr, entry: BackendEntryArc) -> BackendEntryArc {
+        let custom = self.custom.as_ptr();
+        // SAFETY: the box is live; the flag is a scalar set before the backend opened.
+        if unsafe { addr_of!((*custom).base.readonly).read() } == 0 {
+            return entry;
+        }
+        // SAFETY: as in `backend`; the map is Rust-owned, apart from the store.
+        let kept = unsafe { &mut *addr_of_mut!((*custom).kept) };
+        let answers = kept.entry(key.to_owned()).or_default();
+        let same =
+            |k: &&Rc<BackendEntryArc>| same_entry(BackendEntryArc::as_ref(k), entry.as_ref());
+        let shared = match answers.iter().find(same) {
+            Some(kept) => kept.clone(),
+            None => {
+                let kept = Rc::new(entry);
+                answers.push(kept.clone());
+                kept
+            }
+        };
+        SharedEntry::boxed(shared)
+    }
+}
+
+/// Whether two entries read the same.
+fn same_entry(a: BackendEntryRef<'_>, b: BackendEntryRef<'_>) -> bool {
+    let (a, b) = (a.entry(), b.entry());
+    a.name() == b.name()
+        && a.value() == b.value()
+        && a.backend_type() == b.backend_type()
+        && a.origin_path() == b.origin_path()
+        && a.include_depth() == b.include_depth()
+        && a.level() == b.level()
+}
+
+/// A reference to an entry a read-only [`Custom`] backend keeps: a copy of its C
+/// entry, whose strings the shared entry keeps live, first.
+///
+/// Handwritten
+#[repr(C)]
+struct SharedEntry {
+    base: ffi::git_config_backend_entry,
+    entry: Rc<BackendEntryArc>,
+}
+
+impl SharedEntry {
+    fn boxed(entry: Rc<BackendEntryArc>) -> BackendEntryArc {
+        // SAFETY: a live entry, read through its shared handle; the copy's strings
+        // are the entry's, which the box keeps live through its `Rc`.
+        let public = unsafe { addr_of!((*entry.as_c_ptr()).entry).read() };
+        let shared = Box::new(Self {
+            base: ffi::git_config_backend_entry {
+                entry: public,
+                free: Some(Self::free),
+            },
+            entry,
+        });
+        // SAFETY: a complete box with the entry at offset zero and its own callback,
+        // which reclaims it once for this one reference.
+        unsafe { BackendEntryArc::from_c(Box::into_raw(shared).cast()) }
+            .expect("a box is never NULL")
+    }
+
+    /// `git_config_backend_entry.free`: drops the box and its share of the entry.
+    unsafe extern "C" fn free(entry: *mut ffi::git_config_backend_entry) {
+        // SAFETY: only `SharedEntry::boxed` installs this callback, on the base of a
+        // box whose one reference the caller gives up here.
+        drop(unsafe { Box::from_raw(entry.cast::<Self>()) });
+    }
+}
+
+impl<B> Drop for Entered<'_, B> {
+    fn drop(&mut self) {
+        let custom = self.custom.as_ptr();
+        // SAFETY: the box is live while this value lives, per `from_ptr`.
+        let state = unsafe { &*addr_of!((*custom).state) };
+        if state.replace(Dispatch::Idle) == Dispatch::Released {
+            // SAFETY: `free` ran during the callback and left this box, which nothing
+            // refers to any more, to this value; the store borrow has ended.
+            drop(unsafe { Box::from_raw(custom) });
+        }
+    }
+}
+
+impl<B: CustomBackend> Custom<B> {
+    /// A complete backend over `backend`, its base initialised by
+    /// `git_config_init_backend` and every slot set to these trampolines.
+    fn boxed(backend: B, readonly: bool) -> BackendBox {
+        Self::with_base(Backend::new(), backend, readonly)
+    }
+
+    /// As [`boxed`](Self::boxed), over an initialised base whose slots are replaced.
+    fn with_base(Backend(mut base, _): Backend, backend: B, readonly: bool) -> BackendBox {
+        base.readonly = c_int::from(readonly);
+        base.open = Some(Self::open);
+        base.get = Some(Self::get);
+        base.set = Some(Self::set);
+        base.set_multivar = Some(Self::set_multivar);
+        base.del = Some(Self::delete);
+        base.del_multivar = Some(Self::delete_multivar);
+        base.iterator = Some(Self::iterator);
+        base.snapshot = Some(Self::snapshot);
+        base.lock = Some(Self::lock);
+        base.unlock = Some(Self::unlock);
+        base.free = Some(Self::free);
+        let custom = Box::new(Self {
+            base,
+            state: Cell::new(Dispatch::Idle),
+            kept: HashMap::new(),
+            backend,
+        });
+        // SAFETY: a complete box with the initialised base at offset zero, every slot
+        // matched to this allocation; `free` reclaims it once. `B: 'static` borrows
+        // nothing, and strings are copied by the callbacks that keep them.
+        unsafe { BackendBox::from_c(Box::into_raw(custom).cast()) }.expect("a box is never NULL")
+    }
+
+    /// `git_config_backend.open` over [`CustomBackend::open`].
+    unsafe extern "C" fn open(
+        p: *mut ffi::git_config_backend,
+        level: ffi::git_config_level_t,
+        repo: *const ffi::git_repository,
+    ) -> c_int {
+        // SAFETY: C passes NULL or the registering caller's repository, live for the
+        // call and only read through the shared handle.
+        let repository = unsafe { RepositoryRef::from_ptr(repo.cast_mut()) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(
+            entered
+                .backend()
+                .open(ConfigLevel::from_raw(level), repository),
+        )
+    }
+
+    /// `git_config_backend.get` over [`CustomBackend::get`]: success, or
+    /// `GIT_ENOTFOUND` with NULL written.
+    unsafe extern "C" fn get(
+        p: *mut ffi::git_config_backend,
+        key: *const c_char,
+        out: *mut *mut ffi::git_config_backend_entry,
+    ) -> c_int {
+        // SAFETY: C passes a writable slot, which is written before any return.
+        unsafe { out.write(ptr::null_mut()) };
+        if key.is_null() {
+            return not_found(c"(null)");
+        }
+        // SAFETY: a non-NULL key is NUL-terminated and live for the call.
+        let key = unsafe { CStr::from_ptr(key) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return not_found(key);
+        };
+        match entered.backend().get(key) {
+            Some(entry) => {
+                let entry = entered.answer(key, entry);
+                // SAFETY: as above; the caller acquires this reference, released
+                // through the entry's own callback.
+                unsafe { out.write(entry.into_c()) };
+                0
+            }
+            None => not_found(key),
+        }
+    }
+
+    /// `git_config_backend.set` over [`CustomBackend::set`].
+    unsafe extern "C" fn set(
+        p: *mut ffi::git_config_backend,
+        key: *const c_char,
+        value: *const c_char,
+    ) -> c_int {
+        if key.is_null() || value.is_null() {
+            return null_argument().raise();
+        }
+        // SAFETY: non-NULL strings are NUL-terminated and live for the call.
+        let (key, value) = unsafe { (CStr::from_ptr(key), CStr::from_ptr(value)) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().set(key, value))
+    }
+
+    /// `git_config_backend.set_multivar` over [`CustomBackend::set_multivar`].
+    unsafe extern "C" fn set_multivar(
+        p: *mut ffi::git_config_backend,
+        key: *const c_char,
+        regexp: *const c_char,
+        value: *const c_char,
+    ) -> c_int {
+        if key.is_null() || regexp.is_null() || value.is_null() {
+            return null_argument().raise();
+        }
+        // SAFETY: non-NULL strings are NUL-terminated and live for the call.
+        let [key, regexp, value] = unsafe { [key, regexp, value].map(|s| CStr::from_ptr(s)) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().set_multivar(key, regexp, value))
+    }
+
+    /// `git_config_backend.del` over [`CustomBackend::delete`].
+    unsafe extern "C" fn delete(p: *mut ffi::git_config_backend, key: *const c_char) -> c_int {
+        if key.is_null() {
+            return null_argument().raise();
+        }
+        // SAFETY: a non-NULL key is NUL-terminated and live for the call.
+        let key = unsafe { CStr::from_ptr(key) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().delete(key))
+    }
+
+    /// `git_config_backend.del_multivar` over [`CustomBackend::delete_multivar`].
+    unsafe extern "C" fn delete_multivar(
+        p: *mut ffi::git_config_backend,
+        key: *const c_char,
+        regexp: *const c_char,
+    ) -> c_int {
+        if key.is_null() || regexp.is_null() {
+            return null_argument().raise();
+        }
+        // SAFETY: non-NULL strings are NUL-terminated and live for the call.
+        let (key, regexp) = unsafe { (CStr::from_ptr(key), CStr::from_ptr(regexp)) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().delete_multivar(key, regexp))
+    }
+
+    /// `git_config_backend.iterator` over [`CustomBackend::iterator`].
+    unsafe extern "C" fn iterator(
+        out: *mut *mut ffi::git_config_iterator,
+        p: *mut ffi::git_config_backend,
+    ) -> c_int {
+        // SAFETY: C passes a writable slot, which is written before any return.
+        unsafe { out.write(ptr::null_mut()) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        match entered.backend().iterator() {
+            Ok(entries) => {
+                // SAFETY: as above; the caller owns the iterator, which borrows
+                // nothing, and frees it through its own callback.
+                unsafe { out.write(Entries::boxed(entries).into_c()) };
+                0
+            }
+            Err(error) => error.raise(),
+        }
+    }
+
+    /// `git_config_backend.snapshot` over [`CustomBackend::snapshot`], marking the
+    /// unopened result read-only.
+    unsafe extern "C" fn snapshot(
+        out: *mut *mut ffi::git_config_backend,
+        p: *mut ffi::git_config_backend,
+    ) -> c_int {
+        // SAFETY: C passes a writable slot, which is written before any return.
+        unsafe { out.write(ptr::null_mut()) };
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        match entered.backend().snapshot() {
+            Ok(UnopenedBackend(mut snapshot)) => {
+                let base = snapshot.as_mut().as_mut_ptr();
+                // SAFETY: the unopened snapshot is exclusively owned here, and its
+                // read-only flag is a plain scalar no callback has read yet.
+                unsafe { addr_of_mut!((*base).readonly).write(1) };
+                // SAFETY: as above; the caller takes the unopened allocation, opens
+                // it once and frees it through its own callback.
+                unsafe { out.write(snapshot.into_c()) };
+                0
+            }
+            Err(error) => error.raise(),
+        }
+    }
+
+    /// `git_config_backend.lock` over [`CustomBackend::lock`].
+    unsafe extern "C" fn lock(p: *mut ffi::git_config_backend) -> c_int {
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().lock())
+    }
+
+    /// `git_config_backend.unlock` over [`CustomBackend::unlock`].
+    unsafe extern "C" fn unlock(p: *mut ffi::git_config_backend, commit: c_int) -> c_int {
+        // SAFETY: C calls this slot with the live backend it was installed on.
+        let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
+            return reentered().raise();
+        };
+        returned(entered.backend().unlock(commit != 0))
+    }
+
+    /// `git_config_backend.free`: drops the box, store and all, or leaves it to the
+    /// callback running on this backend, which drops it on return.
+    unsafe extern "C" fn free(p: *mut ffi::git_config_backend) {
+        let custom = p.cast::<Self>();
+        // SAFETY: C releases the live backend this slot was installed on, once.
+        let state = unsafe { &*addr_of!((*custom).state) };
+        if state.replace(Dispatch::Released) == Dispatch::Idle {
+            // SAFETY: no callback runs on the box from `Custom::boxed`, whose owner gives
+            // it up here; `Released` refuses any callback the store's drop reaches.
+            drop(unsafe { Box::from_raw(custom) });
+        }
+    }
+}
+
+/// An iterator over a [`CustomBackend`]'s entries: the C base first, then the entries
+/// left (`None` once they end or fail) and the one lent to the caller, which stays
+/// live until the next advance or release.
+///
+/// Handwritten
+#[repr(C)]
+struct Entries<I> {
+    base: ffi::git_config_iterator,
+    entries: Option<I>,
+    current: Option<BackendEntryArc>,
+}
+
+impl<I> Entries<I>
+where
+    I: core::iter::Iterator<Item = Result<BackendEntryArc, ConfigError>> + 'static,
+{
+    fn boxed(entries: I) -> IteratorBox<'static> {
+        let base = ffi::git_config_iterator {
+            backend: ptr::null_mut(),
+            flags: 0,
+            next: Some(Self::next),
+            free: Some(Self::free),
+        };
+        let value = Box::new(Self {
+            base,
+            entries: Some(entries),
+            current: None,
+        });
+        // SAFETY: a complete box with the base at offset zero and callbacks matched to
+        // it; `I: 'static` and the owned entries borrow no config.
+        unsafe { IteratorBox::from_c(Box::into_raw(value).cast()) }.expect("a box is never NULL")
+    }
+
+    /// `git_config_iterator.next`: lends the next entry, releasing the previous one.
+    unsafe extern "C" fn next(
+        out: *mut *mut ffi::git_config_backend_entry,
+        iterator: *mut ffi::git_config_iterator,
+    ) -> c_int {
+        let this = iterator.cast::<Self>();
+        // SAFETY: C advances the live box this slot was installed on, one call at a
+        // time; its Rust-owned fields are reached only here and by `free`.
+        let entries = unsafe { &mut *addr_of_mut!((*this).entries) };
+        // SAFETY: as above, for the field apart from `entries`.
+        let current = unsafe { &mut *addr_of_mut!((*this).current) };
+        *current = None;
+        match entries.as_mut().and_then(core::iter::Iterator::next) {
+            Some(Ok(entry)) => {
+                // SAFETY: C passes a writable slot; the entry stays live in `current`
+                // until the next advance or release.
+                unsafe { out.write(entry.as_c_ptr()) };
+                *current = Some(entry);
+                0
+            }
+            Some(Err(error)) => {
+                *entries = None;
+                error.raise()
+            }
+            None => {
+                *entries = None;
+                ffi::GIT_ITEROVER
+            }
+        }
+    }
+
+    /// `git_config_iterator.free`: drops the box, the lent entry and the rest.
+    unsafe extern "C" fn free(iterator: *mut ffi::git_config_iterator) {
+        // SAFETY: C releases the live box from `Entries::boxed` once, giving it up.
+        drop(unsafe { Box::from_raw(iterator.cast::<Self>()) });
     }
 }
 
@@ -2180,6 +2953,452 @@ mod unit_tests {
             let error = pending.open(ConfigLevel::LOCAL).unwrap_err();
             assert_eq!(error.message(), c"config backend does not implement 'open'");
             assert_eq!(state.frees.get(), 1);
+        }
+    }
+
+    mod custom {
+        use super::*;
+        use std::cell::RefCell;
+
+        /// What a probe store saw, shared with the test.
+        #[derive(Default)]
+        struct Seen {
+            calls: RefCell<Vec<String>>,
+            /// Return codes of the calls a callback made back into its own backend.
+            reentries: RefCell<Vec<c_int>>,
+            drops: Cell<usize>,
+            values: RefCell<Vec<(CString, CString)>>,
+        }
+
+        /// A store that records its calls and, on request, reaches its own backend
+        /// from inside a callback, as a store keeping its config could.
+        struct Probe {
+            seen: Rc<Seen>,
+            this: Cell<*mut ffi::git_config_backend>,
+        }
+
+        impl Probe {
+            fn new(seen: &Rc<Seen>) -> Self {
+                Self {
+                    seen: seen.clone(),
+                    this: Cell::new(ptr::null_mut()),
+                }
+            }
+
+            fn record(&self, call: &str) {
+                self.seen.calls.borrow_mut().push(call.to_owned());
+            }
+
+            fn entry(&self, key: &CStr) -> Option<BackendEntryArc> {
+                let values = self.seen.values.borrow();
+                let (name, value) = values.iter().rev().find(|(k, _)| k.as_c_str() == key)?;
+                let origin = EntryOrigin {
+                    backend_type: Some(c"probe"),
+                    origin_path: None,
+                    include_depth: 0,
+                };
+                Some(BackendEntry::new(
+                    name,
+                    Some(value),
+                    ConfigLevel::APP,
+                    origin,
+                ))
+            }
+
+            /// Calls every slot of its own backend, as a reentrant store would.
+            fn reenter(&self) {
+                let p = self.this.get();
+                let mut entry = ptr::null_mut();
+                let mut iter = ptr::null_mut();
+                let mut snapshot = ptr::null_mut();
+                // SAFETY: `p` is this store's own live backend, its slots the
+                // trampolines, called with valid strings and writable slots.
+                let codes = unsafe {
+                    [
+                        Custom::<Self>::open(p, 1, ptr::null()),
+                        Custom::<Self>::get(p, c"a.b".as_ptr(), &mut entry),
+                        Custom::<Self>::set(p, c"a.b".as_ptr(), c"v".as_ptr()),
+                        Custom::<Self>::set_multivar(
+                            p,
+                            c"a.b".as_ptr(),
+                            c".".as_ptr(),
+                            c"v".as_ptr(),
+                        ),
+                        Custom::<Self>::delete(p, c"a.b".as_ptr()),
+                        Custom::<Self>::delete_multivar(p, c"a.b".as_ptr(), c".".as_ptr()),
+                        Custom::<Self>::iterator(&mut iter, p),
+                        Custom::<Self>::snapshot(&mut snapshot, p),
+                        Custom::<Self>::lock(p),
+                        Custom::<Self>::unlock(p, 1),
+                    ]
+                };
+                assert!(entry.is_null() && iter.is_null() && snapshot.is_null());
+                self.seen.reentries.borrow_mut().extend(codes);
+            }
+        }
+
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.seen.drops.set(self.seen.drops.get() + 1);
+            }
+        }
+
+        impl CustomBackend for Probe {
+            type Entries = std::vec::IntoIter<Result<BackendEntryArc, ConfigError>>;
+
+            fn open(
+                &mut self,
+                level: ConfigLevel,
+                repository: Option<RepositoryRef<'_>>,
+            ) -> Result<(), ConfigError> {
+                self.record(&format!("open {} {}", level.raw(), repository.is_some()));
+                Ok(())
+            }
+            fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
+                self.record("get");
+                self.entry(key)
+            }
+            fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
+                self.record("iterator");
+                let values = self.seen.values.borrow().clone();
+                let entries: Vec<_> = values
+                    .iter()
+                    .map(|(k, _)| Ok(self.entry(k).unwrap()))
+                    .collect();
+                Ok(entries.into_iter())
+            }
+            fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
+                self.record("snapshot");
+                Ok(UnopenedBackend::new(Probe::new(&self.seen)))
+            }
+            fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
+                self.record("set");
+                match key.to_bytes() {
+                    b"release.now" => {
+                        // C releasing the backend while this callback runs.
+                        // SAFETY: the store's own live backend, released once.
+                        unsafe { Custom::<Self>::free(self.this.get()) };
+                        assert_eq!(self.seen.drops.get(), 0, "released under the store");
+                    }
+                    b"reenter.now" => self.reenter(),
+                    _ => {}
+                }
+                let pair = (key.to_owned(), value.to_owned());
+                self.seen.values.borrow_mut().push(pair);
+                Ok(())
+            }
+            fn lock(&mut self) -> Result<(), ConfigError> {
+                self.record("lock");
+                Ok(())
+            }
+            fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
+                self.record(&format!("unlock {commit}"));
+                Ok(())
+            }
+        }
+
+        /// A probe backend over a Rust-built base, as `git_config_init_backend`
+        /// fills it, so that Miri runs the dispatch without C.
+        fn probe(seen: &Rc<Seen>, readonly: bool) -> BackendBox {
+            let base = Backend(
+                ffi::git_config_backend {
+                    version: ffi::GIT_CONFIG_BACKEND_VERSION,
+                    ..Default::default()
+                },
+                PhantomData,
+            );
+            let mut owner = Custom::with_base(base, Probe::new(seen), readonly);
+            let p = owner.as_mut().as_mut_ptr();
+            // SAFETY: the probe box `with_base` just built, exclusively owned; the
+            // store is reached through the pointer only while no callback runs.
+            unsafe { (*p.cast::<Custom<Probe>>()).backend.this.set(p) };
+            owner
+        }
+
+        #[test]
+        fn custom_slots_and_layout() {
+            assert_eq!(core::mem::offset_of!(Custom<Probe>, base), 0);
+            assert_eq!(
+                core::mem::offset_of!(Entries<<Probe as CustomBackend>::Entries>, base),
+                0
+            );
+            assert_eq!(core::mem::offset_of!(OwnedEntry, base), 0);
+            assert_eq!(core::mem::offset_of!(SharedEntry, base), 0);
+            let seen = Rc::new(Seen::default());
+            let mut owner = probe(&seen, true);
+            let r = owner.as_ref();
+            assert_eq!(r.version(), ffi::GIT_CONFIG_BACKEND_VERSION);
+            assert!(r.is_readonly());
+            let p = owner.as_mut().as_mut_ptr();
+            // SAFETY: reads the slots of the exclusively owned probe base.
+            let raw = unsafe { p.read() };
+            assert!(raw.open.is_some() && raw.get.is_some() && raw.set.is_some());
+            assert!(raw.set_multivar.is_some() && raw.del.is_some());
+            assert!(raw.del_multivar.is_some() && raw.iterator.is_some());
+            assert!(raw.snapshot.is_some() && raw.lock.is_some());
+            assert!(raw.unlock.is_some() && raw.free.is_some());
+            drop(owner);
+            assert_eq!(seen.drops.get(), 1);
+        }
+
+        #[test]
+        fn custom_dispatch_reaches_store_and_releases_once() {
+            let seen = Rc::new(Seen::default());
+            let unopened = UnopenedBackend(probe(&seen, false));
+            let mut backend = unopened.open(ConfigLevel::GLOBAL).unwrap();
+            {
+                let mut b = backend.as_mut();
+                b.set(c"a.b", c"one").unwrap();
+                let mut transaction = b.lock().unwrap();
+                transaction.set(c"a.c", c"two").unwrap();
+                transaction.finish(true).unwrap();
+                drop(b.lock().unwrap());
+            }
+            assert_eq!(
+                *seen.calls.borrow(),
+                [
+                    "open 4 false",
+                    "set",
+                    "lock",
+                    "set",
+                    "unlock true",
+                    "lock",
+                    "unlock false"
+                ]
+            );
+            assert_eq!(seen.drops.get(), 0);
+            BackendFree.release(backend);
+            assert_eq!(seen.drops.get(), 1);
+        }
+
+        #[test]
+        fn custom_release_during_callback_waits_for_return() {
+            let seen = Rc::new(Seen::default());
+            let mut backend = probe(&seen, false);
+            let p = backend.as_mut().as_mut_ptr();
+            // The release inside the callback consumed the allocation, so the
+            // owner gives it up rather than release it a second time.
+            let _ = backend.into_c();
+            // SAFETY: the live probe backend; its own `set` releases it.
+            let rc = unsafe { Custom::<Probe>::set(p, c"release.now".as_ptr(), c"v".as_ptr()) };
+            assert_eq!(rc, 0);
+            assert_eq!(seen.drops.get(), 1);
+            assert_eq!(seen.values.borrow().len(), 1);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "refusals raise libgit2 errors")]
+        fn custom_reentry_is_refused_per_slot() {
+            use crate::libgit2::util::errors::last;
+            let seen = Rc::new(Seen::default());
+            let mut backend = UnopenedBackend(probe(&seen, false))
+                .open(ConfigLevel::LOCAL)
+                .unwrap();
+            backend.as_mut().set(c"reenter.now", c"v").unwrap();
+            let not_found = ffi::GIT_ENOTFOUND;
+            let refused = ffi::GIT_ERROR;
+            assert_eq!(
+                *seen.reentries.borrow(),
+                [
+                    refused, not_found, refused, refused, refused, refused, refused, refused,
+                    refused, refused
+                ]
+            );
+            // The last refusal is the thread's error until the outer call succeeds.
+            assert_eq!(seen.calls.borrow().as_slice(), ["open 5 false", "set"]);
+            let error = last();
+            assert_eq!(
+                error.message(),
+                c"config backend reentered from its own callback"
+            );
+            drop(backend);
+            assert_eq!(seen.drops.get(), 1);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "refusals raise libgit2 errors")]
+        fn custom_null_strings_are_refused() {
+            let seen = Rc::new(Seen::default());
+            let mut backend = probe(&seen, false);
+            let p = backend.as_mut().as_mut_ptr();
+            let null = ptr::null();
+            let mut entry = ptr::without_provenance_mut(1);
+            // SAFETY: the live probe backend, called as C never does: with NULL
+            // strings; the out slot is writable.
+            let codes = unsafe {
+                [
+                    Custom::<Probe>::get(p, null, &mut entry),
+                    Custom::<Probe>::set(p, null, c"v".as_ptr()),
+                    Custom::<Probe>::set(p, c"a.b".as_ptr(), null),
+                    Custom::<Probe>::set_multivar(p, c"a.b".as_ptr(), null, c"v".as_ptr()),
+                    Custom::<Probe>::delete(p, null),
+                    Custom::<Probe>::delete_multivar(p, c"a.b".as_ptr(), null),
+                ]
+            };
+            assert!(entry.is_null());
+            assert_eq!(codes[0], ffi::GIT_ENOTFOUND);
+            assert!(codes[1..].iter().all(|&rc| rc == ffi::GIT_ERROR));
+            let error = crate::libgit2::util::errors::last();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert!(seen.calls.borrow().is_empty());
+            // SAFETY: as above, with no backend at all; nothing is dereferenced.
+            let rc = unsafe { Custom::<Probe>::lock(ptr::null_mut()) };
+            assert_eq!(rc, ffi::GIT_ERROR);
+            drop(backend);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "entries are released through C")]
+        fn custom_default_slots_refuse_and_name_themselves() {
+            struct Minimal;
+            impl CustomBackend for Minimal {
+                type Entries = core::iter::Empty<Result<BackendEntryArc, ConfigError>>;
+                fn get(&mut self, _: &CStr) -> Option<BackendEntryArc> {
+                    None
+                }
+                fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
+                    Ok(core::iter::empty())
+                }
+                fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
+                    Err(ConfigError::new(ErrorClass::Config, c"no snapshot"))
+                }
+            }
+            let mut backend = UnopenedBackend::new(Minimal)
+                .open(ConfigLevel::APP)
+                .unwrap();
+            let mut b = backend.as_mut();
+            let slot = |result: Result<(), ConfigError>| {
+                let error = result.unwrap_err();
+                assert_eq!(error.raw_code(), ffi::GIT_ERROR);
+                assert_eq!(error.class(), Some(ErrorClass::Config));
+                error.message().to_str().unwrap().to_owned()
+            };
+            let expected = |s: &str| format!("config backend does not implement '{s}'");
+            assert_eq!(slot(b.set(c"a.b", c"v")), expected("set"));
+            assert_eq!(
+                slot(b.set_multivar(c"a.b", c".", c"v")),
+                expected("set_multivar")
+            );
+            assert_eq!(slot(b.delete(c"a.b")), expected("del"));
+            assert_eq!(
+                slot(b.delete_multivar(c"a.b", c".")),
+                expected("del_multivar")
+            );
+            assert_eq!(slot(b.lock().map(drop)), expected("lock"));
+            assert_eq!(slot(b.snapshot().map(drop)), "no snapshot");
+            let missing = b.get(c"a.b").unwrap_err();
+            assert_eq!(missing.code(), Some(ErrorCode::NotFound));
+            assert_eq!(missing.message(), c"config value 'a.b' was not found");
+            assert!(b.iterator().unwrap().as_mut().advance().unwrap().is_none());
+            assert!(Minimal.unlock(true).is_err());
+            assert!(Minimal.open(ConfigLevel::APP, None).is_ok());
+        }
+
+        #[test]
+        fn owned_and_shared_entries_read_their_copies() {
+            let name = CString::new("sec.key").unwrap();
+            let origin = EntryOrigin {
+                backend_type: Some(c"rust"),
+                origin_path: Some(c"/origin"),
+                include_depth: 3,
+            };
+            let owned = BackendEntry::new(&name, None, ConfigLevel::from_raw(-9), origin);
+            drop(name);
+            let entry = owned.as_ref().entry();
+            assert_eq!(entry.name(), Some(c"sec.key"));
+            assert_eq!(entry.value(), None);
+            assert_eq!(entry.backend_type(), Some(c"rust"));
+            assert_eq!(entry.origin_path(), Some(c"/origin"));
+            assert_eq!((entry.include_depth(), entry.level().raw()), (3, -9));
+            let kept = Rc::new(owned);
+            let shared = SharedEntry::boxed(kept.clone());
+            assert!(same_entry(shared.as_ref(), BackendEntryArc::as_ref(&kept)));
+            let other = BackendEntry::new(
+                c"sec.key",
+                Some(c""),
+                ConfigLevel::APP,
+                EntryOrigin::default(),
+            );
+            assert!(!same_entry(other.as_ref(), shared.as_ref()));
+            assert_eq!(other.as_ref().entry().value(), Some(c""));
+            assert_eq!(other.as_ref().entry().backend_type(), None);
+            // Release through the callbacks directly: dropping an owner calls C.
+            // SAFETY: each owner gives up its one reference to its own callback.
+            unsafe { SharedEntry::free(shared.into_c()) };
+            let Ok(owned) = Rc::try_unwrap(kept) else {
+                panic!("the shared copy was released");
+            };
+            // SAFETY: as above.
+            unsafe { OwnedEntry::free(owned.into_c()) };
+            // SAFETY: as above.
+            unsafe { OwnedEntry::free(other.into_c()) };
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "entries are released through C")]
+        fn readonly_lookups_keep_one_entry_per_distinct_answer() {
+            let seen = Rc::new(Seen::default());
+            seen.values
+                .borrow_mut()
+                .push((c"a.b".to_owned(), c"one".to_owned()));
+            let mut backend = UnopenedBackend(probe(&seen, true))
+                .open(ConfigLevel::APP)
+                .unwrap();
+            let p = backend.as_mut().as_mut_ptr().cast::<Custom<Probe>>();
+            let kept = |key: &CStr| {
+                // SAFETY: reads the Rust-owned map of the live box between callbacks.
+                unsafe { (*p).kept.get(key).map_or(0, Vec::len) }
+            };
+            let first = backend.as_mut().get(c"a.b").unwrap();
+            let again = backend.as_mut().get(c"a.b").unwrap();
+            assert_ne!(first.as_c_ptr(), again.as_c_ptr());
+            let value = |e: &BackendEntryArc| e.as_ref().entry().value().unwrap().as_ptr();
+            assert_eq!(value(&first), value(&again));
+            assert_eq!(kept(c"a.b"), 1);
+            seen.values
+                .borrow_mut()
+                .push((c"a.b".to_owned(), c"two".to_owned()));
+            let changed = backend.as_mut().get(c"a.b").unwrap();
+            assert_eq!(changed.as_ref().entry().value(), Some(c"two"));
+            assert_eq!(kept(c"a.b"), 2);
+            assert!(backend.as_mut().get(c"a.missing").is_err());
+            drop(backend);
+            // The answers handed out outlive the backend that kept them.
+            assert_eq!(first.as_ref().entry().value(), Some(c"one"));
+            assert_eq!(changed.as_ref().entry().value(), Some(c"two"));
+            drop((first, again, changed));
+            let mut writable = UnopenedBackend(probe(&seen, false))
+                .open(ConfigLevel::APP)
+                .unwrap();
+            let p = writable.as_mut().as_mut_ptr().cast::<Custom<Probe>>();
+            drop(writable.as_mut().get(c"a.b").unwrap());
+            // SAFETY: as above.
+            assert!(unsafe { (*p).kept.is_empty() });
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "entries are released through C")]
+        fn entries_lend_until_advance_and_end_after_failure() {
+            let make = |name: &CStr| {
+                BackendEntry::new(name, Some(c"v"), ConfigLevel::APP, EntryOrigin::default())
+            };
+            let failure = ConfigError::new(ErrorClass::Config, c"walk failed");
+            let entries = vec![Ok(make(c"a.one")), Err(failure), Ok(make(c"a.two"))];
+            let mut iter = Entries::boxed(entries.into_iter());
+            let mut m = iter.as_mut();
+            assert_eq!(m.as_ref().flags(), 0);
+            assert!(m.as_ref().backend().is_none());
+            let first = m.advance().unwrap().unwrap();
+            assert_eq!(first.entry().name(), Some(c"a.one"));
+            let error = m.advance().unwrap_err();
+            assert_eq!(error.message(), c"walk failed");
+            assert!(m.advance().unwrap().is_none());
+            assert!(m.advance().unwrap().is_none());
+            drop(iter);
+            let mut lent = Entries::boxed(vec![Ok(make(c"a.kept"))].into_iter());
+            assert!(lent.as_mut().advance().unwrap().is_some());
+            // Released with the iterator, still lent.
+            drop(lent);
         }
     }
 }
