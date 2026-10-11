@@ -13,7 +13,7 @@ use core::ptr::{self, NonNull};
 use ffibox::{CBorrowedPtr, CBox, CCell, CDrop};
 
 use crate::ffi;
-use crate::libgit2::config::config::{ConfigMut, ConfigRef};
+use crate::libgit2::config::config::{ConfigError, ConfigMut, ConfigRef};
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, last};
 use crate::libgit2::util::sys::errors::runtime_pinned;
@@ -145,6 +145,10 @@ impl<'r> Transaction<'r> {
     /// repository and its refdb backend must remain alive until the owner drops.
     /// This borrow enforces that keepalive; no raw parent pointer is exposed.
     ///
+    /// The first call on a repository opens its reference database. If that runs
+    /// out of memory, libgit2 crashes rather than failing: `git_refdb_open` frees
+    /// its uninitialised `db` when `git_refdb_new` cannot allocate it.
+    ///
     /// Wraps: git_transaction_new
     pub fn new(repo: RepositoryRef<'r>) -> Result<TransactionBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
@@ -197,9 +201,9 @@ pub struct ConfigTransaction<'c, 'r> {
 
 impl<'c, 'r> ConfigTransaction<'c, 'r> {
     /// Wraps: git_transaction_config_new
-    pub(crate) fn lock(mut config: ConfigMut<'c, 'r>) -> Result<Self, ErrorBuf> {
+    pub(crate) fn lock(mut config: ConfigMut<'c, 'r>) -> Result<Self, ConfigError> {
         if !runtime_pinned() {
-            return Err(last());
+            return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
         }
         let mut out = ptr::null_mut();
         // SAFETY: config grants exclusive access for 'c; out is writable. C locks
@@ -208,11 +212,12 @@ impl<'c, 'r> ConfigTransaction<'c, 'r> {
         // config transaction as a reference transaction.
         let rc = unsafe { ffi::git_config_lock(&mut out, config.as_mut_ptr()) };
         if rc < 0 {
-            return Err(last());
+            return Err(ConfigError::from_libgit2(rc));
         }
         // SAFETY: success transfers a fresh config transaction; TransactionFree
         // dispatches its release correctly. The stored ConfigMut keeps cfg alive.
-        let transaction = unsafe { TransactionBox::from_c(out) }.ok_or_else(last)?;
+        let transaction = unsafe { TransactionBox::from_c(out) }
+            .ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))?;
         Ok(Self {
             transaction,
             config,
@@ -340,5 +345,139 @@ mod unit_tests {
         assert!(unsafe { TransactionBox::from_c(ptr::null_mut()) }.is_none());
         // SAFETY: the C releaser explicitly accepts NULL as a no-op.
         unsafe { ffi::git_transaction_free(ptr::null_mut()) };
+    }
+
+    mod out_of_memory {
+        use super::*;
+        use crate::libgit2::config::config::Config;
+        use crate::libgit2::repository::repository::Repository;
+        use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use core::ffi::{CStr, c_int, c_void};
+        use std::process::Command;
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+        /// Runs `body` alone in a child process, which installs its own allocator.
+        fn isolated(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        static REFUSING: AtomicBool = AtomicBool::new(false);
+        unsafe extern "C" {
+            fn malloc(n: usize) -> *mut c_void;
+            fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+            fn free(p: *mut c_void);
+        }
+
+        /// libc's allocator, refusing everything while `REFUSING` is set.
+        struct Refusing;
+
+        // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
+        unsafe impl Alloc for Refusing {
+            fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                // SAFETY: plain libc allocation.
+                NonNull::new(unsafe { malloc(len) }.cast())
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                len: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if REFUSING.load(SeqCst) {
+                    return None;
+                }
+                let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
+                // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
+                NonNull::new(unsafe { realloc(p, len) }.cast())
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                // SAFETY: `p` is a live libc block the caller gives up.
+                unsafe { free(p.as_ptr().cast()) }
+            }
+        }
+
+        fn install_refusing() {
+            let allocator = Allocator::new::<Refusing>();
+            // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with
+            // every member set; libgit2 copies it before anything is allocated.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+        }
+
+        /// Both constructors report an allocation failure as an error, build no owner,
+        /// leave no lock behind, and succeed once memory is available again.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn constructors_report_allocation_failure() {
+            isolated(
+                concat!(module_path!(), "::constructors_report_allocation_failure"),
+                || {
+                    install_refusing();
+                    let repo = Repository::new().unwrap();
+                    let path = std::env::temp_dir()
+                        .join(format!("crustify-unit-tx-oom-{}", std::process::id()));
+                    let _ = std::fs::remove_file(&path);
+                    let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+                    let mut config = Config::new().unwrap();
+                    // SAFETY: a live sole config and a NUL-terminated path; no repository.
+                    let rc = unsafe {
+                        ffi::git_config_add_file_ondisk(
+                            config.as_c_ptr(),
+                            cpath.as_ptr(),
+                            ffi::GIT_CONFIG_LEVEL_LOCAL,
+                            ptr::null(),
+                            0,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    // A first error allocates the thread's error state, which an
+                    // allocation failure would otherwise report instead.
+                    let _ = Config::new().unwrap().as_mut().lock().unwrap_err();
+                    REFUSING.store(true, SeqCst);
+                    // The pool's page is refused. A refused refdb allocation instead
+                    // crashes in C (`git_refdb_open` frees an uninitialised pointer), see
+                    // `Transaction::new`.
+                    let tx = Transaction::new(repo.as_ref()).map(drop);
+                    let locked = config.as_mut().lock().map(drop);
+                    REFUSING.store(false, SeqCst);
+                    assert_eq!(tx.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                    let locked = locked.unwrap_err();
+                    assert_eq!(locked.code(), Some(ErrorCode::Generic));
+                    assert_eq!(locked.class(), Some(ErrorClass::NoMemory));
+                    assert!(!path.with_extension("lock").exists());
+                    drop(Transaction::new(repo.as_ref()).unwrap());
+                    drop(config.as_mut().lock().unwrap());
+                    assert!(!path.with_extension("lock").exists());
+                    drop(config);
+                    let _ = std::fs::remove_file(path);
+                },
+            );
+        }
     }
 }
