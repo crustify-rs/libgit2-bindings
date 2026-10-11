@@ -398,6 +398,14 @@ pub struct ErrorBuf {
 }
 
 impl ErrorBuf {
+    /// An error of the raw `class` described by `message`, built in Rust.
+    pub(crate) fn new(class: c_int, message: &CStr) -> Self {
+        Self {
+            class,
+            message: message.to_owned(),
+        }
+    }
+
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
     pub fn class(&self) -> Option<ErrorClass> {

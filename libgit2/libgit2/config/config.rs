@@ -1225,6 +1225,34 @@ impl ConfigError {
         }
     }
 
+    /// A failure in `class` described by `message`, returned as `GIT_ERROR`: what a
+    /// [`CustomBackend`](crate::libgit2::config::sys::config::CustomBackend) reports.
+    pub fn new(class: ErrorClass, message: &CStr) -> Self {
+        Self {
+            code: ErrorCode::Generic.raw(),
+            error: ErrorBuf::new(class.raw(), message),
+        }
+    }
+
+    /// The same failure, returned as `code` ([`ErrorCode::NotFound`], say).
+    /// [`ErrorCode::Ok`] would read as success, so the code then stays `GIT_ERROR`.
+    pub fn with_code(mut self, code: ErrorCode) -> Self {
+        if code != ErrorCode::Ok {
+            self.code = code.raw();
+        }
+        self
+    }
+
+    /// Makes this the thread's last libgit2 error, verbatim (`git_error_set_str`), for
+    /// a callback to return its code. When libgit2 cannot be initialised the error is
+    /// not stored; the code is returned either way.
+    pub(crate) fn raise(&self) -> c_int {
+        if runtime_pinned() {
+            restore_last(&self.error);
+        }
+        self.code
+    }
+
     /// The returned code; `None` for one the header does not name
     /// ([`raw_code`](Self::raw_code) has it).
     pub fn code(&self) -> Option<ErrorCode> {
