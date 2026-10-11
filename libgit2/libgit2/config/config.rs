@@ -1281,7 +1281,7 @@ impl std::error::Error for ConfigError {}
 
 define_ctype!(
     /// A C configuration entry. Its strings belong to the backend's retained
-    /// storage, not individually to this struct. Lookups can return the same
+    /// storage, not individually to this struct. C's lookups can return the same
     /// entry, so safe owners are shared and never expose mutable handles.
     /// Iterator/callback entries are borrowed through `EntryRef`, never freed.
     /// No public C up-ref or standalone deep-copy primitive exists.
@@ -1338,20 +1338,89 @@ impl ConfigRef<'_, '_> {
     /// normalized by C and borrowed only during this call. Missing keys and
     /// invalid names retain C's error code and message.
     ///
+    /// The result is `git_config_get_entry`'s: the value of the highest-priority
+    /// backend holding the key, or the failure of a backend above it that cannot
+    /// reread its changed file. C reaches that failure through an entry pointer
+    /// the backend never wrote (`get_entry`, `config.c:811`), so the lookup is
+    /// composed from routines that report it cleanly: `name`'s multivar iterator
+    /// rereads every backend, lowest priority first, and a snapshot, whose
+    /// backends never reread, then hands out the entry. Two differences follow:
+    /// each lookup copies the configuration, so repeated lookups return distinct
+    /// entries; and a backend below the key's also rereads, so a failure there is
+    /// spent on this lookup, which succeeds, and a later one reads its old entries
+    /// where C would report it.
+    ///
+    /// libgit2 mishandles some allocation failures on this path: copying a file
+    /// backend's entries can corrupt its heap, as for [`snapshot`](Self::snapshot),
+    /// and one failure leaks an iterator.
+    ///
     /// Wraps: git_config_get_entry
     pub fn entry(&self, name: &CStr) -> Result<EntryArc, ConfigError> {
+        let before = last();
+        if let Some(failure) = self.reread_through(name)? {
+            return Err(failure);
+        }
+        let snapshot = self.snapshot()?;
         let mut out = ptr::null_mut();
-        // SAFETY: the live config handle keeps its repository alive for this
-        // call; name is NUL-terminated; out is an exclusive writable slot.
-        // Success acquires one independently releasable entry reference.
-        let rc = unsafe { ffi::git_config_get_entry(&mut out, self.as_ptr(), name.as_ptr()) };
+        // SAFETY: the snapshot is live for the call; its backends never reread,
+        // so `get` fails only as a found or missing key; name is NUL-terminated;
+        // out is an exclusive writable slot. Success acquires one reference.
+        let rc = unsafe { ffi::git_config_get_entry(&mut out, snapshot.as_c_ptr(), name.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
-        // SAFETY: success returned one reference paired with entry_free; other
-        // references may exist, so CArc permits only immutable access.
+        if last() != before {
+            // A lower backend's failure was spent: leave the thread's error as
+            // a successful C lookup does.
+            match before.class() {
+                Some(ErrorClass::None) => clear(),
+                Some(class) => set(class, before.message()),
+                None => {}
+            }
+        }
+        // SAFETY: success returned one reference paired with entry_free; the
+        // entry pins the snapshot's list, not the snapshot dropped below.
         let owner = unsafe { EntryArc::from_c(out) };
         Ok(owner.expect("successful entry lookup returned NULL"))
+    }
+
+    /// Rereads every backend, lowest priority first, through `name`'s multivar
+    /// iterator, which reports a backend that cannot reread without forming an
+    /// entry. Returns the failure of the highest-priority backend that failed
+    /// above every backend holding `name`: C's lookup stops there. An invalid
+    /// name fails first, as in C.
+    fn reread_through(&self, name: &CStr) -> Result<Option<ConfigError>, ConfigError> {
+        let mut iter = ptr::null_mut();
+        // SAFETY: the live handle keeps the config and its repository alive for
+        // the iteration; name is NUL-terminated and copied; no regexp; iter is
+        // a writable slot that C fills only on success.
+        let rc = unsafe {
+            ffi::git_config_multivar_iterator_new(
+                &mut iter,
+                self.as_ptr(),
+                name.as_ptr(),
+                ptr::null(),
+            )
+        };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        let mut failure = None;
+        // Built-in backends fail only while opening their iterator, after which
+        // libgit2 moves on to the next one, so this ends after every backend.
+        loop {
+            let mut entry = ptr::null_mut();
+            // SAFETY: live iterator and writable slot; C forms the entry only on
+            // success, and the borrowed entry is not kept past this call.
+            match unsafe { ffi::git_config_next(&mut entry, iter) } {
+                0 => failure = None,
+                ffi::GIT_ITEROVER => break,
+                rc => failure = Some(ConfigError::from_libgit2(rc)),
+            }
+        }
+        // SAFETY: releases the iterator once; no entry it lent is used.
+        unsafe { ffi::git_config_iterator_free(iter) };
+        Ok(failure)
     }
 }
 
@@ -1434,6 +1503,31 @@ impl<'a> EntryRef<'a> {
     }
 }
 
+impl fmt::Debug for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for EntryRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Entry")
+            .field("name", &self.name())
+            .field("value", &self.value())
+            .field("backend_type", &self.backend_type())
+            .field("origin_path", &self.origin_path())
+            .field("level", &self.level())
+            .field("include_depth", &self.include_depth())
+            .finish()
+    }
+}
+
+impl fmt::Debug for EntryMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 /// A mapping's recognition rule. String mode cannot be constructed with NULL;
 /// the other modes need no string and do not interpret `map_value` identically:
 /// integer mode returns the parsed input, not the record's mapped value.
@@ -1446,7 +1540,7 @@ pub enum MapMatch<'s> {
 }
 
 impl MapMatch<'_> {
-    pub fn map_type(self) -> MapType {
+    pub const fn map_type(self) -> MapType {
         match self {
             Self::False => MapType::False,
             Self::True => MapType::True,
@@ -1460,6 +1554,29 @@ impl MapMatch<'_> {
 /// C reads it during lookup and neither retains nor frees it. No C lifecycle
 /// primitive exists: moves and clones retain only immutable Rust borrows.
 /// Mutation replaces borrowed pointers without freeing either referent.
+///
+/// Records build in constant context and are `Sync`, so a mapping table can
+/// be a `static`, as C's are:
+///
+/// ```
+/// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
+/// static AUTOCRLF: [ConfigMap<'static>; 3] = [
+///     ConfigMap::new(MapMatch::False, 0),
+///     ConfigMap::new(MapMatch::True, 1),
+///     ConfigMap::new(MapMatch::String(c"input"), 2),
+/// ];
+/// assert_eq!(AUTOCRLF[2].as_ref().rule(), MapMatch::String(c"input"));
+/// ```
+///
+/// Records cross threads, but only with a string that outlives the thread:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
+/// use std::ffi::CString;
+/// let text = CString::new("temporary").unwrap();
+/// let map = ConfigMap::new(MapMatch::String(&text), 1);
+/// std::thread::spawn(move || drop(map));
+/// ```
 ///
 /// ```compile_fail
 /// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
@@ -1523,9 +1640,27 @@ unsafe impl<'s> CCell for ConfigMap<'s> {
         Self: 'a;
 }
 
+// SAFETY: the record is two scalars and a pointer that only the setters write,
+// NULL or a `&'s CStr`'s: a shared, immutable borrow of `CStr`, which is `Sync`.
+// Nothing has thread affinity or interior mutability, and nothing is released on
+// drop, so moving the record moves bytes.
+unsafe impl Send for ConfigMap<'_> {}
+// SAFETY: as above; `ConfigMapMut` is an exclusive borrow, as `&mut`.
+unsafe impl Send for ConfigMapMut<'_, '_> {}
+
+// SAFETY: as above, and shared access only reads the fields (every write goes
+// through `ConfigMapMut`, which excludes other handles), so readers race nothing.
+unsafe impl Sync for ConfigMap<'_> {}
+// SAFETY: as above; `ConfigMapRef` is a shared borrow, as `&`.
+unsafe impl Send for ConfigMapRef<'_, '_> {}
+// SAFETY: as above.
+unsafe impl Sync for ConfigMapRef<'_, '_> {}
+// SAFETY: `&ConfigMapMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for ConfigMapMut<'_, '_> {}
+
 impl<'s> ConfigMap<'s> {
     /// Builds a resource-free record with a valid discriminator/string pair.
-    pub fn new(rule: MapMatch<'s>, map_value: i32) -> Self {
+    pub const fn new(rule: MapMatch<'s>, map_value: i32) -> Self {
         Self(
             ffi::git_configmap {
                 type_: rule.map_type().raw(),
@@ -1554,6 +1689,28 @@ impl<'s> ConfigMap<'s> {
 impl Clone for ConfigMap<'_> {
     fn clone(&self) -> Self {
         Self(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for ConfigMap<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for ConfigMapRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConfigMap")
+            .field("map_type", &self.map_type())
+            .field("str_match", &self.str_match())
+            .field("map_value", &self.map_value())
+            .finish()
+    }
+}
+
+impl fmt::Debug for ConfigMapMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
     }
 }
 
@@ -1690,6 +1847,12 @@ mod unit_tests {
         std::fs::remove_file(file).unwrap();
     }
     use super::*;
+    use crate::libgit2::util::errors::ErrorCode;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+    use core::ffi::{CStr, c_int, c_void};
+    use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     #[test]
     fn mapping_layout_borrows_clone_and_seams() {
@@ -1767,12 +1930,123 @@ mod unit_tests {
         assert_eq!(exclusive.as_ref().origin_path(), Some(c"origin"));
         assert_eq!(exclusive.as_mut().as_ref().value(), None);
     }
-    use crate::libgit2::util::errors::ErrorCode;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-    use core::ffi::{CStr, c_int, c_void};
-    use core::mem::size_of;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+
+    /// Mapping records and their handles cross threads; entry handles print
+    /// their fields, and mapping records print their rule.
+    #[test]
+    fn debug_and_thread_traits() {
+        fn shared<T: Send + Sync>(_: &T) {}
+        const TABLE: [ConfigMap<'static>; 2] = [
+            ConfigMap::new(MapMatch::Int32, 0),
+            ConfigMap::new(MapMatch::String(c"in"), 2),
+        ];
+        let mut map = TABLE[1].clone();
+        shared(&map);
+        shared(&map.as_ref());
+        shared(&map.as_mut());
+        let expected = r#"ConfigMap { map_type: String, str_match: Some("in"), map_value: 2 }"#;
+        assert_eq!(format!("{map:?}"), expected);
+        assert_eq!(format!("{:?}", map.as_ref()), expected);
+        assert_eq!(format!("{:?}", map.as_mut()), expected);
+        assert_eq!(
+            format!("{:?}", TABLE[0]),
+            "ConfigMap { map_type: Int32, str_match: None, map_value: 0 }"
+        );
+
+        let mut raw = ffi::git_config_entry {
+            name: c"a.b".as_ptr(),
+            value: ptr::null(),
+            backend_type: c"file".as_ptr(),
+            origin_path: c"\xff".as_ptr(),
+            include_depth: 1,
+            level: ffi::GIT_CONFIG_LEVEL_LOCAL,
+        };
+        let expected = concat!(
+            r#"Entry { name: Some("a.b"), value: None, backend_type: Some("file"), "#,
+            r#"origin_path: Some("\xff"), level: ConfigLevel(5), include_depth: 1 }"#
+        );
+        // SAFETY: a Rust-owned fixture with initialized fields and static NUL
+        // strings, unchanged while the handle lives; nothing adopts it.
+        let entry = unsafe { EntryRef::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(format!("{entry:?}"), expected);
+        // SAFETY: as above, after the shared handle's last use; exclusive.
+        let exclusive = unsafe { EntryMut::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(format!("{exclusive:?}"), expected);
+        let value = Entry(raw, PhantomData);
+        assert_eq!(format!("{value:?}"), expected);
+    }
+
+    /// A backend that cannot reread its changed file fails a lookup that would
+    /// consult it, with libgit2's parse error, and without the unwritten entry
+    /// pointer C's `get_entry` forms for it (UBSan: member access within null
+    /// pointer). Afterwards the backend serves its old entries, as in C. An
+    /// invalid name fails first, without spending the reread; a failure spent
+    /// below the key's backend leaves the thread's error as it was.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entry_reports_failed_rereads() {
+        let dir =
+            std::env::temp_dir().join(format!("crustify-entry-rereads-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (low, high) = (dir.join("global"), dir.join("local"));
+        std::fs::write(&low, b"[test]\n shared = g\n").unwrap();
+        std::fs::write(&high, b"[test]\n key = high\n").unwrap();
+        let mut cfg = Config::new().unwrap();
+        for (path, level) in [(&low, ConfigLevel::GLOBAL), (&high, ConfigLevel::LOCAL)] {
+            let path = CString::new(path.to_str().unwrap()).unwrap();
+            cfg.as_mut().add_file(&path, level, None, false).unwrap();
+        }
+        let value = |cfg: &ConfigBox<'_>, key: &CStr| {
+            let entry = cfg.as_ref().entry(key)?;
+            Ok::<_, ConfigError>(entry.as_ref().value().unwrap().to_owned())
+        };
+        let parse_error = |path: &std::path::Path| {
+            format!(
+                "failed to parse config file: missing ']' in section header (in {}:1)",
+                path.display()
+            )
+        };
+
+        std::fs::write(&high, b"[test\n key = broken\n").unwrap();
+        let error = value(&cfg, c"test.key").unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Generic));
+        assert_eq!(error.class(), Some(ErrorClass::Config));
+        assert_eq!(error.message().to_str().unwrap(), parse_error(&high));
+        assert_eq!(last(), *error.error());
+        assert_eq!(value(&cfg, c"test.key").unwrap().as_c_str(), c"high");
+        assert_eq!(value(&cfg, c"test.shared").unwrap().as_c_str(), c"g");
+
+        std::fs::write(&high, b"[test\n key = broken again\n").unwrap();
+        let error = value(&cfg, c"bad").unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::InvalidSpec));
+        assert_eq!(error.message(), c"invalid config item name 'bad'");
+        let error = value(&cfg, c"test.shared").unwrap_err();
+        assert_eq!(error.message().to_str().unwrap(), parse_error(&high));
+
+        for seeded in [true, false] {
+            std::fs::write(
+                &low,
+                if seeded {
+                    &b"[test\n"[..]
+                } else {
+                    &b"[test\n\n"[..]
+                },
+            )
+            .unwrap();
+            if seeded {
+                set(ErrorClass::Odb, c"an earlier, unrelated failure");
+            } else {
+                clear();
+            }
+            let before = last();
+            assert_eq!(value(&cfg, c"test.key").unwrap().as_c_str(), c"high");
+            assert_eq!(last(), before, "seeded: {seeded}");
+        }
+        assert_eq!(value(&cfg, c"test.shared").unwrap().as_c_str(), c"g");
+        drop(cfg);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1877,6 +2151,53 @@ mod unit_tests {
                 assert_eq!(get(snapshot.as_ref(), c"a.b"), Ok(12));
                 drop(snapshot);
                 std::fs::remove_file(path).unwrap();
+            },
+        );
+    }
+
+    /// Refusing each allocation of an entry lookup in turn, through the reread
+    /// walk and the snapshot, fails with libgit2's out-of-memory error, leaks
+    /// nothing (LSan) and leaves the config usable, until the lookup completes.
+    /// The config has no file backend: a file backend's iterator and snapshot
+    /// duplicate its entry list, and `git_config_list_dup_entry` corrupts the
+    /// heap when an allocation fails there (`reviews/.../config/wave-1/batch-0/misc/config-list-dup-corrupts-heap-on-allocation-failure`).
+    /// The lookup's second allocation is never refused: C leaks the iterator
+    /// built by the first (`misc/multivar-iterator-leaks-inner-on-allocation-failure`).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entry_allocation_failures_leave_config_usable() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::entry_allocation_failures_leave_config_usable"
+            ),
+            || {
+                install_refusing();
+                let cfg = Config::new().unwrap();
+                // Prime TLS error storage before refusing allocations.
+                let missing = cfg.as_ref().entry(c"a.b").unwrap_err();
+                assert_eq!(missing.code(), Some(ErrorCode::NotFound));
+                let mut granted = 0;
+                let error = loop {
+                    assert!(granted < 10_000, "lookup never completed");
+                    if granted == 1 {
+                        granted += 1;
+                        continue;
+                    }
+                    ALLOWED_ALLOCATIONS.store(granted, SeqCst);
+                    let error = cfg.as_ref().entry(c"a.b").unwrap_err();
+                    ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
+                    if error.class() != Some(ErrorClass::NoMemory) {
+                        break error;
+                    }
+                    assert_eq!(
+                        cfg.as_ref().entry(c"a.c").unwrap_err().code(),
+                        missing.code()
+                    );
+                    granted += 1;
+                };
+                assert!(granted > 1, "both stages allocate");
+                assert_eq!(error, missing);
             },
         );
     }

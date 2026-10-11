@@ -555,7 +555,7 @@ fn mapping_mode_values_match_c_behavior() {
 mod entry_and_map_types {
     use super::*;
     use core::ptr::addr_of;
-    use libgit2::libgit2::config::config::{ConfigLevel, ConfigMap, MapMatch};
+    use libgit2::libgit2::config::config::{ConfigLevel, ConfigMap, ConfigRef, MapMatch};
     use libgit2::libgit2::repository::repository::Repository;
 
     fn bytes(p: *const core::ffi::c_char) -> Option<Vec<u8>> {
@@ -779,6 +779,331 @@ mod entry_and_map_types {
                 );
                 assert_eq!(c_out, expected);
             }
+        }
+    }
+
+    /// One `git_config_lookup_map_value` observation: code, output, error.
+    fn lookup(maps: *const ffi::git_configmap, n: usize, input: &CStr) -> Record {
+        let mut out = -999;
+        // SAFETY: `maps` addresses `n` initialized records whose String rules
+        // have live strings; the input is NUL-terminated, the output writable.
+        let rc = unsafe { ffi::git_config_lookup_map_value(&mut out, maps, n, input.as_ptr()) };
+        record(rc, out, c_error)
+    }
+
+    /// Tables of records built and edited through `ConfigMap` and of C records
+    /// built by hand, with independent strings, map every input alike through
+    /// C's dispatcher, over every prefix, after each edit.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rust_map_tables_dispatch_like_c_tables() {
+        init();
+        static RUST_TABLE: [ConfigMap<'static>; 4] = [
+            ConfigMap::new(MapMatch::False, 10),
+            ConfigMap::new(MapMatch::True, 11),
+            ConfigMap::new(MapMatch::String(c"input"), 12),
+            ConfigMap::new(MapMatch::Int32, 13),
+        ];
+        let (c_input, c_later) = (
+            CString::new("input").unwrap(),
+            CString::new("Later").unwrap(),
+        );
+        let rust_later = CString::new("Later").unwrap();
+        let mut c_table = [
+            (ffi::GIT_CONFIGMAP_FALSE, ptr::null(), 10),
+            (ffi::GIT_CONFIGMAP_TRUE, ptr::null(), 11),
+            (ffi::GIT_CONFIGMAP_STRING, c_input.as_ptr(), 12),
+            (ffi::GIT_CONFIGMAP_INT32, ptr::null(), 13),
+        ]
+        .map(|(type_, str_match, map_value)| ffi::git_configmap {
+            type_,
+            str_match,
+            map_value,
+        });
+        let mut rust_table = RUST_TABLE.to_vec();
+        let inputs = [
+            c"no", c"on", c"INPUT", c"later", c"2k", c"-0x10", c"", c"neither",
+        ];
+        let compare = |step: &str, rust: &[ConfigMap<'_>], c: &[ffi::git_configmap]| {
+            for (r, c) in rust.iter().zip(c) {
+                assert_eq!(r.as_ref().map_type().raw(), c.type_, "{step}");
+                assert_eq!(r.as_ref().map_value(), c.map_value, "{step}");
+                assert_eq!(
+                    r.as_ref()
+                        .str_match()
+                        .map(CStr::to_bytes)
+                        .map(<[u8]>::to_vec),
+                    bytes(c.str_match),
+                    "{step}"
+                );
+            }
+            for n in 0..=c.len() {
+                for input in inputs {
+                    // `ConfigMap` is transparent over `git_configmap`.
+                    let rust_maps = rust.as_ptr().cast::<ffi::git_configmap>();
+                    assert_eq!(
+                        lookup(rust_maps, n, input),
+                        lookup(c.as_ptr(), n, input),
+                        "{step}: {input:?} over {n} records"
+                    );
+                }
+            }
+        };
+        compare("constant table", &rust_table, &c_table);
+        rust_table[2].as_mut().set_str_match(&rust_later);
+        c_table[2].str_match = c_later.as_ptr();
+        compare("retargeted string rule", &rust_table, &c_table);
+        let mut first = rust_table[0].as_mut();
+        first.set_match(MapMatch::String(c""));
+        first.set_map_value(-1);
+        c_table[0] = ffi::git_configmap {
+            type_: ffi::GIT_CONFIGMAP_STRING,
+            str_match: c"".as_ptr(),
+            map_value: -1,
+        };
+        compare("empty string rule first", &rust_table, &c_table);
+        rust_table[3].as_mut().set_match(MapMatch::True);
+        c_table[3].type_ = ffi::GIT_CONFIGMAP_TRUE;
+        compare("integer rule turned boolean", &rust_table, &c_table);
+        rust_table[1].as_mut().set_str_match(&rust_later);
+        c_table[1].str_match = c_later.as_ptr();
+        compare("ignored string on a boolean rule", &rust_table, &c_table);
+    }
+
+    /// An entry's fields as both sides see them: name, value, backend type,
+    /// origin file name (each side reads its own file), level, include depth.
+    type Fields = (
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        Option<std::ffi::OsString>,
+        i32,
+        u32,
+    );
+
+    fn file_name(origin: Option<Vec<u8>>) -> Option<std::ffi::OsString> {
+        use std::os::unix::ffi::OsStringExt;
+        origin.map(|o| {
+            Path::new(&std::ffi::OsString::from_vec(o))
+                .file_name()
+                .unwrap()
+                .into()
+        })
+    }
+
+    fn c_fields(entry: *const ffi::git_config_entry) -> Fields {
+        // SAFETY: `entry` is a live acquired entry, whose strings stay live and
+        // unchanged until it is released; fields are read by projection.
+        unsafe {
+            (
+                bytes(addr_of!((*entry).name).read()),
+                bytes(addr_of!((*entry).value).read()),
+                bytes(addr_of!((*entry).backend_type).read()),
+                file_name(bytes(addr_of!((*entry).origin_path).read())),
+                addr_of!((*entry).level).read(),
+                addr_of!((*entry).include_depth).read(),
+            )
+        }
+    }
+
+    fn rust_fields(entry: libgit2::libgit2::config::config::EntryRef<'_>) -> Fields {
+        let owned = |s: Option<&CStr>| s.map(|s| s.to_bytes().to_vec());
+        (
+            owned(entry.name()),
+            owned(entry.value()),
+            owned(entry.backend_type()),
+            file_name(owned(entry.origin_path())),
+            entry.level().raw(),
+            entry.include_depth(),
+        )
+    }
+
+    type Lookup = Result<Fields, (c_int, (c_int, String))>;
+
+    /// Entry selection across two levels, multivars, a write that replaces the
+    /// file's list, a snapshot, level and HIGHEST views, and a lower file broken
+    /// then repaired matches C step by step, and every acquired entry still
+    /// reads the same after both configs are gone.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entry_selection_sequences_match_c() {
+        init();
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-equiv-entry-levels-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let files = |side: &str| {
+            let side_dir = dir.join(side);
+            std::fs::create_dir_all(&side_dir).unwrap();
+            let low = side_dir.join("global");
+            let high = side_dir.join("local");
+            std::fs::write(&low, b"[test]\n key = low\n shared = g\n").unwrap();
+            std::fs::write(&high, b"[test]\n key = high\n[multi]\n v = a\n v = b\n").unwrap();
+            [low, high].map(|p| CString::new(p.to_str().unwrap()).unwrap())
+        };
+        let [c_low, c_high] = files("c");
+        let [rust_low, rust_high] = files("rust");
+        let levels = [ConfigLevel::GLOBAL, ConfigLevel::LOCAL];
+
+        let mut c_cfg = ptr::null_mut();
+        // SAFETY: writable slot; the runtime is pinned by `init`.
+        assert_eq!(unsafe { ffi::git_config_new(&mut c_cfg) }, 0);
+        for (path, level) in [&c_low, &c_high].into_iter().zip(levels) {
+            // SAFETY: live config; C copies the path; no repository, no force.
+            let rc = unsafe {
+                ffi::git_config_add_file_ondisk(c_cfg, path.as_ptr(), level.raw(), ptr::null(), 0)
+            };
+            assert_eq!(rc, 0);
+        }
+        let mut rust_cfg = Config::new().unwrap();
+        for (path, level) in [&rust_low, &rust_high].into_iter().zip(levels) {
+            rust_cfg
+                .as_mut()
+                .add_file(path, level, None, false)
+                .unwrap();
+        }
+
+        let mut c_kept = Vec::new();
+        let mut rust_kept = Vec::new();
+        let mut c_get = |cfg: *mut ffi::git_config, key: &CStr| -> Lookup {
+            let mut entry = ptr::null_mut();
+            // SAFETY: live config, writable slot, NUL-terminated key.
+            let rc = unsafe { ffi::git_config_get_entry(&mut entry, cfg, key.as_ptr()) };
+            if rc < 0 {
+                return Err((rc, c_error()));
+            }
+            c_kept.push(entry);
+            Ok(c_fields(entry))
+        };
+        let mut rust_get = |cfg: ConfigRef<'_, '_>, key: &CStr| -> Lookup {
+            let entry = cfg.entry(key).map_err(|e| {
+                let message = e.message().to_string_lossy().into_owned();
+                (e.raw_code(), (e.raw_class(), message))
+            })?;
+            let fields = rust_fields(entry.as_ref());
+            rust_kept.push(entry);
+            Ok(fields)
+        };
+        let step = |what: &str, c: Lookup, rust: Lookup| assert_eq!(c, rust, "{what}");
+
+        for key in [
+            c"test.key",
+            c"TEST.shared",
+            c"multi.v",
+            c"test.missing",
+            c"bad",
+        ] {
+            step(
+                "initial lookups",
+                c_get(c_cfg, key),
+                rust_get(rust_cfg.as_ref(), key),
+            );
+        }
+        let (key, value) = (c"test.key", c"new");
+        // SAFETY: live config; both strings are borrowed for the call.
+        let rc = unsafe { ffi::git_config_set_string(c_cfg, key.as_ptr(), value.as_ptr()) };
+        let status = rust_cfg
+            .as_mut()
+            .set_string(c"test.key", c"new")
+            .map_err(|e| e.raw_code());
+        assert_eq!(status, if rc < 0 { Err(rc) } else { Ok(()) });
+        let written = c_get(c_cfg, c"test.key");
+        step(
+            "after the write",
+            written.clone(),
+            rust_get(rust_cfg.as_ref(), c"test.key"),
+        );
+        assert_eq!(written.unwrap().4, ConfigLevel::LOCAL.raw());
+
+        let mut c_snapshot = ptr::null_mut();
+        // SAFETY: live source config and writable slot.
+        let rc = unsafe { ffi::git_config_snapshot(&mut c_snapshot, c_cfg) };
+        assert_eq!(rc, 0);
+        let rust_snapshot = rust_cfg.as_ref().snapshot().unwrap();
+        for key in [c"test.key", c"test.shared", c"multi.v"] {
+            step(
+                "snapshot",
+                c_get(c_snapshot, key),
+                rust_get(rust_snapshot.as_ref(), key),
+            );
+        }
+
+        let mut c_view = ptr::null_mut();
+        let global = ConfigLevel::GLOBAL.raw();
+        // SAFETY: live parent config and writable slot.
+        let rc = unsafe { ffi::git_config_open_level(&mut c_view, c_cfg, global) };
+        assert_eq!(rc, 0);
+        {
+            let mut parent = rust_cfg.as_mut();
+            let rust_view = parent.open_level(ConfigLevel::GLOBAL).unwrap();
+            for key in [c"test.key", c"multi.v"] {
+                step(
+                    "global view",
+                    c_get(c_view, key),
+                    rust_get(rust_view.as_ref(), key),
+                );
+            }
+        }
+
+        // A HIGHEST view holds the top backend under the selector level.
+        let mut c_top = ptr::null_mut();
+        let highest = ConfigLevel::HIGHEST.raw();
+        // SAFETY: live parent config and writable slot.
+        let rc = unsafe { ffi::git_config_open_level(&mut c_top, c_cfg, highest) };
+        assert_eq!(rc, 0);
+        {
+            let mut parent = rust_cfg.as_mut();
+            let rust_top = parent.open_level(ConfigLevel::HIGHEST).unwrap();
+            for key in [c"test.key", c"test.shared"] {
+                step(
+                    "highest view",
+                    c_get(c_top, key),
+                    rust_get(rust_top.as_ref(), key),
+                );
+            }
+        }
+
+        // The global file is rewritten into something libgit2 cannot parse. C's
+        // lookup of a key the local file holds never rereads it, so it succeeds,
+        // and so does Rust's, which rereads it. C reaches a backend that fails to
+        // reread only through an unwritten entry pointer (config.c:811), so no
+        // step here asks C to; see `unit_tests::entry_reports_failed_rereads`.
+        // Once repaired, both read the new global file.
+        let global = |side: &str| dir.join(side).join("global");
+        std::fs::write(global("c"), b"[test\n shared = broken\n").unwrap();
+        std::fs::write(global("rust"), b"[test\n shared = broken\n").unwrap();
+        let key = c"test.key";
+        step(
+            "broken lower file",
+            c_get(c_cfg, key),
+            rust_get(rust_cfg.as_ref(), key),
+        );
+        std::fs::write(global("c"), b"[test]\n shared = repaired-value\n").unwrap();
+        std::fs::write(global("rust"), b"[test]\n shared = repaired-value\n").unwrap();
+        for key in [c"test.shared", c"test.key"] {
+            step(
+                "repaired lower file",
+                c_get(c_cfg, key),
+                rust_get(rust_cfg.as_ref(), key),
+            );
+        }
+
+        // SAFETY: each config reference is released once; entries keep their lists.
+        unsafe {
+            ffi::git_config_free(c_top);
+            ffi::git_config_free(c_view);
+            ffi::git_config_free(c_snapshot);
+            ffi::git_config_free(c_cfg);
+        }
+        drop(rust_snapshot);
+        drop(rust_cfg);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(c_kept.len(), rust_kept.len());
+        for (c_entry, entry) in c_kept.into_iter().zip(rust_kept) {
+            assert_eq!(c_fields(c_entry), rust_fields(entry.as_ref()));
+            // SAFETY: releases exactly this acquired C entry reference.
+            unsafe { ffi::git_config_entry_free(c_entry) };
         }
     }
 }

@@ -409,3 +409,8 @@ git_config_set_multivar
 git_config_set_string
 git_config_set_writeorder
 git_config_snapshot
+
+# config review wave 1 batch 0: entry lookup without get_entry on a failing backend
+git_config_iterator_free
+git_config_multivar_iterator_new
+git_config_next
