@@ -1,9 +1,13 @@
 #![forbid(unsafe_code)]
 #[path = "../support/diff.rs"]
 mod support;
+use libgit2::ffi;
 use libgit2::libgit2::diff::diff::{Diff, DiffArc};
 use libgit2::libgit2::index::index::Index;
-use libgit2::libgit2::oid::oid::OidType;
+use libgit2::libgit2::object::tree::Tree;
+use libgit2::libgit2::oid::oid::{Oid, OidType};
+use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
+use std::ffi::CString;
 use support::{PATCH, RENAME, Repo};
 
 #[test]
@@ -135,4 +139,119 @@ fn independent_thread_local_diffs() {
     for thread in threads {
         thread.join().unwrap();
     }
+}
+
+/// Trees and indices of the other object-id type than the repository's reach every
+/// generator, both ways round: libgit2 copies each id with its type and compares by
+/// type first, so the deltas stay in bounds and carry the input's own type, while
+/// `id_abbrev` follows the repository's.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn foreign_object_id_type_inputs_stay_in_bounds() {
+    let res = format!("{}/../../../tests/resources", env!("CARGO_MANIFEST_DIR"));
+    let bare256 =
+        Repository::open(&CString::new(format!("{res}/testrepo_256.git")).unwrap()).unwrap();
+    let flat = Oid::from_string(
+        c"f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736",
+        OidType::Sha256,
+    )
+    .unwrap();
+    let tree256 = Tree::lookup(bare256.as_ref(), flat.as_ref()).unwrap();
+    let index256 = Index::open_with_oid_type(
+        &CString::new(format!("{res}/git-sha256.index")).unwrap(),
+        OidType::Sha256,
+    )
+    .unwrap();
+    let dir = std::env::temp_dir().join(format!("crustify-diff-sha256-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut opts = InitOptions::new();
+    opts.as_mut().set_oid_type(Some(OidType::Sha256));
+    opts.as_mut().set_flags(InitFlag::Mkpath.into());
+    let repo256 =
+        Repository::init_ext(&CString::new(dir.to_str().unwrap()).unwrap(), opts.as_mut()).unwrap();
+    std::fs::write(dir.join("file"), b"wd\n").unwrap();
+    let fixture = Repo::new();
+    std::fs::write(fixture.path.join("file"), b"wd\n").unwrap();
+    let repo = fixture.get().as_ref();
+    let tree1 = fixture.tree(b"old\n");
+    let index1 = Index::new().unwrap();
+    let r256 = repo256.as_ref();
+    let (sha1, sha256) = (OidType::Sha1.raw() as u8, OidType::Sha256.raw() as u8);
+    let (added, deleted, modified) = (
+        ffi::GIT_DELTA_ADDED,
+        ffi::GIT_DELTA_DELETED,
+        ffi::GIT_DELTA_MODIFIED,
+    );
+    // (diff, delta count, distinct (status, old type, new type, old/new abbrev)).
+    let cases = [
+        (
+            Diff::tree_to_tree(repo, Some(tree256.as_ref()), Some(tree1.as_ref())),
+            4,
+            vec![(added, sha1, sha1, 0, 40), (deleted, sha256, sha1, 40, 0)],
+        ),
+        (
+            Diff::tree_to_index(repo, Some(tree1.as_ref()), Some(index256.as_ref())),
+            4345,
+            vec![(added, sha1, sha256, 0, 40), (deleted, sha1, sha1, 40, 0)],
+        ),
+        (
+            Diff::index_to_workdir(repo, Some(index256.as_ref())),
+            4344,
+            vec![(deleted, sha256, sha1, 40, 0)],
+        ),
+        (
+            Diff::tree_to_workdir(repo, Some(tree256.as_ref())),
+            3,
+            vec![(deleted, sha256, sha1, 40, 0)],
+        ),
+        (
+            Diff::tree_to_workdir_with_index(repo, Some(tree256.as_ref())),
+            3,
+            vec![(deleted, sha256, sha1, 40, 0)],
+        ),
+        (
+            Diff::index_to_index(repo, index1.as_ref(), index256.as_ref()),
+            4344,
+            vec![(added, sha1, sha256, 0, 40)],
+        ),
+        (
+            Diff::tree_to_tree(r256, Some(tree1.as_ref()), Some(tree256.as_ref())),
+            4,
+            vec![
+                (added, sha256, sha256, 0, 64),
+                (deleted, sha1, sha256, 64, 0),
+            ],
+        ),
+        (
+            Diff::tree_to_index(r256, Some(tree1.as_ref()), Some(index1.as_ref())),
+            1,
+            vec![(deleted, sha1, sha256, 64, 0)],
+        ),
+        (
+            Diff::tree_to_workdir(r256, Some(tree1.as_ref())),
+            1,
+            vec![(modified, sha1, sha256, 64, 64)],
+        ),
+        (
+            Diff::index_to_index(r256, index1.as_ref(), index256.as_ref()),
+            4344,
+            vec![(added, sha256, sha256, 0, 64)],
+        ),
+    ];
+    for (diff, len, expected) in cases {
+        let diff = diff.unwrap();
+        let diff = diff.as_ref();
+        assert_eq!(diff.len(), len);
+        let found: std::collections::BTreeSet<_> = (0..len)
+            .map(|i| {
+                let (status, _, _, _, old, new) = support::delta(diff.get(i).unwrap());
+                (status, old.2, new.2, old.6, new.6)
+            })
+            .collect();
+        assert_eq!(found, expected.into_iter().collect());
+    }
+    drop(tree256);
+    drop(bare256);
+    drop(repo256);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -16,16 +16,19 @@
 //! File views are the minimal dependency needed to project those embedded records.
 
 use crate::ffi;
+use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::index::index::IndexRef;
+use crate::libgit2::index::pathspec::patterns_are_parsable;
 use crate::libgit2::object::tree::TreeRef;
 use crate::libgit2::oid::oid::{OidRef, OidType};
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 use core::ffi::CStr;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of};
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype};
+use std::ffi::CString;
 
 /// The exact nonzero C result and a snapshot of its thread-local error.
 /// Positive progress-callback cancellation codes are preserved, not normalized.
@@ -69,6 +72,19 @@ impl std::error::Error for DiffError {}
 
 /// Opaque C layout, carrying the repository's keepalive lifetime.
 /// Parsed diffs have no repository and use `'static`.
+///
+/// Neither the layout nor its shared handle is `Sync`:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::diff::diff::Diff;
+/// fn sync<T: Sync>() {}
+/// sync::<Diff<'static>>();
+/// ```
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::diff::diff::DiffRef;
+/// fn sync<T: Sync>() {}
+/// sync::<DiffRef<'static, 'static>>();
+/// ```
 ///
 /// Wraps: git_diff
 /// Handwritten
@@ -205,14 +221,14 @@ impl Diff<'static> {
         if !runtime_pinned() {
             return Err(DiffError::from_libgit2(-1));
         }
-        let mut out = ptr::null_mut();
+        let (mut out, data) = (ptr::null_mut(), content.as_ptr().cast());
         // SAFETY: content is readable for its length, including the non-null empty
         // slice; out is writable. C copies the data used after parsing; retained
         // input cursors are never dereferenced again (see the module docs).
-        let rc =
-            unsafe { ffi::git_diff_from_buffer(&mut out, content.as_ptr().cast(), content.len()) };
-        // SAFETY: successful parsing hands out a fresh reference with no repository.
-        unsafe { from_raw_result(out, rc) }
+        let rc = unsafe { ffi::git_diff_from_buffer(&mut out, data, content.len()) };
+        // SAFETY: successful parsing hands out a fresh sole reference with no repository,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Parse with an explicit object-id type (the entire parse-options surface).
@@ -239,23 +255,20 @@ impl Diff<'static> {
                 &mut opts,
             )
         };
-        // SAFETY: successful parsing hands out a fresh reference with no repository.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: successful parsing hands out a fresh sole reference with no repository,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 }
 
-/// Adopts a constructor result, preserving the error code.
-///
-/// # Safety
-/// On success out must be a fresh sole reference whose repository and retained
-/// option referents outlive 'r; on failure out must transfer no allocation.
-unsafe fn from_raw_result<'r>(out: *mut ffi::git_diff, rc: i32) -> Result<DiffBox<'r>, DiffError> {
+/// The diff a constructor returning `rc` handed out, or its error with the exact code.
+/// Every constructor leaves its output NULL whenever it returns nonzero, including a
+/// progress callback's positive code, so a failure adopts nothing.
+fn constructed<'r>(rc: i32, diff: Option<DiffBox<'r>>) -> Result<DiffBox<'r>, DiffError> {
     if rc != 0 {
         return Err(DiffError::from_libgit2(rc));
     }
-    // SAFETY: the calling constructor guarantees the allocation, keepalive and
-    // sole ownership; DiffFree calls its paired destructor.
-    Ok(unsafe { DiffBox::from_c(out) }.expect("successful diff construction returned NULL"))
+    Ok(diff.expect("successful diff construction returned NULL"))
 }
 
 impl<'r> Diff<'r> {
@@ -280,8 +293,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Compare a tree (None is empty) to an index (None loads the repository index).
@@ -305,8 +319,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Compare an index (None loads the repository index) to the working directory.
@@ -328,8 +343,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Compare a tree (None is empty) directly to the working directory.
@@ -351,8 +367,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Compare a tree to the working directory, accounting for staged changes.
@@ -374,8 +391,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Compare two indices. A repository is required by this C revision.
@@ -399,8 +417,9 @@ impl<'r> Diff<'r> {
                 ptr::null(),
             )
         };
-        // SAFETY: success yields a sole reference whose retained repo lives for 'r.
-        unsafe { from_raw_result(out, rc) }
+        // SAFETY: success yields a sole reference whose retained repo lives for 'r,
+        // released by DiffFree; every failure leaves `out` NULL (adopted as None).
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 }
 
@@ -531,14 +550,24 @@ impl<'r> Diff<'r> {
     /// wrappers. Prefer the six safe default constructors when possible.
     ///
     /// # Safety
-    /// `options.version` must equal `GIT_DIFF_OPTIONS_VERSION`. All nested pointers
-    /// must satisfy git_diff_options: pathspec is a readable array of its stated
-    /// count, every string is NUL-terminated, callbacks and payload match each other.
-    /// Their referents must remain valid for `'r` (C copies the options into the
-    /// diff). Callbacks must not unwind, mutate/free input objects or reenter access
-    /// to the diff; callback argument pointers must not escape the callback.
-    /// No other access may conflict with callback payload writes. Input trees and
-    /// indices must be compatible with the repository's object-id type.
+    /// All nested pointers must satisfy git_diff_options: pathspec is a readable
+    /// array of its stated count, every string is NUL-terminated, callbacks and
+    /// payload match each other. Their referents must remain valid for `'r` (C copies
+    /// the options into the diff). Callbacks must not unwind, mutate/free input
+    /// objects or reenter access to the diff; callback argument pointers must not
+    /// escape the callback. No other access may conflict with callback payload writes.
+    ///
+    /// The rest is checked, so it is no obligation: another `options.version`, a
+    /// nonzero `options.oid_type` other than the repository's, or an empty pathspec
+    /// pattern beside a non-empty one, which libgit2 would read past
+    /// (`parse_optimized_patterns`, `src/libgit2/attr_file.c`), fails with code -1 and
+    /// a `GIT_ERROR_INVALID` error. Inputs of the other object-id type are accepted,
+    /// as by the safe constructors; their deltas keep each input id's own type.
+    ///
+    /// The version is checked here, with libgit2's own error: `git_diff_tree_to_workdir`
+    /// and `git_diff_index_to_index` return its refusal as 1 instead of -1, a code a
+    /// progress callback could also have returned (`(error = f(...) < 0)` in
+    /// `diff_generate.c`).
     ///
     /// This is a temporary raw seam for the unavailable git_diff_options wrapper.
     pub unsafe fn generate_with_options(
@@ -546,6 +575,22 @@ impl<'r> Diff<'r> {
         inputs: DiffInputs<'_, '_>,
         options: &'r ffi::git_diff_options,
     ) -> Result<DiffBox<'r>, DiffError> {
+        if !(1..=ffi::GIT_DIFF_OPTIONS_VERSION).contains(&options.version) {
+            // libgit2 formats the unsigned version with `%d`.
+            let version = options.version as i32;
+            let message = format!("invalid version {version} on git_diff_options");
+            set(
+                ErrorClass::Invalid,
+                &CString::new(message).expect("a formatted number has no NUL"),
+            );
+            return Err(DiffError::from_libgit2(-1));
+        }
+        // SAFETY: the caller guarantees the pathspec is a readable array of its stated
+        // count of NUL-terminated strings, live beyond this call and unchanged by it.
+        let pathspec = unsafe { StrArrayRef::from_ptr((&raw const options.pathspec).cast_mut()) };
+        if !patterns_are_parsable(pathspec.expect("an embedded field is non-null")) {
+            return Err(DiffError::from_libgit2(-1));
+        }
         let mut out = ptr::null_mut();
         // SAFETY: handles keep all input objects alive for the call and repo for
         // 'r. The caller guarantees nested option validity and callback discipline.
@@ -596,8 +641,9 @@ impl<'r> Diff<'r> {
             }
         };
         // SAFETY: success yields a sole reference with repo and option referents
-        // valid for 'r, as required by this function's contract.
-        unsafe { from_raw_result(out, rc) }
+        // valid for 'r, as required by this function's contract; every failure,
+        // a callback's positive code included, leaves `out` NULL.
+        constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 }
 
@@ -642,6 +688,108 @@ mod unit_tests {
         assert!(!format!("{error:?}").is_empty());
         let boxed: Box<dyn std::error::Error> = Box::new(error);
         assert!(boxed.source().is_none());
+    }
+
+    /// `git_diff_tree_to_workdir` and `git_diff_index_to_index` return a refused options
+    /// version as 1 (`(error = f(...) < 0)`); the wrapper refuses it as libgit2's other
+    /// generators do: -1 with their `GIT_ERROR_INVALID` message, before any C call.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_options_version_is_negative_for_every_generator() {
+        use crate::libgit2::index::index::Index;
+        use crate::libgit2::repository::repository::Repository;
+        let dir =
+            std::env::temp_dir().join(format!("crustify-diff-version-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false).unwrap();
+        let index = Index::new().unwrap();
+        let mut opts = ffi::git_diff_options::default();
+        for (version, shown) in [(0, c"0"), (2, c"2"), (u32::MAX, c"-1")] {
+            opts.version = version;
+            let mut out = ptr::null_mut();
+            // SAFETY: a live repository, NULL trees and a writable output slot; C checks
+            // the version before reading any other field of the options.
+            let rc = unsafe {
+                ffi::git_diff_tree_to_tree(
+                    &mut out,
+                    repo.as_ref().as_ptr().cast_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &opts,
+                )
+            };
+            assert_eq!((rc, out), (-1, ptr::null_mut()));
+            let expected = last();
+            let message = format!(
+                "invalid version {} on git_diff_options",
+                shown.to_str().unwrap()
+            );
+            assert_eq!(expected.message().to_str(), Ok(message.as_str()));
+            for inputs in [
+                DiffInputs::TreeToWorkdir { old: None },
+                DiffInputs::Indices {
+                    old: index.as_ref(),
+                    new: index.as_ref(),
+                },
+            ] {
+                // SAFETY: no nested pointers or callbacks; the version is refused first.
+                let error = unsafe { Diff::generate_with_options(repo.as_ref(), inputs, &opts) }
+                    .unwrap_err();
+                assert_eq!((error.raw_code(), error.error()), (-1, &expected));
+            }
+        }
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without a libgit2 runtime both parsers fail before calling C. The runtime is
+    /// made to fail in a fresh process, whose first allocation request is refused.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and spawns a child")]
+    fn parsers_refuse_without_a_runtime() {
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        const CHILD: &str = "CRUSTIFY_DIFF_NO_RUNTIME_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let name = concat!(module_path!(), "::parsers_refuse_without_a_runtime");
+            let name = name.split_once("::").unwrap().1;
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stdout}\n{stderr}");
+            assert!(stdout.contains("1 passed"), "{stdout}");
+            return;
+        }
+        struct Refusing;
+        // SAFETY: it never hands out an allocation, which `Alloc` allows; `free` is
+        // never reached, since nothing was allocated.
+        unsafe impl Alloc for Refusing {
+            fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn realloc(
+                _: Option<NonNull<u8>>,
+                _: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                None
+            }
+            unsafe fn free(_: NonNull<u8>) {}
+        }
+        let allocator = Allocator::new::<Refusing>();
+        let option = ffi::GIT_OPT_SET_ALLOCATOR as core::ffi::c_int;
+        // SAFETY: this fresh process has never initialised libgit2, and no other
+        // thread runs; C copies the valid allocator table.
+        let rc = unsafe { ffi::git_libgit2_opts(option, allocator.as_ref().as_ptr()) };
+        assert_eq!(rc, 0);
+        assert_eq!(Diff::from_buffer(b"").err().unwrap().raw_code(), -1);
+        let parsed = Diff::from_buffer_with_oid_type(b"", OidType::Sha256);
+        assert_eq!(parsed.err().unwrap().raw_code(), -1);
+        assert!(!runtime_pinned(), "a failed initialisation stays failed");
     }
 
     // Rust-only layout projections: run under Miri without calling the C library.

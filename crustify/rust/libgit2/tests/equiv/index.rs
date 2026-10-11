@@ -1178,10 +1178,8 @@ fn iterator_snapshot_lifecycle_matches_c() {
             let mut raw = ptr::null_mut();
             // SAFETY: writable output slot and live index; C retains a counted
             // reference on success, settled by CIterator below.
-            assert_eq!(
-                unsafe { ffi::git_index_iterator_new(&mut raw, c_index.0) },
-                0
-            );
+            let rc = unsafe { ffi::git_index_iterator_new(&mut raw, c_index.0) };
+            assert_eq!(rc, 0);
             let c_iter = CIterator(raw);
             let rust_iter = IndexIterator::new(&rust_index).unwrap();
             assert_eq!(state(c_index.0), state(rust_index.as_c_ptr()));
@@ -1271,9 +1269,10 @@ mod conflict_cursor {
                     ptr::null()
                 }
             };
+            let (index, ancestor, ours, theirs) = (index.as_c_ptr(), side(1), side(2), side(4));
             // SAFETY: sole live index, valid entries with static NUL paths read
             // and copied only during this call. NULL represents an absent side.
-            let rc = unsafe { ffi::git_index_conflict_add(index.as_c_ptr(), side(1), side(2), side(4)) };
+            let rc = unsafe { ffi::git_index_conflict_add(index, ancestor, ours, theirs) };
             assert_eq!(rc, 0);
         }
     }
@@ -1284,9 +1283,7 @@ mod conflict_cursor {
     ///
     /// # Safety
     /// `cursor` must be a live cursor over a live, unmodified, exclusively held index.
-    unsafe fn observe(
-        cursor: *mut ffi::git_index_conflict_iterator,
-    ) -> Observation {
+    unsafe fn observe(cursor: *mut ffi::git_index_conflict_iterator) -> Observation {
         let mut a = ptr::null();
         let mut o = ptr::null();
         let mut t = ptr::null();

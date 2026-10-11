@@ -200,6 +200,7 @@ use ffibox::{
 use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::{Signature, SignatureBox, SignatureRef, StreamError};
+use crate::libgit2::diff::diff::Diff;
 use crate::libgit2::index::index::IndexRef;
 use crate::libgit2::object::mailmap::MailmapRef;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
@@ -2367,9 +2368,10 @@ fn changes(repo: RepositoryRef<'_>, committed: Committed<'_, '_>) -> Result<(), 
     };
     let old = head_tree.as_ref().map(|tree| tree.as_ref());
     let diff = match committed {
-        Committed::Tree(tree) => crate::libgit2::diff::diff::Diff::tree_to_tree(repo, old, Some(tree)),
-        Committed::Index(index) => crate::libgit2::diff::diff::Diff::tree_to_index(repo, old, Some(index)),
-    }.map_err(|error| RepositoryError::from_libgit2(error.raw_code()))?;
+        Committed::Tree(tree) => Diff::tree_to_tree(repo, old, Some(tree)),
+        Committed::Index(index) => Diff::tree_to_index(repo, old, Some(index)),
+    }
+    .map_err(|error| RepositoryError::from_libgit2(error.raw_code()))?;
     let deltas = diff.as_ref().len();
     drop(diff);
     if deltas == 0 {
