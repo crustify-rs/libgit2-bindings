@@ -10,9 +10,11 @@
 //! every lookup of its id; `git_commit_free` gives one reference back (it is
 //! `git_object_free`) and `git_commit_dup` takes another, on the same pointer. So the
 //! Rust owner is a [`CommitArc`], built by [`Commit::lookup`] and
-//! [`Commit::lookup_prefix`], whose `Clone` is `git_commit_dup` and which never proves
-//! itself the only reference: it lends the shared handle, [`CommitRef`], and never
-//! [`CommitMut`].
+//! [`Commit::lookup_prefix`], or derived from another commit by [`CommitRef::parent`]
+//! and [`CommitRef::nth_gen_ancestor`], whose `Clone` is `git_commit_dup` and which
+//! never proves itself the only reference: it lends the shared handle, [`CommitRef`],
+//! and never [`CommitMut`]. [`CommitRef::tree`] looks a commit's tree up the same way,
+//! as a [`TreeArc`].
 //!
 //! A commit keeps the repository it was looked up in (`object.repo`, uncounted), which
 //! its owner, tree and parent lookups read and `git_repository_free` does not clear. So
@@ -24,7 +26,7 @@
 //!
 //! A commit is an object, and libgit2's casts between the two never check the type:
 //! [`CommitRef::as_object`] and [`Commit::into_object`] view or convert a commit as an
-//! object, and [`CommitRef::from_object`] and [`Commit::try_from_object`] take an
+//! object, and [`CommitRef::from_object`] and [`Commit::from_object`] take an
 //! object back as a commit only when it is of type `GIT_OBJECT_COMMIT`.
 //!
 //! # Commit arrays
@@ -142,6 +144,7 @@ use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::StreamError;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
+use crate::libgit2::object::tree::TreeArc;
 use crate::libgit2::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataVec};
 use crate::libgit2::oid::oid::{Oid, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
@@ -153,8 +156,9 @@ use crate::libgit2::util::sys::errors::set;
 ///
 /// libgit2 allocates, counts and frees it, so it is only ever reached through a
 /// [`CommitArc`] and its handles, built by [`lookup`](Self::lookup) and
-/// [`lookup_prefix`](Self::lookup_prefix), converted from an object by
-/// [`try_from_object`](Self::try_from_object), or lent by a [`CommitArray`]. It is
+/// [`lookup_prefix`](Self::lookup_prefix), derived from another commit by
+/// [`CommitRef::parent`] and [`CommitRef::nth_gen_ancestor`], converted from an object by
+/// [`from_object`](Self::from_object), or lent by a [`CommitArray`]. It is
 /// opaque: no field is published.
 ///
 /// `'r` is the borrow of the repository the commit was looked up in: routines that
@@ -301,6 +305,125 @@ impl<'a, 'r> CommitRef<'a, 'r> {
         // outlives `'r`, as `object` vouches.
         unsafe { Self::from_ptr(object.as_ptr().cast()) }
     }
+
+    /// The commit's `n`th parent, counting from 0 in the order the commit lists them
+    /// (the first parent is the branch a merge was made on), looked up in the commit's
+    /// repository by the id the commit records: one more reference of the repository's
+    /// cache, or a fresh parse.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] (class `GIT_ERROR_INVALID`, "parent `n` does
+    /// not exist") when the commit has `n` parents or fewer; and as
+    /// [`Commit::lookup`] does for the parent's id: [`ErrorCode::NotFound`] when the
+    /// object database lacks the parent or it is not a commit, libgit2's error when it
+    /// cannot be read or parsed.
+    ///
+    /// The parent lives no longer than the repository's borrow `'r`, as this commit
+    /// does, but may outlive this handle and the commit's owner.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let parent = commit.as_ref().parent(0).unwrap();
+    /// drop(commit);
+    /// drop(repo);
+    /// drop(parent);
+    /// ```
+    ///
+    /// Wraps: git_commit_parent
+    pub fn parent(&self, n: u32) -> Result<CommitArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
+        // live commit for `'a`, whose recorded parent ids are of its repository's type
+        // and whose repository, borrowed for `'r`, is live and used on this thread only,
+        // as `RepositoryRef` allows: libgit2 looks the parent up through it, filling its
+        // cache.
+        let rc = unsafe { ffi::git_commit_parent(&mut out, self.as_ptr(), n) };
+        if rc < 0 {
+            return failed(rc);
+        }
+        // SAFETY: on success `out` holds one counted reference to a live commit of the
+        // same repository, borrowed for `'r`, given to the result and released by
+        // `git_commit_free`.
+        let parent = unsafe { CommitArc::from_c(out) };
+        Ok(parent.expect("a parent lookup succeeded without a commit"))
+    }
+
+    /// The commit's ancestor `n` generations back, following first parents only: this
+    /// very commit for 0 (one more reference, as [`to_commit`](Self::to_commit) takes),
+    /// its first parent for 1, that commit's first parent for 2, and so on, each looked
+    /// up in the commit's repository as [`parent`](Self::parent) looks it up.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] (class `GIT_ERROR_INVALID`, "parent 0 does
+    /// not exist") when the first-parent chain reaches a root commit before `n`
+    /// generations, and as [`parent`](Self::parent) does when an ancestor cannot be
+    /// looked up. Every intermediate commit is released.
+    ///
+    /// The ancestor lives no longer than the repository's borrow `'r`, as this commit
+    /// does.
+    ///
+    /// Wraps: git_commit_nth_gen_ancestor
+    pub fn nth_gen_ancestor(&self, n: u32) -> Result<CommitArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `parent`. libgit2 also takes, and later releases or hands out,
+        // one more reference on this commit (`git_commit_dup`, an atomic increment
+        // through a cast of the `const` pointer), which leaves the holder's own
+        // reference untouched.
+        let rc = unsafe { ffi::git_commit_nth_gen_ancestor(&mut out, self.as_ptr(), n) };
+        if rc < 0 {
+            return failed(rc);
+        }
+        // SAFETY: on success `out` holds one counted reference to a live commit of the
+        // same repository (this one for `n == 0`), borrowed for `'r`, given to the
+        // result and released by `git_commit_free`.
+        let ancestor = unsafe { CommitArc::from_c(out) };
+        Ok(ancestor.expect("an ancestor lookup succeeded without a commit"))
+    }
+
+    /// The commit's tree, looked up in the commit's repository by the id the commit
+    /// records: one more reference of the repository's cache, or a fresh parse.
+    ///
+    /// Fails as [`Tree::lookup`](crate::libgit2::object::tree::Tree::lookup) does for the
+    /// tree's id: with [`ErrorCode::NotFound`]
+    /// when the object database lacks the tree or it is not a tree, and with
+    /// libgit2's error when it cannot be read or parsed.
+    ///
+    /// The tree lives no longer than the repository's borrow `'r`, as this commit
+    /// does, but may outlive this handle and the commit's owner.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let tree = commit.as_ref().tree().unwrap();
+    /// drop(commit);
+    /// drop(repo);
+    /// drop(tree);
+    /// ```
+    ///
+    /// Wraps: git_commit_tree
+    pub fn tree(&self) -> Result<TreeArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `parent`: `out` is a writable slot, the handle addresses a live
+        // commit whose recorded tree id is of its repository's type, and whose
+        // repository is live for `'r` and used on this thread only, where libgit2
+        // looks the tree up.
+        let rc = unsafe { ffi::git_commit_tree(&mut out, self.as_ptr()) };
+        if rc < 0 {
+            return failed(rc);
+        }
+        // SAFETY: on success `out` holds one counted reference to a live tree of the
+        // same repository, borrowed for `'r`, given to the result and released by
+        // `git_tree_free`.
+        let tree = unsafe { TreeArc::from_c(out) };
+        Ok(tree.expect("a tree lookup succeeded without a tree"))
+    }
 }
 
 impl<'a, 'r> CommitMut<'a, 'r> {
@@ -407,7 +530,7 @@ impl<'r> Commit<'r> {
     /// under the cache's size limit, caches it, so that every later lookup of the id
     /// yields the same commit while the cache keeps it.
     ///
-    /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// Fails with [`ErrorCode::NotFound`]
     /// when the object database has no such object (the zero id included), when the
     /// object is not a commit (class `GIT_ERROR_INVALID`, "the requested type does not
     /// match the type in the ODB"; a tag is not peeled, whatever libgit2's header
@@ -465,10 +588,10 @@ impl<'r> Commit<'r> {
     /// candidate, whatever its type: the prefix must name exactly one, which must then
     /// be a commit.
     ///
-    /// Fails with [`ErrorCode::Ambiguous`](crate::libgit2::util::errors::ErrorCode::Ambiguous)
+    /// Fails with [`ErrorCode::Ambiguous`]
     /// when `len` is under 4 (`GIT_ERROR_OBJECT`, "ambiguous lookup - OID prefix is too
     /// short") or the prefix names several objects, with
-    /// [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) when
+    /// [`ErrorCode::NotFound`] when
     /// it names none or one that is not a commit, and as [`lookup`](Self::lookup)
     /// otherwise; an `id` of another type than `repo`'s is refused as it is, whatever
     /// `len`.
@@ -497,7 +620,7 @@ impl<'r> Commit<'r> {
 
     /// The object, as a commit, when it is one (of type `GIT_OBJECT_COMMIT`): the same
     /// counted reference, moved. Otherwise the object, unchanged.
-    pub fn try_from_object(object: ObjectArc<'r>) -> Result<CommitArc<'r>, ObjectArc<'r>> {
+    pub fn from_object(object: ObjectArc<'r>) -> Result<CommitArc<'r>, ObjectArc<'r>> {
         if !is_commit(object.as_ref()) {
             return Err(object);
         }
@@ -876,6 +999,16 @@ impl<'a, 'r> CommitArrayMut<'a, 'r> {
     /// Fails, handing `commits` back and leaving the array as it was, when the buffer
     /// cannot be allocated, or libgit2 cannot be initialised (libgit2's error is then
     /// set on the calling thread).
+    ///
+    /// The commits must be of the array's own repository borrow `'r`:
+    ///
+    /// ```compile_fail,E0521
+    /// use libgit2::libgit2::object::commit::{CommitArc, CommitArrayMut};
+    ///
+    /// fn store<'r>(mut array: CommitArrayMut<'_, 'static>, commit: CommitArc<'r>) {
+    ///     let _ = array.set_commits(vec![commit]);
+    /// }
+    /// ```
     ///
     /// Field: git_commitarray.commits
     /// Field: git_commitarray.count
@@ -2268,7 +2401,7 @@ mod unit_tests {
         assert_eq!(object.as_c_ptr().cast(), commit.as_c_ptr());
         let viewed = CommitRef::from_object(object.as_ref()).unwrap();
         assert_eq!(viewed.as_ptr(), commit.as_c_ptr().cast_const());
-        let back = Commit::try_from_object(object).unwrap();
+        let back = Commit::from_object(object).unwrap();
         assert!(CommitArc::ptr_eq(&back, &commit));
         drop(commit);
         assert_eq!(hex(back.as_ref()), HEAD.to_str().unwrap());
@@ -2276,7 +2409,7 @@ mod unit_tests {
         let tree = Object::lookup(repo.as_ref(), sha1(TREE).as_ref(), Some(ObjectType::Tree));
         let tree = tree.unwrap();
         assert!(CommitRef::from_object(tree.as_ref()).is_none());
-        let tree = Commit::try_from_object(tree).unwrap_err();
+        let tree = Commit::from_object(tree).unwrap_err();
         assert_eq!(
             Commit::lookup(repo.as_ref(), sha1(TREE).as_ref())
                 .unwrap_err()
@@ -2284,6 +2417,65 @@ mod unit_tests {
             Some(ErrorCode::NotFound)
         );
         drop(tree);
+    }
+
+    /// A commit's parents, first-parent ancestors and tree are owners of their own: one
+    /// counted reference each (the very commit for generation 0), which outlives the
+    /// commit it was derived from, and every refusal leaves the thread's error as libgit2
+    /// sets it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn parents_ancestors_and_trees_derive_owned_references() {
+        let repo = open_testrepo();
+        let head = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+        let parent = head.as_ref().parent(0).unwrap();
+        assert_eq!(hex(parent.as_ref()), PARENT.to_str().unwrap());
+        let cached = Commit::lookup(repo.as_ref(), sha1(PARENT).as_ref()).unwrap();
+        assert!(CommitArc::ptr_eq(&parent, &cached));
+        let itself = head.as_ref().nth_gen_ancestor(0).unwrap();
+        assert!(CommitArc::ptr_eq(&itself, &head));
+        let first = head.as_ref().nth_gen_ancestor(1).unwrap();
+        assert!(CommitArc::ptr_eq(&first, &parent));
+        let tree = head.as_ref().tree().unwrap();
+        assert_eq!(
+            tree.as_ref().as_object().id().id()[..20],
+            sha1(TREE).as_ref().id()[..20]
+        );
+        drop((head, itself, cached));
+        // The merge parent's second parent, and the root five generations up.
+        let second = parent.as_ref().parent(1).unwrap();
+        assert_eq!(
+            hex(second.as_ref()),
+            "c47800c7266a2be04c571c04d5a6614691ea99bd"
+        );
+        let root = first.as_ref().nth_gen_ancestor(4).unwrap();
+        assert_eq!(
+            hex(root.as_ref()),
+            "8496071c1b46c854b31185ea97743be6a8774479"
+        );
+        drop((parent, first));
+
+        for (result, message) in [
+            (second.as_ref().parent(1), "parent 1 does not exist"),
+            (root.as_ref().parent(0), "parent 0 does not exist"),
+            (root.as_ref().nth_gen_ancestor(1), "parent 0 does not exist"),
+            (
+                second.as_ref().nth_gen_ancestor(u32::MAX),
+                "parent 0 does not exist",
+            ),
+            (
+                root.as_ref().parent(u32::MAX),
+                "parent 4294967295 does not exist",
+            ),
+        ] {
+            let e = result.unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::NotFound));
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            assert_eq!(e.message().to_str(), Ok(message));
+        }
+        assert!(root.as_ref().tree().is_ok());
+        drop((root, second));
+        assert!(!tree.as_ref().as_object().id().is_zero());
     }
 
     /// Commits moved into an array and taken out again: the same pointers, in order,

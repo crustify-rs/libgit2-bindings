@@ -663,7 +663,7 @@ mod commit_owner {
         let copy = first.as_ref().to_commit();
         drop(first);
         let object: ObjectArc<'r> = Commit::into_object(copy);
-        let back = Commit::try_from_object(object).unwrap();
+        let back = Commit::from_object(object).unwrap();
         let (hex, kind) = view(Commit::into_object(back.clone()).as_c_ptr());
         let same = held.iter().position(|h| CommitArc::ptr_eq(h, &back));
         drop(back);
@@ -725,7 +725,7 @@ mod commit_owner {
                 c_is_commit,
                 "{hex}"
             );
-            let converted = Commit::try_from_object(object);
+            let converted = Commit::from_object(object);
             assert_eq!(converted.is_ok(), c_is_commit, "{hex}");
             let back = match converted {
                 Ok(commit) => Commit::into_object(commit),
@@ -735,6 +735,403 @@ mod commit_owner {
         }
         // SAFETY: the C side's repository, freed once.
         unsafe { ffi::git_repository_free(c_repo) };
+    }
+}
+
+/// Equivalence of the owners a commit derives, [`CommitRef::parent`],
+/// [`CommitRef::nth_gen_ancestor`] and [`CommitRef::tree`], with `git_commit_parent`,
+/// `git_commit_nth_gen_ancestor` and `git_commit_tree`.
+///
+/// Each side opens its own copies of three repositories: `testrepo.git` (merges with two
+/// parents, roots, a seven-generation first-parent chain), `shallow.git` (whose boundary
+/// commit is grafted parentless) and a fresh bare repository into which the side writes
+/// the same hand-made objects through the object database: a commit whose tree is
+/// missing, one whose tree is a blob, one whose parent is a blob, one whose parent is
+/// missing, and a child of the first. A script then derives, from base commits looked up
+/// on each side, every parent up to the third, ancestors of seven generation counts up to
+/// `u32::MAX` and the tree, keeping every other result. After each step both sides record
+/// the result's id and type, which earlier kept result (or the base) is the very same
+/// object, or the failure's code, class and message, and the records are compared. Once
+/// the script ends each side releases its base commits first and then reads every kept
+/// result again.
+mod navigation {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::{Commit, CommitArc};
+    use libgit2::libgit2::object::tree::TreeArc;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    use super::{init, open};
+
+    const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../");
+
+    /// What a step derives from its base commit.
+    #[derive(Clone, Copy, Debug)]
+    enum Op {
+        Parent(u32),
+        Ancestor(u32),
+        Tree,
+    }
+
+    const OPS: [Op; 11] = [
+        Op::Tree,
+        Op::Parent(0),
+        Op::Parent(1),
+        Op::Parent(2),
+        Op::Ancestor(0),
+        Op::Ancestor(1),
+        Op::Ancestor(2),
+        Op::Ancestor(3),
+        Op::Ancestor(6),
+        Op::Ancestor(7),
+        Op::Ancestor(u32::MAX),
+    ];
+
+    /// What a step gave: the result's id and type as C reads them, whether it is the
+    /// base itself, and the index of the earlier kept result of the same side that is
+    /// the same object; or the failure.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum Outcome {
+        Found(String, ffi::git_object_t, bool, Option<usize>),
+        Failed(c_int, c_int, String),
+    }
+
+    fn view(p: *const ffi::git_object) -> (String, ffi::git_object_t) {
+        let mut out = [0u8; 41];
+        // SAFETY: `p` is a live object; its id is formatted into 41 writable bytes.
+        unsafe {
+            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
+            let hex = CStr::from_bytes_until_nul(&out)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            (hex, ffi::git_object_type(p))
+        }
+    }
+
+    fn c_failed(rc: c_int) -> Outcome {
+        // SAFETY: after a failure the thread's error is set and live until the next
+        // libgit2 call, after the copy.
+        let (class, message) = unsafe {
+            let e = ffi::git_error_last();
+            (
+                (*e).klass,
+                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            )
+        };
+        Outcome::Failed(rc, class, message)
+    }
+
+    fn rust_failed(e: &RepositoryError) -> Outcome {
+        Outcome::Failed(
+            e.raw_code(),
+            e.raw_class(),
+            e.message().to_string_lossy().into_owned(),
+        )
+    }
+
+    fn oid(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    fn hex(id: &ffi::git_oid) -> String {
+        let mut out = [0u8; 41];
+        // SAFETY: a live id formatted into 41 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    const MISSING: &str = "dededededededededededededededededededede";
+    const SIGNATURE: &str = "A U Thor <author@example.com> 1234567890 +0000";
+
+    /// A fresh bare repository holding the hand-made objects, removed on drop; `bases`
+    /// are the commits written, in order.
+    struct Crafted {
+        dir: PathBuf,
+        repo: *mut ffi::git_repository,
+        bases: Vec<String>,
+    }
+
+    impl Crafted {
+        fn new(tag: &str) -> Self {
+            init();
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-commit-navigation-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = CString::new(dir.to_str().unwrap()).unwrap();
+            let mut repo = ptr::null_mut();
+            // SAFETY: `repo` receives the repository this side frees; the path is
+            // NUL-terminated.
+            let rc = unsafe { ffi::git_repository_init(&mut repo, path.as_ptr(), 1) };
+            assert_eq!(rc, 0);
+            let mut odb = ptr::null_mut();
+            // SAFETY: `repo` is open; `odb` receives one reference, freed below.
+            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, repo) }, 0);
+            let write = |data: &str, kind: ffi::git_object_t| {
+                let mut id = ffi::git_oid::default();
+                // SAFETY: `odb` is live; `data` is read for the call only.
+                let rc = unsafe {
+                    ffi::git_odb_write(&mut id, odb, data.as_ptr().cast(), data.len(), kind)
+                };
+                assert_eq!(rc, 0);
+                hex(&id)
+            };
+            let commit = |tree: &str, parents: &[&str], message: &str| {
+                let mut raw = format!("tree {tree}\n");
+                for parent in parents {
+                    raw.push_str(&format!("parent {parent}\n"));
+                }
+                raw.push_str(&format!(
+                    "author {SIGNATURE}\ncommitter {SIGNATURE}\n\n{message}\n"
+                ));
+                write(&raw, ffi::GIT_OBJECT_COMMIT)
+            };
+            let blob = write("not a tree\n", ffi::GIT_OBJECT_BLOB);
+            let empty = write("", ffi::GIT_OBJECT_TREE);
+            let treeless = commit(MISSING, &[], "missing tree");
+            let bases = vec![
+                commit(&blob, &[], "tree is a blob"),
+                commit(&empty, &[&blob], "parent is a blob"),
+                commit(&empty, &[MISSING], "parent is missing"),
+                commit(&empty, &[&treeless], "child of a treeless commit"),
+                treeless,
+            ];
+            // SAFETY: the reference taken above, released once.
+            unsafe { ffi::git_odb_free(odb) };
+            Self { dir, repo, bases }
+        }
+    }
+
+    impl Drop for Crafted {
+        fn drop(&mut self) {
+            // SAFETY: the side's repository, freed once, after every object of it.
+            unsafe { ffi::git_repository_free(self.repo) };
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    const TESTREPO_BASES: [&str; 6] = [
+        "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        "be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+        "a4a7dce85cf63874e984719f4fdd239f5145052f",
+        "8496071c1b46c854b31185ea97743be6a8774479",
+        "41bc8c69075bbdb46c5c6f0566cc8cc5b46e8bd9",
+        "763d71aadf09a7951596c9746c024e7eece7c7af",
+    ];
+    const SHALLOW_BASES: [&str; 2] = [
+        "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        "be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+    ];
+
+    /// The C side: the repositories it opened, its base commits and the results it
+    /// keeps.
+    struct CSide {
+        repos: Vec<*mut ffi::git_repository>,
+        bases: Vec<*mut ffi::git_commit>,
+        held: Vec<*mut ffi::git_object>,
+    }
+
+    impl CSide {
+        fn base(&mut self, repo: *mut ffi::git_repository, hex: &str) {
+            let mut commit = ptr::null_mut();
+            // SAFETY: a writable slot, a live repository and a live id of its type.
+            let rc = unsafe { ffi::git_commit_lookup(&mut commit, repo, &oid(hex)) };
+            assert_eq!(rc, 0, "{hex}");
+            self.bases.push(commit);
+        }
+
+        fn step(&mut self, op: Op, keep: bool) -> Outcome {
+            let base = *self.bases.last().unwrap();
+            let mut out: *mut ffi::git_object = ptr::null_mut();
+            // SAFETY: a writable slot of the routine's type and a live commit, whose
+            // repository is live and used on this thread only.
+            let rc = unsafe {
+                match op {
+                    Op::Parent(n) => {
+                        ffi::git_commit_parent(ptr::from_mut(&mut out).cast(), base, n)
+                    }
+                    Op::Ancestor(n) => {
+                        ffi::git_commit_nth_gen_ancestor(ptr::from_mut(&mut out).cast(), base, n)
+                    }
+                    Op::Tree => ffi::git_commit_tree(ptr::from_mut(&mut out).cast(), base),
+                }
+            };
+            if rc < 0 {
+                return c_failed(rc);
+            }
+            let (hex, kind) = view(out);
+            let same = self.held.iter().position(|&h| h == out);
+            let is_base = out == base.cast();
+            if keep {
+                self.held.push(out);
+            } else {
+                // SAFETY: the reference the routine handed out, released once.
+                unsafe { ffi::git_object_free(out) };
+            }
+            Outcome::Found(hex, kind, is_base, same)
+        }
+
+        /// Releases the bases, then reads every kept result.
+        fn release_bases(&mut self) -> Vec<(String, ffi::git_object_t)> {
+            for commit in self.bases.drain(..) {
+                // SAFETY: each base's reference, released once.
+                unsafe { ffi::git_commit_free(commit) };
+            }
+            self.held.iter().map(|&h| view(h)).collect()
+        }
+    }
+
+    impl Drop for CSide {
+        fn drop(&mut self) {
+            for &object in &self.held {
+                // SAFETY: each kept reference, released once, before the repositories.
+                unsafe { ffi::git_object_free(object) };
+            }
+            for &repo in &self.repos {
+                // SAFETY: each repository this side opened, freed once.
+                unsafe { ffi::git_repository_free(repo) };
+            }
+        }
+    }
+
+    /// A result the Rust side keeps.
+    enum Held<'r> {
+        Commit(CommitArc<'r>),
+        Tree(TreeArc<'r>),
+    }
+
+    impl Held<'_> {
+        fn object(&self) -> *const ffi::git_object {
+            match self {
+                Held::Commit(c) => c.as_c_ptr().cast(),
+                Held::Tree(t) => t.as_c_ptr().cast(),
+            }
+        }
+    }
+
+    fn rust_step<'r>(
+        base: &CommitArc<'r>,
+        held: &mut Vec<Held<'r>>,
+        op: Op,
+        keep: bool,
+    ) -> Outcome {
+        let base = base.as_ref();
+        let result = match op {
+            Op::Parent(n) => base.parent(n).map(Held::Commit),
+            Op::Ancestor(n) => base.nth_gen_ancestor(n).map(Held::Commit),
+            Op::Tree => base.tree().map(Held::Tree),
+        };
+        let derived = match result {
+            Ok(derived) => derived,
+            Err(e) => return rust_failed(&e),
+        };
+        let p = derived.object();
+        let (hex, kind) = view(p);
+        let same = held.iter().position(|h| h.object() == p);
+        let is_base = p == base.as_object().to_object().as_c_ptr().cast_const();
+        if keep {
+            held.push(derived);
+        }
+        Outcome::Found(hex, kind, is_base, same)
+    }
+
+    fn rust_open(name: &str) -> RepositoryBox {
+        Repository::open(&CString::new(format!("{ROOT}{name}")).unwrap()).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn derived_commits_and_trees_match_c() {
+        init();
+        let c_crafted = Crafted::new("c");
+        let rust_crafted = Crafted::new("rust");
+        assert_eq!(c_crafted.bases, rust_crafted.bases);
+        let mut c = CSide {
+            repos: vec![
+                open(c"tests/resources/testrepo.git"),
+                open(c"tests/resources/shallow.git"),
+            ],
+            bases: Vec::new(),
+            held: Vec::new(),
+        };
+        let rust_testrepo = rust_open("tests/resources/testrepo.git");
+        let rust_shallow = rust_open("tests/resources/shallow.git");
+        let path = CString::new(rust_crafted.dir.to_str().unwrap()).unwrap();
+        let rust_crafted_repo = Repository::open(&path).unwrap();
+
+        let mut bases = Vec::new();
+        bases.extend(
+            TESTREPO_BASES
+                .iter()
+                .map(|h| (c.repos[0], &rust_testrepo, h.to_string())),
+        );
+        bases.extend(
+            SHALLOW_BASES
+                .iter()
+                .map(|h| (c.repos[1], &rust_shallow, h.to_string())),
+        );
+        bases.extend(
+            c_crafted
+                .bases
+                .iter()
+                .map(|h| (c_crafted.repo, &rust_crafted_repo, h.clone())),
+        );
+
+        let mut rust_bases = Vec::new();
+        let mut held = Vec::new();
+        let mut messages = Vec::new();
+        let mut step = 0;
+        for (repo, rust_repo, base) in &bases {
+            c.base(*repo, base);
+            let id = Oid::from_string(&CString::new(base.as_str()).unwrap(), OidType::Sha1);
+            let commit = Commit::lookup(rust_repo.as_ref(), id.unwrap().as_ref()).unwrap();
+            for op in OPS {
+                let keep = step % 2 == 0;
+                let expected = c.step(op, keep);
+                let got = rust_step(&commit, &mut held, op, keep);
+                assert_eq!(got, expected, "step {step}: {op:?} of {base}");
+                if let Outcome::Failed(_, _, message) = expected {
+                    messages.push(message);
+                }
+                step += 1;
+            }
+            rust_bases.push(commit);
+        }
+        let expected = c.release_bases();
+        drop(rust_bases);
+        let got: Vec<_> = held.iter().map(|h| view(h.object())).collect();
+        assert_eq!(got, expected);
+        drop(held);
+        // Before `c_crafted`, whose repository the side's objects belong to.
+        drop(c);
+        // Every kind of failure was reached, on both sides alike.
+        for expected in [
+            "parent 0 does not exist",
+            "parent 2 does not exist",
+            "object not found - no match for id (dededededededededededededededededededede)",
+            "the requested type does not match the type in the ODB",
+        ] {
+            assert!(
+                messages.iter().any(|m| m == expected),
+                "{expected}: {messages:?}"
+            );
+        }
     }
 }
 

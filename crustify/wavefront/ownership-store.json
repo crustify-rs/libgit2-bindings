@@ -3899,6 +3899,112 @@
    ]
   },
   {
+   "name": "git_commit_nth_gen_ancestor",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "ancestor",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "ancestor",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter. On success one counted reference released with git_commit_free: for n == 0 the very commit (git_commit_dup, a refcount bump on the same pointer), otherwise the commit reached by following first parents n times (git_commit_parent each step, freeing every intermediate commit). Untouched on failure (GIT_ENOTFOUND 'parent 0 does not exist' past a root, or a lookup's error)."
+     }
+    },
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; up-ref'd once (git_commit_dup through a const cast, which only bumps the atomic count) and that reference released or handed out, so the caller's reference is untouched. Its uncounted repository is reached for every lookup."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_parent",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "parent",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call (parent_ids); its uncounted repository is reached for the lookup, so the repository must be live and used by this thread only. No reference to commit is kept or taken."
+     }
+    },
+    {
+     "name": "parent",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:parent"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter. On success one counted reference to the n-th parent commit, looked up through commit->object.repo by its recorded id (git_commit_lookup: the cache's commit, one more reference, or a fresh parse), released with git_commit_free. Untouched on failure: GIT_ENOTFOUND with GIT_ERROR_INVALID 'parent %u does not exist' for n >= parentcount, or the lookup's error (a missing parent object, one that is not a commit)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commit_parent_callback",
    "defined_in": null,
    "ptr_args": [
@@ -4005,6 +4111,59 @@
       "nullable": true,
       "mutable": null,
       "note": "opts->payload, passed through unchanged."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_tree",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "tree_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call (tree_id); its uncounted repository is reached for the lookup, so the repository must be live and used by this thread only."
+     }
+    },
+    {
+     "name": "tree_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter. On success one counted reference to the commit's tree, looked up through commit->object.repo by tree_id (git_tree_lookup: the cache's tree, one more reference, or a fresh parse), released with git_tree_free. Untouched on failure (the lookup's error: a missing tree object, one that is not a tree)."
      }
     }
    ]

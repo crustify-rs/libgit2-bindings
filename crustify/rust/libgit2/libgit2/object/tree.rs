@@ -1159,8 +1159,8 @@ impl<'r> Tree<'r> {
     /// or as an object, yields the same tree while the cache keeps it.
     ///
     /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup) with
-    /// type [`ObjectType::Tree`](crate::libgit2::core::types::ObjectType::Tree) does:
-    /// with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// type [`ObjectType::Tree`] does:
+    /// with [`ErrorCode::NotFound`]
     /// when the object database has no such object, or the object is not a tree (class
     /// `GIT_ERROR_INVALID`, "the requested type does not match the type in the ODB"),
     /// and with libgit2's error when the tree cannot be read or parsed. An `id` of
@@ -1879,7 +1879,7 @@ impl TreeEntry {
     /// a trailing `/` is accepted only after a tree, and an empty component (an empty
     /// `path`, or a leading or doubled `/`) is an invalid path.
     ///
-    /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// Fails with [`ErrorCode::NotFound`]
     /// (class `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a
     /// `/` after an entry that is not a tree; and with libgit2's error when a subtree
     /// cannot be read, or the copy cannot be allocated. A commit or tag is peeled to its
