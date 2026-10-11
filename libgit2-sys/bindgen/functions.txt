@@ -76,6 +76,7 @@ git_commit_tree_id
 git_commitarray_dispose
 git_commitbuilder_add_header
 git_config_add_file_ondisk
+git_config_backend_memory_options_init
 git_config_free
 git_config_get_int32
 git_config_new

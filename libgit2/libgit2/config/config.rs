@@ -403,6 +403,54 @@ pub fn parse_int64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
     if rc < 0 { Err(last()) } else { Ok(out) }
 }
 
+/// A configuration priority, including application-defined integer levels.
+///
+/// Higher numbers are read first. [`HIGHEST`](Self::HIGHEST) is a query selector,
+/// not a backend priority. Unknown C values are preserved, not transmuted into a
+/// closed enum. Backend-registration wrappers must validate their input range:
+/// C's priority comparators subtract signed integers and can overflow when mixing
+/// extreme negative and positive levels.
+///
+/// Wraps: git_config_level_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ConfigLevel(ffi::git_config_level_t);
+
+impl ConfigLevel {
+    pub const SYSTEM: Self = Self(ffi::GIT_CONFIG_LEVEL_SYSTEM);
+    pub const XDG: Self = Self(ffi::GIT_CONFIG_LEVEL_XDG);
+    pub const GLOBAL: Self = Self(ffi::GIT_CONFIG_LEVEL_GLOBAL);
+    pub const LOCAL: Self = Self(ffi::GIT_CONFIG_LEVEL_LOCAL);
+    pub const WORKTREE: Self = Self(ffi::GIT_CONFIG_LEVEL_WORKTREE);
+    /// First application-specific priority; larger priorities are also supported.
+    pub const APP: Self = Self(ffi::GIT_CONFIG_LEVEL_APP);
+    /// Select the highest loaded priority when querying, not when adding a backend.
+    pub const HIGHEST: Self = Self(ffi::GIT_CONFIG_HIGHEST_LEVEL);
+
+    /// Preserves an integer supplied by C, including custom priorities.
+    pub const fn from_raw(value: ffi::git_config_level_t) -> Self {
+        Self(value)
+    }
+
+    /// The C value, for interoperability.
+    pub const fn raw(self) -> ffi::git_config_level_t {
+        self.0
+    }
+}
+
+impl From<ffi::git_config_level_t> for ConfigLevel {
+    fn from(value: ffi::git_config_level_t) -> Self {
+        Self::from_raw(value)
+    }
+}
+
+impl From<ConfigLevel> for ffi::git_config_level_t {
+    fn from(value: ConfigLevel) -> Self {
+        value.raw()
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -670,5 +718,23 @@ mod unit_tests {
                 assert_eq!(parse_int64(Some(c"1")).unwrap_err(), error);
             },
         );
+    }
+    #[test]
+    fn layout_and_custom_values() {
+        assert_eq!(
+            size_of::<ConfigLevel>(),
+            size_of::<ffi::git_config_level_t>()
+        );
+        assert_eq!(
+            align_of::<ConfigLevel>(),
+            align_of::<ffi::git_config_level_t>()
+        );
+        for raw in [i32::MIN, -1, 0, 1, 2, 7, 42, i32::MAX] {
+            let level = ConfigLevel::from(raw);
+            assert_eq!(ffi::git_config_level_t::from(level), raw);
+            assert_eq!(format!("{level:?}"), format!("ConfigLevel({raw})"));
+        }
+        assert!(ConfigLevel::SYSTEM < ConfigLevel::XDG);
+        assert!(ConfigLevel::APP < ConfigLevel::from_raw(42));
     }
 }
