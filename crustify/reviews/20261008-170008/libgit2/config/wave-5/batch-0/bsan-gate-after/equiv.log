@@ -1,0 +1,797 @@
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+22 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running tests/equiv/main.rs (/tmp/crustify-config-rw5-b0/after/snap/target-bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/fd78574c02063864/out/equiv-fd78574c02063864)
+
+running 409 tests
+test blob::filter_flags::options_default_matches_git_blob_filter_options_init ... ok
+test blob::filter_options::setters_match_c_field_writes ... ok
+test blob::writing::writes_into_bare_repositories_match_c ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test blob::writing::writes_match_c ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test blob::filter_options::new_matches_git_blob_filter_options_init ... ok
+test blob::writing::writes_without_paths_match_c ... ignored, its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it
+test blob::whole_slice_is_read ... ok
+test blob::whitespace_classes ... ok
+test commit::create_ext_options::new_matches_c_init ... ok
+test commit::creating::creation_scripts_match ... ignored, BorrowSanitizer reports git_commit_create_v's later variadic parents as freed
+test commit::creating::unwritable_object_databases_fail_alike ... ignored, BorrowSanitizer reports git_commit_create_v's later variadic parents as freed
+test commit::create_options::new_matches_c_init ... ok
+test commit::empty_arrays_match ... ok
+test blob::owner::object_conversions_match ... ok
+test blob::printable_ratio_around_128 ... ok
+test common::git_libgit2_features_reads_back_through_features ... ok
+test common::options::build_info_matches_c ... ok
+test commit::array_moves::moves_match_hand_built_c_arrays ... ok
+test commit::commit_owner::object_conversions_match_c_type_checks ... ok
+test common::options::features_match_c ... ok
+test blob::owner::lookups_without_a_git_directory_match ... ok
+test common::options::feature_backend_matches_c ... ok
+test common::options::prerelease_matches_c ... ok
+test commit::filled_arrays_match_through_their_lifecycle ... ok
+test common::options::version_matches_c ... ok
+test commit::header::git_commit_create_ext_reads_headers_as_c_arrays ... ok
+test common::options_carry_their_c_values ... ok
+test blob::filter_flags::blob_filter_matches_git_blob_filter ... ok
+test config::config_level_values_match_c ... ok
+test blob::filter_flags::flag_from_raw_names_exactly_the_c_constants ... ok
+test config::entry_and_map_types::mapping_fields_and_transitions_match_c_records ... ok
+test blob::filter_flags::rust_sets_change_what_git_blob_filter_does ... ok
+test common::git_libgit2_buildinfo_answers_exactly_the_named_items ... ok
+test blob::filter_flags::git_blob_filter_reads_rust_sets_as_c_flags ... ok
+test common::build_info_from_raw_names_exactly_the_c_constants ... ok
+test buffer::libgit2_results_read_reuse_and_release_alike ... ok
+test commit::create_ext_options::commits_created_with_the_options_match_c ... ok
+test config::file_access::search_and_path_results_match_c ... ok
+test buffer::contents_taken_from_libgit2_results ... ok
+test config::file_access::missing_level_views_match_c ... ok
+test config::iterator_entries::public_constructor_failures_and_empty_configs_match_c ... ok
+test config::entry_and_map_types::entries_match_c_acquisition_fields_errors_and_release ... ok
+test common::git_libgit2_feature_backend_answers_only_named_features ... ok
+test checkout::a_bare_repository_needs_a_target_directory ... ok
+test blob::byte_order_marks_and_their_truncations ... ok
+test config::mapping_mode_values_match_c_behavior ... ok
+test annotated_commit::constructors_build_and_fail_as_c has been running for over 60 seconds
+test annotated_commit::constructors_build_and_fail_as_c_over_sha256 has been running for over 60 seconds
+test blob::every_byte_alone_and_among_text has been running for over 60 seconds
+test blob::generated_inputs has been running for over 60 seconds
+test blob::growing_buffer_sequence has been running for over 60 seconds
+test blob::owner::cached_lookups_match has been running for over 60 seconds
+test blob::owner::contents_match has been running for over 60 seconds
+test blob::owner::lookups_match has been running for over 60 seconds
+test blob::writing::writes_without_an_objects_directory_match_c has been running for over 60 seconds
+test config::file_access::snapshot_strings_and_readonly_mutations_match_c ... ok
+test buffer::rust_built_buffers_match_libgit2_shaped_ones has been running for over 60 seconds
+test checkout::conflict_labels_match_step_by_step has been running for over 60 seconds
+test checkout::new_matches_c_init has been running for over 60 seconds
+test checkout::tree_checkouts_match_step_by_step has been running for over 60 seconds
+test commit::commit_owner::lookups_copies_and_releases_match_c has been running for over 60 seconds
+test commit::create_options::commits_created_and_amended_with_the_options_match_c has been running for over 60 seconds
+test commit::getters::getters_match_c_through_lookups_summaries_and_copies has been running for over 60 seconds
+test commit::navigation::derived_commits_and_trees_match_c has been running for over 60 seconds
+test commit::reading::reads_match has been running for over 60 seconds
+test commit::signatures::signatures_match_c has been running for over 60 seconds
+test common::feature_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test common::from_raw_names_exactly_the_c_keys has been running for over 60 seconds
+test common::options::cache_sizes_match_c has been running for over 60 seconds
+test common::options::extensions_match_c has been running for over 60 seconds
+test common::options::owner_validation_matches_c has been running for over 60 seconds
+test common::options::search_paths_match_c has been running for over 60 seconds
+test config::mapping_callbacks::borrowed_callback_values_and_nonzero_codes_match_c ... ok
+test common::options::setters_without_getters_match_c has been running for over 60 seconds
+test common::options::size_options_match_c has been running for over 60 seconds
+test common::options::ssl_cert_locations_match_c has been running for over 60 seconds
+test common::options::string_options_match_c has been running for over 60 seconds
+test common::options::timeouts_match_c has been running for over 60 seconds
+test common::options::windows_sharemode_matches_c has been running for over 60 seconds
+test common::opts_dispatches_every_named_key has been running for over 60 seconds
+test common::opts_refuses_exactly_the_unnamed_keys has been running for over 60 seconds
+test common::setters_write_what_their_getters_read has been running for over 60 seconds
+test config::backend_walk::backend_walk_multicall_callbacks_errors_and_stops_match_c has been running for over 60 seconds
+test config::entry_and_map_types::entry_selection_sequences_match_c has been running for over 60 seconds
+test config::entry_and_map_types::rust_map_tables_dispatch_like_c_tables has been running for over 60 seconds
+test config::enumeration::enumeration_empty_configs_match_c has been running for over 60 seconds
+test config::enumeration::enumeration_invalid_value_filters_match_c has been running for over 60 seconds
+test config::enumeration::enumeration_refresh_errors_and_recovery_match_c has been running for over 60 seconds
+test config::enumeration::enumeration_sequences_match_c_callbacks_errors_and_priority has been running for over 60 seconds
+test config::enumeration::enumeration_value_filters_match_c has been running for over 60 seconds
+test config::file_access::file_sequences_match_c has been running for over 60 seconds
+test config::file_access::isolated_search_and_default_failures_match_c has been running for over 60 seconds
+test buffer::rust_built_buffers_match_libgit2_shaped_ones ... ok
+test config::iterator_entries::public_entries_across_levels_interleaved_match_c has been running for over 60 seconds
+test config::iterator_entries::public_entries_sequences_match_c has been running for over 60 seconds
+test config::iterator_entries::public_entries_sequences_match_c ... ok
+test config::mapping_callbacks::map_lookup_matches_c_after_each_table_edit has been running for over 60 seconds
+test config::new_configs_match ... ok
+test config::mapping_callbacks::mapped_config_matches_c_across_writes_snapshots_and_errors has been running for over 60 seconds
+test blob::owner::cached_lookups_match ... ok
+test errors::classes_carry_their_c_values ... ok
+test config::mapping_callbacks::spent_backend_failures_keep_any_previous_error has been running for over 60 seconds
+test errors::codes_carry_their_c_values ... ok
+test errors::classifies_codes_libgit2_produces ... ok
+test common::options::owner_validation_matches_c ... ok
+test common::options::extensions_match_c ... ok
+test config::parsers::parse_i64_sequences_match_c has been running for over 60 seconds
+test commit::reading::reads_match ... ok
+test config::parsers::parse_sequences_match_c has been running for over 60 seconds
+test config::repository_configs_match ... ok
+test config::shared_configs_match has been running for over 60 seconds
+test config::writes_and_snapshots::multi_call_writes_order_and_snapshot_match_c has been running for over 60 seconds
+test config::writes_and_snapshots::multivar_and_file_lock_error_sequences_match_c ... ok
+test config::writes_and_snapshots::partial_snapshot_failure_matches_c_and_releases_partial_owner has been running for over 60 seconds
+test errors::classifies_what_libgit2_reports has been running for over 60 seconds
+test errors::from_raw_names_exactly_the_c_classes has been running for over 60 seconds
+test errors::from_raw_names_exactly_the_c_codes has been running for over 60 seconds
+test config::writes_and_snapshots::partial_snapshot_failure_matches_c_and_releases_partial_owner ... ok
+test errors::last_agrees_once_it_pins_the_runtime has been running for over 60 seconds
+test errors::last_reads_allocation_failures_as_c_does has been running for over 60 seconds
+test errors::set_classes_round_trip_through_libgit2 ... ok
+test errors::last_reads_as_c_does_after_each_step has been running for over 60 seconds
+test errors::last_reads_each_threads_own_error has been running for over 60 seconds
+test common::options::cache_sizes_match_c ... ok
+test errors::last_reads_messages_of_every_size has been running for over 60 seconds
+test config::shared_configs_match ... ok
+test filter::absolute_paths has been running for over 60 seconds
+test filter::failing_initialize has been running for over 60 seconds
+test config::mapping_callbacks::spent_backend_failures_keep_any_previous_error ... ok
+test filter::load has been running for over 60 seconds
+test config::enumeration::enumeration_empty_configs_match_c ... ok
+test filter::load_ext has been running for over 60 seconds
+test filter::new has been running for over 60 seconds
+test common::options::size_options_match_c ... ok
+test filter::with_blob has been running for over 60 seconds
+test config::file_access::file_sequences_match_c ... ok
+test global::c_init_fails_without_memory has been running for over 60 seconds
+test global::counts_match_c has been running for over 60 seconds
+test global::mixed_references_count_together has been running for over 60 seconds
+test global::rust_init_fails_without_memory has been running for over 60 seconds
+test index::new_matches_git_index_new has been running for over 60 seconds
+test index::oid_types::open_with_oid_type_fails_as_git_index_open_ext_fails has been running for over 60 seconds
+test common::options::search_paths_match_c ... ok
+test index::oid_types::open_with_oid_type_matches_git_index_open_ext has been running for over 60 seconds
+test index::oid_types::with_oid_type_matches_git_index_new_ext has been running for over 60 seconds
+test commit::create_options::commits_created_and_amended_with_the_options_match_c ... ok
+test index::open_edit_write_reopen_sequence_matches has been running for over 60 seconds
+test index::open_matches_git_index_open has been running for over 60 seconds
+test index::new_matches_git_index_new ... ok
+test index::open_matches_on_corrupted_version_4_files has been running for over 60 seconds
+test index::open_matches_on_every_version_and_extension has been running for over 60 seconds
+test common::options::string_options_match_c ... ok
+test index::open_matches_on_long_paths has been running for over 60 seconds
+test index::oid_types::open_with_oid_type_fails_as_git_index_open_ext_fails ... ok
+test index::shared_index_lifecycle_matches_git_index_free has been running for over 60 seconds
+test mailmap::buffers_match has been running for over 60 seconds
+test blob::owner::contents_match ... ok
+test mailmap::empty_replaced_emails_are_skipped_where_c_fails has been running for over 60 seconds
+test mailmap::entries::entries_and_lookups_match_c has been running for over 60 seconds
+test mailmap::new_mailmaps_match has been running for over 60 seconds
+test mailmap::nul_bytes_fail_on_both_sides has been running for over 60 seconds
+test config::entry_and_map_types::entry_selection_sequences_match_c ... ok
+test mailmap::repository_mailmaps_match has been running for over 60 seconds
+test mailmap::signatures::resolutions_match_c_before_and_after_new_entries has been running for over 60 seconds
+test common::options::windows_sharemode_matches_c ... ok
+test message::allocator::failed_allocations_match has been running for over 60 seconds
+test common::options::ssl_cert_locations_match_c ... ok
+test message::allocator::sequences_match has been running for over 60 seconds
+test errors::last_reads_as_c_does_after_each_step ... ok
+test message::built_trailers_match has been running for over 60 seconds
+test config::enumeration::enumeration_invalid_value_filters_match_c ... ok
+test message::parsed_arrays_match has been running for over 60 seconds
+test message::parsed_trailers_match has been running for over 60 seconds
+test index::oid_types::with_oid_type_matches_git_index_new_ext ... ok
+test message::prettify::prettified_messages_match_c has been running for over 60 seconds
+test object::id_and_owner::ids_and_owners_match_c has been running for over 60 seconds
+test common::options::setters_without_getters_match_c ... ok
+test object::id_options::new_matches_init has been running for over 60 seconds
+test object::id_options::steps_match has been running for over 60 seconds
+test object::kind_and_short_id::kinds_and_short_ids_match_c has been running for over 60 seconds
+test config::enumeration::enumeration_refresh_errors_and_recovery_match_c ... ok
+test common::setters_write_what_their_getters_read ... ok
+test object::lookups_in_a_repository_without_paths_match_c has been running for over 60 seconds
+test common::options::timeouts_match_c ... ok
+test common::opts_refuses_exactly_the_unnamed_keys ... ok
+test object::lookups_match_c has been running for over 60 seconds
+test object::lookups_of_unparsable_objects_match_c has been running for over 60 seconds
+test config::backend_walk::backend_walk_multicall_callbacks_errors_and_stops_match_c ... ok
+test object::peel_and_bypath::peels_and_path_lookups_match_c has been running for over 60 seconds
+test common::opts_dispatches_every_named_key ... ok
+test object::types_and_contents::content_checks_match_c has been running for over 60 seconds
+test object::types_and_contents::names_match_c has been running for over 60 seconds
+test mailmap::nul_bytes_fail_on_both_sides ... ok
+test odb::a_shared_odb_lives_as_long_as_in_c has been running for over 60 seconds
+test odb::new_builds_what_git_odb_new_builds has been running for over 60 seconds
+test index::open_edit_write_reopen_sequence_matches ... ok
+test odb::open_builds_what_git_odb_open_builds has been running for over 60 seconds
+test commit::commit_owner::lookups_copies_and_releases_match_c ... ok
+test odb::open_fails_as_git_odb_open_fails has been running for over 60 seconds
+test odb::open_follows_alternates_as_git_odb_open_does has been running for over 60 seconds
+test index::open_matches_on_long_paths ... ok
+test odb::open_with_oid_type_builds_what_git_odb_open_ext_builds has been running for over 60 seconds
+test odb::with_oid_type_builds_what_git_odb_new_ext_builds has been running for over 60 seconds
+test oid::comparisons_follow_edits_like_c has been running for over 60 seconds
+test config::file_access::isolated_search_and_default_failures_match_c ... ok
+test oid::comparisons_match_c has been running for over 60 seconds
+test index::shared_index_lifecycle_matches_git_index_free ... ok
+test oid::default_is_git_oid_default has been running for over 60 seconds
+test errors::last_reads_messages_of_every_size ... ok
+test oid::field_writes_and_copies_match_c has been running for over 60 seconds
+test oid::formatters_match_c has been running for over 60 seconds
+test config::iterator_entries::public_entries_across_levels_interleaved_match_c ... ok
+test oid::from_prefix_parses_as_c has been running for over 60 seconds
+test common::feature_from_raw_names_exactly_the_c_constants ... ok
+test oid::from_raw_names_exactly_the_c_types has been running for over 60 seconds
+test message::built_trailers_match ... ok
+test oid::from_raw_parses_as_c has been running for over 60 seconds
+test message::parsed_trailers_match ... ok
+test oid::from_string_parses_as_c has been running for over 60 seconds
+test index::oid_types::open_with_oid_type_matches_git_index_open_ext ... ok
+test oid::git_oid_from_prefix_takes_hex_size_digits has been running for over 60 seconds
+test message::parsed_arrays_match ... ok
+test oid::git_oid_from_raw_accepts_exactly_the_named_types has been running for over 60 seconds
+test errors::last_reads_allocation_failures_as_c_does ... ok
+test oid::git_oid_from_string_takes_exactly_hex_size_digits has been running for over 60 seconds
+test oid::mixed_sequences_leave_the_same_error_state has been running for over 60 seconds
+test oid::parses_into_one_oid_follow_the_rust_type has been running for over 60 seconds
+test checkout::new_matches_c_init ... ok
+test oid::repository_oid_types_follow_the_rust_type has been running for over 60 seconds
+test oid::seeded_random_inputs_match_c has been running for over 60 seconds
+test oid::shortener_adds_match_c has been running for over 60 seconds
+test blob::owner::lookups_match ... ok
+test oid::shortener_fills_up_like_c has been running for over 60 seconds
+test oid::shortener_new_matches_c has been running for over 60 seconds
+test oid::types_carry_their_c_values has been running for over 60 seconds
+test oid::zero_ids_match_c has been running for over 60 seconds
+test object::lookups_in_a_repository_without_paths_match_c ... ok
+test oidarray::built_arrays_match_c_built_ones has been running for over 60 seconds
+test oidarray::merge_base_results_read_edit_and_release_alike has been running for over 60 seconds
+test object::types_and_contents::content_checks_match_c ... ignored, its corpus, for every type and id type, outlasts a BorrowSanitizer gate; the other variants run it
+test errors::classifies_what_libgit2_reports ... ok
+test object::id_and_owner::ids_and_owners_match_c ... ok
+test refdb::owner::new_matches_git_refdb_new_and_set_backend has been running for over 60 seconds
+test errors::last_agrees_once_it_pins_the_runtime ... ok
+test global::c_init_fails_without_memory ... ok
+test global::rust_init_fails_without_memory ... ok
+test filter::failing_initialize ... ok
+test filter::load ... ok
+test refdb::owner::open_matches_git_refdb_open has been running for over 60 seconds
+test filter::with_blob ... ok
+test refdb::owner::refused_backends_fail_alike_and_stay_the_callers has been running for over 60 seconds
+test refdb::refdb_type::init_follows_the_rust_type has been running for over 60 seconds
+test refdb::refdb_type::zero_is_the_default_format has been running for over 60 seconds
+test refs::copies_match_git_reference_dup has been running for over 60 seconds
+test global::mixed_references_count_together ... ok
+test refs::direct_matches_git_reference_alloc has been running for over 60 seconds
+test refs::symbolic_matches_git_reference_alloc_symbolic has been running for over 60 seconds
+test repository::head_and_lookups::a_head_at_a_missing_object_has_no_parents has been running for over 60 seconds
+test repository::head_and_lookups::cleanup_resets_what_c_resets has been running for over 60 seconds
+test repository::head_and_lookups::detach_head_moves_what_c_moves has been running for over 60 seconds
+test repository::head_and_lookups::discover_finds_what_c_finds has been running for over 60 seconds
+test config::parsers::parse_i64_sequences_match_c ... ok
+test repository::head_and_lookups::fetchhead_callback_fails_where_c_fails has been running for over 60 seconds
+test repository::head_and_lookups::fetchhead_callback_panic_stops_as_euser has been running for over 60 seconds
+test object::id_options::new_matches_init ... ok
+test repository::head_and_lookups::fetchhead_callback_sees_what_a_c_callback_sees has been running for over 60 seconds
+test filter::new ... ok
+test repository::head_and_lookups::fetchhead_entry_without_a_marker_keeps_the_previous_one has been running for over 60 seconds
+test repository::head_and_lookups::fetchhead_walks_in_sequence_match_c has been running for over 60 seconds
+test oid::default_is_git_oid_default ... ok
+test repository::head_and_lookups::getters_read_what_c_reads has been running for over 60 seconds
+test repository::head_and_lookups::hash_file_matches_c has been running for over 60 seconds
+test repository::head_and_lookups::head_states_read_as_c_reads_them has been running for over 60 seconds
+test repository::head_and_lookups::namespace_and_ident_read_back_what_was_set has been running for over 60 seconds
+test filter::load_ext ... ok
+test repository::head_and_lookups::worktree_heads_read_as_c_reads_them has been running for over 60 seconds
+test object::types_and_contents::names_match_c ... ok
+test repository::heads_and_parts::deferred_configuration_failures_match_c has been running for over 60 seconds
+test repository::heads_and_parts::from_env_opens_match_c has been running for over 60 seconds
+test index::open_matches_on_corrupted_version_4_files ... ok
+test repository::heads_and_parts::from_env_opens_match_c_unparsable has been running for over 60 seconds
+test repository::heads_and_parts::head_move_failures_match_c has been running for over 60 seconds
+test repository::heads_and_parts::head_moves_match_c has been running for over 60 seconds
+test oid::field_writes_and_copies_match_c ... ok
+test repository::heads_and_parts::identities_and_namespaces_match_c has been running for over 60 seconds
+test config::entry_and_map_types::rust_map_tables_dispatch_like_c_tables ... ok
+test repository::heads_and_parts::installed_parts_match_c has been running for over 60 seconds
+test repository::heads_and_parts::lent_odbs_and_refdbs_match_c has been running for over 60 seconds
+test config::mapping_callbacks::mapped_config_matches_c_across_writes_snapshots_and_errors ... ok
+test repository::heads_and_parts::mergehead_callbacks_match_c has been running for over 60 seconds
+test global::counts_match_c ... ok
+test repository::heads_and_parts::message_sequences_match_c has been running for over 60 seconds
+test repository::heads_and_parts::odb_load_failures_match_c has been running for over 60 seconds
+test mailmap::signatures::resolutions_match_c_before_and_after_new_entries ... ok
+test repository::heads_and_parts::open_ext_matches_c has been running for over 60 seconds
+test repository::heads_and_parts::open_from_worktree_matches_c has been running for over 60 seconds
+test oid::from_raw_parses_as_c ... ok
+test repository::heads_and_parts::paths_and_types_match_c has been running for over 60 seconds
+test repository::heads_and_parts::recursive_reinit_matches_c has been running for over 60 seconds
+test message::allocator::sequences_match ... ok
+test repository::heads_and_parts::reinit_filesystem_matches_c has been running for over 60 seconds
+test repository::heads_and_parts::states_match_c has been running for over 60 seconds
+test repository::heads_and_parts::workdirs_and_bareness_match_c has been running for over 60 seconds
+test oid::parses_into_one_oid_follow_the_rust_type ... ok
+test repository::init_flags_and_modes::flag_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test repository::init_flags_and_modes::flags_test_bits_as_c_does has been running for over 60 seconds
+test message::allocator::failed_allocations_match ... ok
+test repository::init_flags_and_modes::init_ext_reads_rust_values_as_c_constants has been running for over 60 seconds
+test oid::shortener_fills_up_like_c ... ignored, tens of thousands of additions stall BorrowSanitizer; the other variants run it
+test repository::init_flags_and_modes::mkpath_reads_the_environment_as_open_from_env has been running for over 60 seconds
+test oid::mixed_sequences_leave_the_same_error_state ... ok
+test repository::init_flags_and_modes::mode_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test commit::signatures::signatures_match_c ... ok
+test repository::init_flags_and_modes::modes_shape_the_created_tree has been running for over 60 seconds
+test repository::init_options::defaults_read_the_global_configuration_as_c has been running for over 60 seconds
+test oid::types_carry_their_c_values ... ok
+test repository::init_options::init_ext_failures_match_c has been running for over 60 seconds
+test repository::init_options::init_ext_reads_rust_options_as_c_options has been running for over 60 seconds
+test repository::init_options::new_matches_the_c_initialisers has been running for over 60 seconds
+test oid::from_raw_names_exactly_the_c_types ... ok
+test repository::items_and_open_flags::item_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test repository::items_and_open_flags::item_path_finds_nothing_in_a_repository_without_a_location has been running for over 60 seconds
+test repository::items_and_open_flags::item_path_resolves_every_variant_as_its_c_constant has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_crosses_file_systems_as_the_c_flags has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_follows_each_flag_as_documented has been running for over 60 seconds
+test oid::comparisons_follow_edits_like_c ... ok
+test repository::items_and_open_flags::open_ext_follows_the_environment_from_env_reads has been running for over 60 seconds
+test oid::shortener_new_matches_c ... ok
+test repository::items_and_open_flags::open_ext_reads_open_flags_as_their_c_bits has been running for over 60 seconds
+test mailmap::entries::entries_and_lookups_match_c ... ok
+test repository::items_and_open_flags::open_ext_reads_the_environment_as_the_c_flags has been running for over 60 seconds
+test repository::items_and_open_flags::open_flag_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test repository::repository_owner::init_creates_and_reopens_what_c_does has been running for over 60 seconds
+test config::mapping_callbacks::map_lookup_matches_c_after_each_table_edit ... ok
+test repository::repository_owner::new_and_open_build_what_c_builds has been running for over 60 seconds
+test repository::repository_owner::open_bare_refuses_a_format_as_c_does has been running for over 60 seconds
+test repository::routines::cleanup_state_failures_match_c has been running for over 60 seconds
+test repository::routines::cleanup_state_matches_c has been running for over 60 seconds
+test oid::from_prefix_parses_as_c ... ok
+test repository::routines::workdir_matches_c has been running for over 60 seconds
+test repository::routines::wrap_odb_matches_c has been running for over 60 seconds
+test config::parsers::parse_sequences_match_c ... ok
+test repository::state::reported_states_match_the_markers has been running for over 60 seconds
+test object::id_options::steps_match ... ok
+test repository::state::reported_states_match_the_markers_in_a_bare_repository has been running for over 60 seconds
+test filter::absolute_paths ... ok
+test oid::from_string_parses_as_c ... ok
+test repository::state::variants_are_the_header_constants has been running for over 60 seconds
+test commit::navigation::derived_commits_and_trees_match_c ... ok
+test signature::a_configuration_corrupted_after_opening has been running for over 60 seconds
+test config::writes_and_snapshots::multi_call_writes_order_and_snapshot_match_c ... ok
+test signature::a_failing_committer_after_the_author has been running for over 60 seconds
+test oidarray::built_arrays_match_c_built_ones ... ok
+test signature::dates_that_do_not_parse has been running for over 60 seconds
+test errors::from_raw_names_exactly_the_c_codes ... ok
+test errors::from_raw_names_exactly_the_c_classes ... ok
+test refdb::owner::refused_backends_fail_alike_and_stay_the_callers ... ok
+test oid::repository_oid_types_follow_the_rust_type ... ok
+test signature::identity_and_dates_from_the_environment has been running for over 60 seconds
+test refs::copies_match_git_reference_dup ... ok
+test signature::identity_from_the_configuration has been running for over 60 seconds
+test refdb::owner::open_matches_git_refdb_open ... ok
+test refs::symbolic_matches_git_reference_alloc_symbolic ... ok
+test signature::missing_identities has been running for over 60 seconds
+test oidarray::merge_base_results_read_edit_and_release_alike ... ok
+test signature::mixed_sources_and_the_email_fallback has been running for over 60 seconds
+test errors::last_reads_each_threads_own_error ... ok
+test signature::refused_values has been running for over 60 seconds
+test refdb::refdb_type::zero_is_the_default_format ... ok
+test strarray::allocated_empty_results_release_alike has been running for over 60 seconds
+test repository::heads_and_parts::from_env_opens_match_c_unparsable ... ok
+test refdb::owner::new_matches_git_refdb_new_and_set_backend ... ok
+test strarray::copies_build_edit_and_release_alike has been running for over 60 seconds
+test index::open_matches_git_index_open ... ok
+test refs::direct_matches_git_reference_alloc ... ok
+test strarray::extension_results_read_copy_edit_and_release_alike has been running for over 60 seconds
+test object::lookups_of_unparsable_objects_match_c ... ok
+test strarray::views_read_and_copy_as_argument_arrays has been running for over 60 seconds
+test odb::new_builds_what_git_odb_new_builds ... ok
+test sys_alloc::libgit2_drives_both_allocators_alike has been running for over 60 seconds
+test odb::open_follows_alternates_as_git_odb_open_does ... ok
+test repository::heads_and_parts::mergehead_callbacks_match_c ... ok
+test sys_alloc::member_writes_match_a_raw_allocator has been running for over 60 seconds
+test oid::git_oid_from_prefix_takes_hex_size_digits ... ok
+test repository::head_and_lookups::a_head_at_a_missing_object_has_no_parents ... ok
+test sys_commit::creation_by_id_scripts_match has been running for over 60 seconds
+test sys_commit::unwritable_object_databases_fail_alike has been running for over 60 seconds
+test repository::heads_and_parts::head_move_failures_match_c ... ok
+test sys_config::backend_entries::backend_entries_across_levels_match_c has been running for over 60 seconds
+test oid::git_oid_from_string_takes_exactly_hex_size_digits ... ok
+test oid::zero_ids_match_c ... ok
+test sys_config::backend_entries::backend_entry_layout_and_lifecycle_match_c has been running for over 60 seconds
+test repository::heads_and_parts::open_from_worktree_matches_c ... ok
+test repository::heads_and_parts::recursive_reinit_matches_c ... ok
+test sys_config::backends::backend_failed_open_error_matches_c has been running for over 60 seconds
+test oid::git_oid_from_raw_accepts_exactly_the_named_types ... ok
+test repository::heads_and_parts::identities_and_namespaces_match_c ... ok
+test repository::init_options::new_matches_the_c_initialisers ... ok
+test sys_config::backends::backend_memory_multicall_and_snapshot_match_c has been running for over 60 seconds
+test blob::growing_buffer_sequence ... ok
+test refdb::refdb_type::init_follows_the_rust_type ... ok
+test sys_config::backends::backend_options_and_open_errors_match_c has been running for over 60 seconds
+test repository::items_and_open_flags::item_path_finds_nothing_in_a_repository_without_a_location ... ok
+test sys_config::backends::backend_template_init_matches_c has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_crosses_file_systems_as_the_c_flags ... ok
+test sys_config::backends::writable_get_dispatches_its_own_slot_like_c has been running for over 60 seconds
+test repository::heads_and_parts::head_moves_match_c ... ok
+test odb::open_builds_what_git_odb_open_builds ... ok
+test repository::heads_and_parts::odb_load_failures_match_c ... ok
+test sys_config::iterators::filtered_multivar_steps_match_c has been running for over 60 seconds
+test repository::heads_and_parts::paths_and_types_match_c ... ok
+test repository::head_and_lookups::detach_head_moves_what_c_moves ... ok
+test repository::init_flags_and_modes::mkpath_reads_the_environment_as_open_from_env ... ok
+test sys_config::iterators::iterator_sequences_match_c has been running for over 60 seconds
+test odb::open_fails_as_git_odb_open_fails ... ok
+test repository::init_flags_and_modes::mode_from_raw_names_exactly_the_c_constants ... ok
+test sys_config::iterators::multivar_regex_errors_match_c has been running for over 60 seconds
+test repository::state::variants_are_the_header_constants ... ok
+test repository::state::reported_states_match_the_markers ... ok
+test sys_config::memory_options_init_and_mutation_match_c has been running for over 60 seconds
+test repository::state::reported_states_match_the_markers_in_a_bare_repository ... ok
+test odb::a_shared_odb_lives_as_long_as_in_c ... ok
+test sys_config::registration::backend_registration_multicall_matches_independent_c has been running for over 60 seconds
+test signature::identity_and_dates_from_the_environment ... ignored, BorrowSanitizer reports the end pointer glibc's strtoul writes for a date as out of bounds
+test sys_errors::allocation_failures has been running for over 60 seconds
+test repository::init_flags_and_modes::flag_from_raw_names_exactly_the_c_constants ... ok
+test sys_errors::messages_grow_and_shrink has been running for over 60 seconds
+test repository::routines::wrap_odb_matches_c ... ok
+test sys_errors::setters_and_clear_in_sequence has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_reads_the_environment_as_the_c_flags ... ok
+test sys_errors::threads_keep_their_own_errors has been running for over 60 seconds
+test repository::repository_owner::open_bare_refuses_a_format_as_c_does ... ok
+test sys_odb_backend::traced_allocator_sequences has been running for over 60 seconds
+test sys_odb_backend::traced_string_sequences has been running for over 60 seconds
+test sys_alloc::member_writes_match_a_raw_allocator ... ok
+test sys_path::filesystem::from_raw_accepts_what_git_path_is_gitfile_accepts has been running for over 60 seconds
+test sys_path::filesystem::variants_match_as_their_rules_say has been running for over 60 seconds
+test sys_path::git_file::each_variant_recognises_its_own_file has been running for over 60 seconds
+test repository::init_options::defaults_read_the_global_configuration_as_c ... ok
+test sys_path::git_file::variants_are_what_git_path_is_gitfile_accepts has been running for over 60 seconds
+test sys_path::is_gitfile::corpus_matches_c has been running for over 60 seconds
+test sys_path::is_gitfile::seeded_short_names_match_c has been running for over 60 seconds
+test sys_repository::new_options::conversions_keep_exactly_what_c_accepts has been running for over 60 seconds
+test sys_repository::new_options::new_ext_reads_rust_options_as_c_options has been running for over 60 seconds
+test repository::items_and_open_flags::open_flag_from_raw_names_exactly_the_c_constants ... ok
+test sys_repository::new_options::new_matches_the_c_initialisers has been running for over 60 seconds
+test sys_repository::new_options::with_oid_type_matches_new_ext has been running for over 60 seconds
+test sys_repository::submodule_cache::cache_sequences_match_c has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_follows_each_flag_as_documented ... ok
+test sys_repository::submodule_cache::failed_loads_match_c has been running for over 60 seconds
+test tag::alternating_sequence_without_clearing has been running for over 60 seconds
+test tag::named_edge_cases has been running for over 60 seconds
+test tag::repository_tags::annotated_scripts_match_c has been running for over 60 seconds
+test tag::repository_tags::annotations_without_an_object_database_match_c has been running for over 60 seconds
+test tag::repository_tags::invalid_reference_names_match_c has been running for over 60 seconds
+test tag::repository_tags::iterover_breaks_match_c_but_for_the_code has been running for over 60 seconds
+test odb::open_with_oid_type_builds_what_git_odb_open_ext_builds ... ok
+test tag::repository_tags::scripts_match_c has been running for over 60 seconds
+test tag::repository_tags::unwritable_objects_match_c has been running for over 60 seconds
+test sys_config::backends::backend_failed_open_error_matches_c ... ok
+test tag::short_names_exhaustively has been running for over 60 seconds
+test repository::routines::cleanup_state_failures_match_c ... ok
+test tag::tag_accessors::getters_match_c has been running for over 60 seconds
+test tag::tag_object::lookups_in_a_repository_without_paths_match_c has been running for over 60 seconds
+test blob::every_byte_alone_and_among_text ... ok
+test tag::tag_object::lookups_match_c has been running for over 60 seconds
+test sys_config::backends::backend_template_init_matches_c ... ok
+test tag::tag_object::lookups_of_unparsable_tags_match_c has been running for over 60 seconds
+test repository::items_and_open_flags::item_path_resolves_every_variant_as_its_c_constant ... ok
+test trace::callback::call_passes_what_a_direct_c_call_passes has been running for over 60 seconds
+test repository::items_and_open_flags::item_from_raw_names_exactly_the_c_constants ... ok
+test trace::callback::libgit2s_messages_reach_a_tracer_as_they_reach_c has been running for over 60 seconds
+test trace::config::set_and_clear_configure_libgit2_as_git_trace_set_does has been running for over 60 seconds
+test sys_config::backends::writable_get_dispatches_its_own_slot_like_c ... ok
+test trace::config::set_and_clear_from_the_callback_as_git_trace_set_does has been running for over 60 seconds
+test trace::config::set_before_init_holds_after_it has been running for over 60 seconds
+test signature::a_configuration_corrupted_after_opening ... ok
+test trace::from_raw_names_exactly_the_c_levels has been running for over 60 seconds
+test sys_config::backends::backend_memory_multicall_and_snapshot_match_c ... ok
+test trace::git_trace_set_accepts_every_level_with_a_callback has been running for over 60 seconds
+test repository::routines::workdir_matches_c ... ok
+test trace::git_trace_set_needs_a_callback_above_none has been running for over 60 seconds
+test sys_config::backends::backend_options_and_open_errors_match_c ... ok
+test signature::a_failing_committer_after_the_author ... ok
+test trace::levels_carry_their_c_values has been running for over 60 seconds
+test repository::head_and_lookups::fetchhead_callback_panic_stops_as_euser ... ok
+test trace::order_is_libgit2s_report_rule has been running for over 60 seconds
+test transaction::config_construct_stage_abort_and_relock has been running for over 60 seconds
+test repository::heads_and_parts::workdirs_and_bareness_match_c ... ok
+test transaction::config_lock_codes_match_c has been running for over 60 seconds
+test transaction::reference_construct_lock_abort_and_relock has been running for over 60 seconds
+test strarray::allocated_empty_results_release_alike ... ok
+test tree::builder::allocation_failures_match has been running for over 60 seconds
+test sys_config::iterators::filtered_multivar_steps_match_c ... ok
+test tree::builder::empty_builders_match has been running for over 60 seconds
+test signature::identity_from_the_configuration ... ok
+test tree::builder::routines::filters_match_c has been running for over 60 seconds
+test tree::builder::routines::missing_object_databases_match has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_reads_open_flags_as_their_c_bits ... ok
+test tree::builder::routines::public_walks_match_c_walks has been running for over 60 seconds
+test sys_alloc::libgit2_drives_both_allocators_alike ... ok
+test tree::builder::routines::routine_allocation_failures_match has been running for over 60 seconds
+test sys_config::backend_entries::backend_entries_across_levels_match_c ... ok
+test tree::builder::routines::steps_match has been running for over 60 seconds
+test object::lookups_match_c ... ok
+test tree::builder::routines::walk_callbacks_match_c_callbacks has been running for over 60 seconds
+test signature::dates_that_do_not_parse ... ok
+test tree::builder::routines::walks_into_missing_subtrees_match has been running for over 60 seconds
+test sys_config::memory_options_init_and_mutation_match_c ... ok
+test tree::builder::seeded_builders_match has been running for over 60 seconds
+test signature::refused_values ... ok
+test sys_config::iterators::iterator_sequences_match_c ... ok
+test strarray::views_read_and_copy_as_argument_arrays ... ok
+test signature::missing_identities ... ok
+test tree::builder::tree_updates_match_c_structs has been running for over 60 seconds
+test strarray::extension_results_read_copy_edit_and_release_alike ... ok
+test strarray::copies_build_edit_and_release_alike ... ok
+test sys_path::filesystem::variants_match_as_their_rules_say ... ok
+test tree::builder::update_actions_match_what_libgit2_accepts has been running for over 60 seconds
+test sys_path::git_file::each_variant_recognises_its_own_file ... ok
+test tree::callback_results_act_as_each_mode_documents has been running for over 60 seconds
+test signature::mixed_sources_and_the_email_fallback ... ok
+test sys_commit::creation_by_id_scripts_match ... ok
+test sys_commit::unwritable_object_databases_fail_alike ... ok
+test oid::comparisons_match_c ... ok
+test sys_config::registration::backend_registration_multicall_matches_independent_c ... ok
+test sys_repository::new_options::conversions_keep_exactly_what_c_accepts ... ok
+test odb::with_oid_type_builds_what_git_odb_new_ext_builds ... ok
+test tree::each_variant_carries_its_constant_and_order has been running for over 60 seconds
+test repository::items_and_open_flags::open_ext_follows_the_environment_from_env_reads ... ok
+test tree::modes_are_the_values_git_tree_walk_accepts has been running for over 60 seconds
+test sys_repository::new_options::new_matches_the_c_initialisers ... ok
+test sys_config::backend_entries::backend_entry_layout_and_lifecycle_match_c ... ok
+test tree::tree_entry::copies_match_c has been running for over 60 seconds
+test repository::init_flags_and_modes::flags_test_bits_as_c_does ... ok
+test tree::tree_entry::getters_match_c has been running for over 60 seconds
+test tree::tree_entry::path_lookups_match_c has been running for over 60 seconds
+test tree::tree_object::getters_match_c has been running for over 60 seconds
+test commit::getters::getters_match_c_through_lookups_summaries_and_copies ... ok
+test tree::tree_object::lookups_in_a_repository_without_paths_match_c has been running for over 60 seconds
+test sys_repository::new_options::new_ext_reads_rust_options_as_c_options ... ok
+test tree::tree_object::lookups_match_c has been running for over 60 seconds
+test sys_path::is_gitfile::seeded_short_names_match_c ... ok
+test sys_repository::new_options::with_oid_type_matches_new_ext ... ok
+test tree::tree_object::lookups_of_unparsable_trees_match_c has been running for over 60 seconds
+test repository::init_flags_and_modes::modes_shape_the_created_tree ... ok
+test tree::tree_updates::baselines_of_other_repositories_match_c has been running for over 60 seconds
+test repository::repository_owner::new_and_open_build_what_c_builds ... ok
+test tree::tree_updates::scripts_match_c has been running for over 60 seconds
+test tree::tree_updates::unwritable_objects_match_c has been running for over 60 seconds
+test sys_config::iterators::multivar_regex_errors_match_c ... ok
+test types::branch_iterators_filter_and_report_as_branch_type_says has been running for over 60 seconds
+test tag::alternating_sequence_without_clearing ... ok
+test types::branch_lookup_takes_exactly_the_named_selections has been running for over 60 seconds
+test sys_path::git_file::variants_are_what_git_path_is_gitfile_accepts ... ok
+test types::configured_ignore_values_are_named has been running for over 60 seconds
+test tag::repository_tags::annotations_without_an_object_database_match_c ... ok
+test types::configured_settings_read_as_the_rust_type has been running for over 60 seconds
+test sys_errors::allocation_failures ... ok
+test types::from_raw_names_exactly_the_c_modes has been running for over 60 seconds
+test sys_odb_backend::traced_string_sequences ... ok
+test types::getters_read_what_git_signature_from_buffer_parses has been running for over 60 seconds
+test tag::tag_object::lookups_in_a_repository_without_paths_match_c ... ok
+test types::init_copies_the_update_setting_by_name has been running for over 60 seconds
+test tag::repository_tags::iterover_breaks_match_c_but_for_the_code ... ok
+test types::modes_carry_their_c_values has been running for over 60 seconds
+test sys_odb_backend::traced_allocator_sequences ... ok
+test types::new_matches_git_signature_new has been running for over 60 seconds
+test tag::named_edge_cases ... ok
+test types::object_types_are_what_libgit2_accepts has been running for over 60 seconds
+test trace::git_trace_set_accepts_every_level_with_a_callback ... ok
+test types::object_types_round_trip_through_the_odb has been running for over 60 seconds
+test sys_repository::submodule_cache::failed_loads_match_c ... ok
+test types::odb_write_of_type_zero_stores_an_unreadable_blob has been running for over 60 seconds
+test trace::levels_carry_their_c_values ... ok
+test types::parsed_trees_keep_any_16_bit_mode has been running for over 60 seconds
+test trace::order_is_libgit2s_report_rule ... ok
+test types::recurse_writes_round_trip has been running for over 60 seconds
+test types::reference_types_follow_c has been running for over 60 seconds
+test sys_repository::submodule_cache::cache_sequences_match_c ... ok
+test types::set_ignore_takes_the_variants_values has been running for over 60 seconds
+test trace::from_raw_names_exactly_the_c_levels ... ok
+test types::setters_write_what_git_signature_dup_copies has been running for over 60 seconds
+test tag::repository_tags::annotated_scripts_match_c ... ok
+test types::signature_zones_are_written_from_offset_and_sign has been running for over 60 seconds
+test types::signatures::new_matches_git_signature_new has been running for over 60 seconds
+test transaction::reference_construct_lock_abort_and_relock ... ok
+test types::signatures::now_matches_git_signature_now has been running for over 60 seconds
+test sys_errors::threads_keep_their_own_errors ... ok
+test types::signatures::owned_signatures_write_what_c_writes has been running for over 60 seconds
+test tag::repository_tags::scripts_match_c ... ok
+test tag::repository_tags::invalid_reference_names_match_c ... ok
+test types::signatures::parse_matches_git_signature_from_buffer has been running for over 60 seconds
+test transaction::config_construct_stage_abort_and_relock ... ok
+test types::signatures::setters_write_what_c_writes has been running for over 60 seconds
+test tree::builder::routines::walks_into_missing_subtrees_match ... ok
+test tree::builder::empty_builders_match ... ok
+test trace::git_trace_set_needs_a_callback_above_none ... ok
+test types::signatures::views_match_c_stack_signatures has been running for over 60 seconds
+test tree::builder::routines::missing_object_databases_match ... ok
+test trace::config::set_before_init_holds_after_it ... ok
+test sys_errors::setters_and_clear_in_sequence ... ok
+test trace::config::set_and_clear_from_the_callback_as_git_trace_set_does ... ok
+test types::treebuilder_accepts_exactly_the_insertable_modes has been running for over 60 seconds
+test tag::tag_object::lookups_of_unparsable_tags_match_c ... ok
+test tree::builder::update_actions_match_what_libgit2_accepts ... ok
+test types::treebuilder_checks_the_object_a_mode_names has been running for over 60 seconds
+test trace::callback::libgit2s_messages_reach_a_tracer_as_they_reach_c ... ok
+test trace::callback::call_passes_what_a_direct_c_call_passes ... ok
+test types::unconfigured_settings_read_as_the_defaults has been running for over 60 seconds
+test tree::tree_object::lookups_in_a_repository_without_paths_match_c ... ok
+test trace::config::set_and_clear_configure_libgit2_as_git_trace_set_does ... ok
+test types::unreadable_settings_fail_the_lookup has been running for over 60 seconds
+test tree::each_variant_carries_its_constant_and_order ... ok
+test tree::builder::routines::walk_callbacks_match_c_callbacks ... ok
+test types::update_writes_round_trip has been running for over 60 seconds
+test tree::builder::allocation_failures_match ... ok
+test tree::tree_entry::copies_match_c ... ok
+test types::variants_carry_the_c_values has been running for over 60 seconds
+test sys_path::filesystem::from_raw_accepts_what_git_path_is_gitfile_accepts ... ok
+test repository::heads_and_parts::from_env_opens_match_c ... ok
+test tree::builder::routines::routine_allocation_failures_match ... ok
+test tree::builder::tree_updates_match_c_structs ... ok
+test tag::tag_object::lookups_match_c ... ok
+test types::getters_read_what_git_signature_from_buffer_parses ... ok
+test tree::tree_entry::path_lookups_match_c ... ok
+test types::write_streams::blob_stream_free_and_close_match_c has been running for over 60 seconds
+test repository::routines::cleanup_state_matches_c ... ok
+test types::modes_carry_their_c_values ... ok
+test types::configured_ignore_values_are_named ... ok
+test tree::tree_updates::baselines_of_other_repositories_match_c ... ok
+test types::new_matches_git_signature_new ... ok
+test types::odb_write_of_type_zero_stores_an_unreadable_blob ... ok
+test types::setters_write_what_git_signature_dup_copies ... ok
+test types::write_streams::blob_stream_writes_and_commit_match_c has been running for over 60 seconds
+test tree::modes_are_the_values_git_tree_walk_accepts ... ok
+test types::object_types_round_trip_through_the_odb ... ok
+test sys_path::is_gitfile::corpus_matches_c ... ok
+test types::write_streams::handle_calls_match_member_calls has been running for over 60 seconds
+test tree::builder::routines::public_walks_match_c_walks ... ok
+test transaction::config_lock_codes_match_c ... ok
+test tree::tree_object::lookups_of_unparsable_trees_match_c ... ok
+test types::write_streams::rust_targets_match_c_targets_under_libgit2 has been running for over 60 seconds
+test types::signatures::owned_signatures_write_what_c_writes ... ok
+test repository::heads_and_parts::message_sequences_match_c ... ok
+test types::signatures::parse_matches_git_signature_from_buffer ... ok
+test types::init_copies_the_update_setting_by_name ... ok
+test types::zeroed_is_what_a_zoneless_parse_leaves has been running for over 60 seconds
+test types::treebuilder_checks_the_object_a_mode_names ... ok
+test repository::heads_and_parts::lent_odbs_and_refdbs_match_c ... ok
+test types::unconfigured_settings_read_as_the_defaults ... ok
+test worktree::add_options::adds_creating_branches_match_c has been running for over 60 seconds
+test types::variants_carry_the_c_values ... ok
+test types::unreadable_settings_fail_the_lookup ... ok
+test types::signatures::views_match_c_stack_signatures ... ok
+test worktree::add_options::adds_in_a_bare_repository_match_c has been running for over 60 seconds
+test types::treebuilder_accepts_exactly_the_insertable_modes ... ok
+test tree::tree_entry::getters_match_c ... ok
+test repository::heads_and_parts::installed_parts_match_c ... ok
+test repository::heads_and_parts::deferred_configuration_failures_match_c ... ok
+test worktree::add_options::adds_match_c_built_options_step_by_step has been running for over 60 seconds
+test types::zeroed_is_what_a_zoneless_parse_leaves ... ok
+test types::signatures::new_matches_git_signature_new ... ok
+test types::set_ignore_takes_the_variants_values ... ok
+test worktree::add_options::adds_on_a_changed_disk_match_c has been running for over 60 seconds
+test tree::callback_results_act_as_each_mode_documents ... ok
+test types::signatures::setters_write_what_c_writes ... ok
+test types::branch_iterators_filter_and_report_as_branch_type_says ... ok
+test worktree::add_options::adds_with_another_repositorys_reference_match_c has been running for over 60 seconds
+test types::write_streams::handle_calls_match_member_calls ... ok
+test types::write_streams::blob_stream_free_and_close_match_c ... ok
+test worktree::add_options::git_worktree_add_options_init_refuses_every_other_version has been running for over 60 seconds
+test types::object_types_are_what_libgit2_accepts ... ok
+test repository::heads_and_parts::states_match_c ... ok
+test types::recurse_writes_round_trip ... ok
+test worktree::add_options::new_matches_git_worktree_add_options_init has been running for over 60 seconds
+test types::reference_types_follow_c ... ok
+test worktree::add_options::new_matches_git_worktree_add_options_init ... ok
+test worktree::prune_options::flag_from_raw_names_exactly_the_c_constants has been running for over 60 seconds
+test worktree::add_options::git_worktree_add_options_init_refuses_every_other_version ... ok
+test types::signatures::now_matches_git_signature_now ... ok
+test worktree::prune_options::git_worktree_prune_options_init_refuses_every_other_version ... ok
+test worktree::prune_options::new_matches_git_worktree_prune_options_init ... ok
+test repository::head_and_lookups::fetchhead_walks_in_sequence_match_c ... ok
+test worktree::prune_options::is_prunable_reads_the_options_alike has been running for over 60 seconds
+test types::update_writes_round_trip ... ok
+test types::signature_zones_are_written_from_offset_and_sign ... ok
+test repository::heads_and_parts::reinit_filesystem_matches_c ... ok
+test types::branch_lookup_takes_exactly_the_named_selections ... ok
+test tree::builder::seeded_builders_match ... ok
+test types::from_raw_names_exactly_the_c_modes ... ok
+test worktree::prune_options::prune_reads_the_options_alike has been running for over 60 seconds
+test worktree::prune_options::flag_from_raw_names_exactly_the_c_constants ... ok
+test types::configured_settings_read_as_the_rust_type ... ok
+test worktree::add_options::adds_creating_branches_match_c ... ok
+test worktree::routines::failures_on_a_changed_disk_match_c has been running for over 60 seconds
+test tag::tag_accessors::getters_match_c ... ok
+test tree::builder::routines::steps_match ... ok
+test tree::builder::routines::filters_match_c ... ok
+test worktree::routines::lock_sequences_match_c has been running for over 60 seconds
+test common::from_raw_names_exactly_the_c_keys ... ok
+test annotated_commit::constructors_build_and_fail_as_c ... ok
+test worktree::routines::lookups_and_readers_match_c has been running for over 60 seconds
+test worktree::worktree_box::adopted_worktrees_match_c_lifecycle ... ok
+test mailmap::new_mailmaps_match ... ok
+test worktree::routines::parent_directory_and_worktrees_entry_match_c has been running for over 60 seconds
+test worktree::routines::prune_sequences_match_c has been running for over 60 seconds
+test worktree::routines::parent_directory_and_worktrees_entry_match_c ... ok
+test tree::tree_object::lookups_match_c ... ok
+test worktree::routines::lookups_and_readers_match_c ... ok
+test types::parsed_trees_keep_any_16_bit_mode ... ok
+test worktree::routines::lock_sequences_match_c ... ok
+test tree::tree_object::getters_match_c ... ok
+test worktree::routines::failures_on_a_changed_disk_match_c ... ok
+test worktree::add_options::adds_on_a_changed_disk_match_c ... ok
+test worktree::prune_options::prune_reads_the_options_alike ... ok
+test oid::seeded_random_inputs_match_c ... ok
+test worktree::routines::prune_sequences_match_c ... ok
+test index::open_matches_on_every_version_and_extension ... ok
+test worktree::prune_options::is_prunable_reads_the_options_alike ... ok
+test annotated_commit::constructors_build_and_fail_as_c_over_sha256 ... ok
+test worktree::add_options::adds_in_a_bare_repository_match_c ... ok
+test types::write_streams::blob_stream_writes_and_commit_match_c ... ok
+test tag::repository_tags::unwritable_objects_match_c ... ok
+test oid::formatters_match_c ... ok
+test worktree::add_options::adds_with_another_repositorys_reference_match_c ... ok
+test object::peel_and_bypath::peels_and_path_lookups_match_c ... ok
+test message::prettify::prettified_messages_match_c ... ok
+test repository::init_options::init_ext_failures_match_c ... ok
+test types::write_streams::rust_targets_match_c_targets_under_libgit2 ... ok
+test config::enumeration::enumeration_sequences_match_c_callbacks_errors_and_priority ... ok
+test sys_errors::messages_grow_and_shrink ... ok
+test tree::tree_updates::scripts_match_c ... ok
+test repository::head_and_lookups::cleanup_resets_what_c_resets ... ok
+test repository::head_and_lookups::worktree_heads_read_as_c_reads_them ... ok
+test repository::head_and_lookups::namespace_and_ident_read_back_what_was_set ... ok
+test repository::head_and_lookups::head_states_read_as_c_reads_them ... ok
+test repository::head_and_lookups::fetchhead_entry_without_a_marker_keeps_the_previous_one ... ok
+test tree::tree_updates::unwritable_objects_match_c ... ok
+test repository::head_and_lookups::getters_read_what_c_reads ... ok
+test repository::head_and_lookups::discover_finds_what_c_finds ... ok
+test config::enumeration::enumeration_value_filters_match_c ... ok
+test repository::repository_owner::init_creates_and_reopens_what_c_does ... ok
+test object::kind_and_short_id::kinds_and_short_ids_match_c ... ok
+test repository::heads_and_parts::open_ext_matches_c ... ok
+test checkout::conflict_labels_match_step_by_step ... ok
+test blob::generated_inputs ... ok
+test repository::head_and_lookups::fetchhead_callback_sees_what_a_c_callback_sees ... ok
+test repository::head_and_lookups::fetchhead_callback_fails_where_c_fails ... ok
+test mailmap::empty_replaced_emails_are_skipped_where_c_fails ... ok
+test worktree::add_options::adds_match_c_built_options_step_by_step ... ok
+test repository::init_flags_and_modes::init_ext_reads_rust_values_as_c_constants ... ok
+test checkout::tree_checkouts_match_step_by_step ... ok
+test tag::short_names_exhaustively ... ok
+test repository::head_and_lookups::hash_file_matches_c ... ok
+test mailmap::repository_mailmaps_match ... ok
+test oid::shortener_adds_match_c ... ok
+test blob::writing::writes_without_an_objects_directory_match_c ... ok
+test repository::init_options::init_ext_reads_rust_options_as_c_options ... ok
+test mailmap::buffers_match ... ok
+
+test result: ok. 401 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 1392.70s
+
