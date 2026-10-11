@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `parent` because it is borrowed
+ --> tests/ub_safe/compile_fail/config_level_parent_frozen.rs:6:18
+  |
+4 |     let mut parent = cfg.as_mut();
+  |         ---------- binding `parent` declared here
+5 |     let view = parent.open_level(ConfigLevel::LOCAL).unwrap();
+  |                ------ borrow of `parent` occurs here
+6 |     let _other = parent.lock();
+  |                  ^^^^^^ move out of `parent` occurs here
+7 |     drop(view);
+  |          ---- borrow later used here

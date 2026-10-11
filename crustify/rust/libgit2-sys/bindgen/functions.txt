@@ -384,3 +384,23 @@ git_config_parse_int64
 # config wave 1 batch 0: entry lifecycle
 git_config_get_entry
 git_config_entry_free
+
+# config wave 1 batch 1: file construction and scalar access
+git_config_delete_entry
+git_config_delete_multivar
+git_config_find_global
+git_config_find_system
+git_config_find_xdg
+git_config_get_bool
+git_config_get_int64
+git_config_get_path
+git_config_get_string
+git_config_get_string_buf
+git_config_open_default
+git_config_open_global
+git_config_open_level
+git_config_open_ondisk
+git_config_parse_path
+git_config_set_bool
+git_config_set_int64
+git_config_set_multivar

@@ -6964,6 +6964,61 @@
    ]
   },
   {
+   "name": "git_config_add_file_ondisk",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "File backend retains repository without upref for includeIf on each refresh/write. It must outlive config and all level views."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_backend_memory_options_init",
    "defined_in": "src/libgit2/config_mem.c",
    "lifetime": {
@@ -6987,11 +7042,171 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "call"
+       "lifetime": "arg:opts"
       },
       "nullable": false,
       "mutable": true,
-      "note": "Exclusive writable storage; full template memcpy on supported version, no retention or resource allocation."
+      "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_delete_entry",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_delete_multivar",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "regexp",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:regexp"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_find_global",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_find_system",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_find_xdg",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
      }
     }
    ]
@@ -7046,7 +7261,342 @@
       "borrowed": null,
       "nullable": true,
       "mutable": true,
-      "note": "Releases one reference (NULL is a no-op): GIT_REFCOUNT_DEC frees the config (config_free: down-ref each backend instance, which frees its backend at 0; dispose both vectors; git__free) once the atomic count reaches 0 and no repository owns it (rc.owner NULL); a repository-owned config at 0 is freed by the repository's set_config(NULL). Wrapped as the drop of ConfigFree (config/config.rs), behind ConfigBox and ConfigArc."
+      "note": "Consumes one config reference; last count releases backend instances, vector and struct. NULL is accepted. Does not access retained repository."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_bool",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_int32",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_int64",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_path",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_string",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "arg:config"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Output slot borrowed for call; result is an immutable NUL string kept by read-only backend until config is released; NULL on lookup error, empty for valueless. Rust copies before next call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_string_buf",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
      }
     }
    ]
@@ -7144,7 +7694,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Retained borrowed parent, must outlive transaction. No parent reference increment."
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
      }
     },
     {
@@ -7164,7 +7714,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Writable caller slot; success transfers one fresh transaction, failure leaves unchanged."
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing."
      }
     }
    ]
@@ -7200,7 +7750,200 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Out slot, written only on success with a fresh git__calloc'd config (empty readers/writers vectors, refcount 1, no owner): the caller's only reference, released by git_config_free. Untouched on failure (OOM, returns -1). Pre-init the calloc goes through failalloc and git_error_set_oom writes through an invalid TLS key, so the wrapper pins the runtime first. Wrapped as ConfigFree's CNew and Config::new (config/config.rs)."
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_open_default",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_open_global",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing. Backend is upref shared, retains parent cfg pointer and repository borrow; Rust keeps parent borrowed and exclusive for a writable level view."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_open_level",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing. Backend is upref shared, retains parent cfg pointer and repository borrow; Rust keeps parent borrowed and exclusive for a writable level view."
+     }
+    },
+    {
+     "name": "parent",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:parent"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_open_ondisk",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
      }
     }
    ]
@@ -7321,6 +8064,226 @@
       "nullable": true,
       "mutable": false,
       "note": "Read-only NUL-terminated bytes during this call, including error formatting; never stored, cloned, retained or freed. NULL means true for bool, parse failure for integers. Callers free config entries/buffers/configs after parsing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_parse_path",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:value"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_bool",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_int32",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_int64",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_multivar",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "regexp",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:regexp"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:value"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
      }
     }
    ]

@@ -46,6 +46,12 @@
 //! for as long as it lives, installs only a `ConfigArc<'static>`, since the repository
 //! would otherwise outlive the one the config's backends read.
 //!
+//! Level views also retain their original parent's backend, whose `cfg` pointer
+//! may still address that parent. The returned owner's lifetime is therefore tied
+//! to the parent even when no repository is involved. Shared handles open only
+//! shared Rust views; exclusive handles can open writable views while freezing
+//! the parent, preventing recursive backend locking through a sibling view.
+//!
 //! # Threads
 //!
 //! The struct is opaque (its body is in `src/libgit2/config.h`), so there are no field
@@ -321,6 +327,524 @@ const _: () = assert!(
         && size_of::<ConfigArc<'static>>() == size_of::<*mut ffi::git_config>()
         && size_of::<Option<ConfigBox<'static>>>() == size_of::<*mut ffi::git_config>()
 );
+
+// Config constructors and accessors keep foreign ownership inside ffibox owners.
+impl Config<'_> {
+    /// Opens a file backend. Missing files are accepted and created by a later write.
+    /// The path is copied; no repository is retained.
+    ///
+    /// Wraps: git_config_open_ondisk
+    pub fn open_ondisk(path: &CStr) -> Result<ConfigBox<'static>, ConfigError> {
+        if !runtime_pinned() {
+            return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: one writable output slot and a live NUL-terminated path, copied
+        // by C. Success transfers a new config; failure frees partial construction.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut out, path.as_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: C transfers one fresh config reference on success. The result
+        // lifetime is no longer than any retained parent and repository borrow.
+        unsafe { ConfigBox::from_c(out) }.ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+    }
+
+    /// Opens the default global, XDG and system configuration locations.
+    ///
+    /// Wraps: git_config_open_default
+    pub fn open_default() -> Result<ConfigBox<'static>, ConfigError> {
+        if !runtime_pinned() {
+            return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: C initializes this writable slot with an independent config
+        // loaded for no repository, or frees it on failure. Runtime is pinned.
+        let rc = unsafe { ffi::git_config_open_default(&mut out) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: C transfers one fresh config reference on success. The result
+        // lifetime is no longer than any retained parent and repository borrow.
+        unsafe { ConfigBox::from_c(out) }.ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+    }
+}
+
+impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
+    /// Opens a read-only Rust view of one priority. C shares the backend, not the
+    /// config allocation. HIGHEST produces a view with no enabled writer.
+    /// The view keeps the parent borrowed (custom backends may
+    /// use their parent pointer). Use the exclusive handle to obtain a writable view.
+    ///
+    /// Wraps: git_config_open_level
+    pub fn open_level(&self, level: ConfigLevel) -> Result<ConfigArc<'a>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: parent is live for 'a and C only reads its backend vector. C
+        // uprefs the selected backend into a fresh config, tied here to the parent.
+        let rc = unsafe { ffi::git_config_open_level(&mut out, self.as_ptr(), level.raw()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: successful output owns one fresh config reference; the shared
+        // view keeps its parent (and repository) borrowed for the result lifetime.
+        unsafe { ConfigBox::from_c(out) }
+            .ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+            .map(ConfigArc::from)
+    }
+
+    /// Opens XDG when present, otherwise global, as a shared Rust view.
+    ///
+    /// Wraps: git_config_open_global
+    pub fn open_global(&self) -> Result<ConfigArc<'a>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: live parent borrowed for 'a; C returns a fresh config holding
+        // one retained backend. The returned shared owner keeps the parent borrowed.
+        let rc = unsafe { ffi::git_config_open_global(&mut out, self.as_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: successful output owns one fresh config reference; the shared
+        // view keeps its parent (and repository) borrowed for the result lifetime.
+        unsafe { ConfigBox::from_c(out) }
+            .ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+            .map(ConfigArc::from)
+    }
+
+    /// Reads and parses a configuration bool value, returning an owned scalar.
+    ///
+    /// Wraps: git_config_get_bool
+    pub fn get_bool(&self, name: &CStr) -> Result<bool, ConfigError> {
+        let mut out = 0;
+        // SAFETY: config is live, name is NUL-terminated, and out is a writable
+        // aligned scalar. C temporarily retains and releases its entry; no borrow
+        // escapes this call, even when a live backend refreshes its file.
+        let rc = unsafe { ffi::git_config_get_bool(&mut out, self.as_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out != 0)
+        }
+    }
+
+    /// Reads and parses a configuration i32 value, returning an owned scalar.
+    ///
+    /// Wraps: git_config_get_int32
+    pub fn get_i32(&self, name: &CStr) -> Result<i32, ConfigError> {
+        let mut out = 0;
+        // SAFETY: config is live, name is NUL-terminated, and out is a writable
+        // aligned scalar. C temporarily retains and releases its entry; no borrow
+        // escapes this call, even when a live backend refreshes its file.
+        let rc = unsafe { ffi::git_config_get_int32(&mut out, self.as_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out)
+        }
+    }
+
+    /// Reads and parses a configuration i64 value, returning an owned scalar.
+    /// Clears stale errors first and reports C's silent suffix-tail parse failure
+    /// as a configuration parse error instead of attributing a previous failure.
+    ///
+    /// Wraps: git_config_get_int64
+    pub fn get_i64(&self, name: &CStr) -> Result<i64, ConfigError> {
+        let mut out = 0;
+        clear();
+        // SAFETY: config is live, name is NUL-terminated, and out is a writable
+        // aligned scalar. C temporarily retains and releases its entry; no borrow
+        // escapes this call, even when a live backend refreshes its file.
+        let rc = unsafe { ffi::git_config_get_int64(&mut out, self.as_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            if last().class() == Some(ErrorClass::None) {
+                set(
+                    ErrorClass::Config,
+                    c"failed to parse configuration value as an integer",
+                );
+            }
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out)
+        }
+    }
+
+    /// Reads C's snapshot-only string accessor and copies its borrowed result.
+    /// A live writable config is rejected by C. A valueless entry yields empty.
+    /// Returning an owned string prevents backend sharing or future calls from
+    /// invalidating a Rust string reference.
+    ///
+    /// Wraps: git_config_get_string
+    pub fn get_string(&self, name: &CStr) -> Result<CString, ConfigError> {
+        let mut out = ptr::null();
+        // SAFETY: live config and name, writable pointer slot. On success C's
+        // read-only backend keeps the NUL-terminated result live through this copy.
+        let rc = unsafe { ffi::git_config_get_string(&mut out, self.as_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: successful C get_string returns a non-NULL NUL-terminated string;
+        // no foreign call or write intervenes before the owned copy is complete.
+        Ok(unsafe { CStr::from_ptr(out) }.to_owned())
+    }
+
+    /// Copies a value from either a live config or snapshot into an owned buffer.
+    /// Valueless entries are empty strings, distinct from missing entries.
+    ///
+    /// Wraps: git_config_get_string_buf
+    pub fn get_string_buf(
+        &self,
+        name: &CStr,
+    ) -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+        let mut out = crate::libgit2::core::buffer::Buf::new();
+        // SAFETY: live config and NUL-terminated name; exclusive valid git_buf
+        // storage. C transfers its allocation to out, which disposes it on all paths.
+        let rc = unsafe {
+            ffi::git_config_get_string_buf(out.as_mut().as_mut_ptr(), self.as_ptr(), name.as_ptr())
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out)
+        }
+    }
+
+    /// Copies a path and expands a leading `~/` (or `~`) using C's home lookup.
+    /// Named users (`~user`) and valueless path entries are rejected by C.
+    ///
+    /// Wraps: git_config_get_path
+    pub fn get_path(
+        &self,
+        name: &CStr,
+    ) -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+        let mut out = crate::libgit2::core::buffer::Buf::new();
+        // SAFETY: config and name are live; out is exclusively borrowed initialized
+        // buffer storage. C owns entry retention and releases it, and transfers any
+        // output allocation into the RAII buffer, including on error.
+        let rc = unsafe {
+            ffi::git_config_get_path(out.as_mut().as_mut_ptr(), self.as_ptr(), name.as_ptr())
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out)
+        }
+    }
+}
+
+impl<'a, 'r> ConfigMut<'a, 'r> {
+    /// Adds a copied file path at a priority, optionally replacing that priority.
+    /// A repository is retained as a borrow for includeIf evaluation on every reparse.
+    /// It must outlive the config's `'r`; narrow a fresh owner's lifetime before
+    /// obtaining its mutable handle to attach a non-static repository.
+    ///
+    /// Registration accepts 0..i32::MAX (exclusive). Negative levels are selectors,
+    /// not priorities. Excluding MAX also prevents C comparator subtraction overflow
+    /// in a view opened with HIGHEST, which C registers internally at -1.
+    ///
+    /// Wraps: git_config_add_file_ondisk
+    pub fn add_file_ondisk(
+        &mut self,
+        path: &CStr,
+        level: ConfigLevel,
+        repository: Option<crate::libgit2::repository::repository::RepositoryRef<'r>>,
+        force: bool,
+    ) -> Result<(), ConfigError> {
+        if !(0..i32::MAX).contains(&level.raw()) {
+            set(
+                ErrorClass::Invalid,
+                c"configuration priority must be in 0..i32::MAX",
+            );
+            return Err(ConfigError::from_libgit2(ffi::GIT_EINVALID));
+        }
+        // SAFETY: exclusive live config, copied NUL-terminated path, safe priority.
+        // Repository is NULL or kept live for the config's 'r; C stores only that
+        // borrow and owns the newly constructed backend on success, frees on failure.
+        let rc = unsafe {
+            ffi::git_config_add_file_ondisk(
+                self.as_mut_ptr(),
+                path.as_ptr(),
+                level.raw(),
+                repository.map_or(ptr::null(), |r| r.as_ptr()),
+                force.into(),
+            )
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Opens a level view, freezing this parent handle while it lives.
+    /// HIGHEST selects the top backend but C disables its writer; concrete levels
+    /// remain writable when their backend is writable.
+    /// C retains the backend; the exclusive borrow prevents two views from locking
+    /// the same backend recursively or replacing it through the parent.
+    ///
+    /// Wraps: git_config_open_level
+    pub fn open_level(&mut self, level: ConfigLevel) -> Result<ConfigBox<'_>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: parent is live and exclusively borrowed for the returned view.
+        // Success constructs a fresh config with one retained backend instance.
+        let rc = unsafe { ffi::git_config_open_level(&mut out, self.as_mut_ptr(), level.raw()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: C transfers one fresh config reference on success. The result
+        // lifetime is no longer than any retained parent and repository borrow.
+        unsafe { ConfigBox::from_c(out) }.ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+    }
+
+    /// Opens a writable XDG view, falling back to global. Keeps the parent exclusive.
+    ///
+    /// Wraps: git_config_open_global
+    pub fn open_global(&mut self) -> Result<ConfigBox<'_>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: as open_level: fresh config over a retained backend; the returned
+        // owner's lifetime freezes the parent until the view is released.
+        let rc = unsafe { ffi::git_config_open_global(&mut out, self.as_mut_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: C transfers one fresh config reference on success. The result
+        // lifetime is no longer than any retained parent and repository borrow.
+        unsafe { ConfigBox::from_c(out) }.ok_or_else(|| ConfigError::from_libgit2(ffi::GIT_ERROR))
+    }
+
+    /// Writes an owned scalar to the highest-priority writable backend.
+    ///
+    /// Wraps: git_config_set_bool
+    pub fn set_bool(&mut self, name: &CStr, value: bool) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config and a NUL-terminated name borrowed only
+        // for this call. C formats and copies the scalar, retaining neither input.
+        let rc =
+            unsafe { ffi::git_config_set_bool(self.as_mut_ptr(), name.as_ptr(), value.into()) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Writes an owned scalar to the highest-priority writable backend.
+    ///
+    /// Wraps: git_config_set_int32
+    pub fn set_i32(&mut self, name: &CStr, value: i32) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config and a NUL-terminated name borrowed only
+        // for this call. C formats and copies the scalar, retaining neither input.
+        let rc = unsafe { ffi::git_config_set_int32(self.as_mut_ptr(), name.as_ptr(), value) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Writes an owned scalar to the highest-priority writable backend.
+    ///
+    /// Wraps: git_config_set_int64
+    pub fn set_i64(&mut self, name: &CStr, value: i64) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config and a NUL-terminated name borrowed only
+        // for this call. C formats and copies the scalar, retaining neither input.
+        let rc = unsafe { ffi::git_config_set_int64(self.as_mut_ptr(), name.as_ptr(), value) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Deletes the entry or matching multivar values in the writer backend.
+    /// Strings are borrowed only for this call; replacement values are copied.
+    ///
+    /// Wraps: git_config_delete_entry
+    pub fn delete_entry(&mut self, name: &CStr) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
+        // Rust pointers. Backend code owns regex compilation, copying and cleanup.
+        let rc = unsafe { ffi::git_config_delete_entry(self.as_mut_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Deletes the entry or matching multivar values in the writer backend.
+    /// Strings are borrowed only for this call; replacement values are copied.
+    ///
+    /// Wraps: git_config_delete_multivar
+    pub fn delete_multivar(&mut self, name: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
+        // Rust pointers. Backend code owns regex compilation, copying and cleanup.
+        let rc = unsafe {
+            ffi::git_config_delete_multivar(self.as_mut_ptr(), name.as_ptr(), regexp.as_ptr())
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Replaces matching values or appends when none match in the writer backend.
+    /// Strings are borrowed only for this call; replacement values are copied.
+    ///
+    /// Wraps: git_config_set_multivar
+    pub fn set_multivar(
+        &mut self,
+        name: &CStr,
+        regexp: &CStr,
+        value: &CStr,
+    ) -> Result<(), ConfigError> {
+        // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
+        // Rust pointers. Backend code owns regex compilation, copying and cleanup.
+        let rc = unsafe {
+            ffi::git_config_set_multivar(
+                self.as_mut_ptr(),
+                name.as_ptr(),
+                regexp.as_ptr(),
+                value.as_ptr(),
+            )
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// Transaction mutations are distinct safe variants: the transaction already owns
+// the exclusive config borrow and must not expose it for recursive locking.
+impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_set_bool
+    pub fn set_bool(&mut self, name: &CStr, value: bool) -> Result<(), ConfigError> {
+        self.config_mut().set_bool(name, value)
+    }
+
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_set_int32
+    pub fn set_i32(&mut self, name: &CStr, value: i32) -> Result<(), ConfigError> {
+        self.config_mut().set_i32(name, value)
+    }
+
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_set_int64
+    pub fn set_i64(&mut self, name: &CStr, value: i64) -> Result<(), ConfigError> {
+        self.config_mut().set_i64(name, value)
+    }
+
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_set_multivar
+    pub fn set_multivar(
+        &mut self,
+        name: &CStr,
+        regexp: &CStr,
+        value: &CStr,
+    ) -> Result<(), ConfigError> {
+        self.config_mut().set_multivar(name, regexp, value)
+    }
+
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_delete_entry
+    pub fn delete_entry(&mut self, name: &CStr) -> Result<(), ConfigError> {
+        self.config_mut().delete_entry(name)
+    }
+
+    /// Mutates the locked writer through the transaction's retained exclusive
+    /// config borrow, without allowing another lock of that same backend.
+    ///
+    /// Wraps: git_config_delete_multivar
+    pub fn delete_multivar(&mut self, name: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
+        self.config_mut().delete_multivar(name, regexp)
+    }
+}
+
+/// Finds the existing global config file using C's search paths. NotFound is an
+/// error with its original code; no UTF-8 assumption is made about the output.
+///
+/// Wraps: git_config_find_global
+pub fn find_global() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+    if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    let mut out = crate::libgit2::core::buffer::Buf::new();
+    // SAFETY: runtime pinned; exclusive initialized git_buf. C transfers any
+    // allocation to the buffer, whose disposer handles success and failure alike.
+    let rc = unsafe { ffi::git_config_find_global(out.as_mut().as_mut_ptr()) };
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(out)
+    }
+}
+
+/// Finds the existing system config file using C's search paths. NotFound is an
+/// error with its original code; no UTF-8 assumption is made about the output.
+///
+/// Wraps: git_config_find_system
+pub fn find_system() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+    if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    let mut out = crate::libgit2::core::buffer::Buf::new();
+    // SAFETY: runtime pinned; exclusive initialized git_buf. C transfers any
+    // allocation to the buffer, whose disposer handles success and failure alike.
+    let rc = unsafe { ffi::git_config_find_system(out.as_mut().as_mut_ptr()) };
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(out)
+    }
+}
+
+/// Finds the existing xdg config file using C's search paths. NotFound is an
+/// error with its original code; no UTF-8 assumption is made about the output.
+///
+/// Wraps: git_config_find_xdg
+pub fn find_xdg() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+    if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    let mut out = crate::libgit2::core::buffer::Buf::new();
+    // SAFETY: runtime pinned; exclusive initialized git_buf. C transfers any
+    // allocation to the buffer, whose disposer handles success and failure alike.
+    let rc = unsafe { ffi::git_config_find_xdg(out.as_mut().as_mut_ptr()) };
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(out)
+    }
+}
+
+/// Expands `~` or `~/...` and copies other paths verbatim. Named users are unsupported.
+/// Input is borrowed only for the call; the returned buffer owns its bytes.
+///
+/// Wraps: git_config_parse_path
+pub fn parse_path(value: &CStr) -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
+    if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    let mut out = crate::libgit2::core::buffer::Buf::new();
+    // SAFETY: a NUL-terminated live input and exclusively borrowed initialized
+    // buffer; C retains no input, transfers output to the buffer's disposer.
+    let rc = unsafe { ffi::git_config_parse_path(out.as_mut().as_mut_ptr(), value.as_ptr()) };
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(out)
+    }
+}
 
 /// Parses a configuration boolean. A missing value (`None`) means true; an
 /// empty string means false. The words `true`, `yes`, `on`, `false`, `no`, and
@@ -990,6 +1514,39 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
 
 #[cfg(test)]
 mod unit_tests {
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn file_priority_rejected_before_foreign_comparators() {
+        let mut cfg = super::Config::new().unwrap();
+        for value in [i32::MIN, -2, -1, i32::MAX] {
+            let error = cfg
+                .as_mut()
+                .add_file_ondisk(c"unused", super::ConfigLevel::from_raw(value), None, false)
+                .unwrap_err();
+            assert_eq!(error.raw_code(), crate::ffi::GIT_EINVALID);
+            assert_eq!(error.class(), Some(super::ErrorClass::Invalid));
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn get_i64_silent_parse_failure_is_not_a_stale_error() {
+        let file =
+            std::env::temp_dir().join(format!("crustify-get-i64-silent-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\n number = 1kb\n").unwrap();
+        let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
+        let cfg = super::Config::open_ondisk(&path).unwrap();
+        super::set(super::ErrorClass::Invalid, c"unrelated earlier failure");
+        let error = cfg.as_ref().get_i64(c"a.number").unwrap_err();
+        assert_eq!(error.class(), Some(super::ErrorClass::Config));
+        assert_eq!(
+            error.message(),
+            c"failed to parse configuration value as an integer"
+        );
+        drop(cfg);
+        std::fs::remove_file(file).unwrap();
+    }
     use super::*;
 
 
