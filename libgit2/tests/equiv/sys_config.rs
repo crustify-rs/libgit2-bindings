@@ -227,4 +227,114 @@ mod backend_entries {
         }
         std::fs::remove_dir_all(base).unwrap();
     }
+
+    /// Entries from four priorities, two include levels and a shadowed key, with
+    /// both configs freed before the entries are released in interleaved order.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C reference and safe wrappers")]
+    fn backend_entries_across_levels_match_c() {
+        const FILES: [(&str, &[u8]); 6] = [
+            ("system", b"[a]\ntop = system\nsys = only\n"),
+            ("global", b"[a]\ntop = global\n[include]\npath = inc1\n"),
+            ("inc1", b"[include]\npath = inc2\n[a]\nshallow = 1\n"),
+            ("inc2", b"[a]\ndeep = \"two levels\"\n"),
+            ("local", b"[a]\ntop = local\nflag\n"),
+            ("app", b"[a]\ntop = app\n"),
+        ];
+        let levels = [
+            ("system", ConfigLevel::SYSTEM),
+            ("global", ConfigLevel::GLOBAL),
+            ("local", ConfigLevel::LOCAL),
+            ("app", ConfigLevel::from_raw(ConfigLevel::APP.raw() + 3)),
+        ];
+        let base = std::env::temp_dir().join(format!(
+            "crustify-backend-entry-levels-{}",
+            std::process::id()
+        ));
+        // The safe constructor pins the runtime before the reference C calls.
+        let mut rust = Config::new().unwrap();
+        let mut c = ptr::null_mut();
+        // SAFETY: initialized runtime and a writable out slot.
+        assert_eq!(unsafe { ffi::git_config_new(&mut c) }, 0);
+        for side in ["c", "rust"] {
+            let dir = base.join(side);
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, contents) in FILES {
+                std::fs::write(dir.join(name), contents).unwrap();
+            }
+            for (name, level) in levels {
+                let path = CString::new(dir.join(name).to_str().unwrap()).unwrap();
+                if side == "c" {
+                    // SAFETY: live sole config; the path is copied; no repository.
+                    let rc = unsafe {
+                        ffi::git_config_add_file_ondisk(
+                            c,
+                            path.as_ptr(),
+                            level.raw(),
+                            ptr::null(),
+                            0,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                } else {
+                    rust.as_mut().add_file(&path, level, None, false).unwrap();
+                }
+            }
+        }
+        let mut retained = Vec::new();
+        for key in [c"a.top", c"a.sys", c"a.shallow", c"A.deep", c"a.flag"] {
+            let mut raw = ptr::null_mut();
+            // SAFETY: live config, writable slot, NUL key; success acquires one
+            // reference, released below.
+            let rc = unsafe { ffi::git_config_get_entry(&mut raw, c, key.as_ptr()) };
+            assert_eq!(rc, 0);
+            let owner = BackendEntry::from_entry(rust.as_ref().entry(key).unwrap());
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            retained.push((raw, owner));
+        }
+        let observed: Vec<_> = retained
+            .iter()
+            .map(|(_, owner)| {
+                let entry = owner.as_ref().entry();
+                (
+                    entry.value().map(|v| v.to_bytes().to_vec()),
+                    entry.level(),
+                    entry.include_depth(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            observed,
+            [
+                (Some(b"app".to_vec()), levels[3].1, 0),
+                (Some(b"only".to_vec()), ConfigLevel::SYSTEM, 0),
+                (Some(b"1".to_vec()), ConfigLevel::GLOBAL, 1),
+                (Some(b"two levels".to_vec()), ConfigLevel::GLOBAL, 2),
+                (None, ConfigLevel::LOCAL, 0),
+            ]
+        );
+        let mut raw = ptr::null_mut();
+        // SAFETY: as above; a missing key transfers no reference.
+        let rc = unsafe { ffi::git_config_get_entry(&mut raw, c, c"a.missing".as_ptr()) };
+        assert!(raw.is_null());
+        assert_eq!(
+            rc,
+            rust.as_ref().entry(c"a.missing").unwrap_err().raw_code()
+        );
+        // SAFETY: releases this config's sole reference; entries retain their lists.
+        unsafe { ffi::git_config_free(c) };
+        drop(rust);
+        std::fs::remove_dir_all(&base).unwrap();
+        // Release from the middle, then alternate ends, comparing the survivors.
+        for index in [2, 0, 2, 1, 0] {
+            let (raw, owner) = retained.remove(index);
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            // SAFETY: releases exactly the reference acquired above.
+            unsafe { ffi::git_config_entry_free(raw) };
+            drop(owner);
+            for (raw, owner) in &retained {
+                assert_eq!(raw_record(*raw), rust_record(owner));
+            }
+        }
+    }
 }
