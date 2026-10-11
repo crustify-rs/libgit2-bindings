@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod core;
+pub mod diff;
 pub mod filter;
 pub mod index;
 pub mod object;
