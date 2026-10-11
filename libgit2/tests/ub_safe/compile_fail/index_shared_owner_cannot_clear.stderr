@@ -1,0 +1,5 @@
+error[E0599]: no method named `clear` found for struct `IndexRef<'a>` in the current scope
+ --> tests/ub_safe/compile_fail/index_shared_owner_cannot_clear.rs:7:28
+  |
+7 |     let _ = index.as_ref().clear();
+  |                            ^^^^^ method not found in `IndexRef<'_>`

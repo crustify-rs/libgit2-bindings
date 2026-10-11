@@ -1244,7 +1244,7 @@ mod heads_and_parts {
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     use crate::fixture::worktree::WorktreeRepo;
-    use crate::fixture::{index, isolated, odb};
+    use crate::fixture::{isolated, odb};
 
     fn resource(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1418,11 +1418,11 @@ mod heads_and_parts {
             let config: ConfigArc = Config::new().unwrap().into();
             repo.as_mut().set_index(Some(&index));
             repo.as_mut().set_config(&config);
-            assert!(index::has_owner(&index));
+            assert!(index.as_ref().has_owner());
             if repo_first {
                 drop(repo);
-                assert!(!index::has_owner(&index));
-                assert_eq!(index::entry_count(&index), 0);
+                assert!(!index.as_ref().has_owner());
+                assert_eq!(index.as_ref().entry_count(), 0);
                 assert_eq!(
                     config.as_ref().get_i32(c"core.missing").unwrap_err().code(),
                     Some(ErrorCode::NotFound)

@@ -961,7 +961,7 @@ pub mod index {
     use libgit2::libgit2::index::index::{Capabilities, IndexArc, IndexBox, IndexRef};
     use libgit2::libgit2::index::sys::index::ReucSide;
     use libgit2::libgit2::oid::oid::Oid;
-    use libgit2::libgit2::repository::repository::RepositoryError;
+    use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError};
 
     use super::{CHILD, TempRepo};
 
@@ -1029,26 +1029,48 @@ pub mod index {
         repo.repo.as_mut().unwrap().as_mut().set_index(Some(index));
     }
 
-    /// `git_index_entrycount`.
-    pub fn entry_count(index: &impl Owner) -> usize {
-        // SAFETY: a live index, only read.
-        unsafe { ffi::git_index_entrycount(index.c_ptr()) }
-    }
-
     /// `IndexRef::path`, copied out.
     pub fn path(index: &impl Owner) -> Option<CString> {
         index.handle().path().map(CStr::to_owned)
     }
 
-    /// Whether `git_index_owner` names a repository.
-    pub fn has_owner(index: &impl Owner) -> bool {
-        // SAFETY: a live index, only read; the repository pointer is not dereferenced.
-        !unsafe { ffi::git_index_owner(index.c_ptr()) }.is_null()
-    }
-
     /// `git_index_add` of a regular file at `path`; the status.
     pub fn add(index: &mut IndexBox, path: &CStr) -> c_int {
         add_flagged(index, path, 0)
+    }
+
+    /// `git_index_add` of a regular file at `path` in `stage` (a conflict side for 1 to
+    /// 3), of the SHA1 id starting with the bytes of `id`; the status. Stands in for the
+    /// conflict and entry wrappers. A repository's index needs the id of an object its
+    /// repository has.
+    pub fn add_staged_id(index: &mut IndexBox, path: &CStr, stage: u16, id: &[u8]) -> c_int {
+        let mut entry = ffi::git_index_entry {
+            mode: 0o100644,
+            path: path.as_ptr(),
+            // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
+            flags: stage << 12,
+            ..Default::default()
+        };
+        entry.id.id[..id.len()].copy_from_slice(id);
+        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        // SAFETY: the box's live index, borrowed exclusively; `entry` and its path are
+        // read and copied for the call.
+        unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }
+    }
+
+    /// One more counted reference to `repo`'s index, adopted as the sole owner, for the
+    /// routines that need an index with a repository and an exclusive handle: no safe
+    /// wrapper hands out an exclusive handle to a repository's index. Sound while the
+    /// test reaches neither the repository nor another reference to its index as long
+    /// as it uses the box; the box releases its reference, never the repository's.
+    pub fn repository_index_box(repo: &RepositoryBox) -> IndexBox {
+        let mut out = std::ptr::null_mut();
+        // SAFETY: a writable slot and the box's live repository.
+        let rc = unsafe { ffi::git_repository_index(&mut out, repo.as_c_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: a counted reference to the repository's index, released once by
+        // `git_index_free`; see above for the exclusivity the box claims.
+        unsafe { IndexBox::from_c(out) }.unwrap()
     }
 
     /// `git_index_add` of a regular file at `path` marked intent-to-add, which needs a

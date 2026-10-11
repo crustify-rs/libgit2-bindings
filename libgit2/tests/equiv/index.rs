@@ -1786,3 +1786,788 @@ mod entry_and_options {
         }
     }
 }
+
+/// The index routines against their C counterparts on independently owned indexes
+/// built alike, compared on results, errors, callbacks and the state the index then
+/// reports through C, after every step of a sequence.
+mod routines {
+    use super::*;
+    use libgit2::libgit2::core::strarray::StrArrayView;
+    use libgit2::libgit2::index::index::{AddFlags, MatchedPathCallback, MatchedPathResult};
+    use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError};
+    use libgit2::libgit2::util::errors::{ErrorBuf, ErrorCode};
+    use std::cell::RefCell;
+    use std::ffi::{c_char, c_void};
+
+    /// Runs `body` alone in a child process, so no other test shares libgit2's globals.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.strip_prefix("equiv::").unwrap_or(test);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// What an index reports through C: its entries (path and stage), whether it has
+    /// conflicts, its capabilities and whether a repository owns it.
+    #[derive(Debug, PartialEq)]
+    struct View {
+        entries: Vec<(CString, c_int)>,
+        conflicts: c_int,
+        caps: c_int,
+        owned: bool,
+    }
+
+    fn view(index: *mut ffi::git_index) -> View {
+        // SAFETY: a live index, only read; every path is copied before the next call.
+        unsafe {
+            let entries = (0..ffi::git_index_entrycount(index))
+                .map(|i| {
+                    let e = ffi::git_index_get_byindex(index, i);
+                    (
+                        CStr::from_ptr((*e).path).to_owned(),
+                        ffi::git_index_entry_stage(e),
+                    )
+                })
+                .collect();
+            View {
+                entries,
+                conflicts: ffi::git_index_has_conflicts(index),
+                caps: ffi::git_index_caps(index),
+                owned: !ffi::git_index_owner(index).is_null(),
+            }
+        }
+    }
+
+    /// The same, through the safe API where it answers.
+    fn rust_view(index: &mut IndexBox) -> View {
+        let mut seen = view(index.as_c_ptr());
+        assert_eq!(index.as_ref().entry_count(), seen.entries.len());
+        seen.conflicts = index.as_ref().has_conflicts().into();
+        seen.caps = index.as_ref().capabilities().bits();
+        seen.owned = index.as_ref().has_owner();
+        seen
+    }
+
+    /// A failure as both sides observe it: code (`None` where the Rust error carries
+    /// none), class and message.
+    type Failure = (Option<c_int>, c_int, CString);
+
+    fn c_status(rc: c_int) -> Result<(), Failure> {
+        if rc < 0 {
+            let (class, message) = c_last();
+            Err((Some(rc), class, message))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn repository_status<T>(result: Result<T, RepositoryError>) -> Result<T, Failure> {
+        result.map_err(|e| (Some(e.raw_code()), e.raw_class(), e.message().to_owned()))
+    }
+
+    fn error_status<T>(result: Result<T, ErrorBuf>) -> Result<T, Failure> {
+        result.map_err(|e| (None, e.raw_class(), e.message().to_owned()))
+    }
+
+    /// C's failure without its code, for the routines whose Rust error has none.
+    fn uncoded(status: Result<(), Failure>) -> Result<(), Failure> {
+        status.map_err(|(_, class, message)| (None, class, message))
+    }
+
+    /// `git_index_add` of a regular file at `path` in `stage`, on a raw index.
+    fn add_staged(index: *mut ffi::git_index, path: &CStr, stage: u16, id: &[u8]) {
+        let mut entry = ffi::git_index_entry {
+            mode: 0o100644,
+            path: path.as_ptr(),
+            // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
+            flags: stage << 12,
+            ..Default::default()
+        };
+        entry.id.id[..id.len()].copy_from_slice(id);
+        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        // SAFETY: a live index; `entry` and its path are read and copied for the call.
+        assert_eq!(unsafe { ffi::git_index_add(index, &entry) }, 0);
+    }
+
+    fn c_find(index: *mut ffi::git_index, path: &CStr) -> Option<usize> {
+        let mut position = usize::MAX;
+        // SAFETY: a writable slot, a live index and a NUL-terminated path.
+        let rc = unsafe { ffi::git_index_find(&mut position, index, path.as_ptr()) };
+        (rc >= 0).then_some(position)
+    }
+
+    fn c_find_prefix(index: *mut ffi::git_index, prefix: &CStr) -> Option<usize> {
+        let mut position = usize::MAX;
+        // SAFETY: as in `c_find`.
+        let rc = unsafe { ffi::git_index_find_prefix(&mut position, index, prefix.as_ptr()) };
+        assert!(rc == 0 || rc == ErrorCode::NotFound.raw());
+        (rc >= 0).then_some(position)
+    }
+
+    /// Both sides' lookups of every probe, compared. `find_prefix` diverges where a
+    /// probe is the path of a conflicted entry: C lands on any of its stages, Rust on the
+    /// first, which is then at or before C's and of the same path.
+    fn assert_same_finds(
+        c: *mut ffi::git_index,
+        rust: &mut IndexBox,
+        probes: &[&CStr],
+        step: &str,
+    ) {
+        for probe in probes {
+            assert_eq!(
+                c_find(c, probe),
+                rust.as_mut().find(probe),
+                "{step}: find {probe:?}"
+            );
+            let (c_at, rust_at) = (c_find_prefix(c, probe), rust.as_mut().find_prefix(probe));
+            match (c_at, rust_at) {
+                (Some(c_at), Some(rust_at)) if c_at != rust_at => {
+                    let entries = view(c).entries;
+                    assert!(rust_at < c_at, "{step}: prefix {probe:?}");
+                    assert_eq!(
+                        entries[rust_at].0, entries[c_at].0,
+                        "{step}: prefix {probe:?}"
+                    );
+                    assert_eq!(entries[rust_at].0.as_c_str(), *probe);
+                    assert_eq!(rust_at, c_find(c, probe).unwrap());
+                }
+                _ => assert_eq!(c_at, rust_at, "{step}: prefix {probe:?}"),
+            }
+        }
+    }
+
+    /// Two in-memory indexes through one sequence: entries and conflicts added alike,
+    /// then lookups, conflict removal, capability changes and clearing.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn in_memory_sequence_matches() {
+        init();
+        let (_, c) = c_open(None);
+        let c = c.unwrap();
+        let mut rust = Index::new().unwrap();
+        let probes = [
+            c"", c"a", c"A", c"b", c"B/x", c"b/x", c"b/", c"b/y", c"c", c"d", c"zz", c"\xff",
+        ];
+        let compare = |rust: &mut IndexBox, step: &str| {
+            assert_eq!(view(c.0), rust_view(rust), "{step}");
+            assert_same_finds(c.0, rust, &probes, step);
+        };
+        compare(&mut rust, "empty");
+
+        for (path, stage, id) in [
+            (c"b/x", 0, 1u8),
+            (c"a", 0, 2),
+            (c"b/y", 0, 3),
+            (c"\xff", 0, 4),
+            (c"a", 1, 5),
+            (c"a", 2, 6),
+            (c"a", 3, 7),
+            (c"c", 2, 8),
+            (c"c", 3, 9),
+            (c"B/x", 0, 10),
+        ] {
+            add_staged(c.0, path, stage, &[id]);
+            add_staged(rust.as_c_ptr(), path, stage, &[id]);
+            compare(&mut rust, &format!("add {path:?} {stage}"));
+        }
+
+        for path in [c"missing", c"b/x", c"a", c"a", c"c", c"", c"c"] {
+            clear();
+            // SAFETY: a live index and a NUL-terminated path.
+            let expected = c_status(unsafe { ffi::git_index_conflict_remove(c.0, path.as_ptr()) });
+            clear();
+            let got = repository_status(rust.as_mut().remove_conflict(path));
+            assert_eq!(expected, got, "remove_conflict {path:?}");
+            compare(&mut rust, &format!("remove_conflict {path:?}"));
+        }
+
+        for (path, stage, id) in [(c"d", 1, 11u8), (c"d", 3, 12), (c"b/x", 2, 13)] {
+            add_staged(c.0, path, stage, &[id]);
+            add_staged(rust.as_c_ptr(), path, stage, &[id]);
+        }
+        compare(&mut rust, "conflicts again");
+
+        // Case-insensitive lookups, then back.
+        for caps in [ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE, 0] {
+            // SAFETY: two live indexes; the capability bits are copied.
+            unsafe {
+                assert_eq!(ffi::git_index_set_caps(c.0, caps), 0);
+                assert_eq!(ffi::git_index_set_caps(rust.as_c_ptr(), caps), 0);
+            }
+            compare(&mut rust, &format!("caps {caps}"));
+        }
+
+        for _ in 0..2 {
+            // SAFETY: a live index.
+            let expected = uncoded(c_status(unsafe { ffi::git_index_conflict_cleanup(c.0) }));
+            assert_eq!(expected, error_status(rust.as_mut().clear_conflicts()));
+            compare(&mut rust, "clear_conflicts");
+        }
+        for _ in 0..2 {
+            // SAFETY: a live index.
+            let expected = uncoded(c_status(unsafe { ffi::git_index_clear(c.0) }));
+            assert_eq!(expected, error_status(rust.as_mut().clear()));
+            compare(&mut rust, "clear");
+        }
+        add_staged(c.0, c"after", 0, &[1]);
+        add_staged(rust.as_c_ptr(), c"after", 0, &[1]);
+        compare(&mut rust, "after clear");
+    }
+
+    /// Every extension at `signatures`, through C.
+    fn c_extensions(index: *mut ffi::git_index, signatures: &[[u8; 4]]) -> Vec<Option<Vec<u8>>> {
+        signatures
+            .iter()
+            .map(|signature| {
+                let key = [signature[0], signature[1], signature[2], signature[3], 0];
+                let mut out = ffi::git_buf {
+                    ptr: ptr::null_mut(),
+                    reserved: 0,
+                    size: 0,
+                };
+                // SAFETY: a writable buffer owning nothing, a live index and a
+                // NUL-terminated key.
+                let rc = unsafe {
+                    ffi::git_index_extension_lookup(&mut out, index, key.as_ptr().cast())
+                };
+                if rc == ErrorCode::NotFound.raw() {
+                    return None;
+                }
+                assert_eq!(rc, 0);
+                // SAFETY: `out` holds `size` bytes of a fresh allocation, copied, then
+                // released with `git_buf_dispose`, which frees `ptr`.
+                unsafe {
+                    let data = std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size).to_vec();
+                    ffi::git_buf_dispose(&mut out);
+                    Some(data)
+                }
+            })
+            .collect()
+    }
+
+    fn rust_extensions(index: &mut IndexBox, signatures: &[[u8; 4]]) -> Vec<Option<Vec<u8>>> {
+        signatures
+            .iter()
+            .map(|signature| {
+                index
+                    .as_mut()
+                    .extension(signature)
+                    .unwrap()
+                    .map(|data| data.as_slice().to_vec())
+            })
+            .collect()
+    }
+
+    /// Two file-backed indexes through one sequence of extension changes, written and
+    /// read back; compared after each step.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn extension_sequence_matches() {
+        init();
+        let scratch = Scratch::new("routines-extensions");
+        let (c_file, rust_file) = (c_path(&scratch.file("c")), c_path(&scratch.file("rust")));
+        let (_, c) = c_open(Some(&c_file));
+        let c = c.unwrap();
+        let mut rust = Index::open(&rust_file).unwrap();
+        let signatures: Vec<[u8; 4]> = [b"ZONE", b"ZTWO", b"ZEMP", b"zman", b"TREE", b"\xff\x01~A"]
+            .into_iter()
+            .copied()
+            .chain((0..12u8).map(|i| [b'Y', b'a' + i, b'b', b'c']))
+            .collect();
+        let compare = |rust: &mut IndexBox, step: &str| {
+            assert_eq!(
+                c_extensions(c.0, &signatures),
+                rust_extensions(rust, &signatures),
+                "{step}"
+            );
+        };
+
+        enum Op {
+            Set(usize, Vec<u8>),
+            Remove(usize),
+        }
+        let mut ops = vec![
+            Op::Set(0, b"one".to_vec()),
+            Op::Set(1, b"\0two\0".to_vec()),
+            Op::Set(2, Vec::new()),
+            Op::Set(0, b"replaced".to_vec()),
+            Op::Remove(1),
+            Op::Remove(1),
+            Op::Set(3, b"mandatory".to_vec()),
+            Op::Remove(3),
+            Op::Set(4, b"not the tree cache".to_vec()),
+            Op::Set(5, vec![0xff; 3000]),
+        ];
+        ops.extend((6..signatures.len()).map(|i| Op::Set(i, vec![i as u8; i])));
+        ops.extend([Op::Remove(4), Op::Remove(9), Op::Set(9, b"back".to_vec())]);
+        for (step, op) in ops.into_iter().enumerate() {
+            match op {
+                Op::Set(i, data) => {
+                    let key = signatures[i].map(|b| b as c_char);
+                    let key = [key[0], key[1], key[2], key[3], 0];
+                    clear();
+                    // SAFETY: a live index, a NUL-terminated four-byte key and `data`.
+                    let expected = uncoded(c_status(unsafe {
+                        ffi::git_index_extension_add(
+                            c.0,
+                            key.as_ptr(),
+                            data.as_ptr().cast(),
+                            data.len(),
+                        )
+                    }));
+                    let got = error_status(rust.as_mut().set_extension(&signatures[i], &data));
+                    assert_eq!(expected, got, "step {step}");
+                }
+                Op::Remove(i) => {
+                    let key = [
+                        signatures[i][0],
+                        signatures[i][1],
+                        signatures[i][2],
+                        signatures[i][3],
+                        0,
+                    ];
+                    // SAFETY: a live index and a NUL-terminated key.
+                    let rc = unsafe { ffi::git_index_extension_remove(c.0, key.as_ptr().cast()) };
+                    assert!(rc == 0 || rc == ErrorCode::NotFound.raw());
+                    assert_eq!(
+                        rust.as_mut().remove_extension(&signatures[i]),
+                        Ok(rc == 0),
+                        "step {step}"
+                    );
+                }
+            }
+            compare(&mut rust, &format!("step {step}"));
+        }
+
+        // Written alike. The mandatory extension (`\xff\x01~A`: not an uppercase first
+        // letter) and the one named `TREE` make the file unreadable, alike.
+        assert_eq!(add(c.0, c"file").0, 0);
+        assert_eq!(add(rust.as_c_ptr(), c"file").0, 0);
+        for round in 0..2 {
+            assert_eq!(write(c.0), (0, None));
+            assert_eq!(write(rust.as_c_ptr()), (0, None));
+            let c_bytes = std::fs::read(scratch.file("c")).unwrap();
+            assert_eq!(c_bytes, std::fs::read(scratch.file("rust")).unwrap());
+            let (c_seen, c_reread) = c_open(Some(&c_file));
+            match (c_reread, Index::open(&rust_file)) {
+                (Some(c_reread), Ok(mut rust_reread)) => {
+                    assert_eq!(round, 1);
+                    assert_eq!(
+                        c_extensions(c_reread.0, &signatures),
+                        rust_extensions(&mut rust_reread, &signatures)
+                    );
+                }
+                (None, Err(error)) => {
+                    assert_eq!(round, 0);
+                    let Seen::Failed { class, message } = c_seen else {
+                        unreachable!()
+                    };
+                    assert_eq!(
+                        (error.raw_class(), error.message()),
+                        (class, message.as_c_str())
+                    );
+                }
+                _ => panic!("round {round}: the rereads differ"),
+            }
+            for i in [4, 5] {
+                let key = [
+                    signatures[i][0],
+                    signatures[i][1],
+                    signatures[i][2],
+                    signatures[i][3],
+                    0,
+                ];
+                // SAFETY: a live index and a NUL-terminated key.
+                let rc = unsafe { ffi::git_index_extension_remove(c.0, key.as_ptr().cast()) };
+                assert_eq!(rust.as_mut().remove_extension(&signatures[i]), Ok(rc == 0));
+            }
+        }
+
+        // Cleared alike.
+        // SAFETY: a live index.
+        assert_eq!(unsafe { ffi::git_index_clear(c.0) }, 0);
+        rust.as_mut().clear().unwrap();
+        compare(&mut rust, "cleared");
+    }
+
+    /// A non-bare repository with the same working-directory files as its twin.
+    struct WorkRepo {
+        dir: Scratch,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl WorkRepo {
+        fn new(tag: &str, bare: bool) -> Self {
+            let dir = Scratch::new(tag);
+            let repo = Some(Repository::init(&c_path(&dir.0), bare).unwrap());
+            for (path, contents) in [
+                ("a", "a"),
+                ("d/f", "f"),
+                ("d/g", "g"),
+                ("e/h", "h"),
+                (".gitignore", "ignored\n*.log\n"),
+                ("ignored", "i"),
+                ("x.log", "l"),
+            ] {
+                if bare {
+                    break;
+                }
+                let file = dir.0.join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, contents).unwrap();
+            }
+            Self { dir, repo }
+        }
+
+        fn repo(&self) -> *mut ffi::git_repository {
+            self.repo.as_ref().unwrap().as_c_ptr()
+        }
+
+        /// One more counted reference to the repository's index, raw.
+        fn index(&self) -> *mut ffi::git_index {
+            let mut out = ptr::null_mut();
+            // SAFETY: a writable slot and a live repository.
+            let rc = unsafe { ffi::git_repository_index(&mut out, self.repo()) };
+            assert_eq!(rc, 0);
+            out
+        }
+
+        /// The same, adopted as a sole owner: no safe wrapper hands out an exclusive
+        /// handle to a repository's index. Sound while the test reaches neither the
+        /// repository nor another reference to its index as long as it uses the box.
+        fn index_box(&self) -> IndexBox {
+            // SAFETY: a counted reference, released once by `git_index_free`; see above.
+            unsafe { IndexBox::from_c(self.index()) }.unwrap()
+        }
+
+        /// `message` with this repository's directory replaced, so that both twins'
+        /// messages compare.
+        fn relative(&self, failure: Failure) -> Failure {
+            let dir = self.dir.0.as_os_str().as_bytes();
+            let mut message = failure.2.into_bytes();
+            if let Some(at) = message.windows(dir.len()).position(|w| w == dir) {
+                message.splice(at..at + dir.len(), *b"<dir>");
+            }
+            (failure.0, failure.1, CString::new(message).unwrap())
+        }
+    }
+
+    impl Drop for WorkRepo {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+        }
+    }
+
+    /// `patterns` as C's `git_strarray`, over a pointer array it owns.
+    struct CPathspec(Vec<*mut c_char>);
+
+    impl CPathspec {
+        fn new(patterns: &[&CStr]) -> Self {
+            Self(patterns.iter().map(|p| p.as_ptr().cast_mut()).collect())
+        }
+
+        /// The array; valid while `self` and the patterns live.
+        fn raw(&mut self) -> ffi::git_strarray {
+            ffi::git_strarray {
+                strings: if self.0.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    self.0.as_mut_ptr()
+                },
+                count: self.0.len(),
+            }
+        }
+    }
+
+    /// A repository nested in `work`'s working directory at `name`, with an empty
+    /// initial commit (of fixed signatures, so twins' ids match) when `committed`.
+    fn nested(work: &WorkRepo, name: &str, committed: bool) {
+        use libgit2::libgit2::core::types::{SignatureView, Time};
+        use libgit2::libgit2::object::commit::{CreateOptions, create_from_stage};
+        let sub = Repository::init(&c_path(&work.dir.0.join(name)), false).unwrap();
+        if committed {
+            let me = SignatureView::new(
+                c"A U Thor",
+                c"author@example.com",
+                Time::new(1_700_000_000, 60),
+            );
+            let mut options = CreateOptions::new();
+            options.as_mut().set_author(Some(me.as_ref()));
+            options.as_mut().set_committer(Some(me.as_ref()));
+            options.as_mut().set_allow_empty_commit(true);
+            create_from_stage(sub.as_ref(), c"initial\n", Some(options.as_mut())).unwrap();
+        }
+    }
+
+    /// What a C scan's callback hears, and what it answers, in order.
+    #[derive(Default)]
+    struct Log {
+        answers: Vec<c_int>,
+        heard: Vec<(CString, Option<CString>)>,
+    }
+
+    impl Log {
+        fn answer(&mut self, path: &CStr, pattern: Option<&CStr>) -> c_int {
+            let code = self.answers.get(self.heard.len()).copied().unwrap_or(0);
+            self.heard
+                .push((path.to_owned(), pattern.map(CStr::to_owned)));
+            code
+        }
+    }
+
+    unsafe extern "C" fn c_callback(
+        path: *const c_char,
+        pattern: *const c_char,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: `git_index_add_all` lends live NUL-terminated strings (the pattern
+        // nullable) for the call, and the test an exclusively borrowed `Log`.
+        unsafe {
+            let path = CStr::from_ptr(path);
+            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
+            (&mut *payload.cast::<Log>()).answer(path, pattern)
+        }
+    }
+
+    /// Twin repositories, one driven through C and the other through the safe API:
+    /// single additions of every kind, then scans with and without callbacks, under each
+    /// flag, compared on results, errors (directory-relative), what the callbacks hear
+    /// and the index after each step. In a child process: the additions load filters,
+    /// whose first loads race in libgit2.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn repository_additions_match() {
+        isolated(
+            concat!(module_path!(), "::repository_additions_match"),
+            || {
+                init();
+                let c_repo = WorkRepo::new("routines-add-c", false);
+                let rust_repo = WorkRepo::new("routines-add-rust", false);
+                // A repository that is not a submodule, and one that is.
+                for work in [&c_repo, &rust_repo] {
+                    nested(work, "nested", true);
+                    nested(work, "reg", true);
+                    let modules = "[submodule \"reg\"]\n\tpath = reg\n\turl = ./reg\n";
+                    std::fs::write(work.dir.0.join(".gitmodules"), modules).unwrap();
+                }
+                let c = CIndex(c_repo.index());
+                let mut rust = rust_repo.index_box();
+                let compare = |rust: &mut IndexBox, step: &str| {
+                    assert_eq!(view(c.0), rust_view(rust), "{step}");
+                };
+                compare(&mut rust, "fresh");
+                let long = CString::new("x".repeat(5000)).unwrap();
+
+                for path in [
+                    c"a",
+                    c"a",
+                    c"d/f",
+                    c"d",
+                    c"d/",
+                    c"missing",
+                    c"",
+                    c".git/config",
+                    c"./a",
+                    c"ignored",
+                    c"\xff",
+                    c"nested",
+                    c"reg",
+                    c"reg/",
+                    long.as_c_str(),
+                ] {
+                    clear();
+                    // SAFETY: a live index and a NUL-terminated path.
+                    let rc = unsafe { ffi::git_index_add_bypath(c.0, path.as_ptr()) };
+                    let expected = c_status(rc).map_err(|f| c_repo.relative(f));
+                    clear();
+                    let got = repository_status(rust.as_mut().add_path(path))
+                        .map_err(|f| rust_repo.relative(f));
+                    assert_eq!(expected, got, "add_path {path:?}");
+                    compare(&mut rust, &format!("add_path {path:?}"));
+                }
+
+                // A conflict at `a`, resolved by adding it again.
+                let blob = view(c.0).entries.len();
+                assert!(blob > 0);
+                // SAFETY: a live index; entry 0 is `a`'s, whose id is copied.
+                let id = unsafe { (*ffi::git_index_get_byindex(c.0, 0)).id.id };
+                for stage in [1, 3] {
+                    add_staged(c.0, c"a", stage, &id);
+                    add_staged(rust.as_c_ptr(), c"a", stage, &id);
+                }
+                compare(&mut rust, "conflict");
+                // SAFETY: a live index and a NUL-terminated path.
+                assert_eq!(unsafe { ffi::git_index_add_bypath(c.0, c"a".as_ptr()) }, 0);
+                rust.as_mut().add_path(c"a").unwrap();
+                compare(&mut rust, "resolved");
+
+                let everything: [&CStr; 0] = [];
+                for (patterns, flags, answers) in [
+                    (&[c"d/*", c"e"][..], AddFlags::DEFAULT, vec![1, 1, 1]),
+                    (&[c"d/*", c"e"], AddFlags::DEFAULT, vec![0, -77]),
+                    (&[c"d/*", c"e"], AddFlags::DEFAULT, vec![]),
+                    (&[c"ignored"], AddFlags::CHECK_PATHSPEC, vec![]),
+                    (
+                        &[c"ignored"],
+                        AddFlags::CHECK_PATHSPEC | AddFlags::FORCE,
+                        vec![],
+                    ),
+                    (&[c"*.log"], AddFlags::DEFAULT, vec![]),
+                    (&[c"*.log"], AddFlags::FORCE, vec![]),
+                    (&[c"e/*"], AddFlags::DISABLE_PATHSPEC_MATCH, vec![]),
+                    (&[c"e/h"], AddFlags::DISABLE_PATHSPEC_MATCH, vec![]),
+                    (&everything, AddFlags::DEFAULT, vec![0, 1]),
+                    (&everything, AddFlags::FORCE, vec![]),
+                ] {
+                    let step = format!("add_all {patterns:?} {flags:?} {answers:?}");
+                    let pathspec = StrArrayView::new(patterns);
+                    let mut c_pathspec = CPathspec::new(patterns);
+                    let c_array = c_pathspec.raw();
+                    for with_callback in [true, false] {
+                        let mut log = Log {
+                            answers: answers.clone(),
+                            ..Log::default()
+                        };
+                        clear();
+                        let (callback, payload): (ffi::git_index_matched_path_cb, *mut c_void) =
+                            if with_callback {
+                                (Some(c_callback), ptr::from_mut(&mut log).cast())
+                            } else {
+                                (None, ptr::null_mut())
+                            };
+                        // SAFETY: a live index, a live pathspec array and a callback pair
+                        // over an exclusively borrowed log, used synchronously.
+                        let expected = c_status(unsafe {
+                            ffi::git_index_add_all(c.0, &c_array, flags.bits(), callback, payload)
+                        })
+                        .map_err(|f| c_repo.relative(f));
+
+                        let heard = RefCell::new(Log {
+                            answers: answers.clone(),
+                            ..Log::default()
+                        });
+                        let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                            MatchedPathResult::from_code(heard.borrow_mut().answer(path, pattern))
+                        };
+                        let mut rust_callback = MatchedPathCallback::new(&mut f);
+                        clear();
+                        let got = repository_status(rust.as_mut().add_all(
+                            pathspec.as_ref(),
+                            flags,
+                            with_callback.then_some(&mut rust_callback),
+                        ))
+                        .map_err(|f| rust_repo.relative(f));
+                        drop(rust_callback);
+                        assert_eq!(expected, got, "{step} {with_callback}");
+                        assert_eq!(
+                            log.heard,
+                            heard.into_inner().heard,
+                            "{step} {with_callback}"
+                        );
+                        compare(&mut rust, &step);
+                        if !answers.is_empty() {
+                            break;
+                        }
+                    }
+                }
+
+                // A bare repository refuses both alike.
+                let c_bare = WorkRepo::new("routines-add-c-bare", true);
+                let rust_bare = WorkRepo::new("routines-add-rust-bare", true);
+                let c = CIndex(c_bare.index());
+                let mut rust = rust_bare.index_box();
+                clear();
+                // SAFETY: a live index and a NUL-terminated path.
+                let expected = c_status(unsafe { ffi::git_index_add_bypath(c.0, c"a".as_ptr()) });
+                assert_eq!(expected, repository_status(rust.as_mut().add_path(c"a")));
+                let pathspec = StrArrayView::default();
+                let empty = CPathspec::new(&[]).raw();
+                clear();
+                // SAFETY: a live index and an empty pathspec, without a callback.
+                let expected = c_status(unsafe {
+                    ffi::git_index_add_all(c.0, &empty, 0, None, ptr::null_mut())
+                });
+                assert_eq!(
+                    expected,
+                    repository_status(rust.as_mut().add_all(
+                        pathspec.as_ref(),
+                        AddFlags::DEFAULT,
+                        None
+                    ))
+                );
+                assert_eq!(view(c.0), rust_view(&mut rust));
+            },
+        );
+    }
+
+    /// A directory holding a repository with no commit, which is no submodule: both
+    /// sides fail alike, and libgit2 leaks what it built for the entry and the nested
+    /// repository it opened (`add_repo_as_submodule`, `src/libgit2/index.c`), so
+    /// LeakSanitizer is off in the child.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unborn_nested_repository_matches() {
+        isolated_tolerating_leaks(
+            concat!(module_path!(), "::unborn_nested_repository_matches"),
+            || {
+                init();
+                let c_repo = WorkRepo::new("routines-unborn-c", false);
+                let rust_repo = WorkRepo::new("routines-unborn-rust", false);
+                nested(&c_repo, "unborn", false);
+                nested(&rust_repo, "unborn", false);
+                let c = CIndex(c_repo.index());
+                let mut rust = rust_repo.index_box();
+                clear();
+                // SAFETY: a live index and a NUL-terminated path.
+                let rc = unsafe { ffi::git_index_add_bypath(c.0, c"unborn".as_ptr()) };
+                let expected = c_status(rc).map_err(|f| c_repo.relative(f));
+                clear();
+                let got = repository_status(rust.as_mut().add_path(c"unborn"))
+                    .map_err(|f| rust_repo.relative(f));
+                assert_eq!(expected, got);
+                assert_eq!(got.unwrap_err().0, Some(ErrorCode::UnbornBranch.raw()));
+                assert_eq!(view(c.0), rust_view(&mut rust));
+            },
+        );
+    }
+
+    /// Ownership as both sides report it, through a repository's life.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ownership_matches() {
+        init();
+        let c_repo = Repo::new("routines-owner-c");
+        let rust_repo = WorkRepo::new("routines-owner-rust", true);
+        let c = CIndex(c_repo.index());
+        let rust: IndexArc = rust_repo.repo.as_ref().unwrap().as_ref().index().unwrap();
+        // SAFETY: a live index, only read.
+        let c_owner = unsafe { ffi::git_index_owner(c.0) };
+        assert_eq!(c_owner, c_repo.repo);
+        assert!(
+            rust.as_ref()
+                .is_owned_by(rust_repo.repo.as_ref().unwrap().as_ref())
+        );
+        assert_eq!(view(c.0).owned, rust.as_ref().has_owner());
+        drop(c_repo);
+        drop(rust_repo);
+        assert_eq!(view(c.0).owned, rust.as_ref().has_owner());
+        assert!(!rust.as_ref().has_owner());
+        let (_, lone) = c_open(None);
+        assert_eq!(
+            view(lone.unwrap().0).owned,
+            Index::new().unwrap().as_ref().has_owner()
+        );
+    }
+}

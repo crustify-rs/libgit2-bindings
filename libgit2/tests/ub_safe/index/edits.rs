@@ -15,9 +15,7 @@ use libgit2::libgit2::index::index::{
 use libgit2::libgit2::oid::oid::OidType;
 
 use super::Scratch;
-use crate::fixture::index::{
-    Owner, add_staged, entry_count, repository_index, set_repository_index,
-};
+use crate::fixture::index::{Owner, add_staged, repository_index, set_repository_index};
 use crate::fixture::{TempRepo, init};
 
 /// Adds an entry: `git_index_add` is a later batch's.
@@ -101,7 +99,7 @@ fn removals_free_entries_once() {
     assert!(handle.remove_directory(c"d", Stage::Any).is_err());
     handle.remove_directory(c"d", Stage::Ours).unwrap();
     handle.remove_directory(c"", Stage::Normal).unwrap();
-    assert_eq!(entry_count(&index), 0);
+    assert_eq!(index.as_ref().entry_count(), 0);
 }
 
 /// Scans whose callbacks read every lent string to its end while C frees the entries
@@ -129,7 +127,7 @@ fn scan_callbacks_read_lent_paths_while_entries_go() {
         .unwrap();
     drop(callback);
     assert_eq!(seen.len(), paths.len());
-    assert_eq!(entry_count(&index), 1);
+    assert_eq!(index.as_ref().entry_count(), 1);
 
     // A callback scanning another index with its own callback.
     let mut index = seeded(&paths.map(|p| (p, 0)));
@@ -147,7 +145,7 @@ fn scan_callbacks_read_lent_paths_while_entries_go() {
             .as_mut()
             .remove_all(patterns.as_ref(), Some(&mut inner))
             .unwrap();
-        assert_eq!(entry_count(&other), 1);
+        assert_eq!(other.as_ref().entry_count(), 1);
         MatchedPathResult::from_code(if path == c"b/d" { -42 } else { 0 })
     };
     let mut callback = MatchedPathCallback::new(&mut outer);
@@ -160,7 +158,7 @@ fn scan_callbacks_read_lent_paths_while_entries_go() {
     assert_eq!(callback.stopped(), Some(-42));
     drop(callback);
     assert!(inner_seen >= 2);
-    assert_eq!(entry_count(&index), 3);
+    assert_eq!(index.as_ref().entry_count(), 3);
 
     // A panic stops the scan; libgit2 cleans up before it resumes.
     let mut f = |path: &CStr, _: Option<&CStr>| -> MatchedPathResult {
@@ -187,7 +185,7 @@ fn scan_callbacks_read_lent_paths_while_entries_go() {
         .as_mut()
         .remove_all(StrArrayView::default().as_ref(), None)
         .unwrap();
-    assert_eq!(entry_count(&index), 0);
+    assert_eq!(index.as_ref().entry_count(), 0);
 }
 
 /// An index with no owner: refused before any callback, and nothing changes.
@@ -212,7 +210,7 @@ fn update_all_without_an_owner_runs_no_callback() {
     }
     drop(callback);
     assert_eq!(calls, 0);
-    assert_eq!(entry_count(&index), 1);
+    assert_eq!(index.as_ref().entry_count(), 1);
 }
 
 /// Ids of another type than the repository's, which libgit2 would look up with an

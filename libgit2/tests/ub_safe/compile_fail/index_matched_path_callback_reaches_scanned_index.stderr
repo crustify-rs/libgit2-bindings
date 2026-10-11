@@ -1,0 +1,14 @@
+error[E0502]: cannot borrow `index` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/index_matched_path_callback_reaches_scanned_index.rs:16:13
+   |
+10 |       let mut f = |_: &CStr, _: Option<&CStr>| {
+   |                   ---------------------------- immutable borrow occurs here
+11 |           let _ = index.as_ref().entry_count();
+   |                   ----- first borrow occurs due to use of `index` in closure
+...
+16 |       let _ = index
+   |  _____________^
+17 | |         .as_mut()
+   | |_________________^ mutable borrow occurs here
+18 |           .add_all(pathspec.as_ref(), AddFlags::DEFAULT, Some(&mut callback));
+   |                                                               ------------- immutable borrow later used here
