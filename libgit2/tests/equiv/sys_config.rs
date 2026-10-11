@@ -76,3 +76,155 @@ fn memory_options_init_and_mutation_match_c() {
     assert_eq!(observe_c(&raw), observe_rust(&rust));
     assert_eq!(observe_c(&c_clone), observe_rust(&rust_clone));
 }
+
+mod backend_entries {
+    use libgit2::ffi;
+    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::{BackendEntry, BackendEntryArc};
+    use std::ffi::{CStr, CString};
+    use std::ptr;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Record {
+        name: Option<Vec<u8>>,
+        value: Option<Vec<u8>>,
+        backend: Option<Vec<u8>>,
+        origin_file: Option<String>,
+        level: ffi::git_config_level_t,
+        include_depth: u32,
+        callback: bool,
+    }
+
+    fn raw_record(ptr: *mut ffi::git_config_entry) -> Record {
+        let string = |ptr: *const std::ffi::c_char| {
+            if ptr.is_null() {
+                None
+            } else {
+                // SAFETY: acquired entry pins its immutable NUL-terminated strings.
+                Some(unsafe { CStr::from_ptr(ptr) })
+            }
+        };
+        // SAFETY: get_entry acquired this initialized entry, not yet released.
+        let entry = unsafe { ptr.read() };
+        // SAFETY: the public entry is the offset-zero field of a backend entry.
+        let callback = unsafe {
+            ptr.cast::<ffi::git_config_backend_entry>()
+                .read()
+                .free
+                .is_some()
+        };
+        Record {
+            name: string(entry.name).map(|s| s.to_bytes().to_vec()),
+            value: string(entry.value).map(|s| s.to_bytes().to_vec()),
+            backend: string(entry.backend_type).map(|s| s.to_bytes().to_vec()),
+            origin_file: string(entry.origin_path).map(origin_file),
+            level: entry.level,
+            include_depth: entry.include_depth,
+            callback,
+        }
+    }
+
+    fn origin_file(s: &CStr) -> String {
+        std::path::Path::new(s.to_str().unwrap())
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn rust_record(owner: &BackendEntryArc) -> Record {
+        let entry = owner.as_ref().entry();
+        let _policy = owner.as_ref().release_policy();
+        Record {
+            name: entry.name().map(|s| s.to_bytes().to_vec()),
+            value: entry.value().map(|s| s.to_bytes().to_vec()),
+            backend: entry.backend_type().map(|s| s.to_bytes().to_vec()),
+            origin_file: entry.origin_path().map(origin_file),
+            level: entry.level().raw(),
+            include_depth: entry.include_depth(),
+            callback: true,
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C reference and safe wrappers")]
+    fn backend_entry_layout_and_lifecycle_match_c() {
+        // Independently allocated configs and file buffers on each side.
+        let base = std::env::temp_dir().join(format!(
+            "crustify-backend-entry-equiv-{}",
+            std::process::id()
+        ));
+        let mut paths = Vec::new();
+        for side in ["c", "rust"] {
+            let dir = base.join(side);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("config"),
+                b"[test]\nvalue = old\nflag\nempty =\n[include]\npath = extra\n",
+            )
+            .unwrap();
+            std::fs::write(dir.join("extra"), b"[test]\nnested = yes\n").unwrap();
+            paths.push(CString::new(dir.join("config").to_str().unwrap()).unwrap());
+        }
+        let mut rust = Config::open(&paths[1]).unwrap();
+        let mut c = ptr::null_mut();
+        // SAFETY: initialized runtime, writable out slot and live C path string.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut c, paths[0].as_ptr()) };
+        assert_eq!(rc, 0);
+        let mut retained = Vec::new();
+        for key in [c"TEST.value", c"test.flag", c"test.empty", c"test.nested"] {
+            let mut raw = ptr::null_mut();
+            // SAFETY: initialized live config, writable slot, valid NUL key;
+            // success returns one acquired reference, released below.
+            let rc = unsafe { ffi::git_config_get_entry(&mut raw, c, key.as_ptr()) };
+            assert_eq!(rc, 0);
+            let owner = BackendEntry::from_entry(rust.as_ref().entry(key).unwrap());
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            retained.push((raw, owner));
+        }
+        for value in [c"changed", c""] {
+            let key = c"test.value";
+            // SAFETY: live sole config and strings borrowed only during the call.
+            let rc = unsafe { ffi::git_config_set_string(c, key.as_ptr(), value.as_ptr()) };
+            assert_eq!(rc, 0);
+            rust.as_mut().set_string(c"test.value", value).unwrap();
+            let mut raw = ptr::null_mut();
+            // SAFETY: as above, successful lookup acquires one reference.
+            let rc = unsafe { ffi::git_config_get_entry(&mut raw, c, c"test.value".as_ptr()) };
+            assert_eq!(rc, 0);
+            let owner = BackendEntry::from_entry(rust.as_ref().entry(c"test.value").unwrap());
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            retained.push((raw, owner));
+            // Previously acquired entries are not affected by file refresh.
+            for (raw, owner) in &retained {
+                assert_eq!(raw_record(*raw), rust_record(owner));
+            }
+        }
+        for key in [c"test.missing", c"invalid"] {
+            let mut raw = ptr::null_mut();
+            // SAFETY: on these errors C leaves NULL and transfers no reference.
+            let rc = unsafe { ffi::git_config_get_entry(&mut raw, c, key.as_ptr()) };
+            assert!(raw.is_null());
+            assert_eq!(rc, rust.as_ref().entry(key).unwrap_err().raw_code());
+        }
+        // SAFETY: releases this config's sole reference; acquired entries retain lists.
+        unsafe { ffi::git_config_free(c) };
+        drop(rust);
+        while let Some((raw, owner)) = retained.pop() {
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            assert_eq!(owner.as_ref().entry().level(), ConfigLevel::LOCAL);
+            let public = BackendEntry::into_entry(owner);
+            let owner = BackendEntry::from_entry(public);
+            assert_eq!(raw_record(raw), rust_record(&owner));
+            // SAFETY: releases exactly the reference acquired above; no raw borrow remains.
+            unsafe { ffi::git_config_entry_free(raw) };
+            let policy = owner.as_ref().release_policy();
+            policy.release(owner);
+            for (raw, owner) in &retained {
+                assert_eq!(raw_record(*raw), rust_record(owner));
+            }
+        }
+        std::fs::remove_dir_all(base).unwrap();
+    }
+}
