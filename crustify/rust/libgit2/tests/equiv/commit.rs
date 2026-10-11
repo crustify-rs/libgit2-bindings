@@ -2167,8 +2167,9 @@ mod create_ext_options {
 
 /// Equivalence of [`CreateOptions`] with the `git_commit_create_options` C code builds:
 /// [`CreateOptions::new`] against `git_commit_create_options_init`, and a sequence of
-/// commits created on `HEAD` through `git_commit_create_from_tree` and amended through
-/// `git_commit_amend_from_tree` (their wrappers are not written yet), one side reading C
+/// commits created on `HEAD` through `git_commit_create_from_tree` and
+/// `git_commit_create_from_stage`, and amended through `git_commit_amend_from_tree` and
+/// `git_commit_amend_from_stage` (their wrappers are not written yet), one side reading C
 /// structs built for each step, the other Rust values set through their setters: the
 /// empty-commit flag, the author and the committer (a fixed one, or none for the
 /// default), the encoding, the extra headers and the signing callback (the
@@ -2179,12 +2180,15 @@ mod create_ext_options {
 /// as they live.
 ///
 /// Each side owns a fresh bare repository whose configuration names the default
-/// identity, and the same two trees (the empty one, and one holding a blob). After every
-/// step the return codes, the error classes and messages, the raw commit objects, the
-/// commit `HEAD` names and the signing callback's calls are compared. The default
-/// identity is signed at the current time, which may differ between the sides: its
-/// timestamps are masked, and every commit id (in `parent` lines, and `HEAD`) is
-/// compared by its position in the side's history rather than by value.
+/// identity, and the same two trees (the empty one, and one holding a blob). The stage
+/// routines commit the repository's index, read from one of the trees before the step,
+/// with a second entry added for a tree the object database does not hold yet. After
+/// every step the return codes, the error classes and messages, the raw commit objects,
+/// the commit `HEAD` names, the signing callback's calls and whether that tree has been
+/// written are compared. The default identity is signed at the current time, which may
+/// differ between the sides: its timestamps are masked, and every commit id (in `parent`
+/// lines, and `HEAD`) is compared by its position in the side's history rather than by
+/// value.
 ///
 /// Documented divergences, outside these comparisons: `git_commit_create_options_init`
 /// refuses another version than `GIT_COMMIT_CREATE_OPTIONS_VERSION` (`-1`), which
@@ -2234,11 +2238,15 @@ mod create_options {
     }
 
     /// Which routine a step calls: create on `HEAD` with one of the side's trees, or
-    /// amend `HEAD` with one and a new message (`None` keeps the amended one's).
+    /// amend `HEAD` with one and a new message (`None` keeps the amended one's); or the
+    /// same with the index read from one of the trees, plus the extra entry when the
+    /// flag is set.
     #[derive(Clone, Copy, Debug)]
     enum Op {
         Create(usize),
         Amend(usize, Option<&'static CStr>),
+        Stage(usize, bool),
+        AmendStage(usize, bool, Option<&'static CStr>),
     }
 
     /// One step: the routine and the options' fields; `fixed` signatures are the side's
@@ -2340,13 +2348,63 @@ mod create_options {
                 sign: Some(0),
                 ..BASE
             },
+            // The index `HEAD`'s tree holds: `GIT_EUNCHANGED`, where the tree routine
+            // gives -1.
+            Step {
+                op: Op::Stage(0, false),
+                ..BASE
+            },
+            // A refusal of the signer leaves no commit, but the index's tree has been
+            // written by then.
+            Step {
+                op: Op::Stage(1, true),
+                sign: Some(-7),
+                ..BASE
+            },
+            Step {
+                op: Op::Stage(1, false),
+                author: false,
+                committer: false,
+                encoding: Some(c"ISO-8859-1"),
+                headers: &[(c"x-stage", c"s")],
+                sign: Some(0),
+                ..BASE
+            },
+            Step {
+                op: Op::Stage(1, false),
+                ..BASE
+            },
+            Step {
+                op: Op::Stage(1, false),
+                allow_empty: true,
+                ..BASE
+            },
+            // The amended commit's author, message and encoding.
+            Step {
+                op: Op::AmendStage(1, true, None),
+                author: false,
+                encoding: Some(c"UTF-16"),
+                ..BASE
+            },
+            Step {
+                op: Op::AmendStage(0, false, Some(c"stage amended\n")),
+                sign: Some(-30),
+                ..BASE
+            },
+            Step {
+                op: Op::AmendStage(0, false, Some(c"stage amended\n")),
+                committer: false,
+                headers: &[(c"x-amend", c"stage")],
+                sign: Some(0),
+                ..BASE
+            },
         ]
     }
 
     /// What a step gave: the code, the error class and message (or the masked raw
-    /// commit), the position of `HEAD`'s commit in the side's history, and the callback's
-    /// calls so far.
-    type Outcome = (c_int, c_int, String, Option<usize>, usize);
+    /// commit), the position of `HEAD`'s commit in the side's history, the callback's
+    /// calls so far, and whether the tree of the index with the extra entry is written.
+    type Outcome = (c_int, c_int, String, Option<usize>, usize, bool);
 
     /// The default identity both repositories' configurations name.
     const DEFAULT_IDENTITY: &str = "Default Identity <default@example.com>";
@@ -2355,6 +2413,11 @@ mod create_options {
         dir: PathBuf,
         repo: *mut ffi::git_repository,
         trees: [*mut ffi::git_tree; 2],
+        /// The blob of the second tree, which the index's extra entry names too.
+        blob: ffi::git_oid,
+        /// The id of the tree of the second tree's index with the extra entry, which
+        /// only the stage steps write.
+        staged: ffi::git_oid,
         author: *mut ffi::git_signature,
         committer: *mut ffi::git_signature,
         history: Vec<String>,
@@ -2447,6 +2510,8 @@ mod create_options {
                 dir,
                 repo,
                 trees,
+                blob: blob_id,
+                staged: ffi::git_oid::default(),
                 author,
                 committer,
                 history: Vec::new(),
@@ -2482,6 +2547,24 @@ mod create_options {
                         message.map_or(ptr::null(), CStr::as_ptr),
                         opts,
                     ),
+                    Op::Stage(tree, extra) => {
+                        self.stage(tree, extra);
+                        ffi::git_commit_create_from_stage(
+                            &mut id,
+                            self.repo,
+                            c"options\n".as_ptr(),
+                            opts,
+                        )
+                    }
+                    Op::AmendStage(tree, extra, message) => {
+                        self.stage(tree, extra);
+                        ffi::git_commit_amend_from_stage(
+                            &mut id,
+                            self.repo,
+                            message.map_or(ptr::null(), CStr::as_ptr),
+                            opts,
+                        )
+                    }
                 }
             };
             let calls = self.signer.calls.get();
@@ -2492,11 +2575,66 @@ mod create_options {
                     ((*e).klass, CStr::from_ptr((*e).message))
                 };
                 let message = message.to_string_lossy().into_owned();
-                return (rc, class, message, self.head(), calls);
+                return (
+                    rc,
+                    class,
+                    message,
+                    self.head(),
+                    calls,
+                    self.staged_written(),
+                );
             }
             let raw = self.raw(&id);
             self.history.push(hex(&id));
-            (rc, 0, self.mask(&raw), self.head(), calls)
+            let head = self.head();
+            (rc, 0, self.mask(&raw), head, calls, self.staged_written())
+        }
+
+        /// Reads the second tree, or the empty one, into the repository's index, and adds
+        /// the extra entry `other`, the second tree's blob, when `extra` is set.
+        fn stage(&self, tree: usize, extra: bool) {
+            let mut index = ptr::null_mut();
+            // SAFETY: the live repository and its tree; the index reference is released
+            // once; the entry is zeroed but for its mode, id and NUL-terminated path,
+            // which libgit2 copies.
+            unsafe {
+                assert_eq!(ffi::git_repository_index(&mut index, self.repo), 0);
+                assert_eq!(ffi::git_index_read_tree(index, self.trees[tree]), 0);
+                if extra {
+                    let mut entry: ffi::git_index_entry = std::mem::zeroed();
+                    entry.mode = ffi::GIT_FILEMODE_BLOB;
+                    entry.id = self.blob;
+                    entry.path = c"other".as_ptr();
+                    assert_eq!(ffi::git_index_add(index, &entry), 0);
+                }
+                ffi::git_index_free(index);
+            }
+        }
+
+        /// The id of the tree of the index with the extra entry, written into this
+        /// side's object database.
+        fn write_staged(&self) -> ffi::git_oid {
+            self.stage(1, true);
+            let (mut index, mut id) = (ptr::null_mut(), ffi::git_oid::default());
+            // SAFETY: the live repository; the index reference is released once.
+            unsafe {
+                assert_eq!(ffi::git_repository_index(&mut index, self.repo), 0);
+                assert_eq!(ffi::git_index_write_tree(&mut id, index), 0);
+                ffi::git_index_free(index);
+            }
+            id
+        }
+
+        /// Whether the object database holds the tree of the index with the extra entry.
+        fn staged_written(&self) -> bool {
+            let mut odb = ptr::null_mut();
+            // SAFETY: the live repository and an id; the odb reference is released once.
+            unsafe {
+                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
+                let found = ffi::git_odb_exists(odb, &self.staged) == 1;
+                ffi::git_odb_free(odb);
+                found
+            }
         }
 
         /// The raw text of the commit `id`.
@@ -2586,6 +2724,11 @@ mod create_options {
     fn commits_created_and_amended_with_the_options_match_c() {
         let script = script();
         let (mut c, mut rust) = (Side::new("c"), Side::new("rust"));
+        // Both sides' blobs are alike, and so is the tree of their index with the extra
+        // entry: its id comes from a third repository, which writes it.
+        let staged = Side::new("staged").write_staged();
+        (c.staged, rust.staged) = (staged, staged);
+        assert!(!c.staged_written() && !rust.staged_written());
         let author =
             SignatureView::new(c"A U Thor", c"author@example.com", Time::new(123456789, 60));
         let committer =
@@ -2652,11 +2795,16 @@ mod create_options {
             let got = rust.run(step, ptr::from_ref(&options).cast());
             signer.resume_panic();
             assert_eq!(got, expected, "step {i}: {step:?}");
+            if let Op::Stage(_, true) = step.op {
+                // Refused by the signer, yet the index's tree is in the object database.
+                assert_eq!((expected.0, expected.5), (-7, true), "step {i}");
+            }
         }
         // Every signing step reached its callback: none fails before signing.
-        assert_eq!(c.signer.calls.get(), 5);
-        assert_eq!(rust.signer.calls.get(), 5);
-        assert_eq!((c.history.len(), rust.history.len()), (8, 8));
+        assert_eq!(c.signer.calls.get(), 9);
+        assert_eq!(rust.signer.calls.get(), 9);
+        assert_eq!((c.history.len(), rust.history.len()), (12, 12));
+        assert!(c.staged_written() && rust.staged_written());
     }
 }
 
