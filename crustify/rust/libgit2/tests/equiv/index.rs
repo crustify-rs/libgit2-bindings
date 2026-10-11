@@ -1236,3 +1236,154 @@ fn entry_flags_match_c_enum_and_preserve_other_fields() {
         );
     }
 }
+
+mod conflict_cursor {
+    use super::*;
+    use libgit2::libgit2::index::index::{ConflictIterator, EntryExtendedFlags as F};
+
+    /// No entry constructor is available yet; C copies these stack entries and
+    /// static paths into the safely constructed index during each add call.
+    fn populate(index: &mut IndexBox) {
+        let mut resolved = ffi::git_index_entry {
+            mode: 0o100644,
+            path: c"aa-resolved".as_ptr(),
+            ..Default::default()
+        };
+        resolved.id.type_ = ffi::GIT_OID_SHA1 as _;
+        // SAFETY: the sole index is live and C copies this initialized entry and
+        // its static NUL-terminated path. Stage zero must be skipped by the cursor.
+        let rc = unsafe { ffi::git_index_add(index.as_c_ptr(), &resolved) };
+        assert_eq!(rc, 0);
+        for (name, mask) in [(c"a", 7), (c"b", 1), (c"c", 2), (c"d", 4), (c"e", 5)] {
+            let entry = ffi::git_index_entry {
+                mode: 0o100644,
+                path: name.as_ptr(),
+                ..Default::default()
+            };
+            let side = |bit| {
+                if mask & bit != 0 {
+                    &raw const entry
+                } else {
+                    ptr::null()
+                }
+            };
+            // SAFETY: sole live index, valid entries with static NUL paths read
+            // and copied only during this call. NULL represents an absent side.
+            let rc = unsafe { ffi::git_index_conflict_add(index.as_c_ptr(), side(1), side(2), side(4)) };
+            assert_eq!(rc, 0);
+        }
+    }
+
+    type Observation = (i32, [Option<(Vec<u8>, u16)>; 3]);
+
+    /// Observes constructor state via C (next is owned by the later symbol wave).
+    ///
+    /// # Safety
+    /// `cursor` must be a live cursor over a live, unmodified, exclusively held index.
+    unsafe fn observe(
+        cursor: *mut ffi::git_index_conflict_iterator,
+    ) -> Observation {
+        let mut a = ptr::null();
+        let mut o = ptr::null();
+        let mut t = ptr::null();
+        // SAFETY: caller guarantees cursor and index liveness/exclusivity;
+        // independent writable slots receive borrowed optional entry pointers.
+        let rc = unsafe { ffi::git_index_conflict_next(&mut a, &mut o, &mut t, cursor) };
+        let entries = [a, o, t].map(|p| {
+            if p.is_null() {
+                None
+            } else {
+                // SAFETY: C returned a live entry from the unchanged index; its
+                // NUL path and flags are copied before any mutation or teardown.
+                unsafe {
+                    Some((
+                        CStr::from_ptr(ptr::addr_of!((*p).path).read())
+                            .to_bytes()
+                            .to_vec(),
+                        ptr::addr_of!((*p).flags).read(),
+                    ))
+                }
+            }
+        });
+        (rc, entries)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn constructors_preserve_conflict_state_and_release_only_cursor() {
+        let mut raw_parent = Index::new().unwrap();
+        let mut safe_parent = Index::new().unwrap();
+        for populated in [false, true] {
+            if populated {
+                populate(&mut raw_parent);
+                populate(&mut safe_parent);
+            }
+            for _ in 0..2 {
+                let safe = ConflictIterator::new(safe_parent.as_mut()).unwrap();
+                let mut raw = ptr::null_mut();
+                // SAFETY: writable slot and live, exclusive independently owned
+                // index which remains unchanged until raw cursor destruction.
+                let rc = unsafe {
+                    ffi::git_index_conflict_iterator_new(&mut raw, raw_parent.as_c_ptr())
+                };
+                assert_eq!(rc, 0);
+                for step in 0..if populated { 7 } else { 2 } {
+                    // SAFETY: both cursors and their independent parents stay live
+                    // and untouched; observe only advances each cursor's position.
+                    let (c, r) = unsafe { (observe(raw), observe(safe.as_c_ptr())) };
+                    assert_eq!(c, r);
+                    assert_eq!(
+                        r.0,
+                        if populated && step < 5 {
+                            0
+                        } else {
+                            ffi::GIT_ITEROVER
+                        }
+                    );
+                }
+                // SAFETY: raw is the sole allocation returned above; no pointer
+                // into its storage is retained. Parents are still live.
+                unsafe { ffi::git_index_conflict_iterator_free(raw) };
+                drop(safe);
+                // SAFETY: owners remain live after the cursor-only destructors.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_index_entrycount(raw_parent.as_c_ptr()),
+                        ffi::git_index_entrycount(safe_parent.as_c_ptr())
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn extended_flags_match_c_bitmasks() {
+        for (rust, c) in [
+            (F::INTENT_TO_ADD, ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD),
+            (F::SKIP_WORKTREE, ffi::GIT_INDEX_ENTRY_SKIP_WORKTREE),
+            (F::ON_DISK, ffi::GIT_INDEX_ENTRY_EXTENDED_FLAGS),
+            (F::UP_TO_DATE, ffi::GIT_INDEX_ENTRY_UPTODATE),
+        ] {
+            assert_eq!(rust.bits(), c);
+        }
+        let mut rust = F::EMPTY;
+        let mut c = 0;
+        for flag in [
+            F::UP_TO_DATE,
+            F::INTENT_TO_ADD,
+            F::SKIP_WORKTREE,
+            F::from_bits_retain(1 << 31),
+        ] {
+            rust.insert(flag);
+            c |= flag.bits();
+            assert_eq!(rust.bits(), c);
+            assert_eq!(
+                (rust & F::ON_DISK).bits(),
+                c & ffi::GIT_INDEX_ENTRY_EXTENDED_FLAGS
+            );
+        }
+        rust.remove(F::UP_TO_DATE);
+        c &= !ffi::GIT_INDEX_ENTRY_UPTODATE;
+        assert_eq!(rust.bits(), c);
+    }
+}
