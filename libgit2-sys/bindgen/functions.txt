@@ -479,3 +479,10 @@ git_pathspec_match_list_entry
 git_pathspec_match_list_diff_entry
 git_pathspec_match_list_failed_entrycount
 git_pathspec_match_list_failed_entry
+
+# index wave 0 batch 5: note iterator lifecycle, equivalence and the composed constructor
+git_note_iterator_new
+git_note_commit_iterator_new
+git_note_iterator_free
+git_note_next
+git_reference_name_to_id

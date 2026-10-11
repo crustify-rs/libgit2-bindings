@@ -1769,6 +1769,162 @@
    "fields": []
   },
   {
+   "name": "git_index_time",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "Resource-free pair of i32 seconds/u32 nanoseconds, embedded in index entries and copied/serialized verbatim (index.c read_entry/write_entry, index.h git_index_time_eq). Every integer bit pattern accepted, no pointers, lifecycle or normalization. Wrapped inline value and projected shared/mutable handles.",
+   "fields": []
+  },
+  {
+   "name": "git_iterator",
+   "defined_in": "src/libgit2/iterator.h",
+   "_comment_agent": "Public API is opaque git_note_iterator only. git_note_iterator_new and git_note_commit_iterator_new construct sole tree iterators; git_note_iterator_free dispatches tree disposer then common storage release. No clone/refcount public API. Root tree is dup-counted, each frame owns looked-up trees; repository remains an uncounted borrow (lifetime on Rust layout). git_vector pathlist owns only pointer array, options strings borrowed; notes passes null options, so no pathlist/start/end. Other private iterator kinds/field accessors are outside wrap scope. C defects (C left unchanged, wrap): git_note_commit_iterator_new frees an uninitialised tree local when git_commit_tree fails (missing tree, OOM); git_note_iterator_new ignores a failed notes-commit lookup (ref to missing object / non-commit) and reaches the same free with a NULL commit; with a NULL name, note_get_default_ref -> git_config__get_string_buf frees an unwritten config entry when the config file stops parsing after load (SIGSEGV). Rust composes git_note_iterator_new from ConfigRef::entry(core.notesRef) + git_reference_name_to_id + Commit::lookup + from_commit, and from_commit looks the tree up first; residual: OOM or tree removal between the two tree lookups.",
+   "fields": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Per-kind static callback vtable; never freed or mutated, callbacks mutate iterator via exclusive traversal. Not published in notes.h."
+     }
+    },
+    {
+     "name": "end",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional strdup in iterator_range_init, freed on reset and git_iterator_free; absent for public note iterators."
+     }
+    },
+    {
+     "name": "entry_srch",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function address selected by iterator_set_ignore_case; no retained payload, no release. Empty iterators leave these null and never call them."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Index/workdir iterators keep one counted snapshot reference via git_index_snapshot_new/release. Stored before snapshot construction during init; only finalized iterators have ownership. Null for note/tree/empty iterators."
+     }
+    },
+    {
+     "name": "prefixcomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function address selected by iterator_set_ignore_case; no retained payload, no release. Empty iterators leave these null and never call them."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "iterator_init_common borrows repo uncounted; tree lookups and process_entry_path use it through iterator lifetime. Null for empty/filesystem iterators, non-null for public note iterators."
+     }
+    },
+    {
+     "name": "start",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional strdup in iterator_range_init, freed on reset and git_iterator_free; absent for public note iterators."
+     }
+    },
+    {
+     "name": "strcomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function address selected by iterator_set_ignore_case; no retained payload, no release. Empty iterators leave these null and never call them."
+     }
+    },
+    {
+     "name": "strncomp",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Function address selected by iterator_set_ignore_case; no retained payload, no release. Empty iterators leave these null and never call them."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_libgit2_opt_t",
    "defined_in": "include/git2/common.h",
    "_comment_agent": "Fieldless C enum of the keys git_libgit2_opts (settings.c:105) dispatches on, dense 0..=47 (GIT_OPT_GET_MWINDOW_SIZE .. GIT_OPT_SET_PACK_MAX_OBJECT_SIZE; bindgen types it c_uint, but git_libgit2_opts takes `int option, ...`). No storage or lifecycle. Every value without a constant (negative included) hits the default arm: -1, GIT_ERROR_INVALID 'invalid option key', and no va_arg is read, so calling with the bare key is sound. Each named key fixes the variadic argument list (documented per variant in core/common.rs LibraryOption). Hazards for the git_libgit2_opts wrapper: SET_SSL_CIPHERS strdups its argument with no NULL check (NULL = crash); SET_ALLOCATOR memcpys a git_allocator (NULL restores stdalloc) and swaps the global allocator under live allocations; GET/SET_WINDOWS_SHAREMODE are no-ops off Windows (the out pointer is left unwritten, rc 0); SET_SSL_CERT_LOCATIONS with OpenSSL fails GIT_ERROR_SSL when neither location loads; ADD_SSL_X509_CERT(NULL) adds nothing and returns 0; SET_SEARCH_PATH/GET_SEARCH_PATH take an int config level, only SYSTEM(2)/XDG(3)/GLOBAL(4) accepted (GIT_ERROR_INVALID 'invalid config path selector %d'); SET_SERVER_(CONNECT_)TIMEOUT refuse negatives (GIT_ERROR_INVALID); SET_OWNER_VALIDATION stores !=0; GET_EXTENSIONS hands out a git_strarray to dispose; GET_* buf options fill a git_buf. Settings are unsynchronised globals (git_sysdir_set etc.). Rust side: LibraryOption::from_raw/from_key/TryFrom -> UnnamedLibraryOption; key() gives the int.",
@@ -12658,6 +12814,155 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller's storage, written whole (_trailer_block, trailers, count) only on success, without freeing what it held: re-parsing into a filled array leaks it. Left untouched on failure (allocation of the block), so a caller must start from a zeroed struct to free it unconditionally. Not NULL-checked. Wrapped by MessageTrailerArray::parse (object/message.rs), which fills a fresh empty CVal."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_note_commit_iterator_new",
+   "defined_in": "src/libgit2/notes.c",
+   "lifetime": {
+    "for": "it",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "it",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:it"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable slot initialized null by caller; success transfers sole C iterator, failure before iterator creation leaves slot unchanged, later failure leaves null. Tree refs owned; repository retained uncounted."
+     }
+    },
+    {
+     "name": "notes_commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:notes_commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Commit read for call only, tree looked up and its reference retained. Result borrows commit owner repository, not commit."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_note_iterator_free",
+   "defined_in": "src/libgit2/notes.c",
+   "lifetime": {
+    "for": "it",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "it",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes sole note iterator and all traversal storage; null is no-op. Delegates git_iterator_free. Does not free repository."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_note_iterator_new",
+   "defined_in": "src/libgit2/notes.c",
+   "lifetime": {
+    "for": "it",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "it",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:it"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable slot initialized null by caller; success transfers sole C iterator, failure before iterator creation leaves slot unchanged, later failure leaves null. Tree refs owned; repository retained uncounted."
+     }
+    },
+    {
+     "name": "notes_ref_in",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:notes_ref_in"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional reference name read/copied for call only; null selects configured default."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Repository borrowed uncounted by result; must outlive traversal. Cache/index/config may be loaded during construction."
      }
     }
    ]

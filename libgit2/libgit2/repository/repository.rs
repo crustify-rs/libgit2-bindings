@@ -1698,6 +1698,12 @@ impl RepositoryError {
         }
     }
 
+    /// The failure a composed routine reports for a step with another error type:
+    /// that step's (negative) code and error.
+    pub(crate) fn from_parts(code: c_int, error: ErrorBuf) -> Self {
+        Self { code, error }
+    }
+
     /// The returned code; `None` for one the header does not name
     /// ([`raw_code`](Self::raw_code) has it).
     pub fn code(&self) -> Option<ErrorCode> {

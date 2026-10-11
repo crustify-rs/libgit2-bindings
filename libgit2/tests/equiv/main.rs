@@ -15,6 +15,7 @@ mod global;
 mod index;
 mod mailmap;
 mod message;
+mod notes;
 mod object;
 mod odb;
 mod oid;

@@ -52,7 +52,7 @@
 use core::ffi::{CStr, c_int};
 use core::ptr::{self, NonNull};
 
-use ffibox::{CArc, CBox, CNew, define_ctype, impl_cdrop};
+use ffibox::{CArc, CBox, CNew, CZeroable, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::oid::oid::OidType;
@@ -1098,6 +1098,98 @@ impl core::ops::BitAnd for EntryExtendedFlags {
     }
 }
 
+define_ctype!(
+    /// The index's truncated timestamp, not an authoritative wall-clock time.
+    ///
+    /// All bit patterns are preserved, including nanoseconds outside 0..1_000_000_000.
+    /// C compares and serializes these integers without normalization. This value
+    /// owns no resources and needs no C constructor or destructor.
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::index::index::IndexTime;
+    /// let mut time = IndexTime::new(1, 2);
+    /// let shared = time.as_ref();
+    /// time.as_mut().set_seconds(3);
+    /// let _ = shared.seconds();
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::index::index::IndexTime;
+    /// let time = IndexTime::new(1, 2);
+    /// let shared = time.as_ref();
+    /// drop(time);
+    /// let _ = shared.seconds();
+    /// ```
+    ///
+    /// Wraps: git_index_time
+    IndexTime, IndexTimeRef, IndexTimeMut, ffi::git_index_time
+);
+
+// SAFETY: both fields are integers accepting all bit patterns; zero has no resources
+// or additional invariants and is accepted by all timestamp accessors and C consumers.
+unsafe impl CZeroable for IndexTime {}
+
+impl IndexTime {
+    /// Constructs an index timestamp without normalization or truncation.
+    pub fn new(seconds: i32, nanoseconds: u32) -> Self {
+        let mut value = Self::zeroed();
+        value.as_mut().set_seconds(seconds);
+        value.as_mut().set_nanoseconds(nanoseconds);
+        value
+    }
+}
+
+impl Default for IndexTime {
+    fn default() -> Self {
+        Self::zeroed()
+    }
+}
+
+impl Clone for IndexTime {
+    fn clone(&self) -> Self {
+        self.as_ref().to_time()
+    }
+}
+
+impl IndexTimeRef<'_> {
+    /// The signed, truncated seconds component.
+    ///
+    /// Field: git_index_time.seconds
+    pub fn seconds(&self) -> i32 {
+        // SAFETY: the shared handle keeps this initialized scalar field readable.
+        unsafe { ptr::addr_of!((*self.as_ptr()).seconds).read() }
+    }
+
+    /// The raw nanoseconds component, without normalization.
+    ///
+    /// Field: git_index_time.nanoseconds
+    pub fn nanoseconds(&self) -> u32 {
+        // SAFETY: the shared handle keeps this initialized scalar field readable.
+        unsafe { ptr::addr_of!((*self.as_ptr()).nanoseconds).read() }
+    }
+
+    /// Copies both integers into independent Rust-owned storage.
+    pub fn to_time(&self) -> IndexTime {
+        IndexTime::new(self.seconds(), self.nanoseconds())
+    }
+}
+
+impl IndexTimeMut<'_> {
+    /// Replaces the seconds component.
+    pub fn set_seconds(&mut self, seconds: i32) {
+        // SAFETY: this exclusive handle grants the only access to the initialized
+        // scalar field for the write; every i32 is valid.
+        unsafe { ptr::addr_of_mut!((*self.as_mut_ptr()).seconds).write(seconds) }
+    }
+
+    /// Replaces the nanoseconds component; all u32 values are preserved.
+    pub fn set_nanoseconds(&mut self, nanoseconds: u32) {
+        // SAFETY: this exclusive handle grants the only access to the initialized
+        // scalar field for the write; every u32 is valid.
+        unsafe { ptr::addr_of_mut!((*self.as_mut_ptr()).nanoseconds).write(nanoseconds) }
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -1903,5 +1995,27 @@ mod unit_tests {
             drop(repo);
             std::fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    #[test]
+    fn value_clone_and_borrowed_projection() {
+        let mut time = IndexTime::default();
+        let independent = time.clone();
+        assert_eq!(independent.as_ref().seconds(), 0);
+        assert_eq!(independent.as_ref().nanoseconds(), 0);
+        time.as_mut().set_seconds(i32::MIN);
+        assert_eq!(independent.as_ref().seconds(), 0);
+        let mut raw = ffi::git_index_time {
+            seconds: -17,
+            nanoseconds: u32::MAX,
+        };
+        // SAFETY: raw is initialized, aligned, and exclusively borrowed until handle
+        // expires; it owns no resources and neither field has restricted validity.
+        let mut handle = unsafe { IndexTimeMut::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(handle.as_ref().seconds(), -17);
+        handle.as_mut().set_nanoseconds(5);
+        assert_eq!(handle.as_ref().nanoseconds(), 5);
+        assert_eq!(size_of::<IndexTime>(), size_of::<ffi::git_index_time>());
+        assert_eq!(align_of::<IndexTime>(), align_of::<ffi::git_index_time>());
     }
 }
