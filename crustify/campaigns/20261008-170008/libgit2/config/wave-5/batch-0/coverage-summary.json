@@ -1,0 +1,49 @@
+{
+  "rust": {
+    "PreparedBackendWalk::free": {
+      "regions_hit": 2,
+      "executable_regions": 2,
+      "uncovered_regions": []
+    },
+    "PreparedBackendWalk::next": {
+      "regions_hit": 43,
+      "executable_regions": 43,
+      "uncovered_regions": []
+    },
+    "PreparedBackendWalk::iterator": {
+      "regions_hit": 8,
+      "executable_regions": 8,
+      "uncovered_regions": []
+    },
+    "ConfigMut::add_backend (including repository closure)": {
+      "regions_hit": 36,
+      "executable_regions": 36,
+      "uncovered_regions": []
+    },
+    "BackendMut::foreach_match (including callback walk closure)": {
+      "regions_hit": 63,
+      "executable_regions": 63,
+      "uncovered_regions": []
+    }
+  },
+  "c": {
+    "git_config_add_backend": {
+      "lines_hit": 15,
+      "executable_lines": 15,
+      "uncovered_lines": []
+    },
+    "git_config_backend_foreach_match": {
+      "lines_hit": 18,
+      "executable_lines": 20,
+      "uncovered_lines": [
+        602,
+        603
+      ]
+    },
+    "git_config_init_backend": {
+      "lines_hit": 4,
+      "executable_lines": 4,
+      "uncovered_lines": []
+    }
+  }
+}

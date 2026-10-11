@@ -601,3 +601,123 @@ mod backends {
         assert_eq!(entry.as_ref().entry().level(), ConfigLevel::GLOBAL);
     }
 }
+
+/// Registration consumes its owner; retained entries and copied snapshots remain
+/// usable after replacement and after all registering configurations are dropped.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn backend_registration_transfer_replace_and_retained_entries() {
+    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    let mut config = Config::new().unwrap();
+    let values = [
+        CString::new("a.b=11").unwrap(),
+        CString::new("a.old=12").unwrap(),
+    ];
+    let backend = Backend::from_values(&[&values[0], &values[1]], None).unwrap();
+    drop(values);
+    config
+        .as_mut()
+        .add_backend(backend, ConfigLevel::GLOBAL, None, false)
+        .unwrap();
+    let retained = config.as_ref().entry(c"a.b").unwrap();
+    assert_eq!(retained.as_ref().value(), Some(c"11"));
+    for (level, force, expected) in [
+        (ConfigLevel::GLOBAL, false, Some(ErrorCode::Exists)),
+        (ConfigLevel::LOCAL, false, None),
+        (ConfigLevel::GLOBAL, true, None),
+    ] {
+        let backend = Backend::from_values(&[c"a.b=20"], None).unwrap();
+        let result = config
+            .as_mut()
+            .as_mut()
+            .add_backend(backend, level, None, force);
+        assert_eq!(result.err().and_then(|e| e.code()), expected);
+        assert_eq!(retained.as_ref().value(), Some(c"11"));
+    }
+    assert_eq!(config.as_ref().get_i32(c"a.b").unwrap(), 20);
+    let snapshot = config.as_ref().snapshot().unwrap();
+    let entry = {
+        let level = config.as_ref().open_level(ConfigLevel::GLOBAL).unwrap();
+        level.as_ref().entry(c"a.b").unwrap()
+    };
+    drop(config);
+    assert_eq!(snapshot.as_ref().get_i32(c"a.b").unwrap(), 20);
+    assert_eq!(retained.as_ref().value(), Some(c"11"));
+    assert_eq!(entry.as_ref().value(), Some(c"20"));
+    drop(snapshot);
+    assert_eq!(retained.as_ref().value(), Some(c"11"));
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn backend_registration_failed_open_empty_and_priority_boundaries() {
+    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    let mut config = Config::new().unwrap();
+    let backend = Backend::from_string(b"[missing\n", None).unwrap();
+    let error = config
+        .as_mut()
+        .add_backend(backend, ConfigLevel::LOCAL, None, false)
+        .unwrap_err();
+    assert_eq!(error.class(), Some(ErrorClass::Config));
+    assert_eq!(
+        config.as_ref().get_i32(c"a.b").unwrap_err().code(),
+        Some(ErrorCode::NotFound)
+    );
+    for raw in [i32::MIN, -1, i32::MAX] {
+        let backend = Backend::from_values(&[c"a.b=1"], None).unwrap();
+        let error = config
+            .as_mut()
+            .add_backend(backend, ConfigLevel::from_raw(raw), None, true)
+            .unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Invalid));
+    }
+    for raw in [0, i32::MAX - 1] {
+        let backend = Backend::from_values(&[], None).unwrap();
+        config
+            .as_mut()
+            .add_backend(backend, ConfigLevel::from_raw(raw), None, false)
+            .unwrap();
+    }
+    let view = config.as_ref().open_level(ConfigLevel::HIGHEST).unwrap();
+    assert_eq!(
+        view.as_ref().get_i32(c"a.b").unwrap_err().code(),
+        Some(ErrorCode::NotFound)
+    );
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn backend_registration_optional_repository_keepalive() {
+    use libgit2::libgit2::config::config::{Config, ConfigBox, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::repository::repository::Repository;
+    let dir = std::env::temp_dir().join(format!(
+        "crustify-backend-register-repo-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = CString::new(dir.to_str().unwrap()).unwrap();
+    let repository = Repository::init(&path, true).unwrap();
+    let mut config: ConfigBox<'_> = Config::new().unwrap();
+    config
+        .as_mut()
+        .add_backend(
+            Backend::from_values(&[c"a.b=1"], None).unwrap(),
+            ConfigLevel::LOCAL,
+            Some(repository.as_ref()),
+            false,
+        )
+        .unwrap();
+    let snapshot = config.as_ref().snapshot().unwrap();
+    drop(config);
+    drop(repository);
+    assert_eq!(snapshot.as_ref().get_i32(c"a.b").unwrap(), 1);
+    drop(snapshot);
+    std::fs::remove_dir_all(dir).unwrap();
+}

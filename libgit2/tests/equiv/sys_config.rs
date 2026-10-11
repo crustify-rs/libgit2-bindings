@@ -1139,3 +1139,113 @@ mod backends {
         assert_eq!(&c_error, error.error());
     }
 }
+
+mod registration {
+    use super::*;
+    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::util::errors::last;
+    use libgit2::libgit2::util::sys::errors::clear;
+    use std::ptr;
+
+    struct RawConfig(*mut ffi::git_config);
+    impl Drop for RawConfig {
+        fn drop(&mut self) {
+            // SAFETY: each RawConfig owns one successfully constructed C reference.
+            unsafe { ffi::git_config_free(self.0) };
+        }
+    }
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn backend_registration_multicall_matches_independent_c() {
+        let mut rust = Config::new().unwrap();
+        let mut raw = ptr::null_mut();
+        // SAFETY: writable slot, success transfers one independent config reference.
+        assert_eq!(unsafe { ffi::git_config_new(&mut raw) }, 0);
+        let raw = RawConfig(raw);
+        let steps: &[(_, _, &[&CStr])] = &[
+            (ConfigLevel::APP, false, &[c"a.b=3", c"a.app=30"]),
+            (ConfigLevel::GLOBAL, false, &[c"a.b=1", c"a.global=10"]),
+            (ConfigLevel::LOCAL, false, &[c"a.b=2", c"a.local=20"]),
+            (ConfigLevel::GLOBAL, false, &[c"a.b=99"]),
+            (ConfigLevel::LOCAL, true, &[c"a.b=9"]),
+            (ConfigLevel::from_raw(0), false, &[]),
+        ];
+        for &(level, force, values) in steps {
+            let backend = Backend::from_values(values, None).unwrap();
+            let pointers: Vec<_> = values.iter().map(|v| v.as_ptr()).collect();
+            let mut c_backend = ptr::null_mut();
+            // SAFETY: readable independent array/strings, writable output; C copies
+            // them and transfers the unopened allocation with its matching free slot.
+            assert_eq!(
+                // SAFETY: readable independent array/strings, writable output; C copies
+                // them and transfers the unopened allocation with its matching free slot.
+                unsafe {
+                    ffi::git_config_backend_from_values(
+                        &mut c_backend,
+                        pointers.as_ptr().cast_mut(),
+                        pointers.len(),
+                        ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            clear();
+            // SAFETY: exclusive independent config and unopened backend, safe priority;
+            // on success C owns it; on failure our matching free below releases it.
+            let rc = unsafe {
+                ffi::git_config_add_backend(
+                    raw.0,
+                    c_backend,
+                    level.raw(),
+                    ptr::null(),
+                    i32::from(force),
+                )
+            };
+            let c_error = last();
+            if rc < 0 {
+                // SAFETY: registration failed without transferring ownership; this
+                // complete allocation's free callback matches its construction.
+                unsafe { ((*c_backend).free.unwrap())(c_backend) };
+            }
+            clear();
+            let result = rust.as_mut().add_backend(backend, level, None, force);
+            assert_eq!(rc, result.as_ref().map_or_else(|e| e.raw_code(), |_| 0));
+            assert_eq!(c_error, last());
+            for key in [c"a.b", c"a.app", c"a.global", c"a.local", c"a.missing"] {
+                let mut value = 0;
+                clear();
+                // SAFETY: live independent config and NUL key, writable scalar output.
+                let rc = unsafe { ffi::git_config_get_int32(&mut value, raw.0, key.as_ptr()) };
+                let c_error = last();
+                clear();
+                let result = rust.as_ref().get_i32(key);
+                assert_eq!(rc, result.as_ref().map_or_else(|e| e.raw_code(), |_| 0));
+                if rc == 0 {
+                    assert_eq!(value, result.unwrap());
+                }
+                assert_eq!(c_error, last());
+            }
+        }
+        // Both snapshots own copies, not registering-config or backend borrows.
+        let mut c_snapshot = ptr::null_mut();
+        // SAFETY: readable live config, writable slot receives a distinct owned copy.
+        assert_eq!(
+            // SAFETY: readable live config, writable slot receives a distinct owned copy.
+            unsafe { ffi::git_config_snapshot(&mut c_snapshot, raw.0) },
+            0
+        );
+        let c_snapshot = RawConfig(c_snapshot);
+        let snapshot = rust.as_ref().snapshot().unwrap();
+        drop(raw);
+        drop(rust);
+        let mut value = 0;
+        // SAFETY: independently owned snapshot and live key, writable scalar output.
+        assert_eq!(
+            // SAFETY: independently owned snapshot and live key, writable scalar output.
+            unsafe { ffi::git_config_get_int32(&mut value, c_snapshot.0, c"a.b".as_ptr()) },
+            0
+        );
+        assert_eq!(snapshot.as_ref().get_i32(c"a.b").unwrap(), value);
+    }
+}

@@ -7257,6 +7257,63 @@
    ]
   },
   {
+   "name": "git_config_add_backend",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": {
+       "lifetime": "arg:backend"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "C opens exactly once. Ownership transfers only on nonnegative return; caller must free on negative return even if already opened. cfg is a potentially stale identity. Safe wrapper consumes construction-phase owner on both outcomes."
+     }
+    },
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive config; modifies backend vectors and writes cfg backpointer. Retains backend on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional repository passed to open; file/custom implementations may retain through every refresh and destruction. Must outlive config and backend references; memory backend ignores it."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_add_file_ondisk",
    "defined_in": "src/libgit2/config.c",
    "ptr_args": [
@@ -7307,6 +7364,80 @@
       "nullable": true,
       "mutable": false,
       "note": "Retained past the call without an up-ref: config_file_open stores it as b->repo, and every reparse of the file (refresh on get, write) evaluates includeIf gitdir:/onbranch: conditions through it. It must outlive config and every level view sharing the backend."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_backend_foreach_match",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive opened backend; iterator callback may refresh state. Not retained by walk; iterator released before return."
+     }
+    },
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Synchronous function pointer lending immutable iterator-owned entry per invocation, nonzero stops; never retains function or entry."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque caller payload forwarded synchronously to callback, mutable for caller-chosen state; no retention or free."
+     }
+    },
+    {
+     "name": "regexp",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:regexp"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional NUL regex over entry names, compiled for this walk and normally disposed. C leaks compiled regex if iterator construction fails. Prepared adapter removes failure after compilation."
      }
     }
    ]
@@ -8446,7 +8577,26 @@
      "alloc": false,
      "init": true
     }
-   }
+   },
+   "ptr_args": [
+    {
+     "name": "backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes full version-1 template into exclusive output; no allocation or resources; unsupported version leaves storage unchanged. Existing Backend::new encapsulates initialized promotion."
+     }
+    }
+   ]
   },
   {
    "name": "git_config_iterator_free",
