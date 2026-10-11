@@ -57,6 +57,25 @@ fn empty_owned_and_borrowed_inputs() {
     }
 }
 
+/// libgit2 reads past an empty pattern once another is not empty: such arrays are
+/// refused before it parses them (`misc/pathspec-empty-entry-overread`). Heap strings
+/// of exactly one byte put the byte after the terminator in a redzone.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn empty_patterns_beside_others_are_refused() {
+    let empty = std::ffi::CString::new("").unwrap();
+    let other = std::ffi::CString::new("a").unwrap();
+    for patterns in [[&other, &empty], [&empty, &other]] {
+        let view = StrArrayView::new(&patterns);
+        assert!(Pathspec::new(view.as_ref()).is_err());
+        let owned = StrArray::from_strs(&patterns).unwrap();
+        assert!(Pathspec::new(owned.as_ref()).is_err());
+    }
+    let alone = [&empty, &empty];
+    let view = StrArrayView::new(&alone);
+    shared(Pathspec::new(view.as_ref()).unwrap().as_ref());
+}
+
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn independent_thread_local_lifecycles() {

@@ -11750,7 +11750,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "apply_each_file borrows delta->old_file.path; index_apply_to_all borrows entry->path. Non-null NUL string, immutable during callback only; diff/index release later. No transfer or retention."
+      "note": "apply_each_file borrows delta->old_file.path (diff-owned, freed by git_diff_free after the scan); index_apply_to_all borrows entry->path, allocated inline with the index entry. Non-null NUL string, immutable during callback only; no transfer or retention. index_apply_to_all takes no reader count, so a callback that removes or replaces entries of the scanned index (git_index_remove*/add*/clear, also through another reference to the refcounted index) frees entry->path at once (index_remove_entry -> index_entry_free): wrappers must keep the index unreachable from the callback."
      }
     },
     {
@@ -11765,7 +11765,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "git_pathspec__match initializes match to NULL for an empty pathspec, otherwise lends the parsed pattern. Read-only NUL string valid during callback; git_pathspec__clear releases it after the synchronous scan."
+      "note": "git_pathspec__match initializes match to NULL and returns true for an empty pattern vector: a NULL/empty/all-empty strarray (git_pathspec_is_empty, never parsed), or one whose every entry git_attr_fnmatch__parse drops with GIT_ENOTFOUND ('#' comment, leading '\\n' or '\\r\\n'), so every path then matches with NULL. An empty entry beside a non-empty one is parsed too, and parse_optimized_patterns reads the byte past its NUL (UB) before dropping it: wrappers must refuse that mix (pathspec::patterns_are_parsable). Otherwise lends the parsed pattern (pool-owned, '!' and trailing '/' stripped). Read-only NUL string valid during callback; git_pathspec__clear releases it after the synchronous scan."
      }
     },
     {

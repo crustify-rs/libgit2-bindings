@@ -526,9 +526,11 @@ type MatchedPathFn<'f> = dyn FnMut(&CStr, Option<&CStr>) -> MatchedPathResult + 
 /// A synchronous add/remove/update callback borrowing its closure exclusively.
 ///
 /// `path` is the index/workdir path. `matched_pathspec` is the parsed pattern
-/// matching it, or `None` when no patterns were supplied. Both are immutable,
-/// potentially non-UTF-8 strings, lent only for this invocation. Copy a string
-/// to keep it: C may delete its storage immediately after the callback returns.
+/// matching it, or `None` when the pathspec holds no usable pattern (it is empty,
+/// its entries are all empty, or each is a `#` comment or starts with a line
+/// break), and then every path matches. Both are immutable, potentially non-UTF-8
+/// strings, lent only for this invocation. Copy a string to keep it: C may delete
+/// its storage immediately after the callback returns.
 /// Neither string nor the payload transfers ownership, in any of the C callers.
 ///
 /// A panic aborts the scan with `GIT_EUSER` and resumes after C returns and
@@ -640,50 +642,50 @@ impl<'f> MatchedPathCallback<'f> {
         scan: impl FnOnce(ffi::git_index_matched_path_cb, *mut core::ffi::c_void) -> R,
     ) -> R {
         self.stopped = None;
-        let result = scan(Some(matched_path_with), ptr::from_mut(self).cast());
+        let result = scan(Some(Self::trampoline), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
             std::panic::resume_unwind(panic);
         }
         result
     }
-}
 
-/// # Safety
-/// `payload` is a live exclusively used MatchedPathCallback on this thread.
-/// `path` is a non-null immutable NUL string; `pattern` is null or such a string.
-/// Both strings live for the invocation; no recursive or concurrent call occurs.
-unsafe extern "C" fn matched_path_with(
-    path: *const core::ffi::c_char,
-    pattern: *const core::ffi::c_char,
-    payload: *mut core::ffi::c_void,
-) -> c_int {
-    // SAFETY: the internal seam guarantees the live exclusive handle and forbids
-    // overlapping invocations or accesses to it during this call.
-    let callback = unsafe { &mut *payload.cast::<MatchedPathCallback<'_>>() };
-    if let Some(code) = callback.stopped {
-        return code;
-    }
-    // SAFETY: the contract supplies a non-null immutable NUL string for this call.
-    let path = unsafe { CStr::from_ptr(path) };
-    let pattern = if pattern.is_null() {
-        None
-    } else {
-        // SAFETY: non-null pattern is an immutable NUL string for this call.
-        Some(unsafe { CStr::from_ptr(pattern) })
-    };
-    let result =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (callback.f)(path, pattern)));
-    let code = match result {
-        Ok(result) => result.code(),
-        Err(panic) => {
-            callback.panic = Some(panic);
-            MatchedPathResult::ABORT.code()
+    /// # Safety
+    /// `payload` is a live exclusively used MatchedPathCallback on this thread.
+    /// `path` is a non-null immutable NUL string; `pattern` is null or such a string.
+    /// Both strings live for the invocation; no recursive or concurrent call occurs.
+    unsafe extern "C" fn trampoline(
+        path: *const core::ffi::c_char,
+        pattern: *const core::ffi::c_char,
+        payload: *mut core::ffi::c_void,
+    ) -> c_int {
+        // SAFETY: the internal seam guarantees the live exclusive handle and forbids
+        // overlapping invocations or accesses to it during this call.
+        let callback = unsafe { &mut *payload.cast::<Self>() };
+        if let Some(code) = callback.stopped {
+            return code;
         }
-    };
-    if code < 0 {
-        callback.stopped = Some(code);
+        // SAFETY: the contract supplies a non-null immutable NUL string for this call.
+        let path = unsafe { CStr::from_ptr(path) };
+        let pattern = if pattern.is_null() {
+            None
+        } else {
+            // SAFETY: non-null pattern is an immutable NUL string for this call.
+            Some(unsafe { CStr::from_ptr(pattern) })
+        };
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (callback.f)(path, pattern)));
+        let code = match result {
+            Ok(result) => result.code(),
+            Err(panic) => {
+                callback.panic = Some(panic);
+                MatchedPathResult::ABORT.code()
+            }
+        };
+        if code < 0 {
+            callback.stopped = Some(code);
+        }
+        code
     }
-    code
 }
 
 /// An index stage, or the wildcard accepted by stage-matching operations.
@@ -1872,128 +1874,211 @@ mod unit_tests {
 
         /// Exercises actual C -> Rust payload writes, both C invokers, and cleanup
         /// after a callback panic. BSan targets this exact test, not the workspace.
+        /// Its scans add files, whose first filter loads race in libgit2: it runs in
+        /// a child process.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn foreign_scan_payload_and_panic_cleanup() {
-            use crate::libgit2::repository::repository::Repository;
-            let dir = std::env::temp_dir()
-                .join(format!("crustify-matched-callback-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            let path = CString::new(dir.to_str().unwrap()).unwrap();
-            let repo = Repository::init(&path, false).unwrap();
-            let index = repo.as_ref().index().unwrap();
-            std::fs::write(dir.join("file"), "first").unwrap();
-            let empty = ffi::git_strarray {
-                strings: ptr::null_mut(),
-                count: 0,
-            };
-            let mut seen = Vec::new();
-            let mut f = |path: &CStr, pattern: Option<&CStr>| {
-                seen.push((path.to_owned(), pattern.map(CStr::to_owned)));
-                MatchedPathResult::APPLY
-            };
-            let mut cb = MatchedPathCallback::new(&mut f);
-            assert_eq!(
-                // SAFETY: live repository-backed index used exclusively during the call;
-                // empty pathspec and callback payload are synchronous borrowed inputs.
-                cb.scan_with(|callback, payload| unsafe {
-                    ffi::git_index_add_all(index.as_c_ptr(), &empty, 0, callback, payload)
-                }),
-                0
-            );
-            std::fs::write(dir.join("file"), "a different length").unwrap();
-            assert_eq!(
-                // SAFETY: same as above; neither index nor callback is reentered.
-                cb.scan_with(|callback, payload| unsafe {
-                    ffi::git_index_update_all(index.as_c_ptr(), &empty, callback, payload)
-                }),
-                0
-            );
-            drop(cb);
-            assert_eq!(
-                seen,
-                [(c"file".to_owned(), None), (c"file".to_owned(), None)]
-            );
-
-            let mut f =
-                |_: &CStr, _: Option<&CStr>| -> MatchedPathResult { panic!("after C cleanup") };
-            let mut cb = MatchedPathCallback::new(&mut f);
-            let mut returned_from_c = false;
-            let panic = catch_unwind(AssertUnwindSafe(|| {
-                cb.scan_with(|callback, payload| {
-                    // SAFETY: live exclusively used index and synchronous callback pair.
-                    let code = unsafe {
-                        ffi::git_index_remove_all(index.as_c_ptr(), &empty, callback, payload)
+            isolated(
+                concat!(module_path!(), "::foreign_scan_payload_and_panic_cleanup"),
+                || {
+                    use crate::libgit2::repository::repository::Repository;
+                    let dir = std::env::temp_dir()
+                        .join(format!("crustify-matched-callback-{}", std::process::id()));
+                    let _ = std::fs::remove_dir_all(&dir);
+                    let path = CString::new(dir.to_str().unwrap()).unwrap();
+                    let repo = Repository::init(&path, false).unwrap();
+                    let index = repo.as_ref().index().unwrap();
+                    std::fs::write(dir.join("file"), "first").unwrap();
+                    let empty = ffi::git_strarray {
+                        strings: ptr::null_mut(),
+                        count: 0,
                     };
-                    returned_from_c = true;
-                    assert_eq!(code, MatchedPathResult::ABORT.code());
-                })
-            }));
-            assert!(panic.is_err());
-            assert!(returned_from_c);
-            // SAFETY: the live index has not changed: the panic aborted before removal.
-            assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 1);
-            drop(index);
-            drop(repo);
-            std::fs::remove_dir_all(dir).unwrap();
+                    let mut seen = Vec::new();
+                    let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                        seen.push((path.to_owned(), pattern.map(CStr::to_owned)));
+                        MatchedPathResult::APPLY
+                    };
+                    let mut cb = MatchedPathCallback::new(&mut f);
+                    assert_eq!(
+                        // SAFETY: live repository-backed index used exclusively during the call;
+                        // empty pathspec and callback payload are synchronous borrowed inputs.
+                        cb.scan_with(|callback, payload| unsafe {
+                            ffi::git_index_add_all(index.as_c_ptr(), &empty, 0, callback, payload)
+                        }),
+                        0
+                    );
+                    std::fs::write(dir.join("file"), "a different length").unwrap();
+                    assert_eq!(
+                        // SAFETY: same as above; neither index nor callback is reentered.
+                        cb.scan_with(|callback, payload| unsafe {
+                            ffi::git_index_update_all(index.as_c_ptr(), &empty, callback, payload)
+                        }),
+                        0
+                    );
+                    drop(cb);
+                    assert_eq!(
+                        seen,
+                        [(c"file".to_owned(), None), (c"file".to_owned(), None)]
+                    );
+
+                    let mut f = |_: &CStr, _: Option<&CStr>| -> MatchedPathResult {
+                        panic!("after C cleanup")
+                    };
+                    let mut cb = MatchedPathCallback::new(&mut f);
+                    let mut returned_from_c = false;
+                    let panic = catch_unwind(AssertUnwindSafe(|| {
+                        cb.scan_with(|callback, payload| {
+                            // SAFETY: live exclusively used index and synchronous callback pair.
+                            let code = unsafe {
+                                ffi::git_index_remove_all(
+                                    index.as_c_ptr(),
+                                    &empty,
+                                    callback,
+                                    payload,
+                                )
+                            };
+                            returned_from_c = true;
+                            assert_eq!(code, MatchedPathResult::ABORT.code());
+                        })
+                    }));
+                    assert!(panic.is_err());
+                    assert!(returned_from_c);
+                    // SAFETY: the live index has not changed: the panic aborted before removal.
+                    assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 1);
+                    drop(index);
+                    drop(repo);
+                    std::fs::remove_dir_all(dir).unwrap();
+                },
+            );
         }
 
+        /// In a child process, as its scans add files (and so load filters).
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn workdir_scan_skip_abort_and_removed_paths() {
-            use crate::libgit2::repository::repository::Repository;
-            use std::cell::Cell;
-            let dir = std::env::temp_dir()
-                .join(format!("crustify-matched-workdir-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            let repo =
-                Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false).unwrap();
-            let index = repo.as_ref().index().unwrap();
-            std::fs::write(dir.join("file"), "contents").unwrap();
-            std::fs::write(dir.join("outside"), "unmatched").unwrap();
-            let mut pattern = c"file".as_ptr().cast_mut();
-            let paths = ffi::git_strarray {
-                strings: &mut pattern,
-                count: 1,
-            };
-            let result = Cell::new(MatchedPathResult::SKIP);
-            let mut f = |path: &CStr, pattern: Option<&CStr>| {
-                assert_eq!((path, pattern), (c"file", Some(c"file")));
-                result.get()
-            };
-            let mut cb = MatchedPathCallback::new(&mut f);
-            for (answer, expected_code, count) in [
-                (MatchedPathResult::SKIP, 0, 0),
-                (MatchedPathResult::from_code(-999), -999, 0),
-                (MatchedPathResult::APPLY, 0, 1),
+            isolated(
+                concat!(
+                    module_path!(),
+                    "::workdir_scan_skip_abort_and_removed_paths"
+                ),
+                || {
+                    use crate::libgit2::repository::repository::Repository;
+                    use std::cell::Cell;
+                    let dir = std::env::temp_dir()
+                        .join(format!("crustify-matched-workdir-{}", std::process::id()));
+                    let _ = std::fs::remove_dir_all(&dir);
+                    let repo =
+                        Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false)
+                            .unwrap();
+                    let index = repo.as_ref().index().unwrap();
+                    std::fs::write(dir.join("file"), "contents").unwrap();
+                    std::fs::write(dir.join("outside"), "unmatched").unwrap();
+                    let mut pattern = c"file".as_ptr().cast_mut();
+                    let paths = ffi::git_strarray {
+                        strings: &mut pattern,
+                        count: 1,
+                    };
+                    let result = Cell::new(MatchedPathResult::SKIP);
+                    let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                        assert_eq!((path, pattern), (c"file", Some(c"file")));
+                        result.get()
+                    };
+                    let mut cb = MatchedPathCallback::new(&mut f);
+                    for (answer, expected_code, count) in [
+                        (MatchedPathResult::SKIP, 0, 0),
+                        (MatchedPathResult::from_code(-999), -999, 0),
+                        (MatchedPathResult::APPLY, 0, 1),
+                    ] {
+                        result.set(answer);
+                        // SAFETY: live exclusively used index and borrowed pathspec; scan_with
+                        // supplies a synchronous callback pair that does not access the index.
+                        let code = cb.scan_with(|callback, payload| unsafe {
+                            ffi::git_index_add_all(index.as_c_ptr(), &paths, 0, callback, payload)
+                        });
+                        assert_eq!(code, expected_code);
+                        assert_eq!(
+                            // SAFETY: the live index is read only after the scan finishes.
+                            unsafe { ffi::git_index_entrycount(index.as_c_ptr()) },
+                            count
+                        );
+                    }
+                    std::fs::remove_file(dir.join("file")).unwrap();
+                    assert_eq!(
+                        // SAFETY: same synchronous exclusive-index contract; C removes the missing
+                        // workdir path only after the callback releases its borrowed path string.
+                        cb.scan_with(|callback, payload| unsafe {
+                            ffi::git_index_update_all(index.as_c_ptr(), &paths, callback, payload)
+                        }),
+                        0
+                    );
+                    // SAFETY: the live index is only read after the callback and scan return.
+                    assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 0);
+                    drop(index);
+                    drop(repo);
+                    std::fs::remove_dir_all(dir).unwrap();
+                },
+            );
+        }
+
+        /// libgit2 ignores an all-empty pathspec and drops `#` and line-break patterns;
+        /// with none left, every path matches without one, while a usable pattern beside
+        /// them still filters. An empty pattern beside others is never passed: libgit2
+        /// reads past it (`pathspec::patterns_are_parsable`).
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn unusable_patterns_match_every_path_without_a_pattern() {
+            let index = Index::new().unwrap();
+            for path in [c"a", c"b"] {
+                let mut entry = ffi::git_index_entry {
+                    mode: 0o100644,
+                    path: path.as_ptr(),
+                    ..Default::default()
+                };
+                entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+                entry.id.id[0] = 1;
+                // SAFETY: the fresh index is exclusively held and C copies this entry
+                // and its immutable NUL path before returning.
+                assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+            }
+            for (patterns, expected) in [
+                (vec![c""], vec![(c"a", None), (c"b", None)]),
+                (vec![c"", c""], vec![(c"a", None), (c"b", None)]),
+                (
+                    vec![c"#a", c"\nb", c"\r\nb"],
+                    vec![(c"a", None), (c"b", None)],
+                ),
+                (vec![c"#a", c"b"], vec![(c"b", Some(c"b"))]),
             ] {
-                result.set(answer);
+                let mut patterns: Vec<_> = patterns
+                    .into_iter()
+                    .map(|p| p.as_ptr().cast_mut())
+                    .collect();
+                let paths = ffi::git_strarray {
+                    strings: patterns.as_mut_ptr(),
+                    count: patterns.len(),
+                };
+                let mut seen = Vec::new();
+                let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                    seen.push((path.to_owned(), pattern.map(CStr::to_owned)));
+                    MatchedPathResult::SKIP
+                };
+                let mut cb = MatchedPathCallback::new(&mut f);
                 // SAFETY: live exclusively used index and borrowed pathspec; scan_with
                 // supplies a synchronous callback pair that does not access the index.
                 let code = cb.scan_with(|callback, payload| unsafe {
-                    ffi::git_index_add_all(index.as_c_ptr(), &paths, 0, callback, payload)
+                    ffi::git_index_remove_all(index.as_c_ptr(), &paths, callback, payload)
                 });
-                assert_eq!(code, expected_code);
-                assert_eq!(
-                    // SAFETY: the live index is read only after the scan finishes.
-                    unsafe { ffi::git_index_entrycount(index.as_c_ptr()) },
-                    count
-                );
+                assert_eq!(code, 0);
+                drop(cb);
+                let expected: Vec<_> = expected
+                    .into_iter()
+                    .map(|(path, pattern)| (path.to_owned(), pattern.map(CStr::to_owned)))
+                    .collect();
+                assert_eq!(seen, expected);
             }
-            std::fs::remove_file(dir.join("file")).unwrap();
-            assert_eq!(
-                // SAFETY: same synchronous exclusive-index contract; C removes the missing
-                // workdir path only after the callback releases its borrowed path string.
-                cb.scan_with(|callback, payload| unsafe {
-                    ffi::git_index_update_all(index.as_c_ptr(), &paths, callback, payload)
-                }),
-                0
-            );
-            // SAFETY: the live index is only read after the callback and scan return.
-            assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 0);
-            drop(index);
-            drop(repo);
-            std::fs::remove_dir_all(dir).unwrap();
+            // SAFETY: the live index is only read after every scan returns.
+            assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 2);
         }
     }
 
