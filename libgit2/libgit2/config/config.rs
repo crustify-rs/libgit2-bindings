@@ -62,11 +62,15 @@
 //! `git_config_set_string` to clear the owner's cache, racing a release of that
 //! repository on another thread.
 
-use core::ffi::{CStr, c_int};
+use core::ffi::{CStr, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
+use core::num::NonZero;
+use core::ops::ControlFlow;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::any::Any;
 use std::ffi::CString;
+use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, define_ctype, impl_cdrop};
 
@@ -1424,6 +1428,228 @@ impl ConfigRef<'_, '_> {
     }
 }
 
+impl ConfigRef<'_, '_> {
+    /// Maps the highest-priority value of `name` through the ordered table.
+    /// A valueless entry is passed as `None`, not as an empty string.
+    ///
+    /// Uses the refresh-and-snapshot path of [`entry`](Self::entry) before
+    /// calling C's mapper: C's direct lookup forms an uninitialized entry
+    /// pointer on a backend refresh error. The same snapshot costs, lower-level
+    /// refresh differences, and C allocation-failure limitations apply here.
+    /// Mapping itself retains C's first-match semantics and error reporting.
+    ///
+    /// Wraps: git_config_get_mapped
+    pub fn get_mapped(&self, name: &CStr, maps: &[ConfigMap<'_>]) -> Result<i32, ConfigError> {
+        let before = last();
+        if let Some(failure) = self.reread_through(name)? {
+            return Err(failure);
+        }
+        let snapshot = self.snapshot()?;
+        if last() != before {
+            // Restore any error spent while refreshing lower-priority backends
+            // before the mapper, which may itself set errors even on success.
+            match before.class() {
+                Some(ErrorClass::None) => clear(),
+                Some(class) => set(class, before.message()),
+                None => {}
+            }
+        }
+        let mut out = 0;
+        // SAFETY: the snapshot stays live and never refreshes its backends;
+        // out is writable and name is NUL-terminated. ConfigMap is transparent
+        // over git_configmap, every string rule has a live non-NULL C string,
+        // and the slice supplies the exact element count. C retains no table
+        // pointer and acquires/releases its own temporary entry reference.
+        let rc = unsafe {
+            ffi::git_config_get_mapped(
+                &mut out,
+                snapshot.as_c_ptr(),
+                name.as_ptr(),
+                maps.as_ptr().cast(),
+                maps.len(),
+            )
+        };
+        if rc < 0 {
+            Err(ConfigError::from_libgit2(rc))
+        } else {
+            Ok(out)
+        }
+    }
+}
+
+/// Maps `value` using the first matching rule in `maps`. Boolean rules return
+/// their mapped value; integer rules return the parsed input, ignoring their
+/// mapped value. String rules compare case-insensitively. An empty table fails.
+/// `None` is a valueless setting (boolean true), distinct from an empty string
+/// (boolean false). The table and strings are borrowed only during this call.
+///
+/// Pins libgit2's runtime before calling C, including its error paths. C's
+/// speculative parsers may leave a last error even when a later rule succeeds;
+/// this wrapper preserves that behavior.
+///
+/// Wraps: git_config_lookup_map_value
+pub fn lookup_map_value(maps: &[ConfigMap<'_>], value: Option<&CStr>) -> Result<i32, ConfigError> {
+    if !runtime_pinned() {
+        return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
+    }
+    let mut out = 0;
+    // SAFETY: out is writable; the transparent mapping slice covers exactly
+    // len initialized records with valid string/discriminator pairs. All
+    // strings are NULL or immutable live C strings and C retains nothing.
+    let rc = unsafe {
+        ffi::git_config_lookup_map_value(
+            &mut out,
+            maps.as_ptr().cast(),
+            maps.len(),
+            value.map_or(ptr::null(), CStr::as_ptr),
+        )
+    };
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(out)
+    }
+}
+
+type ForeachFn<'f> = dyn for<'e> FnMut(EntryRef<'e>) -> ControlFlow<NonZero<c_int>> + 'f;
+
+/// A synchronous enumeration callback borrowing each entry only for its call.
+/// The iterator, not this handle or the closure, owns and releases the entry.
+/// All C invokers use this same borrowed distribution, including backend and
+/// multivar enumeration. Positive and negative nonzero stop codes are retained.
+///
+/// Panics stop C iteration and resume only once C has returned and cleaned up.
+/// The exclusive callback borrow prevents same-handle reentry; a callback may
+/// call another independently borrowed callback. The handle is not Send/Sync.
+///
+/// An entry cannot escape into the closure's captured state:
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+/// use std::ops::ControlFlow;
+/// let mut kept = None;
+/// let mut f = |entry: EntryRef<'_>| {
+///     kept = entry.value();
+///     ControlFlow::Continue(())
+/// };
+/// let _ = ForeachCallback::new(&mut f);
+/// ```
+///
+/// Captured mutable state cannot be accessed while the callback is used:
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+/// use std::ops::ControlFlow;
+/// let mut count = 0;
+/// let mut f = |_: EntryRef<'_>| { count += 1; ControlFlow::Continue(()) };
+/// let callback = ForeachCallback::new(&mut f);
+/// count += 1;
+/// let _ = callback.stopped();
+/// ```
+///
+/// Neither concurrent calls nor moving a borrowed callback to another thread
+/// is permitted:
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+/// use std::ops::ControlFlow;
+/// let mut f = |_: EntryRef<'_>| ControlFlow::Continue(());
+/// let callback = ForeachCallback::new(&mut f);
+/// std::thread::scope(|scope| { scope.spawn(move || drop(callback)); });
+/// ```
+///
+/// Wraps: git_config_foreach_cb
+/// Handwritten
+pub struct ForeachCallback<'f> {
+    f: &'f mut ForeachFn<'f>,
+    stopped: Option<NonZero<c_int>>,
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> ForeachCallback<'f> {
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: for<'e> FnMut(EntryRef<'e>) -> ControlFlow<NonZero<c_int>> + 'f,
+    {
+        Self {
+            f,
+            stopped: None,
+            panic: None,
+        }
+    }
+
+    /// Calls through the C trampoline and resumes any panic on the Rust side.
+    pub fn call(&mut self, entry: EntryRef<'_>) -> ControlFlow<NonZero<c_int>> {
+        let rc = self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is always set");
+            // SAFETY: entry is live and immutable for the call; payload points
+            // to this exclusively borrowed handle, as walk_with supplies it.
+            unsafe { callback(entry.as_ptr(), payload) }
+        });
+        NonZero::new(rc).map_or(ControlFlow::Continue(()), ControlFlow::Break)
+    }
+
+    /// The closure's stop code in the last invocation/walk, including GIT_EUSER
+    /// for a panic. Distinguishes callback stops from C's own errors.
+    pub fn stopped(&self) -> Option<NonZero<c_int>> {
+        self.stopped
+    }
+
+    /// Internal synchronous seam for the enumeration wrappers. The caller must
+    /// not retain either pointer, call concurrently/reentrantly, or lend an entry
+    /// whose strings change during the callback. No reference to self is kept
+    /// across foreign callback writes.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_config_foreach_cb, *mut c_void) -> R,
+    ) -> R {
+        self.stopped = None;
+        let result = walk(Some(foreach_with), ptr::from_mut(self).cast());
+        if let Some(payload) = self.panic.take() {
+            panic::resume_unwind(payload);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for ForeachCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ForeachCallback")
+            .field("stopped", &self.stopped)
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// # Safety
+/// payload addresses a live exclusively used ForeachCallback on this thread;
+/// entry is NULL or a live immutable entry with NULL/immutable NUL strings for
+/// this call. Neither pointer is retained or freed here.
+unsafe extern "C" fn foreach_with(
+    entry: *const ffi::git_config_entry,
+    payload: *mut c_void,
+) -> c_int {
+    // SAFETY: the internal seam gives exclusive access to this live handle.
+    let callback = unsafe { &mut *payload.cast::<ForeachCallback<'_>>() };
+    if let Some(code) = callback.stopped {
+        return code.get();
+    }
+    // SAFETY: the contract supplies a live immutable entry for this call only;
+    // NULL is rejected. The higher-ranked closure cannot retain this borrow.
+    let Some(entry) = (unsafe { EntryRef::from_ptr(entry.cast_mut()) }) else {
+        let code = NonZero::new(ErrorCode::User.raw()).expect("GIT_EUSER is nonzero");
+        callback.stopped = Some(code);
+        return code.get();
+    };
+    let code = match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(entry))) {
+        Ok(ControlFlow::Continue(())) => return 0,
+        Ok(ControlFlow::Break(code)) => code,
+        Err(payload) => {
+            callback.panic = Some(payload);
+            NonZero::new(ErrorCode::User.raw()).expect("GIT_EUSER is nonzero")
+        }
+    };
+    callback.stopped = Some(code);
+    code.get()
+}
+
 impl<'a> EntryRef<'a> {
     /// Normalized key; built-in backends always supply it.
     /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
@@ -1813,6 +2039,127 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
 
 #[cfg(test)]
 mod unit_tests {
+
+    /// Rust-only fixture for the borrowed callback seam; never adopted as an
+    /// owner, since it lacks the enclosing C backend-entry release callback.
+    fn callback_entry(raw: &mut ffi::git_config_entry) -> EntryRef<'_> {
+        // SAFETY: this initialized Rust fixture has only NULL/static strings
+        // and stays live and unchanged for the exclusive borrow's lifetime.
+        unsafe { EntryRef::from_ptr(ptr::from_mut(raw)) }.unwrap()
+    }
+
+    #[test]
+    fn callback_trampoline_stops_panics_nulls_and_reuses() {
+        let mut raw = ffi::git_config_entry {
+            name: c"a.b".as_ptr(),
+            value: c"input".as_ptr(),
+            backend_type: ptr::null(),
+            origin_path: ptr::null(),
+            include_depth: u32::MAX,
+            level: i32::MAX,
+        };
+        let entry = callback_entry(&mut raw);
+        let mut count = 0;
+        let mut f = |e: EntryRef<'_>| {
+            count += 1;
+            assert_eq!(e.value(), Some(c"input"));
+            assert_eq!(e.include_depth(), u32::MAX);
+            if count == 1 {
+                panic!("caught inside trampoline");
+            }
+            ControlFlow::Break(NonZero::new(73).unwrap())
+        };
+        let mut callback = ForeachCallback::new(&mut f);
+        // A hostile internal invoker ignoring a stop cannot invoke the closure
+        // again, overwrite its panic, or drop a panic payload inside C.
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+            callback.walk_with(|cb, payload| {
+                // SAFETY: live exclusively borrowed handle, immutable fixture entry,
+                // no concurrent/reentrant call or retained pointer.
+                let invoke = || unsafe { cb.unwrap()(entry.as_ptr(), payload) };
+                assert_eq!(invoke(), ErrorCode::User.raw());
+                assert_eq!(invoke(), ErrorCode::User.raw());
+            })
+        }));
+        assert!(caught.is_err());
+        assert_eq!(
+            callback.call(entry),
+            ControlFlow::Break(NonZero::new(73).unwrap())
+        );
+        assert!(format!("{callback:?}").contains("73"));
+        let rc = callback.walk_with(|cb, payload| {
+            // SAFETY: valid exclusive callback payload; NULL entries are rejected.
+            unsafe { cb.unwrap()(ptr::null(), payload) }
+        });
+        assert_eq!(rc, ErrorCode::User.raw());
+        drop(callback);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn callback_foreign_iteration_cleans_up_before_resuming_panic() {
+        let file =
+            std::env::temp_dir().join(format!("crustify-callback-w2b1-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\n b = 1\n c = 2\n").unwrap();
+        let config = Config::open(&CString::new(file.to_str().unwrap()).unwrap()).unwrap();
+        let mut count = 0;
+        let mut f = |entry: EntryRef<'_>| {
+            assert!(entry.name().is_some());
+            count += 1;
+            if count == 1 {
+                panic!("foreign iteration panic");
+            }
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut f);
+        let walk = |callback: &mut ForeachCallback<'_>| {
+            callback.walk_with(|cb, payload| {
+                // SAFETY: live config and callback payload exclusive for this
+                // synchronous walk; C owns iterator entries and frees its iterator
+                // before returning; no callback pointer or entry borrow escapes.
+                unsafe { ffi::git_config_foreach(config.as_ref().as_ptr(), cb, payload) }
+            })
+        };
+        assert!(panic::catch_unwind(AssertUnwindSafe(|| walk(&mut callback))).is_err());
+        assert_eq!(walk(&mut callback), 0);
+        assert_eq!(callback.stopped(), None);
+        drop(callback);
+        assert_eq!(count, 3);
+        drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapped_snapshot_construction_failure_reports_oom() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::mapped_snapshot_construction_failure_reports_oom"
+            ),
+            || {
+                install_refusing();
+                let config = Config::new().unwrap();
+                // Warm the thread's error state before limiting C allocations.
+                assert_eq!(
+                    config.as_ref().get_i32(c"a.b").unwrap_err().code(),
+                    Some(ErrorCode::NotFound)
+                );
+                // The empty multivar iterator and normalized key allocate three
+                // times; the next allocation, the empty snapshot, fails. No file
+                // entry copying (whose C OOM paths are defective) is involved.
+                ALLOWED_ALLOCATIONS.store(3, SeqCst);
+                let result = config.as_ref().get_mapped(c"a.b", &[]);
+                ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
+                assert_eq!(result.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                assert_eq!(
+                    config.as_ref().get_mapped(c"a.b", &[]).unwrap_err().code(),
+                    Some(ErrorCode::NotFound)
+                );
+            },
+        );
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2460,6 +2807,7 @@ mod unit_tests {
                     find_system().map(drop),
                     find_xdg().map(drop),
                     parse_path(c"~/unused").map(drop),
+                    lookup_map_value(&[], None).map(drop),
                 ];
                 for failure in failures {
                     let failure = failure.unwrap_err();
