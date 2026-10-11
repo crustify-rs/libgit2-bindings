@@ -199,3 +199,201 @@ mod backend_entries {
         assert_eq!(format!("{:?}", last.as_ref()), printed[1]);
     }
 }
+
+mod iterators {
+    use libgit2::libgit2::config::config::{Config, ConfigLevel};
+    use libgit2::libgit2::config::sys::config::IteratorNext;
+    use std::ffi::CString;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn iterator_lifecycle_reborrow_and_callbacks() {
+        let dir =
+            std::env::temp_dir().join(format!("crustify-iterator-safe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let low = dir.join("low");
+        let high = dir.join("high");
+        let empty_file = dir.join("empty");
+        std::fs::write(&empty_file, b"").unwrap();
+        std::fs::write(&low, b"[a]\nx = one\nx = two\nflag\nempty =\n").unwrap();
+        std::fs::write(&high, b"[a]\nx = high\n").unwrap();
+        let low_path = CString::new(low.to_str().unwrap()).unwrap();
+        let high_path = CString::new(high.to_str().unwrap()).unwrap();
+        let mut config = Config::open(&low_path).unwrap();
+        let empty_path = CString::new(empty_file.to_str().unwrap()).unwrap();
+        config
+            .as_mut()
+            .add_file(&empty_path, ConfigLevel::SYSTEM, None, false)
+            .unwrap();
+        config
+            .as_mut()
+            .add_file(&high_path, ConfigLevel::GLOBAL, None, false)
+            .unwrap();
+        let mut iter = config.as_ref().iterator().unwrap();
+        let callback = iter.as_ref().next_callback();
+        let policy = iter.as_ref().release_policy();
+        assert_eq!(iter.as_ref().flags(), 0);
+        assert!(iter.as_ref().backend_raw().is_none());
+        {
+            let mut m = iter.as_mut();
+            m.as_mut().set_flags(u32::MAX);
+            assert_eq!(m.as_ref().flags(), u32::MAX);
+            let shared = m.as_ref();
+            let copied = shared;
+            assert!(copied.backend_raw().is_none());
+            assert!(format!("{shared:?}").contains("flags: 4294967295"));
+            m.set_flags(0);
+            let mut count = 0;
+            while let Some(entry) = callback.call(&mut m).unwrap() {
+                assert!(entry.entry().name().is_some());
+                // Release token is harmless for a borrowed entry; it cannot free it.
+                let _ = entry.release_policy();
+                count += 1;
+            }
+            assert_eq!(count, 5);
+            assert!(m.advance().unwrap().is_none());
+            assert!(IteratorNext.call(&mut m).unwrap().is_none());
+        }
+        policy.release(iter);
+        // Input regex can be destroyed before advancing the C-compiled regex.
+        let mut matched = {
+            let regexp = CString::new("^a\\.x$").unwrap();
+            config.as_ref().iterator_matching(Some(&regexp)).unwrap()
+        };
+        let mut count = 0;
+        while let Some(entry) = matched.as_mut().advance().unwrap() {
+            assert_eq!(entry.entry().name(), Some(c"a.x"));
+            count += 1;
+        }
+        assert_eq!(count, 3);
+        // A policy/callable from another iterator always dispatches THIS allocation.
+        policy.release(matched);
+        let mut values = {
+            let key = CString::new("A.x").unwrap();
+            let regex = CString::new("^(one|high)$").unwrap();
+            config
+                .as_ref()
+                .multivar_iterator(&key, Some(&regex))
+                .unwrap()
+        };
+        let mut seen = vec![];
+        while let Some(entry) = callback.call(&mut values.as_mut()).unwrap() {
+            seen.push(entry.entry().value().unwrap().to_owned());
+        }
+        assert_eq!(seen, [c"high".to_owned(), c"one".to_owned()]);
+        policy.release(values);
+        // Early release while nested backend state is still live.
+        let mut early = config.as_ref().iterator().unwrap();
+        assert!(early.as_mut().advance().unwrap().is_some());
+        drop(early);
+        let mut empty = config
+            .as_ref()
+            .multivar_iterator(c"a.missing", None)
+            .unwrap();
+        assert!(empty.as_mut().advance().unwrap().is_none());
+        drop(empty);
+        drop(config);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn iterator_empty_and_failed_construction() {
+        let config = Config::new().unwrap();
+        for mut iter in [
+            config.as_ref().iterator().unwrap(),
+            config.as_ref().iterator_matching(None).unwrap(),
+            config.as_ref().iterator_matching(Some(c"nomatch")).unwrap(),
+            config.as_ref().multivar_iterator(c"a.b", None).unwrap(),
+        ] {
+            assert!(iter.as_mut().advance().unwrap().is_none());
+            assert!(iter.as_mut().advance().unwrap().is_none());
+        }
+        assert!(config.as_ref().iterator_matching(Some(c"[")).is_err());
+        assert!(config.as_ref().multivar_iterator(c"invalid", None).is_err());
+        // Avoids upstream C's normalized-name leak on invalid regex.
+        assert!(
+            config
+                .as_ref()
+                .multivar_iterator(c"a.b", Some(c"["))
+                .is_err()
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
+    fn iterator_regex_valueless_and_non_utf8() {
+        let file =
+            std::env::temp_dir().join(format!("crustify-iterator-null-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\nx\nx =\nx = \xff\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let config = Config::open(&path).unwrap();
+        let mut empty = config
+            .as_ref()
+            .multivar_iterator(c"a.x", Some(c"^$"))
+            .unwrap();
+        assert_eq!(
+            empty.as_mut().advance().unwrap().unwrap().entry().value(),
+            Some(c"")
+        );
+        assert!(empty.as_mut().advance().unwrap().is_none());
+        let mut binary = config
+            .as_ref()
+            .multivar_iterator(c"a.x", Some(c"^\xff$"))
+            .unwrap();
+        assert_eq!(
+            binary.as_mut().advance().unwrap().unwrap().entry().value(),
+            Some(c"\xff")
+        );
+        assert!(binary.as_mut().advance().unwrap().is_none());
+        let mut all = config
+            .as_ref()
+            .multivar_iterator(c"a.x", Some(c".*"))
+            .unwrap();
+        let callback = all.as_ref().next_callback();
+        let mut count = 0;
+        while let Some(entry) = callback.call(&mut all.as_mut()).unwrap() {
+            assert!(entry.entry().value().is_some());
+            count += 1;
+        }
+        assert_eq!(count, 2);
+        drop((empty, binary, all));
+        drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn iterator_foreign_refresh_error_and_retry() {
+        let file =
+            std::env::temp_dir().join(format!("crustify-iterator-refresh-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\nb = before\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let config = Config::open(&path).unwrap();
+        let second = Config::open(&path).unwrap();
+        let mut filtered = second
+            .as_ref()
+            .multivar_iterator(c"a.b", Some(c".*"))
+            .unwrap();
+        let mut iter = config.as_ref().iterator().unwrap();
+        // Backend is opened lazily on advance: C writes its state after the
+        // constructor's Rust reborrow has ended. No reference covers C storage.
+        std::fs::write(&file, b"[unterminated\n").unwrap();
+        assert!(iter.as_mut().advance().is_err());
+        assert!(filtered.as_mut().advance().is_err());
+        assert!(filtered.as_mut().advance().unwrap().is_none());
+        drop(filtered);
+        drop(second);
+        assert!(iter.as_mut().advance().unwrap().is_none());
+        drop(iter);
+        std::fs::write(&file, b"[a]\nb = a much longer changed value\n").unwrap();
+        let mut iter = config.as_ref().iterator().unwrap();
+        assert_eq!(
+            iter.as_mut().advance().unwrap().unwrap().entry().value(),
+            Some(c"a much longer changed value")
+        );
+        drop(iter);
+        drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+}

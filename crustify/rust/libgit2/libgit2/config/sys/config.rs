@@ -476,6 +476,537 @@ impl fmt::Debug for BackendEntryMut<'_> {
     }
 }
 
+/// A C iterator whose enclosing allocation and callbacks stay paired.
+///
+/// The iterator borrows its config for `'c`: C's all-iterator stores a raw
+/// config pointer without retaining it. The layout is never copied, cloned or
+/// zero-constructed. Each backend iterator can be freed on an advance, so
+/// entries borrow the exclusive advance, not the whole iterator's lifetime.
+/// Neither owners nor handles cross threads. Callback slots are allocation
+/// identity, not replaceable user hooks.
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::config::config::Config;
+/// let config = Config::new().unwrap();
+/// let iter = config.as_ref().iterator().unwrap();
+/// drop(config);
+/// drop(iter);
+/// ```
+///
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::config::config::Config;
+/// let config = Config::new().unwrap();
+/// let mut iter = config.as_ref().iterator().unwrap();
+/// let mut m = iter.as_mut();
+/// let entry = m.advance().unwrap();
+/// let _ = m.advance();
+/// let _ = entry.unwrap().entry().name();
+/// ```
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::config::config::Config;
+/// let config = Config::new().unwrap();
+/// let mut iter = config.as_ref().iterator().unwrap();
+/// let mut m = iter.as_mut();
+/// let entry = m.advance().unwrap();
+/// drop(iter);
+/// let _ = entry.unwrap().entry().name();
+/// ```
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::config::sys::config::IteratorBox;
+/// fn send(iter: IteratorBox<'static>) { std::thread::spawn(move || drop(iter)); }
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::sys::config::IteratorMut;
+/// fn shrink<'a, 'c>(m: IteratorMut<'a, 'static>) -> IteratorMut<'a, 'c> { m }
+/// ```
+///
+/// An iterator also freezes mutation of the borrowed config:
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::config::config::Config;
+/// let mut config = Config::new().unwrap();
+/// let iter = config.as_ref().iterator().unwrap();
+/// config.as_mut().set_string(c"a.b", c"changed").unwrap();
+/// drop(iter);
+/// ```
+///
+/// ```compile_fail,E0308
+/// use libgit2::libgit2::config::sys::config::{IteratorFree, IteratorRef};
+/// fn free_borrowed(iter: IteratorRef<'_, '_>) { IteratorFree.release(iter); }
+/// ```
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::config::sys::config::IteratorBox;
+/// fn copy(iter: IteratorBox<'_>) { let _ = iter.clone(); }
+/// ```
+///
+/// Wraps: git_config_iterator
+/// Handwritten
+#[repr(transparent)]
+pub struct Iterator<'c>(ffi::git_config_iterator, PhantomData<(*const (), &'c ())>);
+
+/// Copyable shared view. It cannot advance or free the allocation.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct IteratorRef<'a, 'c>(CBorrowedPtr<'a, Iterator<'c>>);
+
+/// Exclusive iterator view, invariant in its config keepalive.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct IteratorMut<'a, 'c>(IteratorRef<'a, 'c>, PhantomData<&'a mut Iterator<'c>>);
+
+// SAFETY: the layout is transparent over the initialized C base; handles are
+// transparent over CBorrowedPtr with no Drop. The mutable handle is invariant
+// in Iterator<'c>, and shared handles provide only reads, never advancement.
+unsafe impl<'c> CCell for Iterator<'c> {
+    type C = ffi::git_config_iterator;
+    type Ref<'a>
+        = IteratorRef<'a, 'c>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = IteratorMut<'a, 'c>
+    where
+        Self: 'a;
+}
+
+/// Stateless release dispatch, recovered from the allocation being released.
+///
+/// Wraps: git_config_iterator_free
+/// Handwritten
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IteratorFree;
+
+// SAFETY: adopted owners hold a complete, uniquely owned enclosing iterator
+// allocation and its matching free callback. C dispatches that callback once,
+// releasing nested iterators, entry lists, compiled regexes and storage.
+unsafe impl<'c> CDrop<Iterator<'c>> for IteratorFree {
+    unsafe fn c_drop(&self, p: NonNull<Iterator<'c>>) {
+        // SAFETY: the caller transfers one live complete iterator allocation;
+        // its callback matches its allocator and all dependencies remain live.
+        unsafe { ffi::git_config_iterator_free(p.as_ptr().cast()) }
+    }
+}
+
+/// Sole owner of the full C iterator allocation (not just its public base).
+pub type IteratorBox<'c> = ffibox::CBox<Iterator<'c>, IteratorFree>;
+
+impl<'c> Iterator<'c> {
+    pub fn as_ref(&self) -> IteratorRef<'_, 'c> {
+        // SAFETY: initialized inline Rust-owned layout, borrowed for this call;
+        // raw projection avoids forming a reference to any C-owned pointee.
+        unsafe { IteratorRef::from_ptr(addr_of!(self.0).cast_mut()) }.unwrap()
+    }
+
+    pub fn as_mut(&mut self) -> IteratorMut<'_, 'c> {
+        let p = NonNull::from(self);
+        // SAFETY: exclusively borrowed initialized inline Rust-owned layout.
+        IteratorMut(IteratorRef(unsafe { CBorrowedPtr::new(p) }), PhantomData)
+    }
+}
+
+impl fmt::Debug for Iterator<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl IteratorFree {
+    /// Consumes an owner, never a borrowed entry or iterator handle.
+    pub fn release(self, iterator: IteratorBox<'_>) {
+        drop(iterator);
+    }
+}
+
+impl<'a, 'c> IteratorRef<'a, 'c> {
+    pub(crate) fn as_ptr(&self) -> *mut ffi::git_config_iterator {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// # Safety
+    /// `p` is NULL or a complete initialized iterator with matching callbacks,
+    /// live and unmodified for `'a`; its config/backend dependencies outlive `'c`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(p: *mut ffi::git_config_iterator) -> Option<Self> {
+        // SAFETY: the contract supplies initialized live storage for 'a.
+        NonNull::new(p.cast()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+    }
+
+    /// User/backend flags; libgit2's built-in iterators leave these zero.
+    ///
+    /// Field: git_config_iterator.flags
+    pub fn flags(&self) -> u32 {
+        // SAFETY: initialized scalar projected through a live shared handle.
+        unsafe { addr_of!((*self.as_ptr()).flags).read() }
+    }
+
+    /// Nullable borrowed backend, never an owner. Built-in iterators leave it
+    /// NULL. This raw seam is temporary until `git_config_backend` is wrapped;
+    /// the pointer must not be dereferenced after the iterator's dependencies die.
+    ///
+    /// Field: git_config_iterator.backend
+    pub fn backend_raw(&self) -> Option<NonNull<ffi::git_config_backend>> {
+        // SAFETY: reads only the initialized pointer slot, not its referent.
+        NonNull::new(unsafe { addr_of!((*self.as_ptr()).backend).read() })
+    }
+
+    /// Allocation-matched dispatch, not a detachable C function pointer. The
+    /// callable always reads the callback of the mutable iterator it receives.
+    ///
+    /// Field: git_config_iterator.next
+    pub fn next_callback(&self) -> IteratorNext {
+        IteratorNext
+    }
+
+    /// Stateless policy that recovers an owned iterator's own free callback.
+    ///
+    /// Field: git_config_iterator.free
+    pub fn release_policy(&self) -> IteratorFree {
+        IteratorFree
+    }
+}
+
+impl<'a, 'c> IteratorMut<'a, 'c> {
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_iterator {
+        self.0.as_ptr()
+    }
+
+    pub fn as_ref(&self) -> IteratorRef<'_, 'c> {
+        self.0
+    }
+
+    pub fn as_mut(&mut self) -> IteratorMut<'_, 'c> {
+        IteratorMut(self.0, PhantomData)
+    }
+
+    pub fn set_flags(&mut self, flags: u32) {
+        // SAFETY: the exclusive handle grants writing this independent scalar.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(flags) }
+    }
+
+    /// Replaces a stored backend borrow without freeing the old one. Temporary
+    /// raw seam for the unavailable higher-layer backend wrapper.
+    ///
+    /// # Safety
+    /// The new backend is NULL or live for `'c` (including destruction), and
+    /// replacing it preserves the enclosing iterator's next/free callback
+    /// invariants. No operation may mutate/free it incompatibly while retained.
+    /// In particular, a custom iterator may require its original backend.
+    pub unsafe fn set_backend_raw(&mut self, backend: Option<NonNull<ffi::git_config_backend>>) {
+        let backend = backend.map_or(ptr::null_mut(), NonNull::as_ptr);
+        // SAFETY: exclusive access to the slot; the caller guarantees keepalive
+        // and compatibility with the enclosing allocation's callbacks.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).backend).write(backend) }
+    }
+
+    /// Advances the allocation's inline callback. `None` is C's ITEROVER; other
+    /// errors preserve the code and copied thread-local error. A subsequent call
+    /// after an error is allowed (C can proceed to a different backend).
+    ///
+    /// Wraps: git_config_next
+    pub fn advance(
+        &mut self,
+    ) -> Result<Option<BackendEntryRef<'_>>, crate::libgit2::config::config::ConfigError> {
+        IteratorNext.call(self)
+    }
+}
+
+/// Ownership-compatible callable for the inline `next` slot.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IteratorNext;
+
+impl IteratorNext {
+    /// The result is borrowed until this mutable reborrow ends: it cannot be
+    /// kept across another call, released, or promoted to an acquired owner.
+    pub fn call<'a>(
+        &self,
+        iterator: &'a mut IteratorMut<'_, '_>,
+    ) -> Result<Option<BackendEntryRef<'a>>, crate::libgit2::config::config::ConfigError> {
+        use crate::libgit2::config::config::ConfigError;
+        let p = iterator.as_mut_ptr();
+        // SAFETY: reads the initialized callback from the complete live iterator.
+        let next = unsafe { addr_of!((*p).next).read() }.expect("iterator lacks next callback");
+        let mut entry = ptr::null_mut();
+        // SAFETY: exclusive live iterator with its allocation-matched callback;
+        // writable output slot, and no previously lent entry is still borrowed.
+        let rc = unsafe { next(&mut entry, p) };
+        if rc == ffi::GIT_ITEROVER {
+            return Ok(None);
+        }
+        if rc != 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        Ok(Some(
+            // SAFETY: callback success lends an initialized immutable entry through
+            // the iterator until its next advance/destruction, excluded for 'a.
+            unsafe { BackendEntryRef::from_ptr(entry) }
+                .expect("successful iterator callback returned NULL"),
+        ))
+    }
+}
+
+impl<'a, 'r> crate::libgit2::config::config::ConfigRef<'a, 'r> {
+    /// Creates an iterator borrowing this config, without retaining a reference.
+    ///
+    /// Wraps: git_config_iterator_new
+    pub fn iterator(&self) -> Result<IteratorBox<'a>, crate::libgit2::config::config::ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: this handle keeps config/repository live for 'a; writable out
+        // slot; C constructs a fresh complete allocation or cleans up failure.
+        let rc = unsafe { ffi::git_config_iterator_new(&mut out, self.as_ptr()) };
+        // SAFETY: only success is adopted; the config borrow lasts for 'a.
+        unsafe { adopt_iterator(out, rc) }
+    }
+
+    /// Iterates keys matching C's regex syntax; `None` means all keys. The regex
+    /// is compiled/copied during construction, not retained as a Rust borrow.
+    ///
+    /// Wraps: git_config_iterator_glob_new
+    pub fn iterator_matching(
+        &self,
+        regexp: Option<&CStr>,
+    ) -> Result<IteratorBox<'a>, crate::libgit2::config::config::ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: live config and writable out; regexp is NUL-terminated and
+        // borrowed only for the call. C frees failed regex construction.
+        let rc = unsafe {
+            ffi::git_config_iterator_glob_new(
+                &mut out,
+                self.as_ptr(),
+                regexp.map_or(ptr::null(), CStr::as_ptr),
+            )
+        };
+        // SAFETY: success owns a complete glob/all iterator borrowing config.
+        unsafe { adopt_iterator(out, rc) }
+    }
+
+    /// Iterates all values for the normalized name, optionally regex-filtered.
+    /// Name and regexp are copied/compiled, so their inputs may die immediately.
+    ///
+    /// With a regex, C's name-selection iterator is retained but value matching
+    /// uses the same PCRE2 engine in a Rust-owned enclosing allocation. C calls
+    /// strlen(NULL) on valueless entries and leaks its name on regex failure;
+    /// the filter instead skips valueless entries and cleans up failed regexes.
+    /// Empty values remain distinct and are matched normally. This corrects
+    /// undefined C behavior without changing matching of non-null values.
+    /// C's existing outer-allocation-failure leak without a regex remains.
+    ///
+    /// Wraps: git_config_multivar_iterator_new
+    pub fn multivar_iterator(
+        &self,
+        name: &CStr,
+        regexp: Option<&CStr>,
+    ) -> Result<IteratorBox<'a>, crate::libgit2::config::config::ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: live config; writable out; C copies the name and returns a
+        // fresh matching-callback allocation. No regex: valueless entries are
+        // safe here, and failed normalization releases its partial construction.
+        let rc = unsafe {
+            ffi::git_config_multivar_iterator_new(
+                &mut out,
+                self.as_ptr(),
+                name.as_ptr(),
+                ptr::null(),
+            )
+        };
+        // SAFETY: success owns the enclosing multivar allocation and dependencies.
+        let inner = unsafe { adopt_iterator(out, rc) }?;
+        match regexp {
+            None => Ok(inner),
+            Some(regexp) => value_filter::new(inner, regexp),
+        }
+    }
+}
+
+// A narrow workaround for C's valueless multivar regex UB. The campaign builds
+// libgit2 with USE_REGEX=pcre2; these bindings link the same system PCRE2 library,
+// use the same options and preserve arbitrary pattern/value bytes (not UTF-8).
+mod value_filter {
+    use super::*;
+    use crate::libgit2::config::config::ConfigError;
+    use crate::libgit2::util::errors::ErrorClass;
+    use crate::libgit2::util::sys::errors::{set, set_oom};
+    use ffibox::{CBox, impl_cdrop};
+    use pcre2_sys as pcre;
+
+    define_ctype!(Regex, RegexRef, RegexMut, pcre::pcre2_code_8);
+    #[derive(Clone, Copy, Default)]
+    /// PCRE2's compiled-pattern releaser, recovered through ffibox.
+    /// Wraps: pcre2_code_free_8
+    pub struct RegexFree;
+    impl_cdrop!(RegexFree, Regex, pcre::pcre2_code_free_8);
+    type RegexBox = CBox<Regex, RegexFree>;
+
+    define_ctype!(
+        MatchData,
+        MatchDataRef,
+        MatchDataMut,
+        pcre::pcre2_match_data_8
+    );
+    #[derive(Clone, Copy, Default)]
+    /// PCRE2's transient match-data releaser.
+    /// Wraps: pcre2_match_data_free_8
+    pub struct MatchDataFree;
+    impl_cdrop!(MatchDataFree, MatchData, pcre::pcre2_match_data_free_8);
+    type MatchDataBox = CBox<MatchData, MatchDataFree>;
+
+    fn compile(pattern: &CStr) -> Result<RegexBox, ConfigError> {
+        let mut error = 0;
+        let mut offset = 0;
+        // SAFETY: readable bytes for the supplied length, writable error slots;
+        // default context and options match libgit2's git_regexp_compile. PCRE2
+        // copies its pattern and returns its own uniquely owned compiled code.
+        let p = unsafe {
+            pcre::pcre2_compile_8(
+                pattern.as_ptr().cast(),
+                pattern.to_bytes().len(),
+                0,
+                &mut error,
+                &mut offset,
+                ptr::null_mut(),
+            )
+        };
+        // SAFETY: non-NULL is one compiled-code allocation paired with code_free.
+        if let Some(regex) = unsafe { RegexBox::from_c(p) } {
+            return Ok(regex);
+        }
+        let mut message = [0u8; 1024];
+        // SAFETY: full writable buffer; PCRE2 writes a NUL-terminated error
+        // message when it fits. The initialized zero tail covers failure too.
+        unsafe { pcre::pcre2_get_error_message_8(error, message.as_mut_ptr(), message.len()) };
+        let message = CStr::from_bytes_until_nul(&message).unwrap_or(c"regex compilation failed");
+        set(ErrorClass::Regex, message);
+        Err(ConfigError::from_libgit2(ffi::GIT_EINVALIDSPEC))
+    }
+
+    fn matches(regex: &RegexBox, value: &CStr) -> bool {
+        // SAFETY: default context, one output pair, a fresh match-data allocation.
+        let p = unsafe { pcre::pcre2_match_data_create_8(1, ptr::null_mut()) };
+        // SAFETY: non-NULL is uniquely owned match data paired with data_free.
+        let Some(data) = (unsafe { MatchDataBox::from_c(p) }) else {
+            set_oom();
+            return false; // C also skips all nonzero match statuses.
+        };
+        // SAFETY: compiled regex and exclusive match data are live; value is
+        // readable for its length (including zero); PCRE2 retains neither borrow.
+        let rc = unsafe {
+            pcre::pcre2_match_8(
+                regex.as_c_ptr(),
+                value.as_ptr().cast(),
+                value.to_bytes().len(),
+                0,
+                0,
+                data.as_c_ptr(),
+                ptr::null_mut(),
+            )
+        };
+        rc >= 0
+    }
+
+    /// Rust-owned callback payload: C only accesses its offset-zero ABI base.
+    /// Handwritten
+    #[repr(C)]
+    struct Filtered<'c> {
+        base: ffi::git_config_iterator,
+        state: State<'c>,
+    }
+
+    struct State<'c> {
+        inner: IteratorBox<'c>,
+        regex: RegexBox,
+    }
+
+    unsafe extern "C" fn next(
+        out: *mut *mut ffi::git_config_backend_entry,
+        iterator: *mut ffi::git_config_iterator,
+    ) -> i32 {
+        // SAFETY: this callback belongs only to Filtered allocations. The caller
+        // gives exclusive access, and C never retains a pointer to Rust's state.
+        // This reference covers Rust-owned state, not the wrapped C base/pointee.
+        let state = unsafe { &mut *addr_of_mut!((*iterator.cast::<Filtered<'_>>()).state) };
+        loop {
+            let mut m = state.inner.as_mut();
+            let entry = match m.advance() {
+                Ok(Some(entry)) => entry,
+                Ok(None) => return ffi::GIT_ITEROVER,
+                Err(error) => return error.raw_code(),
+            };
+            let Some(value) = entry.entry().value() else {
+                continue;
+            };
+            if !matches(&state.regex, value) {
+                continue;
+            }
+            // SAFETY: out is a writable slot; this borrowed entry stays pinned
+            // by the inner iterator until the next outer advance or release.
+            unsafe { out.write(entry.as_ptr().cast_mut()) };
+            return 0;
+        }
+    }
+
+    unsafe extern "C" fn free(iterator: *mut ffi::git_config_iterator) {
+        // SAFETY: the callback consumes one uniquely owned Filtered Box whose
+        // base is at offset zero. Erased lifetime is used only for destruction;
+        // the owner kept the original config live. No lent entry survives here.
+        drop(unsafe { Box::from_raw(iterator.cast::<Filtered<'_>>()) });
+    }
+
+    pub(super) fn new<'c>(
+        inner: IteratorBox<'c>,
+        pattern: &CStr,
+    ) -> Result<IteratorBox<'c>, ConfigError> {
+        let regex = compile(pattern)?;
+        let value = Box::new(Filtered {
+            base: ffi::git_config_iterator {
+                backend: ptr::null_mut(),
+                flags: 0,
+                next: Some(next),
+                free: Some(free),
+            },
+            state: State { inner, regex },
+        });
+        // SAFETY: complete offset-zero ABI iterator, callbacks matched to this
+        // Box. Its payload uniquely owns inner and regex; inner preserves 'c.
+        Ok(unsafe { IteratorBox::from_c(Box::into_raw(value).cast()) }.unwrap())
+    }
+}
+
+/// # Safety
+/// A successful status supplies a uniquely owned complete iterator and matching
+/// release callback; all config/backend dependencies remain live for `'c`.
+unsafe fn adopt_iterator<'c>(
+    p: *mut ffi::git_config_iterator,
+    rc: i32,
+) -> Result<IteratorBox<'c>, crate::libgit2::config::config::ConfigError> {
+    use crate::libgit2::config::config::ConfigError;
+    if rc != 0 {
+        return Err(ConfigError::from_libgit2(rc));
+    }
+    // SAFETY: successful construction and dependency lifetime per contract.
+    Ok(unsafe { IteratorBox::from_c(p) }.expect("successful iterator constructor returned NULL"))
+}
+
+impl fmt::Debug for IteratorRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Iterator")
+            .field("flags", &self.flags())
+            .field("backend", &self.backend_raw())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for IteratorMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -697,5 +1228,181 @@ mod unit_tests {
             BackendEntryFree.release(parent);
             assert_eq!(releases.get(), 5);
         }
+    }
+}
+
+#[cfg(test)]
+mod iterator_unit_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[repr(C)]
+    struct Fixture {
+        base: ffi::git_config_iterator,
+        entry: ffi::git_config_backend_entry,
+        calls: usize,
+        releases: Rc<Cell<usize>>,
+        child: Option<IteratorBox<'static>>,
+    }
+
+    fn fixture(releases: Rc<Cell<usize>>) -> Fixture {
+        Fixture {
+            base: ffi::git_config_iterator {
+                backend: ptr::null_mut(),
+                flags: 0,
+                next: Some(next),
+                free: Some(free),
+            },
+            entry: ffi::git_config_backend_entry {
+                entry: ffi::git_config_entry {
+                    name: c"fixture.key".as_ptr(),
+                    value: ptr::null(),
+                    backend_type: c"fixture".as_ptr(),
+                    origin_path: ptr::null(),
+                    include_depth: 0,
+                    level: ffi::GIT_CONFIG_LEVEL_LOCAL,
+                },
+                free: None, // Borrowed-only fixture, never acquired or released.
+            },
+            calls: 0,
+            releases,
+            child: None,
+        }
+    }
+
+    unsafe extern "C" fn next(
+        out: *mut *mut ffi::git_config_backend_entry,
+        p: *mut ffi::git_config_iterator,
+    ) -> i32 {
+        let p = p.cast::<Fixture>();
+        // SAFETY: our fixture always has its initialized base at offset zero;
+        // callback receives exclusive access, and out is a writable output slot.
+        unsafe {
+            let calls = addr_of_mut!((*p).calls);
+            let n = calls.read();
+            calls.write(n + 1);
+            if n > 0 {
+                return ffi::GIT_ITEROVER;
+            }
+            out.write(addr_of_mut!((*p).entry));
+        }
+        0
+    }
+
+    unsafe extern "C" fn free(p: *mut ffi::git_config_iterator) {
+        // SAFETY: owner adoption below transfers precisely this Box allocation,
+        // with its first field at offset zero. Dispatch runs once, with no live
+        // handle or entry remaining; child release may reenter C independently.
+        let value = unsafe { Box::from_raw(p.cast::<Fixture>()) };
+        value.releases.set(value.releases.get() + 1);
+    }
+
+    fn owned(
+        releases: Rc<Cell<usize>>,
+        child: Option<IteratorBox<'static>>,
+    ) -> IteratorBox<'static> {
+        let mut value = fixture(releases);
+        value.child = child;
+        // SAFETY: one initialized uniquely owned complete enclosing Box with
+        // matching free callback and static entry strings, no config dependency.
+        unsafe { IteratorBox::from_c(Box::into_raw(Box::new(value)).cast()) }.unwrap()
+    }
+
+    #[test]
+    fn iterator_layout_and_borrowed_rust_callback() {
+        assert_eq!(size_of::<Iterator>(), size_of::<ffi::git_config_iterator>());
+        assert_eq!(
+            align_of::<Iterator>(),
+            align_of::<ffi::git_config_iterator>()
+        );
+        assert_eq!(size_of::<IteratorRef>(), size_of::<*const ()>());
+        assert_eq!(size_of::<IteratorMut>(), size_of::<*mut ()>());
+        assert_eq!(core::mem::offset_of!(Fixture, base), 0);
+        let mut value = fixture(Rc::new(Cell::new(0)));
+        let p = NonNull::from(&mut value).cast::<Iterator<'static>>();
+        // SAFETY: exclusively borrowed initialized Fixture with matching
+        // callbacks; static strings; no other access to value during this borrow.
+        let mut m = IteratorMut(IteratorRef(unsafe { CBorrowedPtr::new(p) }), PhantomData);
+        m.as_mut().set_flags(u32::MAX);
+        assert_eq!(m.as_ref().flags(), u32::MAX);
+        assert!(m.as_ref().backend_raw().is_none());
+        let callback = m.as_ref().next_callback();
+        assert_eq!(
+            callback.call(&mut m).unwrap().unwrap().entry().name(),
+            Some(c"fixture.key")
+        );
+        assert!(m.advance().unwrap().is_none());
+        let expected = "Iterator { flags: 4294967295, backend: None, .. }";
+        assert_eq!(format!("{m:?}"), expected);
+        assert_eq!(format!("{:?}", m.as_ref()), expected);
+        // SAFETY: NULL is rejected without dereference.
+        assert!(unsafe { IteratorRef::from_ptr(ptr::null_mut()) }.is_none());
+        // Only field access, not callback invocation: standalone base has no
+        // enclosing Fixture and deliberately is never adopted as an owner.
+        let mut base = Iterator(value.base, PhantomData);
+        assert_eq!(format!("{base:?}"), expected);
+        base.as_mut().set_flags(0);
+        assert_eq!(base.as_ref().flags(), 0);
+    }
+
+    /// Corrected behavior: C's regex path calls strlen(NULL) on the first flag.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
+    fn multivar_regex_skips_valueless() {
+        use crate::libgit2::config::config::Config;
+        use std::ffi::CString;
+        let file =
+            std::env::temp_dir().join(format!("crustify-filter-correction-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\nk\nk =\nk = value\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let config = Config::open(&path).unwrap();
+        let mut iter = config
+            .as_ref()
+            .multivar_iterator(c"a.k", Some(c"^$"))
+            .unwrap();
+        assert_eq!(
+            iter.as_mut().advance().unwrap().unwrap().entry().value(),
+            Some(c"")
+        );
+        assert!(iter.as_mut().advance().unwrap().is_none());
+        let bad = config
+            .as_ref()
+            .multivar_iterator(c"a.k", Some(c"["))
+            .unwrap_err();
+        assert_eq!(bad.raw_code(), ffi::GIT_EINVALIDSPEC);
+        // C normalizes names before compiling the regex: preserve that precedence.
+        assert_eq!(
+            config
+                .as_ref()
+                .multivar_iterator(c"invalid", Some(c"["))
+                .unwrap_err()
+                .raw_code(),
+            ffi::GIT_EINVALIDSPEC
+        );
+        drop(iter);
+        drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Drop dispatch calls C")]
+    fn iterator_owned_release_and_reentry() {
+        let releases = Rc::new(Cell::new(0));
+        let mut first = owned(releases.clone(), None);
+        let policy = first.as_ref().release_policy();
+        assert!(first.as_mut().advance().unwrap().is_some());
+        let ptr = first.into_c();
+        // SAFETY: ownership roundtrip of a complete matching allocation; nothing
+        // accesses the surrendered pointer, and dependencies are still static.
+        let first = unsafe { IteratorBox::from_c(ptr) }.unwrap();
+        policy.release(first);
+        assert_eq!(releases.get(), 1);
+        let child = owned(releases.clone(), None);
+        let parent = owned(releases.clone(), Some(child));
+        policy.release(parent);
+        assert_eq!(releases.get(), 3);
+        // SAFETY: NULL adoption never creates an owner or calls its destructor.
+        assert!(unsafe { IteratorBox::from_c(ptr::null_mut()) }.is_none());
     }
 }
