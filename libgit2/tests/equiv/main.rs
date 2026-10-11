@@ -25,6 +25,7 @@ mod repository;
 mod signature;
 mod strarray;
 mod sys_alloc;
+mod sys_commit;
 mod sys_errors;
 mod sys_odb_backend;
 mod sys_path;

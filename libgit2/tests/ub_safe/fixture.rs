@@ -675,70 +675,51 @@ pub mod commit_and_config {
 
 // --- `git2/commit.h`: `git_commit_create_ext_options` ---------------------------------
 
-/// Commit creation through C, standing in for the `git_commit_create_ext` wrapper (a
-/// later run), which replaces it.
+/// Commit creation through the `git_commit_create_ext` wrapper, reading the commit back
+/// through C, which stands in for the object database's read wrapper.
 pub mod create_ext {
-    use std::ffi::{CStr, c_int};
+    use std::ffi::{CStr, CString, c_int};
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::commit::CreateExtOptions;
+    use libgit2::libgit2::core::types::{SignatureView, Time};
+    use libgit2::libgit2::object::commit::{CreateExtOptions, create_ext};
+    use libgit2::libgit2::object::tree::Tree;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
 
     use super::TempRepo;
 
-    /// `git_commit_create_ext` of a root commit of the empty tree in `repo`, with a
-    /// fixed signature and message, reading `options` in place: the new commit's raw
-    /// text, or the code libgit2 failed with.
-    pub fn create(repo: &TempRepo, options: &CreateExtOptions<'_>) -> Result<String, c_int> {
-        let raw = repo.raw();
-        let (mut builder, mut tree_id, mut tree, mut sig) = (
-            ptr::null_mut(),
-            ffi::git_oid::default(),
-            ptr::null_mut(),
-            ptr::null_mut(),
-        );
-        // SAFETY: a live repository; each out-parameter receives an object freed below.
+    /// [`create_ext`] of a root commit of the empty tree in `repo`, with a fixed
+    /// signature and message, through `options`: the new commit's raw text, or the code
+    /// the wrapper failed with. A panic of the options' signer resumes from here.
+    pub fn create(repo: &TempRepo, options: &mut CreateExtOptions<'_>) -> Result<String, c_int> {
+        let r = repo.repo.as_ref().unwrap().as_ref();
+        let empty = c"4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let tree = Tree::lookup(r, Oid::from_string(empty, OidType::Sha1).unwrap().as_ref());
+        let tree = tree.unwrap();
+        let sig = SignatureView::new(c"A", c"a@b", Time::new(1, 0));
+        let id = create_ext(
+            r,
+            sig.as_ref(),
+            sig.as_ref(),
+            c"msg\n",
+            tree.as_ref(),
+            &[],
+            Some(options.as_mut()),
+        )
+        .map_err(|e| e.raw_code())?;
+        let hex = CString::new(id.as_ref().to_hex_string().unwrap()).unwrap();
+        let (mut raw, mut odb, mut obj) =
+            (ffi::git_oid::default(), ptr::null_mut(), ptr::null_mut());
+        // SAFETY: the commit just written is read back by its id and copied; each object
+        // is released once.
         unsafe {
-            assert_eq!(ffi::git_treebuilder_new(&mut builder, raw, ptr::null()), 0);
-            assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-            ffi::git_treebuilder_free(builder);
-            assert_eq!(ffi::git_tree_lookup(&mut tree, raw, &tree_id), 0);
             assert_eq!(
-                ffi::git_signature_new(&mut sig, c"A".as_ptr(), c"a@b".as_ptr(), 1, 0),
+                ffi::git_oid_from_string(&mut raw, hex.as_ptr(), ffi::GIT_OID_SHA1),
                 0
             );
-        }
-        let mut id = ffi::git_oid::default();
-        // SAFETY: live objects of the repository; the options are a live value Rust
-        // holds (`CreateExtOptions` is transparent over the C struct), whose borrows
-        // outlive the call by their `'o`.
-        let rc = unsafe {
-            ffi::git_commit_create_ext(
-                &mut id,
-                raw,
-                sig,
-                sig,
-                c"msg\n".as_ptr(),
-                tree,
-                0,
-                ptr::null(),
-                ptr::from_ref(options).cast(),
-            )
-        };
-        // SAFETY: each object is released once.
-        unsafe {
-            ffi::git_signature_free(sig);
-            ffi::git_tree_free(tree);
-        }
-        if rc != 0 {
-            return Err(rc);
-        }
-        let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
-        // SAFETY: the commit just written is read back and copied; each object is
-        // released once.
-        unsafe {
-            assert_eq!(ffi::git_repository_odb(&mut odb, raw), 0);
-            assert_eq!(ffi::git_odb_read(&mut obj, odb, &id), 0);
+            assert_eq!(ffi::git_repository_odb(&mut odb, repo.raw()), 0);
+            assert_eq!(ffi::git_odb_read(&mut obj, odb, &raw), 0);
             let data = std::slice::from_raw_parts(
                 ffi::git_odb_object_data(obj).cast::<u8>(),
                 ffi::git_odb_object_size(obj),
@@ -2076,65 +2057,15 @@ pub mod filter_probe {
 
 // --- `git2/blob.h`: `git_blob`, `git_blob_filter_options` ----------------------------
 
-/// Stand-ins for the blob routines a later run wraps (`git_blob_rawcontent`,
-/// `git_blob_rawsize`, `git_blob_filter`), which replaces them, and the blob cache
-/// limit, a process-global option.
+/// The blob cache limit, a global option the blob tests set in isolated children.
 pub mod blob {
-    use std::ffi::{CStr, c_int};
-    use std::ptr;
-
-    use libgit2::ffi;
     use libgit2::libgit2::core::types::ObjectType;
-    use libgit2::libgit2::object::blob::{BlobArc, FilterOptions};
-
-    /// A copy of the content of the blob an owner holds.
-    pub fn content(blob: &BlobArc<'_>) -> Vec<u8> {
-        let p = blob.as_c_ptr();
-        // SAFETY: `p` is the live blob the owner holds; its content lives as long as
-        // it does and is copied at once.
-        unsafe {
-            let size = usize::try_from(ffi::git_blob_rawsize(p)).unwrap();
-            let data = ffi::git_blob_rawcontent(p).cast::<u8>();
-            if size == 0 {
-                return Vec::new();
-            }
-            std::slice::from_raw_parts(data, size).to_vec()
-        }
-    }
 
     /// Lets the object cache keep blobs of up to `bytes`, in a child process that runs
     /// nothing else.
     pub fn set_blob_cache_limit(bytes: usize) {
         // SAFETY: the isolated children that call it run one thread meanwhile.
         unsafe { libgit2::libgit2::core::common::set_cache_object_limit(ObjectType::Blob, bytes) }
-    }
-
-    /// `git_blob_filter` of `blob` as `path`, with `opts` read in place (or none): the
-    /// filtered bytes, or the code libgit2 failed with. Filter lists race on their first
-    /// load, so callers run in an isolated child.
-    pub fn filter(
-        blob: &BlobArc<'_>,
-        path: &CStr,
-        opts: Option<&mut FilterOptions>,
-    ) -> Result<Vec<u8>, c_int> {
-        let mut out = ffi::git_buf::default();
-        // `FilterOptions` is `#[repr(transparent)]` over `git_blob_filter_options`.
-        let opts = opts.map_or(ptr::null_mut(), |o| {
-            ptr::from_mut(o).cast::<ffi::git_blob_filter_options>()
-        });
-        // SAFETY: a zeroed buffer libgit2 fills; the live blob the owner holds, whose
-        // repository outlives it by its borrow; `path` NUL-terminated; `opts` NULL or
-        // live, initialised options, which libgit2 copies for the call.
-        let rc = unsafe { ffi::git_blob_filter(&mut out, blob.as_c_ptr(), path.as_ptr(), opts) };
-        let bytes = if rc < 0 || out.ptr.is_null() {
-            Vec::new()
-        } else {
-            // SAFETY: on success `out` holds `size` initialised bytes at `ptr`.
-            unsafe { std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size) }.to_vec()
-        };
-        // SAFETY: the buffer libgit2 filled (or left zeroed), released once.
-        unsafe { ffi::git_buf_dispose(&mut out) };
-        if rc < 0 { Err(rc) } else { Ok(bytes) }
     }
 }
 

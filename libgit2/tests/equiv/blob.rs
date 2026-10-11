@@ -1,7 +1,14 @@
 //! Equivalence of `git2/blob.h`'s `data_is_binary` with `git_blob_data_is_binary`, of
-//! its filter flags with C's in [`filter_flags`], of the blob owner and its
-//! constructors with `git_blob_lookup` and friends in [`owner`], and of the filter
-//! options with `git_blob_filter_options_init` in [`filter_options`].
+//! its filter flags with C's, and `BlobRef::filter` with `git_blob_filter`, in
+//! [`filter_flags`], of the blob owner, its constructors and its getters with
+//! `git_blob_lookup` and friends in [`owner`], and of the filter options with
+//! `git_blob_filter_options_init` in [`filter_options`].
+//!
+//! `BlobRef::filter` refuses two inputs libgit2 mishandles, outside these comparisons:
+//! an absolute path, which libgit2 asserts on (a release build fails with the error the
+//! wrapper reports, a debug one aborts), and an attribute commit id of another type
+//! than the repository's, which libgit2 would format out of bounds. The unit tests of
+//! `blob.rs` hold both refusals.
 //!
 //! Each probe hands the same bytes, in two independently owned buffers, to C and to
 //! Rust, and compares the verdicts and the calling thread's last error after each
@@ -241,7 +248,7 @@ fn growing_buffer_sequence() {
 /// attribute flags change which conversions apply. The safe wrapper of
 /// `git_blob_filter` itself belongs to the `object` symbol batches.
 mod filter_flags {
-    use std::ffi::{CStr, c_int};
+    use std::ffi::{CStr, CString, c_int};
     use std::ptr;
     use std::sync::OnceLock;
 
@@ -572,13 +579,137 @@ mod filter_flags {
             );
         }
     }
+
+    /// [`BlobRef::filter`] against `git_blob_filter`: each side filters its own blobs of
+    /// its own `crlf.git` through every flag combination, with options and without, and
+    /// with versions libgit2 refuses, comparing the code, the bytes and the thread's
+    /// error after every call.
+    ///
+    /// [`BlobRef::filter`]: libgit2::libgit2::object::blob::BlobRef::filter
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_filter_matches_git_blob_filter() {
+        isolated(
+            concat!(module_path!(), "::blob_filter_matches_git_blob_filter"),
+            blob_filter_matches_git_blob_filter_body,
+        );
+    }
+
+    /// A call's outcome: the code, the bytes, and the error left (for a failure).
+    type Filtered = (c_int, Vec<u8>, Option<(c_int, String)>);
+
+    fn c_filtered(
+        side: &mut Side,
+        i: usize,
+        opts: Option<&mut ffi::git_blob_filter_options>,
+    ) -> Filtered {
+        // SAFETY: as in `Side::filter`; NULL options are the defaults.
+        let rc = unsafe {
+            ffi::git_blob_filter(
+                &mut side.buf,
+                side.blobs[i],
+                CALLS[i].1.as_ptr(),
+                opts.map_or(ptr::null_mut(), |o| o),
+            )
+        };
+        let out = if rc < 0 || side.buf.ptr.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: libgit2 left `size` initialised bytes at `ptr`.
+            unsafe { std::slice::from_raw_parts(side.buf.ptr.cast::<u8>(), side.buf.size) }.to_vec()
+        };
+        // SAFETY: the side's buffer, emptied for the next call.
+        unsafe { ffi::git_buf_dispose(&mut side.buf) };
+        (rc, out, (rc < 0).then(super::c_last))
+    }
+
+    fn blob_filter_matches_git_blob_filter_body() {
+        use libgit2::libgit2::object::blob::Blob;
+        use libgit2::libgit2::repository::repository::Repository;
+
+        let mut c = Side::open();
+        let path = CString::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/crlf.git"
+        ))
+        .unwrap();
+        let repo = Repository::open(&path).unwrap();
+        let blobs: Vec<_> = CALLS
+            .iter()
+            .map(|(id, _)| {
+                let id = Oid::from_string(id, OidType::Sha1).unwrap();
+                Blob::lookup(repo.as_ref(), id.as_ref()).unwrap()
+            })
+            .collect();
+        let rust_filtered = |i: usize, opts: Option<&FilterOptions>| -> Filtered {
+            match blobs[i]
+                .as_ref()
+                .filter(CALLS[i].1, opts.map(FilterOptions::as_ref))
+            {
+                Ok(buf) => (0, buf.as_ref().as_bytes().to_vec(), None),
+                Err(e) => (
+                    e.raw_code(),
+                    Vec::new(),
+                    Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                ),
+            }
+        };
+        let mut compared = 0;
+        for i in 0..CALLS.len() {
+            assert_eq!(
+                rust_filtered(i, None),
+                c_filtered(&mut c, i, None),
+                "call {i}"
+            );
+        }
+        for combo in 0..1u32 << FLAGS.len() {
+            let set: FilterFlags = (0..FLAGS.len())
+                .filter(|k| combo & (1 << k) != 0)
+                .map(|k| FLAGS[k].1)
+                .collect();
+            let mut c_opts = c_options();
+            c_opts.flags = set.bits() | UNNAMED;
+            let mut rust_opts = FilterOptions::new();
+            rust_opts
+                .as_mut()
+                .set_flags(set | FilterFlags::from_bits_retain(UNNAMED));
+            let commit = Oid::from_string(IDENT_COMMIT, OidType::Sha1).unwrap();
+            rust_opts.as_mut().set_attr_commit_id(commit.as_ref());
+            for i in 0..CALLS.len() {
+                let expected = c_filtered(&mut c, i, Some(&mut c_opts));
+                assert_eq!(
+                    rust_filtered(i, Some(&rust_opts)),
+                    expected,
+                    "{set:?} call {i}"
+                );
+                compared += 1;
+            }
+        }
+        for version in [0, ffi::GIT_BLOB_FILTER_OPTIONS_VERSION as c_int + 1, -1] {
+            let mut c_opts = c_options();
+            c_opts.version = version;
+            let mut rust_opts = FilterOptions::new();
+            rust_opts.as_mut().set_version(version);
+            let expected = c_filtered(&mut c, 0, Some(&mut c_opts));
+            assert!(expected.0 < 0);
+            assert_eq!(
+                rust_filtered(0, Some(&rust_opts)),
+                expected,
+                "version {version}"
+            );
+        }
+        assert_eq!(compared, CALLS.len() << FLAGS.len());
+    }
 }
 
 /// The blob owner and its constructors against the C routines they wrap.
 ///
 /// [`Blob::lookup`] must find what `git_blob_lookup` finds and [`Blob::lookup_prefix`]
-/// what `git_blob_lookup_prefix` does: the same blob (id, type and content, as C reads
-/// them) or the same failure (code, error class and message). Each side opens
+/// what `git_blob_lookup_prefix` does: the same blob or the same failure (code, error
+/// class and message). A blob is compared as each side reads it: C through
+/// `git_blob_id`, `git_blob_rawcontent`, `git_blob_rawsize`, `git_blob_is_binary` and
+/// `git_blob_owner`, Rust through [`BlobRef::id`], [`BlobRef::content`],
+/// [`BlobRef::size`], [`BlobRef::is_binary`] and [`BlobRef::owner`]. Each side opens
 /// `testrepo.git` on its own and runs one script of lookups, in order: every blob by
 /// full id and by prefix, prefixes of 0 to past 40 digits, ids of a commit, a tree and
 /// a tag, ambiguous, missing and zero ids, and repeats. After every step the sides are
@@ -593,6 +724,10 @@ mod filter_flags {
 /// `git_object_type` says the object is one, and the blob reads as C reads the object
 /// cast to `git_blob *`.
 ///
+/// The accessors also run on blobs of every size around the 8000 bytes
+/// `git_blob_is_binary` reads, binary or not, written into a repository of each side's
+/// own, in [`contents_match`].
+///
 /// Documented divergence, outside these comparisons: an id of another type than the
 /// repository's is refused by the wrappers (code `-1`, `GIT_ERROR_INVALID`), where the
 /// C routines format it out of bounds; the unit tests of `blob.rs` hold the refusal.
@@ -601,7 +736,7 @@ mod owner {
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::blob::{Blob, BlobArc};
+    use libgit2::libgit2::object::blob::{Blob, BlobArc, BlobRef};
     use libgit2::libgit2::object::object::Object;
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
@@ -619,12 +754,29 @@ mod owner {
     const TREE: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
     const TAG: &str = "b25fa35b38051e4ae45d4222e795f9df2e43f1d1";
 
-    /// What a lookup gave: the blob's id, type and content as C reads them, or the
-    /// failure.
+    /// What a lookup gave: the blob's id, type, content, size, binary verdict and
+    /// repository path, as each side reads them, or the failure.
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Outcome {
-        Found(String, ffi::git_object_t, Vec<u8>),
+        Found(String, ffi::git_object_t, Vec<u8>, Facts),
         Failed(c_int, c_int, String),
+    }
+
+    /// The size, binary verdict and repository path of a blob.
+    type Facts = (u64, bool, Option<String>);
+
+    /// The Rust side's view of a live blob, through its handle's getters.
+    fn rust_found(blob: BlobRef<'_, '_>) -> Outcome {
+        let path = blob
+            .owner()
+            .path()
+            .map(|p| p.to_string_lossy().into_owned());
+        Outcome::Found(
+            blob.id().to_hex_string().unwrap(),
+            blob.as_object().kind().raw(),
+            blob.content().to_vec(),
+            (blob.size(), blob.is_binary(), path),
+        )
     }
 
     /// C's view of a live blob.
@@ -653,6 +805,10 @@ mod owner {
                     .to_owned(),
                 ffi::git_object_type(object),
                 data,
+                (ffi::git_blob_rawsize(p), ffi::git_blob_is_binary(p) != 0, {
+                    let path = ffi::git_repository_path(ffi::git_blob_owner(p));
+                    (!path.is_null()).then(|| CStr::from_ptr(path).to_string_lossy().into_owned())
+                }),
             )
         }
     }
@@ -796,7 +952,7 @@ mod owner {
             Err(e) => (rust_failed(e), None),
             Ok(blob) => {
                 let same = held.iter().position(|h| BlobArc::ptr_eq(h, &blob));
-                let outcome = found(blob.as_c_ptr());
+                let outcome = rust_found(blob.as_ref());
                 held.push(blob);
                 (outcome, same)
             }
@@ -830,7 +986,7 @@ mod owner {
             assert!(BlobArc::ptr_eq(copy, original));
         }
         drop(held);
-        let got: Vec<_> = copies.iter().map(|b| found(b.as_c_ptr())).collect();
+        let got: Vec<_> = copies.iter().map(|b| rust_found(b.as_ref())).collect();
         assert_eq!(got, expected);
         shared
     }
@@ -926,7 +1082,7 @@ mod owner {
             let object = Object::lookup(rust.as_ref(), oid.as_ref(), None).unwrap();
             let got = match Blob::from_object(object) {
                 Ok(blob) => {
-                    let view = found(blob.as_c_ptr());
+                    let view = rust_found(blob.as_ref());
                     let p = blob.as_c_ptr();
                     let back = Blob::into_object(blob);
                     assert_eq!(back.as_c_ptr().cast::<ffi::git_blob>(), p);
@@ -935,6 +1091,70 @@ mod owner {
                 Err(_) => None,
             };
             assert_eq!(got, expected, "{hex}");
+        }
+    }
+    /// Blobs written with a NUL or a long non-printable run before, at and after the
+    /// 8000 bytes `git_blob_is_binary` reads, and empty ones, read alike by both sides,
+    /// each from its own repository, twice in a row.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn contents_match() {
+        init();
+        let dirs: Vec<_> = ["c", "rust"]
+            .iter()
+            .map(|side| {
+                let dir = std::env::temp_dir().join(format!(
+                    "crustify-equiv-blob-contents-{}-{side}",
+                    std::process::id()
+                ));
+                let _ = std::fs::remove_dir_all(&dir);
+                dir
+            })
+            .collect();
+        let mut c_repo = ptr::null_mut();
+        let c_path = CString::new(dirs[0].to_str().unwrap()).unwrap();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_init(&mut c_repo, c_path.as_ptr(), 1) };
+        assert_eq!(rc, 0);
+        let rust =
+            Repository::init(&CString::new(dirs[1].to_str().unwrap()).unwrap(), true).unwrap();
+        let mut inputs: Vec<Vec<u8>> = vec![Vec::new(), b"text\n".to_vec()];
+        for at in [0, 7999, 8000, 8001, 20_000] {
+            let mut nul = vec![b'a'; 20_001];
+            nul[at] = 0;
+            inputs.push(nul);
+            let mut control = vec![b'a'; at];
+            control.extend(std::iter::repeat_n(1u8, 200));
+            inputs.push(control);
+        }
+        for data in &inputs {
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id, the live repository and `data.len()` bytes.
+            let rc = unsafe {
+                ffi::git_blob_create_from_buffer(&mut id, c_repo, data.as_ptr().cast(), data.len())
+            };
+            assert_eq!(rc, 0);
+            let mut blob = ptr::null_mut();
+            // SAFETY: a writable slot, the live repository and an id of its type.
+            assert_eq!(unsafe { ffi::git_blob_lookup(&mut blob, c_repo, &id) }, 0);
+            let mut expected = found(blob);
+            // SAFETY: the blob, released once.
+            unsafe { ffi::git_blob_free(blob) };
+            // The repository paths differ by design: compare their file names only.
+            if let Outcome::Found(_, _, _, (_, _, path)) = &mut expected {
+                *path = path.as_ref().map(|p| p.replace("-c/", "-rust/"));
+            }
+            let rid =
+                libgit2::libgit2::object::blob::create_from_buffer(rust.as_ref(), data).unwrap();
+            let rblob = Blob::lookup(rust.as_ref(), rid.as_ref()).unwrap();
+            assert_eq!(rust_found(rblob.as_ref()), expected, "{}", data.len());
+            assert_eq!(rust_found(rblob.as_ref()), expected);
+        }
+        drop(rust);
+        // SAFETY: the C side's repository, released once.
+        unsafe { ffi::git_repository_free(c_repo) };
+        for dir in dirs {
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 }

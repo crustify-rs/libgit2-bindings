@@ -14830,6 +14830,1587 @@
      "note": "reftable's allocator: the hook set by reftable_set_alloc (libgit2 installs git__ wrappers in refdb_reftable.c) or malloc. NON-zeroing; returns NULL for sz == 0 and on failure. Released by reftable_free."
     }
    }
+  },
+  {
+   "name": "git_blob_filter",
+   "defined_in": "src/libgit2/blob.c",
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob, only read despite git_blob *; its owner repository is used to load attributes (caches filled)."
+     }
+    },
+    {
+     "name": "given_opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; GIT_ERROR_CHECK_VERSION (1..=VERSION as unsigned) then memcpy'd; never written. Under GIT_DEPRECATE_HARD `reserved` is unread. attr_commit_id is looked up (git_commit_lookup) when ATTRIBUTES_FROM_COMMIT is set and no binary stop: an id of another type than the repository's is formatted out of bounds."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's git_buf, filled through GIT_BUF_WRAP_PRIVATE with an owned copy of the (filtered) content on success; untouched when CHECK_FOR_BINARY stops at a binary blob. Header's 'may point at the raw content' is stale: buf_stream always copies."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "GIT_ASSERT_ARG; attribute lookup path, must be relative to the workdir (collect_attr_files asserts !(path[0]=='/')); copied into the filter source."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_id",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob, only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&obj->cached.oid: embedded in the blob, never NULL for a live blob, lives as long as the blob; written once at parse."
+    }
+   }
+  },
+  {
+   "name": "git_blob_is_binary",
+   "defined_in": "src/libgit2/blob.c",
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob; reads at most the first 8000 bytes of its content (GIT_FILTER_BYTES_TO_CHECK_NUL) with int counters, so no overflow."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_blob_owner",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob, only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj->object.repo"
+     },
+     "nullable": false,
+     "mutable": true,
+     "note": "obj->repo: the repository the blob was looked up in, stored uncounted and never cleared; borrowed for as long as the repository lives (outlives the blob in the safe API), not owned."
+    }
+   }
+  },
+  {
+   "name": "git_blob_rawcontent",
+   "defined_in": "src/libgit2/blob.c",
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob, only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:blob"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "rawsize bytes: blob->data.raw.data (raw blobs, parsed from a caller buffer) or git_odb_object_data(blob->data.odb) (the cached odb object the blob holds a reference to). Never written; lives as long as the blob. NULL only for a NULL blob (assert)."
+    }
+   }
+  },
+  {
+   "name": "git_blob_rawsize",
+   "defined_in": "src/libgit2/blob.c",
+   "ptr_args": [
+    {
+     "name": "blob",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:blob"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live blob, only read; returns its content size."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_amend",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional (NULL: the commit's). Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "commit_to_amend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit_to_amend"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live commit; its owner repository, author, committer, encoding, message, tree id and parent ids are read; not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional (NULL: the commit's). Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional (NULL: the commit's)."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional (NULL: the commit's)."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional (NULL: the commit's tree, looked up); a given tree must be owned by the commit's repository (asserted)."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:update_ref"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; resolved (5 levels) and must target commit_to_amend, else GIT_ERROR_REFERENCE -1; moved after the write. The resolved reference leaks if the write fails."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_author",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live, fully parsed commit; only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit->author"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "commit->author: owned by the commit (freed in git_commit__free), non-NULL for a full parse; name/email may be NULL after a parser OOM."
+    }
+   }
+  },
+  {
+   "name": "git_commit_author_with_mailmap",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live commit; commit->author is read; git_mailmap_resolve GIT_ASSERTs its name and email non-NULL."
+     }
+    },
+    {
+     "name": "mailmap",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:mailmap"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional mailmap, only read (NULL: no mapping)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives a fresh git_signature (git_signature_new over the mailmap-resolved name/email, commit's author time, sign copied); caller frees with git_signature_free. Set to NULL on git_signature_new failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_body",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live commit; lazily computes and caches commit->body (git__strndup) when NULL, unsynchronised: a write through a shared object, sound only single-threaded (repository objects are thread-confined)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit->body"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "commit->body, owned by the commit, set once and never replaced; NULL when the message has no body (or strndup failed)."
+    }
+   }
+  },
+  {
+   "name": "git_commit_committer",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live parsed commit; only read."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit->committer"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "commit->committer: owned by the commit, always parsed (even quick parses)."
+    }
+   }
+  },
+  {
+   "name": "git_commit_committer_with_mailmap",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live commit; commit->committer is read; git_mailmap_resolve GIT_ASSERTs its name and email non-NULL."
+     }
+    },
+    {
+     "name": "mailmap",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:mailmap"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional mailmap, only read (NULL: no mapping)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "Receives a fresh git_signature (git_signature_new over the mailmap-resolved name/email, commit's committer time, sign copied); caller frees with git_signature_free. Set to NULL on git_signature_new failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given after the headers."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; written as an `encoding` header."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call; libgit2 reads and writes its references, odb (lazy load, atomic CAS) and caches through it though shared. Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree object; GIT_ASSERT_ARG(tree) and GIT_ASSERT_ARG(git_tree_owner(tree) == repo) (assert in debug builds); only its id is read. Parents (const git_commit *parents[]) are read through commit_parent_from_array, which ends the list silently at the first commit of another repository; validate=false."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:update_ref"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional reference name, resolved (git_reference_lookup_resolved, 10 levels); an existing one must target the first parent (GIT_EMODIFIED otherwise); updated with a reflog entry after the write."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_buffer",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; written as an `encoding` header."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's git_buf, filled (GIT_BUF_WRAP_PRIVATE) with the commit contents on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository; its odb is read to validate tree and parents (strict creation). Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree object; GIT_ASSERT_ARG(tree) and GIT_ASSERT_ARG(git_tree_owner(tree) == repo) (assert in debug builds); only its id is read. Parents from the array, foreign ones end the list silently."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "out: the callback writes the created commit's id here when it returns 0; rebase then looks it up in its repository (an id of another type would be formatted out of bounds)."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "author, lent for the call (rebase: given or the replayed commit's)."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg2"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "committer, lent for the call."
+     }
+    },
+    {
+     "name": "arg3",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg3"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "message_encoding, NULL for UTF-8, lent for the call."
+     }
+    },
+    {
+     "name": "arg4",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg4"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "message, lent for the call."
+     }
+    },
+    {
+     "name": "arg5",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg5"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "tree of the commit to create, lent for the call; owned by the caller (rebase frees it after)."
+     }
+    },
+    {
+     "name": "arg7",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "arg:arg7"
+        }
+       }
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg7"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "parents[parent_count], each a live commit lent for the call (rebase: one, &parent_commit)."
+     }
+    },
+    {
+     "name": "arg8",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg8"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "payload from git_rebase_options, passed through unchanged."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_ext",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional options, only read for the call (update_ref, message_encoding, extra_headers[len], sign + payload). The sign callback is called once with a builder lent for the call; every negative return fails the call (GIT_PASSTHROUGH included)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call; libgit2 reads and writes its references, odb (lazy load, atomic CAS) and caches through it though shared. Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree object; GIT_ASSERT_ARG(tree) and GIT_ASSERT_ARG(git_tree_owner(tree) == repo) (assert in debug builds); only its id is read. Parents (git_commit * const parents[]) only read; foreign ones end the list silently."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_from_callback",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given after the headers."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; written as an `encoding` header."
+     }
+    },
+    {
+     "name": "parent_cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:parent_cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Parent callback, called with 0,1,2... until it returns NULL; each returned id is read (validated when strict) and copied before the next call."
+     }
+    },
+    {
+     "name": "parent_payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:parent_payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque payload passed back to parent_cb unchanged; never read by libgit2."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call; libgit2 reads and writes its references, odb (lazy load, atomic CAS) and caches through it though shared. Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Tree id; validated (strict) and freshened as in create_from_ids; type must match the repository's."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:update_ref"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional reference name, resolved (git_reference_lookup_resolved, 10 levels); an existing one must target the first parent (GIT_EMODIFIED otherwise); updated with a reflog entry after the write."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_from_ids",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given after the headers."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; written as an `encoding` header."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call; libgit2 reads and writes its references, odb (lazy load, atomic CAS) and caches through it though shared. Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Tree id; with strict creation (default) validated in the odb (git_object__is_valid), and freshened: an id of another type than the repository's is formatted out of bounds by the loose backend. Parents (const git_oid *parents[], parent_count) likewise validated; a NULL entry ends the list."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:update_ref"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional reference name, resolved (git_reference_lookup_resolved, 10 levels); an existing one must target the first parent (GIT_EMODIFIED otherwise); updated with a reflog entry after the write."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_v",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:author"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:committer"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live signature, only read: git_signature__writebuf prints name/email with %s (NULL would be UB) and negates a negative offset as int (UB for INT_MIN); the time is printed through an unsigned cast. Not retained."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given after the headers."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message_encoding"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional; written as an `encoding` header."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call; libgit2 reads and writes its references, odb (lazy load, atomic CAS) and caches through it though shared. Not retained."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree object; GIT_ASSERT_ARG(tree) and GIT_ASSERT_ARG(git_tree_owner(tree) == repo) (assert in debug builds); only its id is read. Variadic `const git_commit *` parents, parent_count of them read with va_arg; a NULL ends the list; owners are not checked; validate=false."
+     }
+    },
+    {
+     "name": "update_ref",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:update_ref"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional reference name, resolved (git_reference_lookup_resolved, 10 levels); an existing one must target the first parent (GIT_EMODIFIED otherwise); updated with a reflog entry after the write."
+     }
+    }
+   ]
   }
  ]
 }
