@@ -1,10 +1,8 @@
 //! Safe wrappers over `include/git2/sys/config.h`.
 //!
 //! Memory backend options are caller-owned values. Their nullable strings are
-//! borrowed, never freed by C. `config_backend_new` copies both strings; neither
-//! `git_config_backend_from_string` nor `git_config_backend_from_values` retains
-//! the options. There is no C allocation, destruction or cloning primitive for
-//! the options themselves. A Rust clone simply shares the immutable string borrows,
+//! borrowed, never freed by C. There is no C allocation, destruction or cloning
+//! primitive for the options themselves. A Rust clone simply shares the immutable string borrows,
 //! and the options cross threads as the borrows they hold do.
 //!
 //! Backend entries retain immutable storage via an allocation-specific callback.
@@ -25,7 +23,7 @@ use crate::libgit2::config::config::{
     ConfigError, ConfigLevel, ConfigMut, EntryArc, EntryMut, EntryRef,
 };
 use crate::libgit2::util::errors::ErrorClass;
-use crate::libgit2::util::sys::errors::{runtime_pinned, set};
+use crate::libgit2::util::sys::errors::set;
 
 use crate::ffi;
 
@@ -943,15 +941,6 @@ define_ctype!(
     /// Shared handles only inspect metadata; all dispatch requires exclusivity.
     /// No Send/Sync or Clone is asserted for arbitrary third-party backends.
     ///
-    /// ```compile_fail
-    /// use libgit2::libgit2::config::sys::config::Backend;
-    /// let backend = Backend::from_string(b"[a]\nb=c\n", None).unwrap()
-    ///     .open(libgit2::libgit2::config::config::ConfigLevel::LOCAL).unwrap();
-    /// let view = backend.as_ref();
-    /// drop(backend);
-    /// assert_eq!(view.version(), 1);
-    /// ```
-    ///
     /// Wraps: git_config_backend
     Backend, BackendRef, BackendMut, ffi::git_config_backend
 );
@@ -1002,12 +991,6 @@ pub type BackendBox = ffibox::CBox<Backend, BackendFree>;
 /// Construction phase: only metadata and a consuming one-time open are available.
 /// C retains stable storage throughout initialization; failure frees it normally.
 ///
-/// ```compile_fail
-/// use libgit2::libgit2::config::sys::config::Backend;
-/// let mut pending = Backend::from_string(b"[a]\nb=c\n", None).unwrap();
-/// pending.as_mut().get(c"a.b").unwrap();
-/// ```
-///
 /// Handwritten
 pub struct UnopenedBackend(BackendBox);
 
@@ -1033,72 +1016,6 @@ impl Backend {
         assert_eq!(rc, 0, "backend init refused its own version");
         // SAFETY: successful init wrote every field, including nullable callbacks.
         Self(unsafe { raw.assume_init() }, PhantomData)
-    }
-
-    /// Copies configuration bytes and options; parsing occurs during one-time open.
-    /// Empty and non-UTF-8 input are allowed. No input borrow is retained.
-    ///
-    /// Wraps: git_config_backend_from_string
-    pub fn from_string(
-        data: &[u8],
-        options: Option<BackendMemoryOptionsRef<'_, '_>>,
-    ) -> Result<UnopenedBackend, ConfigError> {
-        if !runtime_pinned() {
-            return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
-        }
-        let mut out = ptr::null_mut();
-        // SAFETY: input covers data.len bytes, out is writable, and C only reads
-        // options and copies its strings; it does not mutate or retain that struct.
-        let rc = unsafe {
-            ffi::git_config_backend_from_string(
-                &mut out,
-                data.as_ptr().cast(),
-                data.len(),
-                options.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut()),
-            )
-        };
-        backend_status(rc)?;
-        // SAFETY: success returned one complete memory allocation with its matching
-        // free callback; its copied data/options need no external keepalive.
-        let backend = unsafe { BackendBox::from_c(out) };
-        Ok(UnopenedBackend(
-            backend.expect("backend constructor returned NULL"),
-        ))
-    }
-
-    /// Copies key=value strings. C subtracts a NULL strchr result for a missing
-    /// '=' during open, so malformed pairs are rejected before entering C.
-    ///
-    /// Wraps: git_config_backend_from_values
-    pub fn from_values(
-        values: &[&CStr],
-        options: Option<BackendMemoryOptionsRef<'_, '_>>,
-    ) -> Result<UnopenedBackend, ConfigError> {
-        if !runtime_pinned() {
-            return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
-        }
-        if values.iter().any(|v| !v.to_bytes().contains(&b'=')) {
-            set(ErrorClass::Config, c"expected key=value pair");
-            return Err(ConfigError::from_libgit2(ffi::GIT_EINVALIDSPEC));
-        }
-        let pointers: Vec<_> = values.iter().map(|v| v.as_ptr()).collect();
-        let mut out = ptr::null_mut();
-        // SAFETY: readable array and strings for the call, writable out. C copies
-        // each string and reads/copies options without retaining either input.
-        let rc = unsafe {
-            ffi::git_config_backend_from_values(
-                &mut out,
-                pointers.as_ptr().cast_mut(),
-                pointers.len(),
-                options.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut()),
-            )
-        };
-        backend_status(rc)?;
-        // SAFETY: fresh complete allocation paired with its own free callback.
-        let backend = unsafe { BackendBox::from_c(out) };
-        Ok(UnopenedBackend(
-            backend.expect("backend constructor returned NULL"),
-        ))
     }
 }
 
@@ -1147,28 +1064,7 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// Successful registration is released by the config (or its last level view).
     ///
     /// Priorities must be in `0..i32::MAX`, as with `add_file`. A repository, when
-    /// supplied, stays borrowed for the configuration's `'r`; memory backends ignore
-    /// it. This phase currently constructs only independently owned memory backends.
-    ///
-    /// An opened backend cannot be registered a second time:
-    /// ```compile_fail
-    /// use libgit2::libgit2::config::config::{Config, ConfigLevel};
-    /// use libgit2::libgit2::config::sys::config::Backend;
-    /// let mut config = Config::new().unwrap();
-    /// let backend = Backend::from_values(&[c"a.b=1"], None).unwrap()
-    ///     .open(ConfigLevel::LOCAL).unwrap();
-    /// config.as_mut().add_backend(backend, ConfigLevel::LOCAL, None, false).unwrap();
-    /// ```
-    ///
-    /// Registration moves the owner, not a stored Rust borrow:
-    /// ```compile_fail
-    /// use libgit2::libgit2::config::config::{Config, ConfigLevel};
-    /// use libgit2::libgit2::config::sys::config::Backend;
-    /// let mut config = Config::new().unwrap();
-    /// let backend = Backend::from_values(&[c"a.b=1"], None).unwrap();
-    /// config.as_mut().add_backend(backend, ConfigLevel::LOCAL, None, false).unwrap();
-    /// let _ = backend.as_ref();
-    /// ```
+    /// supplied, stays borrowed for the configuration's `'r`.
     ///
     /// Wraps: git_config_add_backend
     pub fn add_backend(
@@ -1914,7 +1810,6 @@ mod unit_tests {
             commits: Cell<usize>,
             rollbacks: Cell<usize>,
             frees: Cell<usize>,
-            reads: Cell<usize>,
             fail_rollback: Cell<bool>,
             opens: Cell<usize>,
             open_status: Cell<i32>,
@@ -2168,76 +2063,6 @@ mod unit_tests {
             backend.as_ref().release_policy().release(backend);
             assert_eq!(state.frees.get(), 1);
         }
-        unsafe extern "C" fn snapshot(
-            out: *mut *mut ffi::git_config_backend,
-            _source: *mut ffi::git_config_backend,
-        ) -> i32 {
-            let data = b"[a]\nb=value\n";
-            // SAFETY: callback supplies a writable output slot; the pinned C runtime
-            // copies this static input into a fresh matching-free memory allocation.
-            unsafe {
-                ffi::git_config_backend_from_string(
-                    out,
-                    data.as_ptr().cast(),
-                    data.len(),
-                    ptr::null_mut(),
-                )
-            }
-        }
-        unsafe extern "C" fn get(
-            p: *mut ffi::git_config_backend,
-            key: *const core::ffi::c_char,
-            out: *mut *mut ffi::git_config_backend_entry,
-        ) -> i32 {
-            // SAFETY: matched Mock callback, allocation live for this call.
-            let s = unsafe { state(p) };
-            s.reads.set(s.reads.get() + 1);
-            let mut memory = ptr::null_mut();
-            // SAFETY: writable slot for a fresh, unopened memory backend.
-            let rc = unsafe { snapshot(&mut memory, p) };
-            assert_eq!(rc, 0);
-            // SAFETY: the memory backend is opened once, looked up and released by
-            // its own callbacks; a returned entry retains the backend's list.
-            unsafe {
-                assert_eq!(((*memory).open.unwrap())(memory, 0, ptr::null()), 0);
-                let rc = ((*memory).get.unwrap())(memory, key, out);
-                ((*memory).free.unwrap())(memory);
-                rc
-            }
-        }
-        #[test]
-        #[cfg_attr(miri, ignore = "calls C memory backends")]
-        fn writable_get_dispatches_its_own_slot_and_missing_open_cleans_up() {
-            assert!(runtime_pinned());
-            let (mut backend, state) = fixture();
-            let p = backend.as_mut().as_mut_ptr();
-            // SAFETY: exclusive fixture allocation, installs an allocation-compatible
-            // get callback (acquiring independent entries) before any handle is shared.
-            unsafe { addr_of_mut!((*p).get).write(Some(get)) };
-            // A writable backend without a snapshot slot still answers through get.
-            let entry = backend.as_mut().get(c"a.b").unwrap();
-            assert_eq!(state.reads.get(), 1);
-            assert!(backend.as_mut().get(c"a.missing").is_err());
-            assert_eq!(state.reads.get(), 2);
-            // SAFETY: as above, an independently owning snapshot callback.
-            unsafe { addr_of_mut!((*p).snapshot).write(Some(snapshot)) };
-            let mut snapshot = backend.as_mut().snapshot().unwrap();
-            drop(backend);
-            assert_eq!(state.frees.get(), 1);
-            assert_eq!(entry.as_ref().entry().value(), Some(c"value"));
-            let copy = snapshot.as_mut().get(c"a.b").unwrap();
-            assert_eq!(copy.as_ref().entry().value(), Some(c"value"));
-            assert_eq!(state.reads.get(), 2);
-            let (backend, state) = fixture();
-            // This pending fixture has a real matching free but no open slot.
-            assert!(
-                BackendOpen
-                    .call(UnopenedBackend(backend), ConfigLevel::LOCAL)
-                    .is_err()
-            );
-            assert_eq!(state.frees.get(), 1);
-            assert!(backend_status(1).is_err());
-        }
         #[test]
         fn failed_rollback_on_drop_is_discarded() {
             let (mut backend, state) = fixture();
@@ -2355,57 +2180,6 @@ mod unit_tests {
             let error = pending.open(ConfigLevel::LOCAL).unwrap_err();
             assert_eq!(error.message(), c"config backend does not implement 'open'");
             assert_eq!(state.frees.get(), 1);
-        }
-
-        /// The memory constructors fail cleanly when libgit2's allocator refuses
-        /// the backend shell, its list or either option string. C leaks both
-        /// strings when the later copy of the input fails, so the sweep stops there.
-        #[test]
-        #[cfg_attr(miri, ignore = "installs a libgit2 allocator")]
-        fn constructors_report_allocation_failure() {
-            use crate::libgit2::config::config::unit_tests::{
-                ALLOWED_ALLOCATIONS, install_refusing, isolated,
-            };
-            use crate::libgit2::util::errors::ErrorCode;
-            use std::sync::atomic::Ordering::SeqCst;
-            isolated(
-                concat!(module_path!(), "::constructors_report_allocation_failure"),
-                || {
-                    install_refusing();
-                    // Warm the thread's error state before limiting allocations.
-                    assert!(Backend::from_values(&[c"no-equals"], None).is_err());
-                    let mut options = BackendMemoryOptions::new();
-                    options.as_mut().set_origin_path(Some(c"origin"));
-                    for granted in 0..4 {
-                        for values in [false, true] {
-                            ALLOWED_ALLOCATIONS.store(granted, SeqCst);
-                            let result = if values {
-                                Backend::from_values(&[c"a.b=c"], Some(options.as_ref()))
-                            } else {
-                                Backend::from_string(b"[a]\nb = c\n", Some(options.as_ref()))
-                            };
-                            ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
-                            let error = result.unwrap_err();
-                            assert_eq!(error.code(), Some(ErrorCode::Generic));
-                            assert_eq!(error.class(), Some(ErrorClass::NoMemory));
-                        }
-                    }
-                    let mut backend = Backend::from_values(&[c"a.b=c"], Some(options.as_ref()))
-                        .unwrap()
-                        .open(ConfigLevel::LOCAL)
-                        .unwrap();
-                    let entry = backend.as_mut().get(c"a.b").unwrap();
-                    assert_eq!(entry.as_ref().entry().origin_path(), Some(c"origin"));
-                },
-            );
-        }
-
-        #[test]
-        #[cfg_attr(miri, ignore = "pins foreign runtime")]
-        fn values_missing_equals_rejected_without_constructing_backend() {
-            let error = Backend::from_values(&[c"a.b"], None).err().unwrap();
-            assert_eq!(error.raw_code(), ffi::GIT_EINVALIDSPEC);
-            assert_eq!(error.message(), c"expected key=value pair");
         }
     }
 }

@@ -1809,21 +1809,6 @@ impl BackendMut<'_> {
     /// nameless entry is allowed without a pattern, but rejected when matching
     /// would pass its NULL name to C's regex engine.
     ///
-    /// The walked backend cannot be reentered or dropped through the callback:
-    /// ```compile_fail
-    /// use libgit2::libgit2::config::config::{ConfigLevel, EntryRef, ForeachCallback};
-    /// use libgit2::libgit2::config::sys::config::Backend;
-    /// use std::ops::ControlFlow;
-    /// let mut backend = Backend::from_values(&[c"a.b=1"], None).unwrap()
-    ///     .open(ConfigLevel::LOCAL).unwrap();
-    /// let mut view = backend.as_mut();
-    /// let mut f = |_: EntryRef<'_>| {
-    ///     backend.as_mut().get(c"a.b").unwrap();
-    ///     ControlFlow::Continue(())
-    /// };
-    /// view.foreach_match(None, &mut ForeachCallback::new(&mut f)).unwrap();
-    /// ```
-    ///
     /// Wraps: git_config_backend_foreach_match
     pub fn foreach_match(
         &mut self,
