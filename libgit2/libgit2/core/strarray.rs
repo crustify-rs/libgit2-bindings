@@ -1011,6 +1011,26 @@ mod unit_tests {
             unsafe { ffi::git_pathspec_free(ps) };
             out
         };
+        let safe_matches = |spec: StrArrayRef<'_>| -> Vec<(c_int, c_int)> {
+            let ps = crate::libgit2::index::pathspec::Pathspec::new(spec).unwrap();
+            paths
+                .iter()
+                .map(|p| {
+                    // SAFETY: the safe constructor's owner keeps the compiled pathspec
+                    // alive; matching only reads it and the terminated input path.
+                    unsafe {
+                        (
+                            ffi::git_pathspec_matches_path(ps.as_c_ptr(), 0, p.as_ptr()),
+                            ffi::git_pathspec_matches_path(
+                                ps.as_c_ptr(),
+                                ffi::GIT_PATHSPEC_IGNORE_CASE,
+                                p.as_ptr(),
+                            ),
+                        )
+                    }
+                })
+                .collect()
+        };
         let text = ["src/*.c", "!src/skip.c", "docs/"];
         let patterns: Vec<CString> = text.iter().map(|s| CString::new(*s).unwrap()).collect();
         let view = StrArrayView::new(&patterns);
@@ -1020,20 +1040,17 @@ mod unit_tests {
         assert!(
             expected_matches.iter().any(|m| m.0 == 1) && expected_matches.iter().any(|m| m.0 == 0)
         );
-        assert_eq!(matches(view.as_ref().as_ptr()), expected_matches);
+        assert_eq!(safe_matches(view.as_ref()), expected_matches);
         let owned = view.as_ref().to_str_array().unwrap();
-        assert_eq!(matches(owned.as_ref().as_ptr()), expected_matches);
+        assert_eq!(safe_matches(owned.as_ref()), expected_matches);
         assert_eq!(contents(view.as_ref()), expected(&text));
         // SAFETY: a read through the view's own handle: C left the array as built.
         let after = unsafe { view.as_ref().as_ptr().read() };
         assert_eq!(after.count, 3);
         // The empty view is NULL, which libgit2 reads as the empty pathspec.
         let empty = StrArrayView::default();
-        assert_eq!(matches(empty.as_ref().as_ptr()), matches(ptr::null()));
-        assert_eq!(
-            matches(StrArray::new().as_ref().as_ptr()),
-            matches(ptr::null())
-        );
+        assert_eq!(safe_matches(empty.as_ref()), matches(ptr::null()));
+        assert_eq!(safe_matches(StrArray::new().as_ref()), matches(ptr::null()));
     }
 
     /// A failed allocation is `None` from every copying constructor, releases the
