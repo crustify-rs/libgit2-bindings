@@ -1,6 +1,7 @@
 //! Public safe surface of `sys/config.h`: memory-options initialization,
 //! replacement, copies and exclusive reborrows; backend entries' retained storage
-//! and release; iterators' construction, lending, filtering and release points.
+//! and release; iterators' construction, lending, filtering and release points;
+//! memory backends' construction, one-time open, dispatch and snapshot chains.
 //! The lifetime/aliasing failures are compile-fail doctests.
 #![forbid(unsafe_code)]
 
@@ -563,5 +564,40 @@ mod backends {
             .open(ConfigLevel::LOCAL)
             .unwrap();
         assert!(empty.as_mut().get(c"a.b").is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_template_refuses_every_slot_and_snapshot_chains_outlive_sources() {
+        let mut template = Backend::new();
+        assert!(format!("{template:?}").starts_with("Backend { version: 1, readonly: 0,"));
+        {
+            let mut b = template.as_mut();
+            let message = |e: libgit2::libgit2::config::config::ConfigError| {
+                e.message().to_str().unwrap().to_owned()
+            };
+            let refused = "config backend does not implement";
+            assert!(message(b.get(c"a.b").unwrap_err()).starts_with(refused));
+            assert!(message(b.iterator().unwrap_err()).starts_with(refused));
+            assert!(message(b.snapshot().unwrap_err()).starts_with(refused));
+            assert!(message(b.lock().unwrap_err()).ends_with("'lock'"));
+        }
+        let pending = Backend::from_string(b"[a]\nb = one\n", None).unwrap();
+        assert!(format!("{pending:?}").starts_with("UnopenedBackend(Backend {"));
+        let mut source = pending.open(ConfigLevel::GLOBAL).unwrap();
+        let mut first = source.as_mut().snapshot().unwrap();
+        drop(source);
+        let mut second = first.as_mut().snapshot().unwrap();
+        let entry = first.as_mut().get(c"a.b").unwrap();
+        drop(first);
+        let mut b = second.as_mut();
+        let mut iter = b.iterator().unwrap();
+        let mut m = iter.as_mut();
+        let lent = m.advance().unwrap().unwrap();
+        assert_eq!(lent.entry().value(), entry.as_ref().entry().value());
+        assert!(lent.entry().value() == Some(c"one"));
+        drop(iter);
+        drop(second);
+        assert_eq!(entry.as_ref().entry().level(), ConfigLevel::GLOBAL);
     }
 }

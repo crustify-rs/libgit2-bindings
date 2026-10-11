@@ -7323,6 +7323,57 @@
    }
   },
   {
+   "name": "git_config_backend_from_file",
+   "defined_in": "src/libgit2/config_file.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes a fresh sole writable file backend (readonly=0) only on success. Unopened until its open slot runs (which may retain the repository passed to open); released through its own free slot (config_file_free)."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied with git__strdup into the backend's file path; not retained."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_backend_from_string",
    "defined_in": "src/libgit2/config_mem.c",
    "lifetime": {
@@ -7379,6 +7430,59 @@
       "nullable": false,
       "mutable": true,
       "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_backend_snapshot",
+   "defined_in": "src/libgit2/config_snapshot.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes a fresh sole snapshot backend (readonly=1, version 1, every slot filled) only on success; GIT_ERROR_CHECK_ALLOC returns -1 without writing. The result is unopened: its open callback must run before get/iterator, and it is released through its own free slot (config_snapshot_free)."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Stored uncounted in config_snapshot_backend.source and dereferenced only by config_snapshot_open (source->iterator). The source must stay live until the snapshot is opened; after open no path reads it, so it may dangle. Reached through the memory and snapshot backends' snapshot slots and config_file_snapshot."
      }
     }
    ]
