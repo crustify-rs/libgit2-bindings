@@ -5,14 +5,22 @@
 //! clone. `git_index_name_add` duplicates its inputs, while clearing or releasing
 //! the index destroys its entries. No public C operation transfers standalone
 //! ownership of an entry or permits mutation of a returned entry.
+//!
+//! REUC (resolve-undo) entries follow the same model. The index allocates each one
+//! with its path in the same block (`reuc_entry_alloc`, from `git_index_reuc_add` or
+//! the index file reader) and frees it with that block (`index_entry_reuc_free`) when
+//! a same-path add replaces it, on remove, clear, reload, and when the index is
+//! released. The public API only lends const entries.
 
 use core::ffi::CStr;
-use core::ptr::{self, addr_of};
+use core::fmt;
+use core::ptr::{self, NonNull, addr_of};
 
-use ffibox::define_ctype;
+use ffibox::{CSlice, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::index::index::{IndexMut, IndexRef};
+use crate::libgit2::oid::oid::{Oid, OidRef};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::set;
 
@@ -74,6 +82,118 @@ impl<'a> NameEntryRef<'a> {
                 Some(CStr::from_ptr(p))
             }
         }
+    }
+}
+
+define_ctype!(
+    /// A resolve-undo (REUC) record owned by an index: the path of a conflict that
+    /// was resolved, and the mode and blob id each side had before resolution.
+    /// Obtain its read-only handle with [`IndexMut::reuc_entry`] or
+    /// [`IndexMut::reuc_entry_by_path`]; copy what must survive index mutation. The
+    /// layout and exclusive handle are only for internal FFI interoperability, not
+    /// independently constructed owners: libgit2 publishes no constructor, clone or
+    /// destructor for a standalone entry.
+    ///
+    /// Like the index, a record never crosses threads:
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::index::index::Index;
+    /// let mut index = Index::new().unwrap();
+    /// let handle = index.as_mut();
+    /// let entry = handle.reuc_entry(0).unwrap();
+    /// std::thread::scope(|s| {
+    ///     s.spawn(move || entry.path());
+    /// });
+    /// ```
+    ///
+    /// Wraps: git_index_reuc_entry
+    ReucEntry, ReucEntryRef, ReucEntryMut, ffi::git_index_reuc_entry
+);
+
+/// One side of a resolved conflict as a REUC record keeps it.
+#[derive(Clone, Copy, Debug)]
+pub struct ReucSide<'a> {
+    /// The file mode the side had, as stored: any non-zero 32-bit value read from
+    /// an index file or passed to `git_index_reuc_add`, not only the modes
+    /// [`FileMode`](crate::libgit2::core::types::FileMode) names.
+    pub mode: u32,
+    /// The side's blob id, borrowed from the record.
+    pub id: OidRef<'a>,
+}
+
+impl<'a> ReucEntryRef<'a> {
+    /// The resolved path. Never NULL: libgit2 stores it in the record's own
+    /// allocation, so it lives exactly as long as the record.
+    ///
+    /// Field: git_index_reuc_entry.path
+    pub fn path(&self) -> &'a CStr {
+        // SAFETY: the handle keeps this initialized, index-owned entry alive and
+        // unmodified for 'a. Both allocators point `path` at the NUL-terminated tail
+        // of the entry's own block, never NULL, and nothing writes through it.
+        unsafe { CStr::from_ptr(addr_of!((*self.as_ptr()).path).read()) }
+    }
+
+    /// The ancestor's, our and their stored modes, in that order; 0 marks a side
+    /// that did not exist.
+    ///
+    /// Field: git_index_reuc_entry.mode
+    pub fn modes(&self) -> [u32; 3] {
+        // SAFETY: a read through the shared handle's pointer to a live entry; any
+        // three `u32`s are valid.
+        unsafe { addr_of!((*self.as_ptr()).mode).read() }
+    }
+
+    /// The ancestor's, our and their ids, in that order, borrowed in place. A slot
+    /// whose mode is 0 carries no id: libgit2 leaves it all zero (typeless).
+    ///
+    /// Field: git_index_reuc_entry.oid
+    pub fn ids(&self) -> CSlice<'a, Oid> {
+        // SAFETY: the field projected from the shared handle's pointer to a live entry
+        // is three initialised `git_oid`s (`Oid` is transparent over one), non-NULL,
+        // which live and stay unmodified for 'a with the entry; the run only reads.
+        unsafe {
+            let ids = addr_of!((*self.as_ptr()).oid).cast::<Oid>().cast_mut();
+            CSlice::from_raw_parts(NonNull::new_unchecked(ids), 3)
+        }
+    }
+
+    /// The common ancestor's side, or `None` when it had no such file.
+    pub fn ancestor(&self) -> Option<ReucSide<'a>> {
+        self.side(0)
+    }
+
+    /// Our side, or `None` when it had no such file.
+    pub fn ours(&self) -> Option<ReucSide<'a>> {
+        self.side(1)
+    }
+
+    /// Their side, or `None` when it had no such file.
+    pub fn theirs(&self) -> Option<ReucSide<'a>> {
+        self.side(2)
+    }
+
+    /// Slot `i`, present exactly when its mode is non-zero: libgit2 copies (and
+    /// writes) an id only for those.
+    fn side(&self, i: usize) -> Option<ReucSide<'a>> {
+        let mode = self.modes()[i];
+        if mode == 0 {
+            return None;
+        }
+        Some(ReucSide {
+            mode,
+            id: self.ids().get(i)?,
+        })
+    }
+}
+
+impl fmt::Debug for ReucEntryRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReucEntry")
+            .field("path", &self.path())
+            .field("ancestor", &self.ancestor())
+            .field("ours", &self.ours())
+            .field("theirs", &self.theirs())
+            .finish()
     }
 }
 
@@ -156,6 +276,69 @@ impl IndexMut<'_> {
         }
     }
 
+    /// Read the REUC record at `position`, in path order; out-of-range positions
+    /// return `None`. Records stay valid while this handle is only shared, so several
+    /// may be held at once, but none survives a mutation through it or the index's
+    /// release.
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::index::index::Index;
+    /// let mut index = Index::new().unwrap();
+    /// let mut handle = index.as_mut();
+    /// let entry = handle.reuc_entry(0).unwrap();
+    /// handle.clear_names().unwrap();
+    /// let _ = entry.path();
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::index::index::Index;
+    /// let mut index = Index::new().unwrap();
+    /// let handle = index.as_mut();
+    /// let path = handle.reuc_entry(0).unwrap().path();
+    /// drop(index);
+    /// let _ = path.to_bytes();
+    /// ```
+    ///
+    /// A shared index may change behind any of its holders, so its shared handle
+    /// lends no records:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::index::index::{Index, IndexArc};
+    /// let index: IndexArc = Index::new().unwrap().into();
+    /// let _ = index.as_ref().reuc_entry(0);
+    /// ```
+    ///
+    /// Wraps: git_index_reuc_get_byindex
+    pub fn reuc_entry(&self, position: usize) -> Option<ReucEntryRef<'_>> {
+        // SAFETY: the exclusive handle proves no other holder can change the index,
+        // and the shared borrow of it excludes clearing, reloading, and freeing until
+        // the returned borrow ends. C only reads the vector despite the non-const
+        // parameter, returning null or one initialized, index-owned entry (whose
+        // address no reordering changes); no Rust reference covers it.
+        unsafe {
+            ReucEntryRef::from_ptr(
+                ffi::git_index_reuc_get_byindex(self.as_ref().as_ptr().cast_mut(), position)
+                    .cast_mut(),
+            )
+        }
+    }
+
+    /// Find the REUC record for `path`, or `None`. The search folds case when the
+    /// index ignores case. Borrowing is as for [`reuc_entry`](Self::reuc_entry).
+    ///
+    /// Wraps: git_index_reuc_get_bypath
+    pub fn reuc_entry_by_path(&self, path: &CStr) -> Option<ReucEntryRef<'_>> {
+        // SAFETY: as in `reuc_entry`; C returns before searching unless the vector is
+        // flagged sorted, so it only reads. `path` is a NUL-terminated key read for the
+        // binary search and never retained.
+        unsafe {
+            ReucEntryRef::from_ptr(
+                ffi::git_index_reuc_get_bypath(self.as_ref().as_ptr().cast_mut(), path.as_ptr())
+                    .cast_mut(),
+            )
+        }
+    }
+
     /// Destroy all rename-conflict records and their strings, leaving the index
     /// reusable. Existing record/string borrows must end before this call.
     ///
@@ -213,5 +396,88 @@ mod unit_tests {
             assert_eq!(err.class(), Some(ErrorClass::Invalid));
             assert_eq!(index.as_ref().name_entry_count(), 0);
         }
+    }
+
+    fn raw_oid(kind: u32, first: u8) -> ffi::git_oid {
+        let mut id = [0; 32];
+        id[0] = first;
+        id[31] = !first;
+        ffi::git_oid {
+            type_: kind as _,
+            id,
+        }
+    }
+
+    #[test]
+    fn reuc_layout_and_side_projection() {
+        assert_eq!(
+            size_of::<ReucEntry>(),
+            size_of::<ffi::git_index_reuc_entry>()
+        );
+        assert_eq!(
+            align_of::<ReucEntry>(),
+            align_of::<ffi::git_index_reuc_entry>()
+        );
+        let raw = ffi::git_index_reuc_entry {
+            mode: [0, 0o100644, u32::MAX],
+            oid: [
+                raw_oid(0, 0),
+                raw_oid(ffi::GIT_OID_SHA1, 0x11),
+                raw_oid(ffi::GIT_OID_SHA256, 0x22),
+            ],
+            path: c"dir/\xff".as_ptr().cast_mut(),
+        };
+        // SAFETY: the raw entry is initialized local storage whose path is an
+        // immutable static C string. Neither changes while the handle is used; it does
+        // not assume ownership.
+        let view = unsafe { ReucEntryRef::from_ptr(ptr::from_ref(&raw).cast_mut()) }.unwrap();
+        let copy = view;
+        assert_eq!(view.path(), c"dir/\xff");
+        assert_eq!(copy.modes(), [0, 0o100644, u32::MAX]);
+        let ids = view.ids();
+        assert_eq!(ids.len(), 3);
+        // Compare in Rust: `OidRef`'s `PartialEq` calls libgit2.
+        for (id, raw) in ids.iter().zip(&raw.oid) {
+            assert_eq!(id.raw_kind(), raw.type_);
+            assert_eq!(id.id(), raw.id);
+        }
+        assert!(ids.get(3).is_none());
+        assert!(view.ancestor().is_none());
+        let ours = view.ours().unwrap();
+        assert_eq!(ours.mode, 0o100644);
+        assert_eq!(ours.id.raw_kind(), ffi::GIT_OID_SHA1 as u8);
+        assert_eq!(ours.id.id()[0], 0x11);
+        let theirs = view.theirs().unwrap();
+        assert_eq!(theirs.mode, u32::MAX);
+        assert_eq!(theirs.id.id()[31], !0x22);
+        let debug = format!("{view:?}");
+        assert!(debug.starts_with(
+            "ReucEntry { path: \"dir/\\xff\", ancestor: None, ours: Some(ReucSide { mode: 33188,"
+        ));
+    }
+
+    #[test]
+    fn reuc_absent_sides_ignore_stale_ids() {
+        // A zero mode hides whatever its slot holds; a non-zero one exposes even a
+        // typeless id, as C stores and writes it.
+        let raw = ffi::git_index_reuc_entry {
+            mode: [0, 0, 1],
+            oid: [
+                raw_oid(ffi::GIT_OID_SHA1, 1),
+                raw_oid(ffi::GIT_OID_SHA1, 2),
+                raw_oid(0, 0),
+            ],
+            path: c"".as_ptr().cast_mut(),
+        };
+        // SAFETY: as above: initialized local storage and a static empty path.
+        let view = unsafe { ReucEntryRef::from_ptr(ptr::from_ref(&raw).cast_mut()) }.unwrap();
+        assert_eq!(view.path(), c"");
+        assert!(view.ancestor().is_none());
+        assert!(view.ours().is_none());
+        let theirs = view.theirs().unwrap();
+        assert_eq!((theirs.mode, theirs.id.raw_kind()), (1, 0));
+        assert_eq!(view.ids().get(1).unwrap().id()[0], 2);
+        // SAFETY: null pointers adopt as no handle.
+        assert!(unsafe { ReucEntryRef::from_ptr(ptr::null_mut()) }.is_none());
     }
 }

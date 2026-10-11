@@ -1785,6 +1785,28 @@
    ]
   },
   {
+   "name": "git_index_reuc_entry",
+   "defined_in": "include/git2/sys/index.h",
+   "_comment_agent": "Entries are index-owned (index->reuc vector); the public API only lends const pointers (get_byindex/get_bypath) and publishes no standalone constructor, clone or destructor. Internal lifecycle: reuc_entry_alloc (calloc of struct+path, path copied inline; mode/oid zeroed), index_entry_reuc_init (fills modes and copies an oid for every slot whose stored uint32 mode is non-zero), index_entry_reuc_free (git__free of the whole block). Freed by reuc_add replacing a same-path entry (index_reuc_on_dup), reuc_remove, reuc_clear (also via git_index_read/read_tree/clear), and index free. oid[i] is meaningful only when mode[i] != 0; otherwise it is the calloc'd typeless all-zero GIT_OID_NONE. mode[] holds whatever uint32 the add call or on-disk octal stage supplied (negative int modes wrap).",
+   "fields": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "self"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Never NULL: reuc_entry_alloc (the only allocator, used by git_index_reuc_add and read_reuc) points it at the NUL-terminated flexible-array tail of the same reuc_entry_internal allocation, so it lives and dies with the entry and has no separate free. Nothing writes through it after allocation; checkout, merge, the comparators and the writer only read it."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_options",
    "defined_in": "include/git2/index.h",
    "_comment_agent": "Two scalars, no pointer field and no teardown. git_index_options_init copies GIT_INDEX_OPTIONS_INIT ({GIT_INDEX_OPTIONS_VERSION}, so oid_type 0) and fails only for another version; git_index_open_ext reads oid_type 0 as GIT_OID_DEFAULT and GIT_ASSERT_ARGs any other value is a valid git_oid_t. Read for the call only, never retained. Rust: IndexOptions value (define_ctype, Copy, Send, Sync), built by git_index_options_init; the setter only stores a named OidType or 0, keeping the assertion unreachable.",
@@ -12184,6 +12206,99 @@
    ]
   },
   {
+   "name": "git_index_reuc_get_byindex",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed index, no refcount taken. Only reads the REUC vector (asserts it sorted; it is always kept sorted by add/read/set_caps), despite the non-const parameter."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Read-only index-owned entry, NULL out of bounds. Freed by reuc_add of the same path, reuc_remove, reuc_clear, index read/read_tree/clear, checkout's REUC update, and index free."
+    }
+   }
+  },
+  {
+   "name": "git_index_reuc_get_bypath",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed index; binary search over the sorted REUC vector with the case-sensitivity the index caps select. Read-only."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Search key, read for the call only."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Read-only index-owned entry, NULL when absent (or the vector is empty); invalidated as for get_byindex."
+    }
+   }
+  },
+  {
    "name": "git_index_options_init",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {
@@ -22299,6 +22414,136 @@
    ]
   },
   {
+   "name": "index_entry_reuc_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "reuc",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "reuc",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes one reuc entry allocated by reuc_entry_alloc; the inline path tail goes with it (single git__free). NULL is accepted (git__free). Internal static helper; public clients never release an entry directly."
+     }
+    }
+   ]
+  },
+  {
+   "name": "index_entry_reuc_init",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "reuc_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "ancestor_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied only when the stored mode is non-zero (then asserted non-NULL); ignored otherwise."
+     }
+    },
+    {
+     "name": "our_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:our_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "As ancestor_oid."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into the entry; not retained."
+     }
+    },
+    {
+     "name": "reuc_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:reuc_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives a fresh entry from reuc_entry_alloc before any failure past the argument asserts; the caller owns it and releases it with index_entry_reuc_free on every failure path (it may be partly filled or NULL)."
+     }
+    },
+    {
+     "name": "their_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:their_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "As ancestor_oid."
+     }
+    }
+   ]
+  },
+  {
    "name": "index_name_entry_free",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {
@@ -22470,6 +22715,51 @@
      "nullable": true,
      "mutable": true,
      "note": "reftable's allocator: the hook set by reftable_set_alloc (libgit2 installs git__ wrappers in refdb_reftable.c) or malloc. NON-zeroing; returns NULL for sz == 0 and on failure. Released by reftable_free."
+    }
+   }
+  },
+  {
+   "name": "reuc_entry_alloc",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "return",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for strlen/memcpy into the entry's inline tail; not retained."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": true,
+     "borrowed": null,
+     "nullable": true,
+     "mutable": true,
+     "note": "Fresh calloc'd entry whose path points into its own allocation; modes and oids zeroed. NULL on size overflow or OOM. Released by index_entry_reuc_free."
     }
    }
   }
