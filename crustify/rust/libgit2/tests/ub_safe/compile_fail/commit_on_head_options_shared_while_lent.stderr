@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `options` as mutable because it is also borrowed as immutable
+  --> tests/ub_safe/compile_fail/commit_on_head_options_shared_while_lent.rs:10:50
+   |
+ 9 |     let shared = options.as_ref();
+   |                  ------- immutable borrow occurs here
+10 |     let _ = create_from_stage(repo, c"m\n", Some(options.as_mut()));
+   |                                                  ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+11 |     let _ = shared.allow_empty_commit();
+   |             ------ immutable borrow later used here

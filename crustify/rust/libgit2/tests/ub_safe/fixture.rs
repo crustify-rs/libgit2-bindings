@@ -744,97 +744,36 @@ pub mod create_ext {
     }
 }
 
-pub mod create_options {
-    use std::ffi::{CStr, c_int};
-    use std::ptr;
+/// Fills a repository's index, standing in for the `git_index_read_tree` and
+/// `git_index_add` wrappers (a later run), which replace it.
+pub mod stage {
+    use std::ffi::CStr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::commit::CreateOptions;
+    use libgit2::libgit2::index::index::IndexArc;
+    use libgit2::libgit2::object::tree::TreeArc;
+    use libgit2::libgit2::oid::oid::Oid;
 
-    use super::TempRepo;
-
-    /// The empty tree of `repo`, written and looked up; freed by the caller.
-    fn empty_tree(raw: *mut ffi::git_repository) -> *mut ffi::git_tree {
-        let (mut builder, mut tree_id, mut tree) =
-            (ptr::null_mut(), ffi::git_oid::default(), ptr::null_mut());
-        // SAFETY: a live repository; each out-parameter receives an object the caller
-        // or this block frees.
-        unsafe {
-            assert_eq!(ffi::git_treebuilder_new(&mut builder, raw, ptr::null()), 0);
-            assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-            ffi::git_treebuilder_free(builder);
-            assert_eq!(ffi::git_tree_lookup(&mut tree, raw, &tree_id), 0);
+    /// Reads `tree` into `index`, then adds a blob entry for each `(path, id)`.
+    pub fn stage(index: &IndexArc, tree: &TreeArc<'_>, entries: &[(&CStr, &Oid)]) {
+        // SAFETY: the live index and tree the owners hold, on this thread.
+        let rc = unsafe { ffi::git_index_read_tree(index.as_c_ptr(), tree.as_c_ptr()) };
+        assert_eq!(rc, 0);
+        for (path, id) in entries {
+            let id = id.as_ref();
+            // SAFETY: a zeroed entry is a valid one with no flags or stat data.
+            let mut entry: ffi::git_index_entry = unsafe { std::mem::zeroed() };
+            entry.mode = ffi::GIT_FILEMODE_BLOB;
+            entry.id = ffi::git_oid {
+                type_: id.raw_kind(),
+                id: id.id(),
+            };
+            entry.path = path.as_ptr();
+            // SAFETY: the live index; libgit2 copies the entry and its NUL-terminated
+            // path.
+            let rc = unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) };
+            assert_eq!(rc, 0);
         }
-        tree
-    }
-
-    /// The raw text of the commit `id` of `raw`.
-    fn read(raw: *mut ffi::git_repository, id: &ffi::git_oid) -> String {
-        let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
-        // SAFETY: the commit just written is read back and copied; each object is
-        // released once.
-        unsafe {
-            assert_eq!(ffi::git_repository_odb(&mut odb, raw), 0);
-            assert_eq!(ffi::git_odb_read(&mut obj, odb, id), 0);
-            let data = std::slice::from_raw_parts(
-                ffi::git_odb_object_data(obj).cast::<u8>(),
-                ffi::git_odb_object_size(obj),
-            );
-            let text = String::from_utf8(data.to_vec()).unwrap();
-            ffi::git_odb_object_free(obj);
-            ffi::git_odb_free(odb);
-            text
-        }
-    }
-
-    /// `git_commit_create_from_tree` of the empty tree on `repo`'s `HEAD`, with message
-    /// `msg`, reading `options` in place: the new commit's raw text, or the code
-    /// libgit2 failed with.
-    pub fn create(repo: &TempRepo, options: &CreateOptions<'_>) -> Result<String, c_int> {
-        let raw = repo.raw();
-        let tree = empty_tree(raw);
-        let mut id = ffi::git_oid::default();
-        // SAFETY: a live repository and its tree; the options are a live value Rust
-        // holds (`CreateOptions` is transparent over the C struct), whose borrows
-        // outlive the call by their `'o`.
-        let rc = unsafe {
-            ffi::git_commit_create_from_tree(
-                &mut id,
-                raw,
-                tree,
-                c"msg\n".as_ptr(),
-                ptr::from_ref(options).cast(),
-            )
-        };
-        // SAFETY: the tree is released once.
-        unsafe { ffi::git_tree_free(tree) };
-        if rc != 0 { Err(rc) } else { Ok(read(raw, &id)) }
-    }
-
-    /// `git_commit_amend_from_tree` of `repo`'s `HEAD` commit with the empty tree and
-    /// `message` (the amended commit's for `None`), reading `options` in place: the new
-    /// commit's raw text, or the code libgit2 failed with.
-    pub fn amend(
-        repo: &TempRepo,
-        message: Option<&CStr>,
-        options: &CreateOptions<'_>,
-    ) -> Result<String, c_int> {
-        let raw = repo.raw();
-        let tree = empty_tree(raw);
-        let mut id = ffi::git_oid::default();
-        // SAFETY: as `create`; the message is NULL or NUL-terminated.
-        let rc = unsafe {
-            ffi::git_commit_amend_from_tree(
-                &mut id,
-                raw,
-                tree,
-                message.map_or(ptr::null(), CStr::as_ptr),
-                ptr::from_ref(options).cast(),
-            )
-        };
-        // SAFETY: the tree is released once.
-        unsafe { ffi::git_tree_free(tree) };
-        if rc != 0 { Err(rc) } else { Ok(read(raw, &id)) }
     }
 }
 
