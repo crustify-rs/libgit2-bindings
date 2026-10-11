@@ -75,6 +75,7 @@ use std::panic::{self, AssertUnwindSafe};
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::config::sys::config::{IteratorBox, IteratorMut};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 
@@ -1336,6 +1337,148 @@ impl_cdrop!(EntryFree, Entry, ffi::git_config_entry_free);
 /// One acquired entry reference. Not `Clone`: C publishes no entry up-ref.
 /// The backing storage stays alive independently of the config/repository.
 pub type EntryArc = CArc<Entry, EntryFree>;
+
+impl<'a, 'r> ConfigRef<'a, 'r> {
+    /// Creates an iterator borrowing this config, without retaining a reference.
+    ///
+    /// Wraps: git_config_iterator_new
+    pub fn iterator(&self) -> Result<IteratorBox<'a>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: this handle keeps config/repository live for 'a; writable out
+        // slot; C constructs a fresh complete allocation or cleans up failure.
+        let rc = unsafe { ffi::git_config_iterator_new(&mut out, self.as_ptr()) };
+        if rc != 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success wrote a fresh all-iterator owned only by out, paired
+        // with its own free callback; it borrows the config only for 'a.
+        let iter = unsafe { IteratorBox::from_c(out) };
+        Ok(iter.expect("successful iterator constructor returned NULL"))
+    }
+
+    /// Iterates keys matching C's regex syntax; `None` means all keys. The regex
+    /// is compiled/copied during construction, not retained as a Rust borrow.
+    ///
+    /// Wraps: git_config_iterator_glob_new
+    pub fn iterator_matching(&self, regexp: Option<&CStr>) -> Result<IteratorBox<'a>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: live config and writable out; regexp is NUL-terminated and
+        // borrowed only for the call. C frees failed regex construction.
+        let rc = unsafe {
+            ffi::git_config_iterator_glob_new(
+                &mut out,
+                self.as_ptr(),
+                regexp.map_or(ptr::null(), CStr::as_ptr),
+            )
+        };
+        if rc != 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success wrote a fresh glob (or, without a regex, all) iterator
+        // owned only by out, with its own free callback, borrowing config for 'a.
+        let iter = unsafe { IteratorBox::from_c(out) };
+        Ok(iter.expect("successful iterator constructor returned NULL"))
+    }
+
+    /// Iterates all values for the normalized name, optionally regex-filtered.
+    /// Name and regexp are copied/compiled, so their inputs may die immediately.
+    ///
+    /// With a regex, C's name-selection iterator is retained but value matching
+    /// uses the same PCRE2 engine in a Rust-owned enclosing allocation. C calls
+    /// strlen(NULL) on valueless entries and leaks its name on regex failure;
+    /// the filter instead skips valueless entries and cleans up failed regexes.
+    /// Empty values remain distinct and are matched normally. This corrects
+    /// undefined C behavior without changing matching of non-null values.
+    /// C's existing outer-allocation-failure leak without a regex remains.
+    ///
+    /// Wraps: git_config_multivar_iterator_new
+    pub fn multivar_iterator(
+        &self,
+        name: &CStr,
+        regexp: Option<&CStr>,
+    ) -> Result<IteratorBox<'a>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: live config; writable out; C copies the name and returns a
+        // fresh matching-callback allocation. No regex: valueless entries are
+        // safe here, and failed normalization releases its partial construction.
+        let rc = unsafe {
+            ffi::git_config_multivar_iterator_new(
+                &mut out,
+                self.as_ptr(),
+                name.as_ptr(),
+                ptr::null(),
+            )
+        };
+        if rc != 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success wrote a fresh multivar iterator owned only by out, with
+        // its own free callback; it and its inner iterator borrow config for 'a.
+        let inner = unsafe { IteratorBox::from_c(out) }
+            .expect("successful iterator constructor returned NULL");
+        match regexp {
+            None => Ok(inner),
+            Some(regexp) => crate::libgit2::config::sys::config::value_filter::new(inner, regexp),
+        }
+    }
+}
+
+impl IteratorMut<'_, '_> {
+    /// Advances to a public configuration entry. The entry is borrowed, never
+    /// acquired: it remains valid only until this exclusive reborrow ends.
+    /// `None` is libgit2's end-of-iteration status. Other errors retain their
+    /// code and message, and do not prevent retrying (C can move to a different
+    /// backend after a refresh failure).
+    ///
+    /// Unlike [`advance`](Self::advance), this exposes only the public entry,
+    /// not the enclosing backend entry or its release dispatch.
+    ///
+    /// The entry cannot survive another advance, even through the backend API:
+    ///
+    /// ```compile_fail,E0499
+    /// use libgit2::libgit2::config::config::Config;
+    /// let config = Config::new().unwrap();
+    /// let mut iter = config.as_ref().iterator().unwrap();
+    /// let mut m = iter.as_mut();
+    /// let entry = m.advance_entry().unwrap().unwrap();
+    /// let _ = m.advance();
+    /// let _ = entry.name();
+    /// ```
+    ///
+    /// Nor can its owner be dropped first:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::config::config::Config;
+    /// let config = Config::new().unwrap();
+    /// let mut iter = config.as_ref().iterator().unwrap();
+    /// let mut m = iter.as_mut();
+    /// let entry = m.advance_entry().unwrap().unwrap();
+    /// drop(iter);
+    /// let _ = entry.value();
+    /// ```
+    ///
+    /// Wraps: git_config_next
+    pub fn advance_entry(&mut self) -> Result<Option<EntryRef<'_>>, ConfigError> {
+        let mut entry = ptr::null_mut();
+        // SAFETY: the exclusive handle denotes a complete live iterator with
+        // its allocation-matched callback; out is writable. No entry from an
+        // earlier advance remains lent across this exclusive reborrow.
+        let rc = unsafe { ffi::git_config_next(&mut entry, self.as_mut_ptr()) };
+        if rc == ffi::GIT_ITEROVER {
+            return Ok(None);
+        }
+        if rc != 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success lends an initialized immutable public entry, kept
+        // live by the iterator until next advance/free. The returned lifetime
+        // freezes this mutable handle, excluding both operations.
+        let entry = unsafe { EntryRef::from_ptr(entry) };
+        Ok(Some(
+            entry.expect("successful iterator advance returned NULL"),
+        ))
+    }
+}
 
 impl ConfigRef<'_, '_> {
     /// Acquires an immutable entry reference, released on drop. The key is

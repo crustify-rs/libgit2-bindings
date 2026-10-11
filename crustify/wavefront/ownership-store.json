@@ -8485,6 +8485,51 @@
    ]
   },
   {
+   "name": "git_config_next",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": false,
+        "borrowed": {
+         "lifetime": "arg:iter"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive output slot receives one immutable borrowed public entry on success only; no reference acquired. Entry is enclosed in a backend entry pinned by the iterator until next advance/free. Output untouched for ITEROVER or error."
+     }
+    },
+    {
+     "name": "iter",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:iter"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive borrowed complete iterator; dispatches allocation-matched next callback. Next can invalidate the previous entry and free a backend iterator. All config/backend dependencies must remain live; callback error leaves iterator available for retry."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_open_default",
    "defined_in": "src/libgit2/config.c",
    "lifetime": {

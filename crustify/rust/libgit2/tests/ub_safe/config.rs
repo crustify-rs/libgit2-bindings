@@ -1762,3 +1762,112 @@ mod enumeration {
         });
     }
 }
+
+mod iterator_entries {
+    use super::*;
+
+    /// Public entries are lent across Rust reborrows, never acquired/freed.
+    /// Alternating public/backend views exercises the shared callback state and
+    /// the lifetime boundary when C changes or releases backend storage.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_reborrow_and_release() {
+        let path = scratch("public-iterator-entries");
+        std::fs::write(path.to_str().unwrap(), b"[a]\nx\nx =\nx = \xff\n").unwrap();
+        let sole = Config::open(&path).unwrap();
+        let shared = ConfigArc::from(sole);
+        let mut iter = shared.as_ref().iterator().unwrap();
+        {
+            let mut m = iter.as_mut();
+            let entry = m.advance_entry().unwrap().unwrap();
+            let copied = entry;
+            assert_eq!(copied.name(), Some(c"a.x"));
+            assert_eq!(entry.value(), None);
+            assert_eq!(entry.backend_type(), Some(c"file"));
+            assert_eq!(entry.origin_path(), Some(path.as_c_str()));
+            assert_eq!(entry.level(), ConfigLevel::LOCAL);
+            assert_eq!(entry.include_depth(), 0);
+            // Previous public entry is no longer used before changing state.
+            assert_eq!(m.advance().unwrap().unwrap().entry().value(), Some(c""));
+            assert_eq!(
+                m.as_mut().advance_entry().unwrap().unwrap().value(),
+                Some(c"\xff")
+            );
+            assert!(m.advance_entry().unwrap().is_none());
+            assert!(m.advance_entry().unwrap().is_none());
+        }
+        drop(iter);
+        // Compiled/copied arguments may die before the first advance, also for
+        // the Rust-owned value filter's allocation-specific callbacks.
+        let mut filtered = {
+            let key = std::ffi::CString::new("A.X").unwrap();
+            let regex = std::ffi::CString::new("^$").unwrap();
+            shared
+                .as_ref()
+                .multivar_iterator(&key, Some(&regex))
+                .unwrap()
+        };
+        assert_eq!(
+            filtered.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"")
+        );
+        filtered.as_ref().release_policy().release(filtered);
+        let mut glob = shared.as_ref().iterator_matching(Some(c"a\\.x")).unwrap();
+        assert!(glob.as_mut().advance_entry().unwrap().is_some());
+        drop(glob); // Early release of active backend storage.
+        drop(shared);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    /// A failed foreign refresh must not project the untouched output slot.
+    /// Retry is allowed; a new iterator can then read the repaired file.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_refresh_error_and_retry() {
+        let path = scratch("public-iterator-refresh");
+        std::fs::write(path.to_str().unwrap(), b"[a]\nx = old\n").unwrap();
+        let cfg = Config::open(&path).unwrap();
+        let mut iter = cfg.as_ref().iterator().unwrap();
+        std::fs::write(path.to_str().unwrap(), b"[unterminated\n").unwrap();
+        assert!(iter.as_mut().advance_entry().is_err());
+        assert!(iter.as_mut().advance_entry().unwrap().is_none());
+        drop(iter);
+        std::fs::write(
+            path.to_str().unwrap(),
+            b"[a]\nx = a much longer repaired value\n",
+        )
+        .unwrap();
+        let mut iter = cfg.as_ref().iterator().unwrap();
+        assert_eq!(
+            iter.as_mut().advance_entry().unwrap().unwrap().value(),
+            Some(c"a much longer repaired value")
+        );
+        drop(iter);
+        drop(cfg);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    /// No thread-safety claim is made: each thread builds, uses and drops its
+    /// own config and iterator; only C's process runtime is shared.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_independent_threads_and_empty() {
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    let cfg = Config::new().unwrap();
+                    for mut iter in [
+                        cfg.as_ref().iterator().unwrap(),
+                        cfg.as_ref().iterator_matching(None).unwrap(),
+                        cfg.as_ref().iterator_matching(Some(c".*")).unwrap(),
+                        cfg.as_ref().multivar_iterator(c"a.x", None).unwrap(),
+                        cfg.as_ref().multivar_iterator(c"a.x", Some(c".*")).unwrap(),
+                    ] {
+                        assert!(iter.as_mut().advance_entry().unwrap().is_none());
+                        assert!(iter.as_mut().advance_entry().unwrap().is_none());
+                    }
+                });
+            }
+        });
+    }
+}
