@@ -4,9 +4,11 @@
 //! borrowed, never freed by C. `config_backend_new` copies both strings; neither
 //! `git_config_backend_from_string` nor `git_config_backend_from_values` retains
 //! the options. There is no C allocation, destruction or cloning primitive for
-//! the options themselves. A Rust clone simply shares the immutable string borrows.
+//! the options themselves. A Rust clone simply shares the immutable string borrows,
+//! and the options cross threads as the borrows they hold do.
 
 use core::ffi::CStr;
+use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
@@ -59,6 +61,17 @@ use crate::ffi;
 /// assert!(path.is_some());
 /// ```
 ///
+/// The options cross threads, but only with borrows that outlive the thread:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
+/// use std::ffi::CString;
+/// let label = CString::new("temporary").unwrap();
+/// let mut options = BackendMemoryOptions::new();
+/// options.as_mut().set_backend_type(Some(&label));
+/// std::thread::spawn(move || drop(options));
+/// ```
+///
 /// Wraps: git_config_backend_memory_options
 /// Handwritten
 #[repr(transparent)]
@@ -97,6 +110,24 @@ unsafe impl<'o> CCell for BackendMemoryOptions<'o> {
     where
         Self: 'a;
 }
+
+// SAFETY: the options are a version and two pointers that only the setters write, each
+// NULL or a `&'o CStr`'s: a shared, immutable borrow of `CStr`, which is `Sync`, so it
+// may be read from any thread. Nothing has thread affinity or interior mutability, and
+// nothing is released on drop, so moving the options moves bytes.
+unsafe impl Send for BackendMemoryOptions<'_> {}
+// SAFETY: as above; `BackendMemoryOptionsMut` is an exclusive borrow, as `&mut`.
+unsafe impl Send for BackendMemoryOptionsMut<'_, '_> {}
+
+// SAFETY: as above, and shared access only reads the fields (every write goes through
+// `BackendMemoryOptionsMut`, which excludes other handles), so readers race nothing.
+unsafe impl Sync for BackendMemoryOptions<'_> {}
+// SAFETY: as above; `BackendMemoryOptionsRef` is a shared borrow, as `&`.
+unsafe impl Send for BackendMemoryOptionsRef<'_, '_> {}
+// SAFETY: as above.
+unsafe impl Sync for BackendMemoryOptionsRef<'_, '_> {}
+// SAFETY: `&BackendMemoryOptionsMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for BackendMemoryOptionsMut<'_, '_> {}
 
 impl<'o> BackendMemoryOptions<'o> {
     /// C's defaults: current version and both strings unset. No library
@@ -200,6 +231,28 @@ impl<'a, 'o> BackendMemoryOptionsRef<'a, 'o> {
     }
 }
 
+impl fmt::Debug for BackendMemoryOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for BackendMemoryOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackendMemoryOptions")
+            .field("version", &self.version())
+            .field("backend_type", &self.backend_type())
+            .field("origin_path", &self.origin_path())
+            .finish()
+    }
+}
+
+impl fmt::Debug for BackendMemoryOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 impl<'a, 'o> BackendMemoryOptionsMut<'a, 'o> {
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_backend_memory_options {
         self.0.0.as_non_null().as_ptr().cast()
@@ -289,8 +342,26 @@ mod unit_tests {
         let cloned = options.clone();
         options.as_mut().set_backend_type(None);
         options.as_mut().set_origin_path(None);
-        drop(options);
+        assert_eq!(options.as_ref().backend_type(), None);
         assert_eq!(cloned.as_ref().backend_type(), Some(c"label"));
         assert_eq!(cloned.as_ref().origin_path(), Some(c"origin"));
+    }
+
+    #[test]
+    fn debug_and_thread_traits() {
+        fn shared<T: Send + Sync>(_: &T) {}
+        let mut options = fixture();
+        shared(&options);
+        shared(&options.as_ref());
+        shared(&options.as_mut());
+        assert_eq!(
+            format!("{options:?}"),
+            "BackendMemoryOptions { version: 1, backend_type: None, origin_path: None }"
+        );
+        options.as_mut().set_backend_type(Some(c"label"));
+        options.as_mut().set_origin_path(Some(c""));
+        let expected = r#"BackendMemoryOptions { version: 1, backend_type: Some("label"), origin_path: Some("") }"#;
+        assert_eq!(format!("{:?}", options.as_ref()), expected);
+        assert_eq!(format!("{:?}", options.as_mut()), expected);
     }
 }

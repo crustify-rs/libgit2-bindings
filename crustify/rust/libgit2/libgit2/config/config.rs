@@ -56,7 +56,7 @@
 //! `git_config_set_string` to clear the owner's cache, racing a release of that
 //! repository on another thread.
 
-use core::ffi::CStr;
+use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
@@ -65,7 +65,7 @@ use std::ffi::CString;
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew};
 
 use crate::ffi;
-use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 
 /// A configuration (`git_config`): an opaque, reference-counted object of
@@ -470,6 +470,149 @@ impl From<ConfigLevel> for ffi::git_config_level_t {
     }
 }
 
+/// How a configuration mapping recognizes a value. Integer mappings parse the
+/// input directly; boolean and string mappings return the entry's mapped value.
+/// Unknown C values are rejected instead of constructing an invalid Rust enum.
+///
+/// Wraps: git_configmap_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum MapType {
+    False,
+    True,
+    Int32,
+    String,
+}
+
+impl MapType {
+    pub const ALL: [Self; 4] = [Self::False, Self::True, Self::Int32, Self::String];
+
+    pub const fn raw(self) -> ffi::git_configmap_t {
+        match self {
+            Self::False => ffi::GIT_CONFIGMAP_FALSE,
+            Self::True => ffi::GIT_CONFIGMAP_TRUE,
+            Self::Int32 => ffi::GIT_CONFIGMAP_INT32,
+            Self::String => ffi::GIT_CONFIGMAP_STRING,
+        }
+    }
+
+    pub const fn from_raw(raw: ffi::git_configmap_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_CONFIGMAP_FALSE => Some(Self::False),
+            ffi::GIT_CONFIGMAP_TRUE => Some(Self::True),
+            ffi::GIT_CONFIGMAP_INT32 => Some(Self::Int32),
+            ffi::GIT_CONFIGMAP_STRING => Some(Self::String),
+            _ => None,
+        }
+    }
+}
+
+impl From<MapType> for ffi::git_configmap_t {
+    fn from(value: MapType) -> Self {
+        value.raw()
+    }
+}
+
+impl<'a, 'r> ConfigMut<'a, 'r> {
+    /// Locks the writer backend and retains this exclusive borrow until the
+    /// transaction drops. Dropping aborts. The owner does not expose a mutable
+    /// config handle: that would permit recursively locking the same C backend.
+    ///
+    /// Fails with libgit2's code: [`ErrorCode::ReadOnly`] when there is no writer
+    /// (an empty or read-only config), [`ErrorCode::Locked`] when another writer
+    /// holds the file's lock, a backend's own code otherwise.
+    ///
+    /// Wraps: git_config_lock
+    pub fn lock(
+        self,
+    ) -> Result<crate::libgit2::refs::transaction::ConfigTransaction<'a, 'r>, ConfigError> {
+        crate::libgit2::refs::transaction::ConfigTransaction::lock(self)
+    }
+}
+
+/// The failure of a configuration routine: the code it returned, and the error it
+/// left as the thread's last libgit2 error, copied out.
+///
+/// The code tells the failures apart: [`ErrorCode::ReadOnly`] when a config has no
+/// writable backend, [`ErrorCode::Locked`] when another writer holds a backend's
+/// lock, [`ErrorCode::Generic`] for the rest; a custom backend may return any code.
+///
+/// Handwritten
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ConfigError {
+    code: c_int,
+    error: ErrorBuf,
+}
+
+impl ConfigError {
+    /// The failure a routine reported by returning `rc`, with the thread's last
+    /// error. A non-negative `rc` is reported as `GIT_ERROR`.
+    pub(crate) fn from_libgit2(rc: c_int) -> Self {
+        Self {
+            code: if rc < 0 { rc } else { ErrorCode::Generic.raw() },
+            error: last(),
+        }
+    }
+
+    /// The returned code; `None` for one the header does not name
+    /// ([`raw_code`](Self::raw_code) has it).
+    pub fn code(&self) -> Option<ErrorCode> {
+        ErrorCode::from_raw(self.code)
+    }
+
+    /// The returned code, always negative.
+    pub fn raw_code(&self) -> c_int {
+        self.code
+    }
+
+    /// The error's class; `None` for a class the header does not name
+    /// ([`raw_class`](Self::raw_class) has it).
+    pub fn class(&self) -> Option<ErrorClass> {
+        self.error.class()
+    }
+
+    /// The error's class as libgit2 stored it.
+    pub fn raw_class(&self) -> c_int {
+        self.error.raw_class()
+    }
+
+    /// The error message.
+    pub fn message(&self) -> &CStr {
+        self.error.message()
+    }
+
+    /// The error, without the code.
+    pub fn error(&self) -> &ErrorBuf {
+        &self.error
+    }
+}
+
+/// The error, without the code.
+impl From<ConfigError> for ErrorBuf {
+    fn from(error: ConfigError) -> Self {
+        error.error
+    }
+}
+
+impl fmt::Debug for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("ConfigError");
+        match self.code() {
+            Some(code) => s.field("code", &code),
+            None => s.field("code", &self.code),
+        };
+        s.field("error", &self.error).finish()
+    }
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -815,67 +958,6 @@ mod unit_tests {
         assert!(ConfigLevel::SYSTEM < ConfigLevel::XDG);
         assert!(ConfigLevel::APP < ConfigLevel::from_raw(42));
     }
-}
-
-/// How a configuration mapping recognizes a value. Integer mappings parse the
-/// input directly; boolean and string mappings return the entry's mapped value.
-/// Unknown C values are rejected instead of constructing an invalid Rust enum.
-///
-/// Wraps: git_configmap_t
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum MapType {
-    False,
-    True,
-    Int32,
-    String,
-}
-
-impl MapType {
-    pub const ALL: [Self; 4] = [Self::False, Self::True, Self::Int32, Self::String];
-
-    pub const fn raw(self) -> ffi::git_configmap_t {
-        match self {
-            Self::False => ffi::GIT_CONFIGMAP_FALSE,
-            Self::True => ffi::GIT_CONFIGMAP_TRUE,
-            Self::Int32 => ffi::GIT_CONFIGMAP_INT32,
-            Self::String => ffi::GIT_CONFIGMAP_STRING,
-        }
-    }
-
-    pub const fn from_raw(raw: ffi::git_configmap_t) -> Option<Self> {
-        match raw {
-            ffi::GIT_CONFIGMAP_FALSE => Some(Self::False),
-            ffi::GIT_CONFIGMAP_TRUE => Some(Self::True),
-            ffi::GIT_CONFIGMAP_INT32 => Some(Self::Int32),
-            ffi::GIT_CONFIGMAP_STRING => Some(Self::String),
-            _ => None,
-        }
-    }
-}
-
-impl From<MapType> for ffi::git_configmap_t {
-    fn from(value: MapType) -> Self {
-        value.raw()
-    }
-}
-
-impl<'a, 'r> ConfigMut<'a, 'r> {
-    /// Locks the writer backend and retains this exclusive borrow until the
-    /// transaction drops. No writer (including an empty or read-only config)
-    /// reports a C error. Dropping aborts. The owner does not expose a mutable
-    /// config handle: that would permit recursively locking the same C backend.
-    ///
-    /// Wraps: git_config_lock
-    pub fn lock(
-        self,
-    ) -> Result<crate::libgit2::refs::transaction::ConfigTransaction<'a, 'r>, ErrorBuf> {
-        crate::libgit2::refs::transaction::ConfigTransaction::lock(self)
-    }
-}
-
-#[cfg(test)]
-mod map_type_unit_tests {
-    use super::MapType;
 
     #[test]
     fn checked_mapping_modes() {
@@ -887,5 +969,34 @@ mod map_type_unit_tests {
         assert_eq!(MapType::from_raw(crate::ffi::git_configmap_t::MAX), None);
         assert_ne!(MapType::False, MapType::True);
         assert_eq!(format!("{:?}", MapType::Int32), "Int32");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "reads libgit2's last error")]
+    fn config_errors_keep_codes() {
+        let _config = Config::new().unwrap();
+        crate::libgit2::util::sys::errors::set(ErrorClass::Config, c"held");
+        let locked = ConfigError::from_libgit2(ErrorCode::Locked.raw());
+        assert_eq!(locked.code(), Some(ErrorCode::Locked));
+        assert_eq!(locked.raw_code(), ffi::GIT_ELOCKED);
+        assert_eq!(locked.class(), Some(ErrorClass::Config));
+        assert_eq!(locked.raw_class(), ffi::GIT_ERROR_CONFIG as c_int);
+        assert_eq!(locked.message(), c"held");
+        assert_eq!(locked.error().message(), c"held");
+        assert_eq!(
+            format!("{locked:?}"),
+            r#"ConfigError { code: Locked, error: ErrorBuf { class: Config, message: "held" } }"#
+        );
+        assert_eq!(locked.to_string(), "held");
+        assert_eq!(ErrorBuf::from(locked.clone()), *locked.error());
+        // A positive or zero code is still a failure; an unnamed one is kept raw.
+        assert_eq!(
+            ConfigError::from_libgit2(0).code(),
+            Some(ErrorCode::Generic)
+        );
+        assert_eq!(ConfigError::from_libgit2(7).raw_code(), ffi::GIT_ERROR);
+        let unnamed = ConfigError::from_libgit2(-1000);
+        assert_eq!((unnamed.code(), unnamed.raw_code()), (None, -1000));
+        assert!(format!("{unnamed:?}").starts_with("ConfigError { code: -1000,"));
     }
 }

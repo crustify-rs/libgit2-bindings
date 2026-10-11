@@ -330,3 +330,14 @@ fn config_level_values_and_threads() {
         }
     });
 }
+
+/// Unknown mapping-mode values are rejected, never transmuted into the enum.
+#[test]
+fn mapping_modes_are_checked() {
+    use libgit2::libgit2::config::config::MapType;
+    for mode in MapType::ALL {
+        assert_eq!(MapType::from_raw(mode.raw()), Some(mode));
+    }
+    assert_eq!(MapType::from_raw(4), None);
+    assert_eq!(MapType::from_raw(u32::MAX), None);
+}

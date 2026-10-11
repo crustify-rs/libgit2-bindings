@@ -2958,9 +2958,21 @@ mod create_options {
             .to_owned()
     }
 
+    /// Alone in a child: committing takes the time through glibc's `tzset`, which TSan
+    /// reports against any concurrent caller.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn commits_created_and_amended_with_the_options_match_c() {
+        super::isolated(
+            concat!(
+                module_path!(),
+                "::commits_created_and_amended_with_the_options_match_c"
+            ),
+            commits_created_and_amended_with_the_options_match_c_body,
+        );
+    }
+
+    fn commits_created_and_amended_with_the_options_match_c_body() {
         let script = script();
         let (mut c, mut rust) = (Side::new("c"), Side::new("rust"));
         // Both sides' blobs are alike, and so is the tree of their index with the extra

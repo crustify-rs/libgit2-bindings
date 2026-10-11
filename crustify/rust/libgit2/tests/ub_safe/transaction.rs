@@ -1,17 +1,8 @@
 //! Public transaction lifecycle and keepalive tests. No unsafe transaction adoption.
 //! Illegal parent drops, aliasing, and thread transfer are compile-fail cases.
-use libgit2::libgit2::config::config::{Config, MapType};
+use libgit2::libgit2::config::config::Config;
 use libgit2::libgit2::refs::transaction::Transaction;
 use libgit2::libgit2::repository::repository::Repository;
-
-#[test]
-fn mapping_modes_are_checked() {
-    for mode in MapType::ALL {
-        assert_eq!(MapType::from_raw(mode.raw()), Some(mode));
-    }
-    assert_eq!(MapType::from_raw(4), None);
-    assert_eq!(MapType::from_raw(u32::MAX), None);
-}
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]

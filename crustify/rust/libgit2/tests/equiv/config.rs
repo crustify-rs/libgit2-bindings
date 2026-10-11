@@ -476,3 +476,40 @@ fn config_level_values_match_c() {
         assert_eq!(ConfigLevel::from_raw(custom).raw(), custom);
     }
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn mapping_mode_values_match_c_behavior() {
+    use libgit2::libgit2::config::config::MapType;
+    let _runtime = Config::new().unwrap();
+    for (rust_mode, c_mode, value) in [
+        (MapType::False, ffi::GIT_CONFIGMAP_FALSE, c"false"),
+        (MapType::True, ffi::GIT_CONFIGMAP_TRUE, c"yes"),
+        (MapType::Int32, ffi::GIT_CONFIGMAP_INT32, c"123"),
+        (MapType::String, ffi::GIT_CONFIGMAP_STRING, c"MATCH"),
+    ] {
+        let mut observations = Vec::new();
+        for mode in [rust_mode.raw(), c_mode] {
+            let map = ffi::git_configmap {
+                type_: mode,
+                str_match: c"match".as_ptr(),
+                map_value: 42,
+            };
+            for input in [value, c"unmapped"] {
+                let mut out = -999;
+                // SAFETY: initialized single-element map with a valid mode and
+                // live matching string, writable output and NUL terminated input.
+                let status = unsafe {
+                    ffi::git_config_lookup_map_value(&mut out, &raw const map, 1, input.as_ptr())
+                };
+                observations.push((status, out));
+            }
+        }
+        assert_eq!(observations[..2], observations[2..]);
+        assert_eq!(
+            observations[0],
+            (0, if rust_mode == MapType::Int32 { 123 } else { 42 })
+        );
+        assert!(observations[1].0 < 0);
+    }
+}

@@ -1154,9 +1154,19 @@ impl Drop for Reference {
 
 /// `git_reference_type` must answer, for the references libgit2 builds, the value of
 /// the variant the reference's kind predicts.
+///
+/// Alone in a child: writing a reference takes the reflog's time through glibc's
+/// `tzset`, which TSan reports against any concurrent caller.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reference_types_follow_c() {
+    signatures::isolated(
+        concat!(module_path!(), "::reference_types_follow_c"),
+        reference_types_follow_c_body,
+    );
+}
+
+fn reference_types_follow_c_body() {
     init();
     let repo = TempRepo::new("reference-kinds");
 
@@ -2937,7 +2947,7 @@ mod signatures {
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
     /// Runs `body` alone in a child process.
-    fn isolated(test: &str, body: fn()) {
+    pub(super) fn isolated(test: &str, body: fn()) {
         let name = test.split_once("::").map_or(test, |(_, rest)| rest);
         if std::env::var(CHILD).as_deref() == Ok(name) {
             body();
