@@ -4,26 +4,39 @@
 //!
 //! Every reference must be released exactly once, whichever owner holds it and in
 //! whatever order owners and repositories go (ASan: double free, use after free;
-//! LSan: leak). The config routines have no wrappers yet: the tests drive the object
-//! through fixtures over the owners' `as_c_ptr`. Nothing here runs without libgit2, so
-//! Miri runs none of it. Illegal uses are compile-fail doctests on the crate: a
+//! LSan: leak). The tests drive the object through the safe wrappers only. Nothing
+//! here runs without libgit2, so Miri runs none of it. Illegal uses are compile-fail
+//! doctests on the crate and `compile_fail/` cases: a
 //! `ConfigArc` clone, an exclusive handle from a shared owner, sending either owner to
 //! another thread, a handle outliving its owner, a repository's config outliving the
 //! repository its file backends read.
 
+use std::ffi::{CStr, c_int};
 use std::sync::Barrier;
 use std::thread;
 
-use libgit2::libgit2::config::config::{Config, ConfigArc, ConfigBox};
+use libgit2::libgit2::config::config::{Config, ConfigArc, ConfigBox, ConfigLevel, ConfigRef};
 use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::ErrorCode;
 
-use crate::fixture::commit_and_config::{
-    OpenRepo, TESTREPO, config, get_int32, set_int32, write_through_file,
-};
+use crate::fixture::commit_and_config::{OpenRepo, TESTREPO, config};
 use crate::fixture::isolated;
 
 const NOT_FOUND: i32 = ErrorCode::NotFound.raw();
+
+/// `get_i32` of `name`: the value, or the code it failed with.
+fn number(config: ConfigRef<'_, '_>, name: &CStr) -> Result<i32, c_int> {
+    config.get_i32(name).map_err(|e| e.raw_code())
+}
+
+/// Adds `file` as the local backend of `config`, then writes `value` to `name` in it.
+fn write_through_file(config: &mut ConfigBox<'_>, file: &CStr, name: &CStr, value: i32) {
+    config
+        .as_mut()
+        .add_file(file, ConfigLevel::LOCAL, None, false)
+        .unwrap();
+    config.as_mut().set_i32(name, value).unwrap();
+}
 
 /// A scratch config file for `tag`, removed first.
 fn scratch(tag: &str) -> std::ffi::CString {
@@ -41,19 +54,16 @@ fn configs_build_use_and_release() {
     let mut sole = Config::new().unwrap();
     let _ = sole.as_ref();
     let _ = sole.as_mut().as_ref();
-    assert_eq!(get_int32(sole.as_c_ptr(), c"a.b"), Err(NOT_FOUND));
+    assert_eq!(number(sole.as_ref(), c"a.b"), Err(NOT_FOUND));
     let file = scratch("sole");
-    assert_eq!(
-        write_through_file(sole.as_c_ptr(), &file, c"a.b", 5),
-        (0, 0)
-    );
-    assert_eq!(get_int32(sole.as_c_ptr(), c"a.b"), Ok(5));
+    write_through_file(&mut sole, &file, c"a.b", 5);
+    assert_eq!(number(sole.as_ref(), c"a.b"), Ok(5));
     drop(sole);
 
     let boxed = ConfigBox::new().unwrap();
     let shared = ConfigArc::new().unwrap();
-    assert_eq!(get_int32(boxed.as_c_ptr(), c"a.b"), Err(NOT_FOUND));
-    assert_eq!(get_int32(shared.as_c_ptr(), c"a.b"), Err(NOT_FOUND));
+    assert_eq!(number(boxed.as_ref(), c"a.b"), Err(NOT_FOUND));
+    assert_eq!(number(shared.as_ref(), c"a.b"), Err(NOT_FOUND));
     let _ = std::fs::remove_file(file.to_str().unwrap());
 }
 
@@ -63,14 +73,11 @@ fn configs_build_use_and_release() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn shared_configs_release_each_reference_once() {
     let file = scratch("shared");
-    let sole = Config::new().unwrap();
-    assert_eq!(
-        write_through_file(sole.as_c_ptr(), &file, c"a.b", 9),
-        (0, 0)
-    );
+    let mut sole = Config::new().unwrap();
+    write_through_file(&mut sole, &file, c"a.b", 9);
     let shared = ConfigArc::from(sole);
     let _ = shared.as_ref();
-    assert_eq!(get_int32(shared.as_c_ptr(), c"a.b"), Ok(9));
+    assert_eq!(number(shared.as_ref(), c"a.b"), Ok(9));
     drop(shared);
 
     let repo = OpenRepo::open(TESTREPO);
@@ -78,14 +85,14 @@ fn shared_configs_release_each_reference_once() {
     assert!(ConfigArc::ptr_eq(&first, &second));
     drop(second);
     assert_eq!(
-        get_int32(first.as_c_ptr(), c"core.repositoryformatversion"),
+        number(first.as_ref(), c"core.repositoryformatversion"),
         Ok(0)
     );
     drop(first);
     // The repository still holds its own reference, and reloads nothing.
     let third = config(&repo);
     assert_eq!(
-        get_int32(third.as_c_ptr(), c"core.repositoryformatversion"),
+        number(third.as_ref(), c"core.repositoryformatversion"),
         Ok(0)
     );
     drop(third);
@@ -99,8 +106,9 @@ fn shared_configs_release_each_reference_once() {
 /// through a config a repository lent, after that repository was freed, was a use
 /// after free (review wave 1 batch 1); now the arc borrows the repository (a
 /// compile-fail doctest on `ConfigArc` and
-/// `compile_fail/config_arc_outlives_repository.rs`), and the write reparses the file
-/// against the live repository.
+/// `compile_fail/config_arc_outlives_repository.rs`). A shared reference cannot write,
+/// so the reparse here is the refresh a lookup makes after the file changed on disk,
+/// which evaluates the condition against the live repository.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn repository_config_reparses_against_its_live_repository() {
@@ -119,13 +127,17 @@ fn repository_config_reparses_against_its_live_repository() {
     .unwrap();
     let shared = repo.as_ref().config().unwrap();
     assert_eq!(
-        get_int32(shared.as_c_ptr(), c"core.repositoryformatversion"),
+        number(shared.as_ref(), c"core.repositoryformatversion"),
         Ok(0)
     );
-    // The write reparses the file, which evaluates the condition against the
-    // repository: live, as the borrow guarantees.
-    assert_eq!(set_int32(shared.as_c_ptr(), c"a.b", 7), 0);
-    assert_eq!(get_int32(shared.as_c_ptr(), c"a.b"), Ok(7));
+    // The changed size makes the lookup reparse the file, which evaluates the
+    // condition against the repository: live, as the borrow guarantees.
+    std::fs::write(
+        dir.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[includeIf \"gitdir:/nowhere/\"]\n\tpath = extra\n[a]\n\tb = 7\n",
+    )
+    .unwrap();
+    assert_eq!(number(shared.as_ref(), c"a.b"), Ok(7));
     drop(shared);
     drop(repo);
     let _ = std::fs::remove_dir_all(&dir);
@@ -147,7 +159,7 @@ fn first_configs_race_to_init() {
                     s.spawn(|| {
                         barrier.wait();
                         let config = Config::new().unwrap();
-                        assert_eq!(get_int32(config.as_c_ptr(), c"a.b"), Err(NOT_FOUND));
+                        assert_eq!(number(config.as_ref(), c"a.b"), Err(NOT_FOUND));
                     });
                 }
             });
@@ -342,7 +354,6 @@ fn mapping_modes_are_checked() {
     assert_eq!(MapType::from_raw(u32::MAX), None);
 }
 
-
 #[forbid(unsafe_code)]
 mod entry_and_map_types {
     use libgit2::libgit2::config::config::{Config, ConfigLevel, ConfigMap, EntryArc, MapMatch};
@@ -443,7 +454,7 @@ mod file_access {
             b"[a]\n flag\n empty =\n path = relative/path\n multi = first\n multi = second\n",
         )
         .unwrap();
-        let mut cfg = Config::open_ondisk(&file).unwrap();
+        let mut cfg = Config::open(&file).unwrap();
         assert!(cfg.as_ref().get_bool(c"a.flag").unwrap());
         assert_eq!(
             cfg.as_ref()
@@ -500,11 +511,11 @@ mod file_access {
         let path = CString::new(file.to_bytes()).unwrap();
         assert!(
             cfg.as_mut()
-                .add_file_ondisk(&path, ConfigLevel::LOCAL, None, false)
+                .add_file(&path, ConfigLevel::LOCAL, None, false)
                 .is_err()
         );
         cfg.as_mut()
-            .add_file_ondisk(&path, ConfigLevel::LOCAL, None, true)
+            .add_file(&path, ConfigLevel::LOCAL, None, true)
             .unwrap();
         drop(path);
         let mut parent = cfg.as_mut();
@@ -513,7 +524,7 @@ mod file_access {
         let extra = scratch("highest-max-priority");
         highest
             .as_mut()
-            .add_file_ondisk(&extra, ConfigLevel::from_raw(i32::MAX - 1), None, false)
+            .add_file(&extra, ConfigLevel::from_raw(i32::MAX - 1), None, false)
             .unwrap();
         highest.as_mut().set_i32(c"a.extra", 3).unwrap();
         drop(highest);
@@ -529,18 +540,19 @@ mod file_access {
             tx.set_i32(c"a.view", 100).unwrap();
             tx.set_i64(c"a.large", i64::MAX).unwrap();
             tx.set_bool(c"a.tx", true).unwrap();
+            let staged = CString::new(b"staged \xff".to_vec()).unwrap();
+            tx.set_string(c"a.txstring", &staged).unwrap();
+            drop(staged);
+            assert!(tx.config().get_string_buf(c"a.txstring").is_err());
             tx.set_multivar(c"a.txmulti", c".*", c"first").unwrap();
             tx.delete_multivar(c"a.txmulti", c"first").unwrap();
             tx.delete_entry(c"a.tx").unwrap();
             // C stages locked writes without updating the published values.
             assert_eq!(tx.config().get_i32(c"a.view").unwrap(), 99);
         } // abort staged changes and release the retained backend
-        assert!(
-            !std::fs::read(file.to_str().unwrap())
-                .unwrap()
-                .windows(3)
-                .any(|w| w == b"100")
-        );
+        let written = std::fs::read(file.to_str().unwrap()).unwrap();
+        assert!(!written.windows(3).any(|w| w == b"100"));
+        assert!(!written.windows(6).any(|w| w == b"staged"));
         drop(view);
         // Aborted staged writes leave both disk and published values untouched.
         let expected = cfg.as_ref().get_i32(c"a.view").unwrap();
@@ -572,17 +584,17 @@ mod file_access {
     fn file_constructor_error_cleanup() {
         let malformed = scratch("malformed-input");
         std::fs::write(malformed.to_str().unwrap(), b"[unfinished\n").unwrap();
-        assert!(Config::open_ondisk(&malformed).is_err());
+        assert!(Config::open(&malformed).is_err());
         let mut cfg = Config::new().unwrap();
         #[cfg(unix)]
         {
             let circular = scratch("circular-symlink");
             let path = circular.to_str().unwrap();
             std::os::unix::fs::symlink(path, path).unwrap();
-            assert!(Config::open_ondisk(&circular).is_err());
+            assert!(Config::open(&circular).is_err());
             assert!(
                 cfg.as_mut()
-                    .add_file_ondisk(&circular, ConfigLevel::LOCAL, None, false)
+                    .add_file(&circular, ConfigLevel::LOCAL, None, false)
                     .is_err()
             );
             std::fs::remove_file(path).unwrap();
@@ -590,7 +602,7 @@ mod file_access {
 
         assert!(
             cfg.as_mut()
-                .add_file_ondisk(&malformed, ConfigLevel::LOCAL, None, false)
+                .add_file(&malformed, ConfigLevel::LOCAL, None, false)
                 .is_err()
         );
         assert!(cfg.as_ref().get_bool(c"a.missing").is_err());
@@ -606,7 +618,7 @@ mod file_access {
             .map(|index| {
                 std::thread::spawn(move || {
                     let file = scratch(&format!("file-thread-{index}"));
-                    let mut cfg = Config::open_ondisk(&file).unwrap();
+                    let mut cfg = Config::open(&file).unwrap();
                     for value in [i64::MIN, 0, i64::MAX] {
                         cfg.as_mut().set_i64(c"a.value", value).unwrap();
                         assert_eq!(cfg.as_ref().get_i64(c"a.value").unwrap(), value);
@@ -681,14 +693,14 @@ mod file_access {
         let xdg = scratch("xdg-view");
         let mut cfg = Config::new().unwrap();
         cfg.as_mut()
-            .add_file_ondisk(&global, ConfigLevel::GLOBAL, None, false)
+            .add_file(&global, ConfigLevel::GLOBAL, None, false)
             .unwrap();
         let mut parent = cfg.as_mut();
         let mut view = parent.open_global().unwrap();
         view.as_mut().set_i32(c"a.value", 1).unwrap();
         drop(view);
         parent
-            .add_file_ondisk(&xdg, ConfigLevel::XDG, None, false)
+            .add_file(&xdg, ConfigLevel::XDG, None, false)
             .unwrap();
         let mut view = parent.open_global().unwrap();
         view.as_mut().set_i32(c"a.value", 2).unwrap();
@@ -726,7 +738,7 @@ mod file_access {
         ) -> ConfigBox<'r> {
             let mut cfg: ConfigBox<'r> = Config::new().unwrap();
             cfg.as_mut()
-                .add_file_ondisk(file, ConfigLevel::LOCAL, Some(repo), false)
+                .add_file(file, ConfigLevel::LOCAL, Some(repo), false)
                 .unwrap();
             cfg
         }
@@ -752,7 +764,7 @@ fn string_file_config(tag: &str) -> (ConfigBox<'static>, std::ffi::CString) {
     let file = scratch(tag);
     config
         .as_mut()
-        .add_file_ondisk(
+        .add_file(
             &file,
             libgit2::libgit2::config::config::ConfigLevel::LOCAL,
             None,
@@ -765,13 +777,7 @@ fn string_file_config(tag: &str) -> (ConfigBox<'static>, std::ffi::CString) {
 #[forbid(unsafe_code)]
 mod writes_and_snapshots {
     use super::*;
-    use libgit2::libgit2::config::config::ConfigLevel;
-    use libgit2::libgit2::config::config::ConfigRef;
-    use std::ffi::{CStr, CString};
-
-    fn number(config: ConfigRef<'_, '_>, name: &CStr) -> Result<i32, i32> {
-        config.get_i32(name).map_err(|e| e.raw_code())
-    }
+    use std::ffi::CString;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -878,7 +884,7 @@ mod writes_and_snapshots {
         let mut blocker = Config::new().unwrap();
         blocker
             .as_mut()
-            .add_file_ondisk(&file, ConfigLevel::LOCAL, None, false)
+            .add_file(&file, ConfigLevel::LOCAL, None, false)
             .unwrap();
         let lock = blocker.as_mut().lock().unwrap();
         let locked = writer.as_mut().set_string(c"a.unique", c"3").unwrap_err();
@@ -893,6 +899,32 @@ mod writes_and_snapshots {
         );
         assert_eq!(locked.code(), Some(ErrorCode::Locked));
         std::fs::remove_file(file.to_str().unwrap()).unwrap();
+    }
+
+    /// A delete without a writer reports an error the wrapper set itself, which the
+    /// `ConfigError` owns: it outlives the config and later errors on the thread.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn readonly_delete_errors_are_owned() {
+        use libgit2::libgit2::util::errors::ErrorClass;
+        use libgit2::libgit2::util::sys::errors::set_str;
+        let mut empty = Config::new().unwrap();
+        let mut snapshot = empty.as_ref().snapshot().unwrap();
+        let name = CString::new("a.temporary").unwrap();
+        let errors = [
+            empty.as_mut().delete_entry(&name).unwrap_err(),
+            snapshot.as_mut().delete_multivar(&name, c".*").unwrap_err(),
+        ];
+        drop((empty, snapshot, name));
+        set_str(ErrorClass::Odb, c"a later, unrelated failure").unwrap();
+        for error in errors {
+            assert_eq!(error.code(), Some(ErrorCode::ReadOnly));
+            assert_eq!(error.class(), Some(ErrorClass::Config));
+            assert_eq!(
+                error.message(),
+                c"cannot delete 'a.temporary': the configuration is read-only"
+            );
+        }
     }
 
     #[test]

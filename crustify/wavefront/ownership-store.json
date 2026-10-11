@@ -7009,11 +7009,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "arg:repo"
+       "lifetime": "arg:config"
       },
       "nullable": true,
       "mutable": false,
-      "note": "File backend retains repository without upref for includeIf on each refresh/write. It must outlive config and all level views."
+      "note": "Retained past the call without an up-ref: config_file_open stores it as b->repo, and every reparse of the file (refresh on get, write) evaluates includeIf gitdir:/onbranch: conditions through it. It must outlive config and every level view sharing the backend."
      }
     }
    ]
@@ -7690,11 +7690,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "arg:config"
+       "lifetime": "arg:out"
       },
       "nullable": false,
       "mutable": true,
-      "note": "Borrowed config; getters may refresh C backend state internally. No Rust reference to C object is formed."
+      "note": "Config whose highest-priority writable backend C locks. Retained past the call: the transaction written to out stores this pointer (tx->cfg, transaction.c) and passes it to git_config_unlock on commit or free, and holds one reference to the locked backend instance. The config must outlive the transaction and must not be locked again (or have that backend replaced) while it lives; Rust keeps the exclusive config borrow inside the transaction owner."
      }
     },
     {
@@ -7714,7 +7714,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Output slot borrowed for call; success transfers fresh object paired with git_config_free (or git_transaction_free for lock); failure transfers nothing."
+      "note": "Output slot borrowed for call; success writes a fresh config transaction (git__calloc'd by git_transaction_config_new) that git_transaction_free releases, unlocking the backend without committing; failure writes nothing."
      }
     }
    ]

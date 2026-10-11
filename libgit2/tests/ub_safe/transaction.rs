@@ -1,6 +1,6 @@
 //! Public transaction lifecycle and keepalive tests. No unsafe transaction adoption.
 //! Illegal parent drops, aliasing, and thread transfer are compile-fail cases.
-use libgit2::libgit2::config::config::Config;
+use libgit2::libgit2::config::config::{Config, ConfigLevel};
 use libgit2::libgit2::refs::transaction::Transaction;
 use libgit2::libgit2::repository::repository::Repository;
 
@@ -39,11 +39,11 @@ fn config_lock_borrows_and_abort_releases_backend() {
         config.as_mut().lock().is_err(),
         "empty config has no writer"
     );
-    // Existing fixture for adding the not-yet-wrapped file backend.
-    assert_eq!(
-        crate::fixture::commit_and_config::write_through_file(config.as_c_ptr(), &cpath, c"a.b", 7),
-        (0, 0)
-    );
+    config
+        .as_mut()
+        .add_file(&cpath, ConfigLevel::LOCAL, None, false)
+        .unwrap();
+    config.as_mut().set_i32(c"a.b", 7).unwrap();
     let before = std::fs::read(&path).unwrap();
     let lock_path = path.with_extension("lock");
     std::fs::write(&lock_path, "held by another writer").unwrap();

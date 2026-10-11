@@ -5,15 +5,15 @@
 //! Each config is produced twice, independently, one per side: an empty one (C:
 //! `git_config_new`; Rust: [`Config::new`], and the shared form
 //! [`ConfigArc::from`]), and a repository's (`git_repository_config` on its own open
-//! `testrepo.git`, which the Rust side adopts as a [`ConfigArc`], as the wrapper
-//! will). The config routines have no wrappers yet, so both sides drive their object
-//! through the same raw calls, the Rust side reaching its object through the owner's
-//! `as_c_ptr`: a lookup that misses, a write without a backend, adding a file backend
-//! (each side its own file), writes and reads through it, then (C alone, see below)
-//! a read after the repository is freed. After every step both record the return
-//! code, the value read or the error left (class and message), and the records are
-//! compared; the files each side wrote are compared at the end. C then frees its
-//! config, and Rust drops its owner.
+//! `testrepo.git`; Rust: the [`ConfigArc`] `Repository::config` returns). C drives its
+//! object through the raw calls, Rust through the safe wrappers: a lookup that misses,
+//! a write without a backend, adding a file backend (each side its own file), writes
+//! and reads through it, then (C alone, see below) a read after the repository is
+//! freed. A shared reference cannot write, so the Rust side of the shared case writes
+//! through the box before sharing it, and both sides then read. After every step both
+//! record the return code, the value read or the error (class and message), and the
+//! records are compared; the files each side wrote are compared at the end. C then
+//! frees its config, and Rust drops its owner.
 //!
 //! One documented divergence: C lets the caller's reference to a repository's config
 //! outlive the repository (a read that does not reparse the file goes through; one
@@ -26,7 +26,9 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 use libgit2::ffi;
-use libgit2::libgit2::config::config::{Config, ConfigArc};
+use libgit2::libgit2::config::config::{
+    Config, ConfigArc, ConfigBox, ConfigError, ConfigLevel, ConfigRef,
+};
 use libgit2::libgit2::util::errors::last;
 
 /// Pins the process runtime through the safe config constructor before reference C calls.
@@ -47,17 +49,21 @@ fn c_error() -> (c_int, String) {
     (error.klass, message.to_string_lossy().into_owned())
 }
 
-/// The calling thread's last error, read through the safe API.
-fn rust_error() -> (c_int, String) {
-    let error = last();
-    (
-        error.raw_class(),
-        error.message().to_string_lossy().into_owned(),
-    )
-}
-
 fn record(rc: c_int, value: i32, error: fn() -> (c_int, String)) -> Record {
     (rc, value, (rc < 0).then(error))
+}
+
+/// A safe wrapper's result as the record C's would make: the value read (0 for a
+/// write), or the code and the error the `ConfigError` carries.
+fn rust_record(result: Result<i32, ConfigError>) -> Record {
+    match result {
+        Ok(value) => (0, value, None),
+        Err(e) => (
+            e.raw_code(),
+            0,
+            Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+        ),
+    }
 }
 
 /// A scratch config file path for `side` of `test`, removed first.
@@ -70,21 +76,25 @@ fn scratch(test: &str, side: &str) -> PathBuf {
     path
 }
 
-/// The step sequence, run on one side's `config` with `error` reading its errors.
-/// `file` names that side's own backend file.
-fn steps(config: *mut ffi::git_config, file: &Path, error: fn() -> (c_int, String)) -> Vec<Record> {
+/// The names the read phase looks up, after the writes.
+const READS: [&CStr; 3] = [c"crustify.value", c"crustify.other", c"crustify.missing"];
+
+/// `git_config_get_int32` of `name` on C's `config`.
+fn c_get(config: *mut ffi::git_config, name: &CStr) -> Record {
+    let mut value = 0;
+    // SAFETY: `config` is live for the call; `value` is writable, `name` NUL-terminated.
+    let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
+    record(rc, value, c_error)
+}
+
+/// The write sequence through C on `config`; `file` names C's own backend file.
+fn c_steps(config: *mut ffi::git_config, file: &Path) -> Vec<Record> {
     let file = CString::new(file.to_str().unwrap()).unwrap();
-    let get = |name: &CStr| {
-        let mut value = 0;
-        // SAFETY: `config` is live for the call; `value` is writable, `name`
-        // NUL-terminated.
-        let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
-        record(rc, value, error)
-    };
+    let get = |name: &CStr| c_get(config, name);
     let set = |name: &CStr, value: i32| {
         // SAFETY: `config` is live for the call; `name` is NUL-terminated.
         let rc = unsafe { ffi::git_config_set_int32(config, name.as_ptr(), value) };
-        record(rc, 0, error)
+        record(rc, 0, c_error)
     };
     let mut out = vec![get(c"crustify.value"), set(c"crustify.value", 1)];
     // SAFETY: `config` is live; `file` is NUL-terminated and copied; no repository.
@@ -97,7 +107,7 @@ fn steps(config: *mut ffi::git_config, file: &Path, error: fn() -> (c_int, Strin
             0,
         )
     };
-    out.push(record(rc, 0, error));
+    out.push(record(rc, 0, c_error));
     out.extend([
         set(c"crustify.value", 7),
         get(c"crustify.value"),
@@ -111,6 +121,42 @@ fn steps(config: *mut ffi::git_config, file: &Path, error: fn() -> (c_int, Strin
     out
 }
 
+/// The same write sequence through the safe wrappers on the sole `config`.
+fn rust_steps(config: &mut ConfigBox<'_>, file: &Path) -> Vec<Record> {
+    let file = CString::new(file.to_str().unwrap()).unwrap();
+    let get = |config: &ConfigBox<'_>, name: &CStr| rust_record(config.as_ref().get_i32(name));
+    let set = |config: &mut ConfigBox<'_>, name: &CStr, value: i32| {
+        rust_record(config.as_mut().set_i32(name, value).map(|()| 0))
+    };
+    let mut out = vec![
+        get(config, c"crustify.value"),
+        set(config, c"crustify.value", 1),
+    ];
+    let added = config
+        .as_mut()
+        .add_file(&file, ConfigLevel::LOCAL, None, false);
+    out.push(rust_record(added.map(|()| 0)));
+    out.extend([
+        set(config, c"crustify.value", 7),
+        get(config, c"crustify.value"),
+        set(config, c"crustify.value", -3),
+        set(config, c"crustify.other", 11),
+        get(config, c"crustify.value"),
+        get(config, c"crustify.other"),
+        get(config, c"crustify.missing"),
+        set(config, c"invalid", 1),
+    ]);
+    out
+}
+
+/// The read phase through the safe wrappers on any handle.
+fn rust_reads(config: ConfigRef<'_, '_>, names: &[&CStr]) -> Vec<Record> {
+    names
+        .iter()
+        .map(|name| rust_record(config.get_i32(name)))
+        .collect()
+}
+
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn new_configs_match() {
@@ -121,12 +167,12 @@ fn new_configs_match() {
     let c_rc = unsafe { ffi::git_config_new(&mut c_config) };
     let rust_config = Config::new();
     assert_eq!(c_rc == 0, rust_config.is_ok());
-    let rust_config = rust_config.unwrap();
+    let mut rust_config = rust_config.unwrap();
 
-    let c_steps = steps(c_config, &c_file, c_error);
-    let rust_steps = steps(rust_config.as_c_ptr(), &rust_file, rust_error);
-    assert_eq!(c_steps, rust_steps);
-    assert_eq!(c_steps[4], (0, 7, None), "the backend took the write");
+    let c_records = c_steps(c_config, &c_file);
+    let rust_records = rust_steps(&mut rust_config, &rust_file);
+    assert_eq!(c_records, rust_records);
+    assert_eq!(c_records[4], (0, 7, None), "the backend took the write");
     assert_eq!(
         std::fs::read(&c_file).unwrap(),
         std::fs::read(&rust_file).unwrap()
@@ -154,10 +200,18 @@ fn shared_configs_match() {
     let mut c_config = ptr::null_mut();
     // SAFETY: `c_config` is a writable slot.
     assert_eq!(unsafe { ffi::git_config_new(&mut c_config) }, 0);
-    let rust_config = ConfigArc::from(Config::new().unwrap());
+    let mut rust_box = Config::new().unwrap();
     assert_eq!(
-        steps(c_config, &c_file, c_error),
-        steps(rust_config.as_c_ptr(), &rust_file, rust_error)
+        c_steps(c_config, &c_file),
+        rust_steps(&mut rust_box, &rust_file)
+    );
+    let rust_config = ConfigArc::from(rust_box);
+    let c_reads: Vec<_> = READS.iter().map(|name| c_get(c_config, name)).collect();
+    assert_eq!(c_reads, rust_reads(rust_config.as_ref(), &READS));
+    assert_eq!(
+        c_reads[1],
+        (0, 11, None),
+        "shared, the config reads its backend"
     );
     // SAFETY: the C side's only reference, released once.
     unsafe { ffi::git_config_free(c_config) };
@@ -171,63 +225,48 @@ fn shared_configs_match() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn repository_configs_match() {
+    use libgit2::libgit2::repository::repository::Repository;
     init();
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../tests/resources/testrepo.git\0"
     );
-    let open = || {
-        let mut repo = ptr::null_mut();
-        // SAFETY: `repo` receives the repository; `path` is NUL-terminated.
-        let rc = unsafe {
-            ffi::git_repository_open_ext(
-                &mut repo,
-                path.as_ptr().cast(),
-                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
-                ptr::null(),
-            )
-        };
-        assert_eq!(rc, 0);
-        repo
+    let mut c_repo = ptr::null_mut();
+    // SAFETY: `c_repo` receives the repository; `path` is NUL-terminated.
+    let rc = unsafe {
+        ffi::git_repository_open_ext(
+            &mut c_repo,
+            path.as_ptr().cast(),
+            ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+            ptr::null(),
+        )
     };
-    let (c_repo, rust_repo) = (open(), open());
+    assert_eq!(rc, 0);
+    let rust_repo = Repository::open(CStr::from_bytes_with_nul(path.as_bytes()).unwrap());
+    let rust_repo = rust_repo.unwrap();
     let mut c_config = ptr::null_mut();
     // SAFETY: `c_config` is a writable slot, `c_repo` open.
     let c_rc = unsafe { ffi::git_repository_config(&mut c_config, c_repo) };
-    let mut out = ptr::null_mut();
-    // SAFETY: as above, for the Rust side's repository.
-    let rust_rc = unsafe { ffi::git_repository_config(&mut out, rust_repo) };
-    assert_eq!(c_rc, rust_rc);
-    // SAFETY: `git_repository_config` hands out one up-ref'd reference to the
-    // repository's config, released by `git_config_free`; the repository holds another,
-    // and outlives the arc (freed below, after it): the arc's `'r`.
-    let rust_config = unsafe { ConfigArc::from_c(out) }.unwrap();
+    let rust_config = rust_repo.as_ref().config();
+    assert_eq!(c_rc == 0, rust_config.is_ok());
+    let rust_config = rust_config.unwrap();
 
-    let reads = |config: *mut ffi::git_config, error: fn() -> (c_int, String)| {
-        [
-            c"core.repositoryformatversion",
-            c"core.bare",
-            c"core.missing",
-        ]
-        .map(|name| {
-            let mut value = 0;
-            // SAFETY: `config` is live; `value` is writable, `name` NUL-terminated.
-            let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
-            record(rc, value, error)
-        })
-    };
-    let before = reads(c_config, c_error);
-    assert_eq!(before, reads(rust_config.as_c_ptr(), rust_error));
+    let names = [
+        c"core.repositoryformatversion",
+        c"core.bare",
+        c"core.missing",
+    ];
+    let reads = |config| names.map(|name| c_get(config, name)).to_vec();
+    let before = reads(c_config);
+    assert_eq!(before, rust_reads(rust_config.as_ref(), &names));
     // Documented divergence: C lets the caller's reference outlive the repository and
     // read on (the file backends still point at the freed repository, which only a
     // reparse reaches); a `ConfigArc<'r>` borrows the repository and goes first.
     drop(rust_config);
-    for repo in [c_repo, rust_repo] {
-        // SAFETY: each repository is open and freed once; the C config outlives its
-        // repository, and the Rust arc was released before its own.
-        unsafe { ffi::git_repository_free(repo) };
-    }
-    let after = reads(c_config, c_error);
+    drop(rust_repo);
+    // SAFETY: the repository is open and freed once; the C config outlives it.
+    unsafe { ffi::git_repository_free(c_repo) };
+    let after = reads(c_config);
     assert_eq!(after, before);
     // SAFETY: the C side's last reference, released once.
     unsafe { ffi::git_config_free(c_config) };
@@ -832,7 +871,7 @@ mod file_access {
         let cp = CString::new(cfile.to_str().unwrap()).unwrap();
         let rp = CString::new(rfile.to_str().unwrap()).unwrap();
         let c = Reference::open(&cp);
-        let mut r = Config::open_ondisk(&rp).unwrap();
+        let mut r = Config::open(&rp).unwrap();
         macro_rules! compare {
             ($c:expr, $r:expr) => {{
                 clear();
@@ -998,10 +1037,7 @@ mod file_access {
                     },
                     ()
                 ),
-                safe(
-                    r.as_mut()
-                        .add_file_ondisk(&rp, ConfigLevel::LOCAL, None, force)
-                )
+                safe(r.as_mut().add_file(&rp, ConfigLevel::LOCAL, None, force))
             );
         }
         let mut transaction = ptr::null_mut();
@@ -1031,6 +1067,20 @@ mod file_access {
         let c_result = raw(rc, ());
         clear();
         assert_eq!(c_result, safe(tx.set_bool(c"a.tx", true)));
+        clear();
+        let (name, value) = (c"a.txstring", c"staged");
+        // SAFETY: live locked config and NUL-terminated inputs borrowed for call;
+        // the value is copied by the C writer.
+        let rc = unsafe { ffi::git_config_set_string(c.0, name.as_ptr(), value.as_ptr()) };
+        let c_result = raw(rc, ());
+        clear();
+        assert_eq!(c_result, safe(tx.set_string(name, value)));
+        clear();
+        // SAFETY: as above; an invalid name fails before anything is staged.
+        let rc = unsafe { ffi::git_config_set_string(c.0, c"invalid".as_ptr(), c"x".as_ptr()) };
+        let c_result = raw(rc, ());
+        clear();
+        assert_eq!(c_result, safe(tx.set_string(c"invalid", c"x")));
         clear();
         // SAFETY: live locked config and NUL-terminated inputs borrowed for call;
         // scalar or replacement contents are copied by the C writer.
@@ -1131,11 +1181,10 @@ mod file_access {
             .unwrap();
             repositories.push(repo);
         }
-        let mut out = ptr::null_mut();
+        let (mut out, repo) = (ptr::null_mut(), repositories[0].as_c_ptr());
         // SAFETY: live independently owned repository and writable output slot.
         // A successful snapshot is a fresh config released by Reference's Drop.
-        let rc =
-            unsafe { ffi::git_repository_config_snapshot(&mut out, repositories[0].as_c_ptr()) };
+        let rc = unsafe { ffi::git_repository_config_snapshot(&mut out, repo) };
         assert_eq!(rc, 0);
         let c = Reference(out);
         let mut r = repositories[1].as_ref().config_snapshot().unwrap();
@@ -1197,12 +1246,39 @@ mod file_access {
             },
             r.as_mut().set_multivar(c"a.flag", c".*", c"true")
         );
-        readonly!(
+        // C returns the code of a delete without a writer but sets no error, so the
+        // thread keeps whatever it had (here, after the clear, "no error"). The
+        // wrappers set their own error there; only the code is C's.
+        macro_rules! readonly_delete {
+            ($raw:expr, $safe:expr) => {{
+                clear();
+                let c_result = raw($raw, ());
+                clear();
+                let r_result = safe($safe);
+                assert_eq!(
+                    c_result,
+                    Err((
+                        ffi::GIT_EREADONLY,
+                        ffi::GIT_ERROR_NONE as i32,
+                        b"no error".to_vec()
+                    ))
+                );
+                assert_eq!(
+                    r_result,
+                    Err((
+                        ffi::GIT_EREADONLY,
+                        ffi::GIT_ERROR_CONFIG as i32,
+                        b"cannot delete 'a.flag': the configuration is read-only".to_vec()
+                    ))
+                );
+            }};
+        }
+        readonly_delete!(
             // SAFETY: live readonly config and borrowed NUL name, nothing retained.
             unsafe { ffi::git_config_delete_entry(c.0, c"a.flag".as_ptr()) },
             r.as_mut().delete_entry(c"a.flag")
         );
-        readonly!(
+        readonly_delete!(
             // SAFETY: live readonly config and NUL strings borrowed for this call.
             unsafe { ffi::git_config_delete_multivar(c.0, c"a.flag".as_ptr(), c".*".as_ptr()) },
             r.as_mut().delete_multivar(c"a.flag", c".*")
@@ -1271,6 +1347,123 @@ mod file_access {
             }
         }
     }
+
+    /// Views of levels a config lacks fail as C's do, through the shared and the
+    /// exclusive handle: `open_level` with C's not-found error, and `open_global` with
+    /// the error of its `GLOBAL` fallback once `XDG` is missing too.
+    #[test]
+    fn missing_level_views_match_c() {
+        let (cfile, rfile) = (
+            scratch("missing-level", "c"),
+            scratch("missing-level", "rust"),
+        );
+        let cp = CString::new(cfile.to_str().unwrap()).unwrap();
+        let rp = CString::new(rfile.to_str().unwrap()).unwrap();
+        let c = Reference::open(&cp);
+        let mut r = Config::open(&rp).unwrap();
+        let failure = |e: ConfigError| safe::<()>(Err(e)).unwrap_err();
+        for level in [
+            ConfigLevel::GLOBAL,
+            ConfigLevel::APP,
+            ConfigLevel::from_raw(-7),
+        ] {
+            clear();
+            let cv = c.level(level, false).map(drop);
+            clear();
+            let rv = r.as_ref().open_level(level).map(drop).map_err(failure);
+            assert_eq!(cv, rv);
+            assert_eq!(cv.unwrap_err().0, ffi::GIT_ENOTFOUND);
+            clear();
+            let rv = r.as_mut().open_level(level).map(drop).map_err(failure);
+            assert_eq!(c.level(level, false).map(drop), rv);
+        }
+        clear();
+        let cv = c.level(ConfigLevel::GLOBAL, true).map(drop);
+        clear();
+        assert_eq!(cv, r.as_ref().open_global().map(drop).map_err(failure));
+        clear();
+        assert_eq!(cv, r.as_mut().open_global().map(drop).map_err(failure));
+        assert_eq!(cv.unwrap_err().0, ffi::GIT_ENOTFOUND);
+        drop((c, r));
+        let _ = (std::fs::remove_file(cfile), std::fs::remove_file(rfile));
+    }
+
+    const SEARCH_CHILD: &str = "CRUSTIFY_EQUIV_CONFIG_SEARCH_CHILD";
+
+    /// In a process whose `$HOME` holds a malformed `.gitconfig` and whose system search
+    /// path is an empty directory, the search routines and `open_default` fail and
+    /// succeed as C's do: `open_default` with the parse error of the global file (C
+    /// frees the config it built), `find_system` and `find_xdg` with not found, and
+    /// `find_global` with the malformed file's path. libgit2 reads `$HOME` when it
+    /// initialises, so the scenario runs in a child.
+    #[test]
+    fn isolated_search_and_default_failures_match_c() {
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-equiv-config-search-{}",
+            std::process::id()
+        ));
+        if std::env::var_os(SEARCH_CHILD).is_some() {
+            init();
+            let system = CString::new(dir.join("system").to_str().unwrap()).unwrap();
+            // SAFETY: `GIT_OPT_SET_SEARCH_PATH` reads an `int` level and a
+            // NUL-terminated path, which libgit2 copies; this child runs one thread.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_SEARCH_PATH as c_int,
+                    ffi::GIT_CONFIG_LEVEL_SYSTEM,
+                    system.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+            for (raw_find, safe_find) in [
+                (
+                    ffi::git_config_find_global as unsafe extern "C" fn(*mut ffi::git_buf) -> i32,
+                    find_global as fn() -> Result<BufVal, ConfigError>,
+                ),
+                (ffi::git_config_find_xdg, find_xdg),
+                (ffi::git_config_find_system, find_system),
+            ] {
+                clear();
+                // SAFETY: out is initialized exclusive buffer storage.
+                let c = buffer(|out| unsafe { raw_find(out) });
+                clear();
+                assert_eq!(c, bytes(safe_find()));
+            }
+            clear();
+            let mut out = ptr::null_mut();
+            // SAFETY: writable output slot; on failure C frees what it built.
+            let rc = unsafe { ffi::git_config_open_default(&mut out) };
+            let c = raw(rc, out).map(Reference);
+            clear();
+            let r = safe(Config::open_default());
+            let (c, r) = (c.map(drop), r.map(drop));
+            assert_eq!(c, r);
+            let (code, class, _) = c.unwrap_err();
+            assert_eq!((code, class), (-1, ffi::GIT_ERROR_CONFIG as c_int));
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("system")).unwrap();
+        std::fs::write(dir.join(".gitconfig"), b"[unfinished\n").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "config::file_access::isolated_search_and_default_failures_match_c",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("HOME", &dir)
+            .env("XDG_CONFIG_HOME", dir.join("xdg"))
+            .env(SEARCH_CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 mod writes_and_snapshots {
@@ -1289,10 +1482,7 @@ mod writes_and_snapshots {
 
     fn attach(config: &mut ConfigBox<'_>, file: &Path, level: ConfigLevel) {
         let file = CString::new(file.to_str().unwrap()).unwrap();
-        config
-            .as_mut()
-            .add_file_ondisk(&file, level, None, false)
-            .unwrap();
+        config.as_mut().add_file(&file, level, None, false).unwrap();
     }
 
     fn observation(status: Result<(), ConfigError>) -> Record {
