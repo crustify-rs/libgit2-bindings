@@ -64,8 +64,9 @@ use crate::libgit2::core::types::FileMode;
 use crate::libgit2::index::pathspec::patterns_are_parsable;
 use crate::libgit2::object::object::id_fits;
 use crate::libgit2::oid::oid::{Oid, OidMut, OidRef, OidType};
+use crate::libgit2::raw::OdbDataVec;
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
-use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 define_ctype!(
@@ -488,6 +489,405 @@ impl Index {
             unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), opts.as_ref().as_ptr()) };
         // SAFETY: as in `open`.
         constructed(rc, unsafe { IndexBox::from_c(out) })
+    }
+}
+
+/// The NUL-terminated key libgit2's extension routines search for `signature`: its four
+/// bytes and a terminator. `None`, with a `GIT_ERROR_INVALID` error, when the signature
+/// holds a NUL byte: libgit2 copies all four bytes into an extension it adds, but
+/// compares keys with `strncmp`, which stops at the first NUL (`extension_srch`), so such
+/// an extension would match every key sharing the bytes before it.
+fn extension_key(signature: &[u8; 4]) -> Option<[u8; 5]> {
+    if signature.contains(&0) {
+        set(
+            ErrorClass::Invalid,
+            c"an index extension signature cannot hold a NUL byte",
+        );
+        return None;
+    }
+    let [a, b, c, d] = *signature;
+    Some([a, b, c, d, 0])
+}
+
+impl IndexRef<'_> {
+    /// The number of entries in the index, conflict entries (one per side) included.
+    ///
+    /// Wraps: git_index_entrycount
+    pub fn entry_count(&self) -> usize {
+        // SAFETY: the handle addresses a live index, whose entry vector's length libgit2
+        // only reads.
+        unsafe { ffi::git_index_entrycount(self.as_ptr()) }
+    }
+
+    /// Whether any entry is a conflict side: of a stage other than
+    /// [`Stage::Normal`].
+    ///
+    /// Wraps: git_index_has_conflicts
+    pub fn has_conflicts(&self) -> bool {
+        // SAFETY: the handle addresses a live index; libgit2 only reads its entries' flags
+        // and returns no pointer.
+        unsafe { ffi::git_index_has_conflicts(self.as_ptr()) > 0 }
+    }
+
+    /// The capabilities the index applies: those it was built with (none), last set, or
+    /// read from its owning repository's configuration. Never
+    /// [`CapabilitySetting::FromOwner`]: libgit2 resolves that when it is set.
+    ///
+    /// Wraps: git_index_caps
+    pub fn capabilities(&self) -> Capabilities {
+        // SAFETY: the handle addresses a live index, whose three capability bits libgit2
+        // only reads.
+        let bits = unsafe { ffi::git_index_caps(self.as_ptr()) };
+        // libgit2 composes the result from the three published bits alone.
+        Capabilities::from_bits(bits).unwrap_or(Capabilities::all())
+    }
+
+    /// Whether a repository keeps this index as its own: the index of a repository's
+    /// working directory ([`RepositoryRef::index`]) or one installed with
+    /// [`RepositoryMut::set_index`], until the repository releases it.
+    ///
+    /// libgit2 lends that repository uncounted, and an index may outlive it, so there is
+    /// no handle to it here: nothing ties the index's owners to the repository's borrow.
+    /// [`is_owned_by`](Self::is_owned_by) tells whether a repository at hand is the one.
+    ///
+    /// A sole owner ([`IndexBox`]) never has one: a repository counts a reference of its
+    /// own.
+    ///
+    /// [`RepositoryMut::set_index`]: crate::libgit2::repository::repository::RepositoryMut::set_index
+    ///
+    /// Wraps: git_index_owner
+    pub fn has_owner(&self) -> bool {
+        // SAFETY: the handle addresses a live index, whose owner field libgit2 only reads;
+        // the repository pointer is not dereferenced.
+        !unsafe { ffi::git_index_owner(self.as_ptr()) }.is_null()
+    }
+
+    /// Whether `repo` is the repository keeping this index as its own (see
+    /// [`has_owner`](Self::has_owner)).
+    ///
+    /// Wraps: git_index_owner
+    pub fn is_owned_by(&self, repo: RepositoryRef<'_>) -> bool {
+        // SAFETY: as in `has_owner`; the pointer is only compared.
+        let owner = unsafe { ffi::git_index_owner(self.as_ptr()) };
+        ptr::eq(owner.cast_const(), repo.as_ptr())
+    }
+}
+
+impl IndexMut<'_> {
+    /// Removes every entry, conflict and resolved conflict (`REUC`), rename record
+    /// (`NAME`), the tree cache and every extension, leaving an empty index that still
+    /// reads from and writes to its file. Only the index in memory changes until it is
+    /// written.
+    ///
+    /// Fails only with libgit2's error, which a sole owner's index never reports: the
+    /// removals allocate only while a snapshot iterator reads the index.
+    ///
+    /// Wraps: git_index_clear
+    pub fn clear(&mut self) -> Result<(), ErrorBuf> {
+        // SAFETY: the exclusive handle addresses a live index that no borrow reads: every
+        // entry, name and extension it frees is unreachable from Rust.
+        let rc = unsafe { ffi::git_index_clear(self.as_mut_ptr()) };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+
+    /// Adds, or updates, the entry for the file at `path`, relative to the working
+    /// directory of the repository that owns the index, whose contents it writes to the
+    /// object database as a blob (through the repository's filters); ignore rules are not
+    /// consulted. Resolves a conflict at `path`, moving its sides to the resolved-conflict
+    /// (`REUC`) records. A directory holding a repository is added as a submodule entry.
+    ///
+    /// The index must belong to a repository with a working directory. An exclusive
+    /// handle comes only from a sole owner, which no repository shares, and no wrapper
+    /// yet lends one to a repository's own index, so through the safe API alone this
+    /// fails as below for want of a repository.
+    ///
+    /// Fails with libgit2's error when the index has no owning repository (as a sole
+    /// owner's never has: see [`IndexRef::has_owner`]), with [`ErrorCode::BareRepo`] when
+    /// that repository is bare, [`ErrorCode::Directory`] for a directory that is not a
+    /// repository, [`ErrorCode::NotFound`] when the file does not exist, and with
+    /// libgit2's error for a path an index cannot hold (`""`, `"d/"`, `".git/config"`,
+    /// `"./a"`; [`ErrorCode::InvalidSpec`] for one too long for the file system) or a
+    /// file it cannot read.
+    ///
+    /// libgit2 leaks the entry it built, and the nested repository it opened, when a
+    /// directory holds a repository that is no submodule and has no commit
+    /// ([`ErrorCode::UnbornBranch`]) or cannot be opened (`add_repo_as_submodule`,
+    /// `src/libgit2/index.c`).
+    ///
+    /// [`ErrorCode::BareRepo`]: crate::libgit2::util::errors::ErrorCode::BareRepo
+    /// [`ErrorCode::Directory`]: crate::libgit2::util::errors::ErrorCode::Directory
+    /// [`ErrorCode::NotFound`]: crate::libgit2::util::errors::ErrorCode::NotFound
+    /// [`ErrorCode::InvalidSpec`]: crate::libgit2::util::errors::ErrorCode::InvalidSpec
+    /// [`ErrorCode::UnbornBranch`]: crate::libgit2::util::errors::ErrorCode::UnbornBranch
+    ///
+    /// Wraps: git_index_add_bypath
+    pub fn add_path(&mut self, path: &CStr) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle addresses a live index that no borrow reads, and
+        // `path` is a NUL-terminated string read and copied for the call. Whatever libgit2
+        // reaches through the owning repository (its object database, filters, submodule
+        // cache) is the repository's, used on this thread, which neither is `Send`.
+        let rc = unsafe { ffi::git_index_add_bypath(self.as_mut_ptr(), path.as_ptr()) };
+        if rc < 0 {
+            Err(RepositoryError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Adds, or updates, the entries of the files in the owning repository's working
+    /// directory that match `pathspec` (every file for an empty one), as
+    /// [`add_path`](Self::add_path) does for one, and removes the entries of tracked
+    /// files that are gone. Ignored files are skipped unless already tracked, or unless
+    /// `flags` is exactly [`AddFlags::FORCE`] (see [`AddFlags`]);
+    /// [`AddFlags::CHECK_PATHSPEC`] fails the call, with [`ErrorCode::InvalidSpec`], when
+    /// a pattern names an ignored, untracked file. Resolves the conflicts of the paths it
+    /// adds.
+    ///
+    /// `callback` hears of each matching path before it is applied, with the pattern
+    /// that matched it, and decides ([`MatchedPathResult`]): a negative result stops the
+    /// scan, which then fails with that code; a panic stops it with `GIT_EUSER` and
+    /// resumes once libgit2 has returned.
+    ///
+    /// The index must belong to a repository, as for [`add_path`](Self::add_path), which
+    /// no exclusive handle the safe API hands out does yet. Refused, with a
+    /// `GIT_ERROR_INDEX` error and libgit2's generic code, when the index has no owning
+    /// repository (see [`IndexRef::has_owner`]), as a sole owner's never has. libgit2 instead asks the missing repository whether it is bare, and reports a
+    /// bare repository ([`ErrorCode::BareRepo`]). A pathspec mixing empty and non-empty
+    /// patterns is refused, with a `GIT_ERROR_INVALID` error, before libgit2 reads past
+    /// its empty ones (see [`Pathspec::new`]).
+    ///
+    /// Otherwise fails with [`ErrorCode::BareRepo`] for a bare repository, and with
+    /// libgit2's error when a file cannot be read or written as a blob.
+    ///
+    /// [`ErrorCode::BareRepo`]: crate::libgit2::util::errors::ErrorCode::BareRepo
+    /// [`ErrorCode::InvalidSpec`]: crate::libgit2::util::errors::ErrorCode::InvalidSpec
+    /// [`Pathspec::new`]: crate::libgit2::index::pathspec::Pathspec::new
+    ///
+    /// Wraps: git_index_add_all
+    pub fn add_all(
+        &mut self,
+        pathspec: StrArrayRef<'_>,
+        flags: AddFlags,
+        callback: Option<&mut MatchedPathCallback<'_>>,
+    ) -> Result<(), RepositoryError> {
+        if !self.as_ref().has_owner() {
+            set(
+                ErrorClass::Index,
+                c"cannot add all; the index is not backed up by a repository",
+            );
+            return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+        }
+        if !patterns_are_parsable(pathspec) {
+            return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+        }
+        let index = self.as_mut_ptr();
+        let scan = |callback, payload| {
+            // SAFETY: `index` is the exclusive handle's live index, which the callback
+            // cannot reach; `pathspec` is a live array of patterns, none empty beside a
+            // non-empty one, read for the call. The callback pair is NULL, or from
+            // `scan_with`, which keeps its payload live and exclusive for the call.
+            unsafe {
+                ffi::git_index_add_all(index, pathspec.as_ptr(), flags.bits(), callback, payload)
+            }
+        };
+        let rc = match callback {
+            Some(callback) => callback.scan_with(scan),
+            None => scan(None, ptr::null_mut()),
+        };
+        if rc < 0 {
+            Err(RepositoryError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The position of the first entry at `path`, of any stage, in path order; `None`
+    /// when the index has none. Compares as the index's
+    /// [`Capabilities::IGNORE_CASE`] says.
+    ///
+    /// Takes the exclusive handle: libgit2 sorts the entries first.
+    ///
+    /// Wraps: git_index_find
+    pub fn find(&mut self, path: &CStr) -> Option<usize> {
+        let mut position = 0;
+        // SAFETY: the exclusive handle addresses a live index, whose entry vector libgit2
+        // may sort, which no borrow reads; `position` is a writable slot, and `path` a
+        // NUL-terminated string read for the call.
+        let rc = unsafe { ffi::git_index_find(&mut position, self.as_mut_ptr(), path.as_ptr()) };
+        (rc >= 0).then_some(position)
+    }
+
+    /// The position of the first entry whose path starts with `prefix`, of any stage,
+    /// in path order; `None` when no path does. Suffix a directory's path with `/` to
+    /// find the first entry inside it. The empty prefix finds the first entry. The
+    /// prefix is compared byte for byte, even when the index ignores case.
+    ///
+    /// A deliberate divergence: when an entry's path is `prefix` itself and it has
+    /// several stages (a conflict), libgit2's binary search stops at whichever stage it
+    /// meets first, not necessarily the first one; this backs up to the first.
+    ///
+    /// Takes the exclusive handle: libgit2 sorts the entries first.
+    ///
+    /// Wraps: git_index_find_prefix
+    pub fn find_prefix(&mut self, prefix: &CStr) -> Option<usize> {
+        let mut position = 0;
+        // SAFETY: as in `find`.
+        let rc = unsafe {
+            ffi::git_index_find_prefix(&mut position, self.as_mut_ptr(), prefix.as_ptr())
+        };
+        if rc < 0 {
+            return None;
+        }
+        while position > 0 && self.path_at_starts_with(position - 1, prefix) {
+            position -= 1;
+        }
+        Some(position)
+    }
+
+    /// Whether the entry at `position` exists and its path starts with `prefix`, as
+    /// libgit2 checks the entry its prefix search found (`git__prefixcmp`).
+    fn path_at_starts_with(&mut self, position: usize, prefix: &CStr) -> bool {
+        // SAFETY: the exclusive handle addresses a live index, whose entry vector
+        // libgit2 may sort, which no borrow reads. It returns NULL past the end, or one of
+        // the index's entries, with its path in its own allocation, which nothing writes
+        // or frees while the handle, used only here, stays borrowed.
+        let entry = unsafe {
+            IndexEntryRef::from_ptr(ffi::git_index_get_byindex(self.as_mut_ptr(), position))
+        };
+        entry.is_some_and(|entry| entry.path().to_bytes().starts_with(prefix.to_bytes()))
+    }
+
+    /// Removes the conflict sides (entries of a stage other than
+    /// [`Stage::Normal`]) at `path`, leaving its normal entry, if any; succeeds without
+    /// change when `path` has no conflict.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when the index has no entry at `path` at all.
+    ///
+    /// [`ErrorCode::NotFound`]: crate::libgit2::util::errors::ErrorCode::NotFound
+    ///
+    /// Wraps: git_index_conflict_remove
+    pub fn remove_conflict(&mut self, path: &CStr) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle addresses a live index that no borrow reads, so the
+        // entries libgit2 frees are unreachable from Rust; `path` is a NUL-terminated
+        // string read for the call.
+        let rc = unsafe { ffi::git_index_conflict_remove(self.as_mut_ptr(), path.as_ptr()) };
+        if rc < 0 {
+            Err(RepositoryError::from_libgit2(rc))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Removes every conflict side: every entry of a stage other than
+    /// [`Stage::Normal`].
+    ///
+    /// Fails only with libgit2's error, which a sole owner's index never reports, as
+    /// for [`clear`](Self::clear).
+    ///
+    /// Wraps: git_index_conflict_cleanup
+    pub fn clear_conflicts(&mut self) -> Result<(), ErrorBuf> {
+        // SAFETY: as in `remove_conflict`.
+        let rc = unsafe { ffi::git_index_conflict_cleanup(self.as_mut_ptr()) };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+
+    /// A copy of the data of the extension with `signature`, its header excluded; `None`
+    /// when the index has none. The extensions are those libgit2 does not interpret, read
+    /// from the index file or set with [`set_extension`](Self::set_extension): never the
+    /// tree cache (`TREE`) or the conflict records (`REUC`, `NAME`) libgit2 parses.
+    ///
+    /// The copy is in libgit2's allocator, which it is released to.
+    ///
+    /// A signature holding a NUL byte is refused, with a `GIT_ERROR_INVALID` error: see
+    /// [`set_extension`](Self::set_extension). Otherwise fails only with libgit2's error
+    /// when the copy cannot be allocated.
+    ///
+    /// Takes the exclusive handle: libgit2 sorts the extensions first.
+    ///
+    /// Wraps: git_index_extension_lookup
+    pub fn extension(&mut self, signature: &[u8; 4]) -> Result<Option<OdbDataVec<u8>>, ErrorBuf> {
+        let key = extension_key(signature).ok_or_else(last)?;
+        let mut out = ffi::git_buf {
+            ptr: ptr::null_mut(),
+            reserved: 0,
+            size: 0,
+        };
+        // SAFETY: `out` is a writable `git_buf` owning nothing, which libgit2 overwrites
+        // without freeing; the exclusive handle addresses a live index, whose extension
+        // vector libgit2 may sort; `key` is a NUL-terminated string read for the call.
+        let rc = unsafe {
+            ffi::git_index_extension_lookup(&mut out, self.as_mut_ptr(), key.as_ptr().cast())
+        };
+        if rc == ErrorCode::NotFound.raw() {
+            return Ok(None);
+        }
+        if rc < 0 {
+            return Err(last());
+        }
+        // SAFETY: on success `out.ptr` is a fresh `git__malloc` allocation of exactly
+        // `out.size` bytes, all copied from the extension and owned by the caller; it is
+        // not NUL-terminated and `reserved` stays 0, so it is not a `Buf`'s. libgit2's
+        // allocator settles it, through `git__free`, as `OdbDataArrayFree` does.
+        let data = unsafe { OdbDataVec::from_raw_parts_or_empty(out.ptr.cast::<u8>(), out.size) };
+        Ok(Some(data.expect("a successful lookup allocates its copy")))
+    }
+
+    /// Sets the extension with `signature` to `data`, replacing any it has; libgit2
+    /// writes it to the index file after its own extensions, and keeps the data as is.
+    ///
+    /// libgit2 does not check the signature. Git reads an extension whose signature does
+    /// not start with an uppercase ASCII letter as one the reader must understand, so an
+    /// index file holding one is unreadable (libgit2 fails with "unsupported mandatory
+    /// extension"); one named after libgit2's own (`TREE`, `REUC`, `NAME`) is written
+    /// beside them, and read back as theirs.
+    ///
+    /// A signature holding a NUL byte is refused, with a `GIT_ERROR_INVALID` error, before
+    /// libgit2 sees it: libgit2 keeps all four bytes, but compares only those before the
+    /// NUL when it searches for one. So is `data` of 4 GiB or more (`u32::MAX` bytes),
+    /// whose size the extension header cannot hold. Otherwise fails only with libgit2's
+    /// error when it runs out of memory.
+    ///
+    /// libgit2 leaks the new extension when it runs out of memory growing its list.
+    ///
+    /// Wraps: git_index_extension_add
+    pub fn set_extension(&mut self, signature: &[u8; 4], data: &[u8]) -> Result<(), ErrorBuf> {
+        let key = extension_key(signature).ok_or_else(last)?;
+        if !u32::try_from(data.len()).is_ok_and(|len| len < u32::MAX) {
+            set(
+                ErrorClass::Invalid,
+                c"index extension data cannot reach 4 GiB",
+            );
+            return Err(last());
+        }
+        // SAFETY: the exclusive handle's live index lends nothing, so the extension it
+        // replaces is unreachable from Rust; `key` holds four bytes and a terminator;
+        // `data` is `data.len()` (< `u32::MAX`) readable bytes at a non-NULL pointer.
+        let rc = unsafe {
+            ffi::git_index_extension_add(
+                self.as_mut_ptr(),
+                key.as_ptr().cast(),
+                data.as_ptr().cast(),
+                data.len(),
+            )
+        };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+
+    /// Removes the extension with `signature`; `false` when the index has none.
+    ///
+    /// A signature holding a NUL byte is refused, with a `GIT_ERROR_INVALID` error: see
+    /// [`set_extension`](Self::set_extension).
+    ///
+    /// Wraps: git_index_extension_remove
+    pub fn remove_extension(&mut self, signature: &[u8; 4]) -> Result<bool, ErrorBuf> {
+        let key = extension_key(signature).ok_or_else(last)?;
+        // SAFETY: as in `set_extension`, for the extension libgit2 frees; `key` is a
+        // NUL-terminated string read for the call.
+        let rc = unsafe { ffi::git_index_extension_remove(self.as_mut_ptr(), key.as_ptr().cast()) };
+        if rc == ErrorCode::NotFound.raw() {
+            return Ok(false);
+        }
+        if rc < 0 { Err(last()) } else { Ok(true) }
     }
 }
 
@@ -3619,6 +4019,320 @@ mod unit_tests {
             format!("{options:?}"),
             "IndexOptions { version: 1, oid_type: Some(Sha1) }"
         );
+    }
+
+    /// The index and extension routines' internal paths: refusals before libgit2, the
+    /// divergence from C's `git_index_add_all` without a repository, and allocation
+    /// failures.
+    mod symbols {
+        use super::*;
+        use crate::libgit2::core::strarray::StrArrayView;
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use std::path::PathBuf;
+
+        /// A fresh repository with a working directory under the temporary directory,
+        /// removed with it.
+        struct Scratch {
+            dir: PathBuf,
+            repo: Option<RepositoryBox>,
+        }
+
+        impl Scratch {
+            fn new(tag: &str) -> Self {
+                let dir = std::env::temp_dir().join(format!(
+                    "crustify-index-symbols-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = std::fs::remove_dir_all(&dir);
+                let path = CString::new(dir.to_str().unwrap()).unwrap();
+                let repo = Some(Repository::init(&path, false).unwrap());
+                Self { dir, repo }
+            }
+
+            /// The repository's index, with `body` given an exclusive handle over it.
+            fn with_index(&self, body: impl FnOnce(IndexMut<'_>)) {
+                let index = self.repo.as_ref().unwrap().as_ref().index().unwrap();
+                // SAFETY: the arc's counted reference keeps the index live past the
+                // handle, and nothing else reaches the index or its repository while
+                // `body` runs: the test holds no other reference to either.
+                let handle = unsafe { IndexMut::from_ptr(index.as_c_ptr()) }.unwrap();
+                body(handle);
+            }
+        }
+
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                drop(self.repo.take());
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        #[test]
+        fn extension_keys_terminate_the_signature() {
+            assert_eq!(extension_key(b"ZOPT"), Some(*b"ZOPT\0"));
+            assert_eq!(extension_key(b"\xff\x01a~"), Some(*b"\xff\x01a~\0"));
+        }
+
+        /// A NUL byte anywhere in a signature is refused by every extension routine,
+        /// before libgit2 sees it, and changes nothing.
+        #[test]
+        #[cfg_attr(miri, ignore = "sets libgit2's error")]
+        fn signatures_holding_nul_bytes_are_refused() {
+            let mut index = Index::new().unwrap();
+            index.as_mut().set_extension(b"ZOPT", b"kept").unwrap();
+            for signature in [b"\0OPT", b"Z\0PT", b"ZO\0T", b"ZOP\0", b"\0\0\0\0"] {
+                let errors = [
+                    index.as_mut().extension(signature).unwrap_err(),
+                    index.as_mut().set_extension(signature, b"x").unwrap_err(),
+                    index.as_mut().remove_extension(signature).unwrap_err(),
+                ];
+                for error in errors {
+                    assert_eq!(
+                        (error.class(), error.message()),
+                        (
+                            Some(ErrorClass::Invalid),
+                            c"an index extension signature cannot hold a NUL byte"
+                        )
+                    );
+                }
+            }
+            let kept = index.as_mut().extension(b"ZOPT").unwrap().unwrap();
+            assert_eq!(kept.as_slice(), b"kept");
+        }
+
+        /// Data the extension header cannot size is refused before libgit2, which
+        /// asserts on it; the buffer is never written, so its pages stay unmapped.
+        #[test]
+        #[cfg_attr(miri, ignore = "allocates 4 GiB and sets libgit2's error")]
+        fn extension_data_of_4_gib_is_refused() {
+            let mut index = Index::new().unwrap();
+            let huge = vec![0u8; u32::MAX as usize];
+            let error = index.as_mut().set_extension(b"ZBIG", &huge).unwrap_err();
+            assert_eq!(
+                (error.class(), error.message()),
+                (
+                    Some(ErrorClass::Invalid),
+                    c"index extension data cannot reach 4 GiB"
+                )
+            );
+            assert!(index.as_mut().extension(b"ZBIG").unwrap().is_none());
+        }
+
+        /// A deliberate divergence: without a repository, `git_index_add_all` asks
+        /// `git_repository_is_bare(NULL)`, whose argument check fails, and reports a bare
+        /// repository; `add_all` refuses with the index error libgit2's own scan reports.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn add_all_without_a_repository_is_refused_where_c_reports_a_bare_one() {
+            let mut index = Index::new().unwrap();
+            let mut calls = 0;
+            let mut f = |_: &CStr, _: Option<&CStr>| {
+                calls += 1;
+                MatchedPathResult::APPLY
+            };
+            let mut callback = MatchedPathCallback::new(&mut f);
+            let pathspec = StrArrayView::default();
+            for callback in [None, Some(&mut callback)] {
+                let error = index
+                    .as_mut()
+                    .add_all(pathspec.as_ref(), AddFlags::DEFAULT, callback)
+                    .unwrap_err();
+                assert_eq!(
+                    (error.code(), error.class(), error.message()),
+                    (
+                        Some(ErrorCode::Generic),
+                        Some(ErrorClass::Index),
+                        c"cannot add all; the index is not backed up by a repository"
+                    )
+                );
+            }
+            drop(callback);
+            assert_eq!(calls, 0);
+
+            // SAFETY: the box's live index, borrowed exclusively; an empty pathspec and
+            // no callback.
+            let rc = unsafe {
+                ffi::git_index_add_all(
+                    index.as_c_ptr(),
+                    pathspec.as_ref().as_ptr(),
+                    0,
+                    None,
+                    ptr::null_mut(),
+                )
+            };
+            assert_eq!(rc, ErrorCode::BareRepo.raw());
+            assert_eq!(
+                last().message(),
+                c"cannot index add all. This operation is not allowed against bare repositories."
+            );
+
+            // `add_path` is left to libgit2, which checks for the repository first.
+            let error = index.as_mut().add_path(c"file").unwrap_err();
+            assert_eq!(
+                (error.code(), error.class(), error.message()),
+                (
+                    Some(ErrorCode::Generic),
+                    Some(ErrorClass::Index),
+                    c"could not initialize index entry. Index is not backed up by an existing repository."
+                )
+            );
+        }
+
+        /// A pathspec mixing empty and non-empty patterns is refused before libgit2
+        /// parses it, once the index is known to have a repository, which C checks first.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn add_all_refuses_mixed_empty_patterns() {
+            let scratch = Scratch::new("mixed");
+            std::fs::write(scratch.dir.join("file"), "contents").unwrap();
+            scratch.with_index(|mut index| {
+                for patterns in [&[c"", c"file"][..], &[c"file", c""], &[c"a", c"", c"b"]] {
+                    let pathspec = StrArrayView::new(patterns);
+                    let error = index
+                        .add_all(pathspec.as_ref(), AddFlags::DEFAULT, None)
+                        .unwrap_err();
+                    assert_eq!(
+                        (error.code(), error.class()),
+                        (Some(ErrorCode::Generic), Some(ErrorClass::Invalid))
+                    );
+                }
+                assert_eq!(index.as_ref().entry_count(), 0);
+            });
+        }
+
+        /// A deliberate divergence: libgit2's prefix search stops at whichever stage of
+        /// an entry whose path is the prefix it meets first; `find_prefix` backs up to the
+        /// first stage, as `find` and the header promise.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn find_prefix_backs_up_to_the_first_stage() {
+            let mut index = Index::new().unwrap();
+            for (path, stage) in [(c"a", 0u16), (c"a", 1), (c"a", 2), (c"a", 3), (c"ab", 0)] {
+                let mut entry = ffi::git_index_entry {
+                    mode: 0o100644,
+                    path: path.as_ptr(),
+                    // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
+                    flags: stage << 12,
+                    ..Default::default()
+                };
+                entry.id.id[0] = 1;
+                entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+                // SAFETY: the box's live index, borrowed exclusively; `entry` and its
+                // path are read and copied for the call.
+                assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+            }
+            let mut position = usize::MAX;
+            // SAFETY: a writable slot, the box's live index and a NUL-terminated prefix.
+            let rc = unsafe {
+                ffi::git_index_find_prefix(&mut position, index.as_c_ptr(), c"a".as_ptr())
+            };
+            assert_eq!((rc, position), (0, 2));
+            assert_eq!(index.as_mut().find_prefix(c"a"), Some(0));
+            assert_eq!(index.as_mut().find(c"a"), Some(0));
+            assert_eq!(index.as_mut().find_prefix(c"ab"), Some(4));
+            assert_eq!(index.as_mut().find_prefix(c"a/"), None);
+            assert_eq!(index.as_mut().find_prefix(c"b"), None);
+        }
+
+        /// Every allocation the extension routines make can fail: the lookup reports it
+        /// and leaks nothing; so does setting an extension, except where libgit2 runs out
+        /// of memory growing its list after allocating the extension, which it leaks
+        /// (`git_index_extension_add`, `src/libgit2/index.c`). Counted through the
+        /// allocator, with LeakSanitizer off in the child for that leak.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn extension_allocation_failures() {
+            isolated_with(
+                concat!(module_path!(), "::extension_allocation_failures"),
+                || {
+                    install_countdown();
+                    assert!(runtime_pinned());
+                    set(ErrorClass::Invalid, c"error state allocated");
+                    let mut index = Index::new().unwrap();
+                    index.as_mut().set_extension(b"ZONE", b"one").unwrap();
+
+                    // The lookup's one allocation, the copy.
+                    let before = LIVE.load(SeqCst);
+                    ALLOWED.store(0, SeqCst);
+                    REFUSING.store(true, SeqCst);
+                    let error = index.as_mut().extension(b"ZONE").unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                    assert_eq!(LIVE.load(SeqCst), before);
+
+                    // Replacing allocates the extension alone.
+                    ALLOWED.store(0, SeqCst);
+                    REFUSING.store(true, SeqCst);
+                    let error = index.as_mut().set_extension(b"ZONE", b"two").unwrap_err();
+                    REFUSING.store(false, SeqCst);
+                    assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                    assert_eq!(LIVE.load(SeqCst), before);
+                    let kept = index.as_mut().extension(b"ZONE").unwrap().unwrap();
+                    assert_eq!(kept.as_slice(), b"one");
+                    drop(kept);
+
+                    // A cleared index has no list left, so a new extension grows one.
+                    index.as_mut().clear().unwrap();
+                    let before = LIVE.load(SeqCst);
+                    let mut leaked = Vec::new();
+                    for allowed in 0..=2 {
+                        ALLOWED.store(allowed, SeqCst);
+                        REFUSING.store(true, SeqCst);
+                        let result = index.as_mut().set_extension(b"ZNEW", b"new");
+                        REFUSING.store(false, SeqCst);
+                        let live = LIVE.load(SeqCst) - before;
+                        match result {
+                            Err(error) => {
+                                assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                                assert!(index.as_mut().extension(b"ZNEW").unwrap().is_none());
+                                leaked.push(live);
+                            }
+                            Ok(()) => {
+                                // The extension and the list, beside what failed
+                                // attempts leaked.
+                                assert_eq!(live, 2 + leaked.iter().sum::<isize>());
+                                break;
+                            }
+                        }
+                    }
+                    assert_eq!(leaked, [0, 1]);
+                    drop(index);
+                },
+                false,
+            );
+        }
+
+        /// The routines that only free never fail on a sole owner's index, even with
+        /// every allocation refused.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn removals_do_not_allocate() {
+            isolated(
+                concat!(module_path!(), "::removals_do_not_allocate"),
+                || {
+                    install_countdown();
+                    set(ErrorClass::Invalid, c"error state allocated");
+                    let mut index = Index::new().unwrap();
+                    index.as_mut().set_extension(b"ZONE", b"one").unwrap();
+                    index
+                        .as_mut()
+                        .add_name(Some(c"a"), Some(c"b"), None)
+                        .unwrap();
+                    let before = LIVE.load(SeqCst);
+                    ALLOWED.store(0, SeqCst);
+                    REFUSING.store(true, SeqCst);
+                    assert_eq!(index.as_mut().remove_extension(b"ZONE"), Ok(true));
+                    assert_eq!(index.as_mut().remove_extension(b"ZONE"), Ok(false));
+                    index.as_mut().clear_conflicts().unwrap();
+                    index.as_mut().clear().unwrap();
+                    assert_eq!(index.as_mut().find(c"a"), None);
+                    assert_eq!(index.as_mut().find_prefix(c""), None);
+                    REFUSING.store(false, SeqCst);
+                    assert!(LIVE.load(SeqCst) < before);
+                    assert_eq!(index.as_ref().name_entry_count(), 0);
+                },
+            );
+        }
     }
 
     #[test]

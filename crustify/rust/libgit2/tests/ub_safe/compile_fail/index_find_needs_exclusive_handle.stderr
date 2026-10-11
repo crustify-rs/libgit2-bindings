@@ -1,0 +1,5 @@
+error[E0599]: no method named `find` found for struct `IndexRef<'a>` in the current scope
+ --> tests/ub_safe/compile_fail/index_find_needs_exclusive_handle.rs:6:28
+  |
+6 |     let _ = index.as_ref().find(c"a");
+  |                            ^^^^ method not found in `IndexRef<'_>`

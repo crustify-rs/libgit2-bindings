@@ -11506,6 +11506,187 @@
    ]
   },
   {
+   "name": "git_index_add_all",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional synchronous callback, invoked from apply_each_file before each matching workdir path is applied, with delta->old_file.path (diff-owned) and the matched pattern (pathspec-owned), both lent for the invocation. >0 skips, <0 aborts and is returned (git_error_set_after_callback). Never retained."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used for the call; needs INDEX_OWNER (a repository keeping its own counted reference) with a workdir. With no owner it passes NULL to git_repository_is_bare, whose soft assert fails, and returns GIT_EBAREREPO ('not allowed against bare repositories'): a C defect the Rust wrapper refuses. Adds/updates/removes entries (index_insert, index_remove_entry) and resolves conflicts to REUC; retains nothing."
+     }
+    },
+    {
+     "name": "paths",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:paths"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only pattern array, parsed twice (git_pathspec__init here and in index_apply_to_wd_diff) into private copies; NULL/empty matches everything. An empty pattern beside non-empty ones is over-read by parse_optimized_patterns (attr_file.c): the wrapper refuses that mix."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque cookie passed only to cb, during the call; never dereferenced or retained by libgit2."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_add_bypath",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used for the call; needs INDEX_OWNER, else -1 'Index is not backed up by an existing repository'. Writes the file as a blob through the owner (filters), inserts or replaces the stage-0 entry (freeing a replaced one), moves conflict sides to REUC, may add a submodule entry through the owner's index weakptr (the same index). Retains nothing. A directory holding a non-submodule repository with no commit (or one that cannot be opened) fails in add_repo_as_submodule after building the entry and opening the nested repository, leaking both (and the joined path)."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Workdir-relative path, read and copied (index_entry_init / git_repository_workdir_path) for the call; validated by index_insert (''/'d/'/'.git/config'/'./a' rejected with -1)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_caps",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: the three capability bitfields; no pointer returned."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_clear",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used: removes every entry (deferred to 'deleted' while snapshot readers exist, else freed), clears the tree cache pool, disposes every extension (git_vector_dispose_deep, leaving the vector unallocated), clears NAME and REUC records and the file stamp. The index itself survives; invalidates every entry/name/reuc/extension pointer lent before."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_cleanup",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used: index_conflict_remove(index, NULL) removes (frees, or defers while readers exist) every entry of stage > 0; invalidates their pointers."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_conflict_iterator_free",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {
@@ -11676,6 +11857,327 @@
    ]
   },
   {
+   "name": "git_index_conflict_remove",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used: removes (frees, or defers while readers exist) the stage > 0 entries at path; GIT_ENOTFOUND (error set by git_index_find) when no entry of any stage has that path; 0 when only a stage-0 entry exists."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Path compared for the call (git_index_find, entries_cmp_path), never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_entrycount",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: entries.length."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_extension_add",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:data"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "data_len bytes copied into the new extension (memcpy, non-NULL even when empty); data_len must be < UINT32_MAX (GIT_ASSERT). Never retained."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used: frees and replaces an existing extension with the same signature (header says GIT_EEXISTS; the code replaces), or inserts a new one, growing the vector (unallocated after git_index_clear). On growth failure the new extension leaks. Extensions are written by git_index_write after TREE/NAME/REUC; a non-uppercase first signature byte makes the written file unreadable ('unsupported mandatory extension')."
+     }
+    },
+    {
+     "name": "signature",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:signature"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Exactly four bytes are memcpy'd (over-read if shorter), but the search (extension_srch) uses strncmp, stopping at a NUL: needs four non-NUL bytes plus a terminator. Never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_extension_lookup",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Read for the call; the extension vector may be sorted (git_vector_bsearch2)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's git_buf; ptr/size overwritten WITHOUT freeing a previous allocation, reserved untouched. On success ptr is a fresh git__malloc copy of exactly size bytes, NOT NUL-terminated, owned by the caller (git__free / git_buf_dispose): with reserved left 0 it breaks the Buf invariant, so the wrapper adopts ptr as an OdbDataVec<u8>. NULL/0 on GIT_ENOTFOUND (no error set) and on allocation failure."
+     }
+    },
+    {
+     "name": "signature",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:signature"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Search key compared with strncmp over at most four bytes; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_extension_remove",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusively used: frees the extension with the signature and removes it from the vector; GIT_ENOTFOUND without an error message when absent."
+     }
+    },
+    {
+     "name": "signature",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:signature"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Search key compared with strncmp over at most four bytes; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_find",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "at_pos",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:at_pos"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional out slot, written only on success; left untouched on GIT_ENOTFOUND."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Entry vector sorted for the bsearch (git_vector_bsearch2), then read; a non-const routine for that reason."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Compared for the call; never retained. GIT_ENOTFOUND sets 'index does not contain'."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_find_prefix",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "at_pos",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:at_pos"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional out slot, written only on success; left untouched on GIT_ENOTFOUND."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Entry vector sorted (index_find), then read. No GIT_ASSERT_ARG on index or prefix. When an entry's path equals the prefix and it has several stages, the bsearch stops at an arbitrary stage, not the first one the header promises (the wrapper backs up)."
+     }
+    },
+    {
+     "name": "prefix",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:prefix"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "strlen'd and compared for the call; never retained. GIT_ENOTFOUND sets no error."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_free",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {
@@ -11699,6 +12201,29 @@
       "nullable": true,
       "mutable": true,
       "note": "Releases one counted reference: NULL is a no-op; GIT_REFCOUNT_DEC frees through index_free (clears entries, names, reuc, extensions, deleted, the entry map, index_file_path, then git__free on the zeroed struct) once the count reaches 0 while rc.owner is NULL. Every reference handed out by git_index_open/open_ext/new/new_ext, git_repository_index, git_rebase_inmemory_index and the merge/cherrypick/revert/apply index results is released here; the repository releases its own through set_index. Rust: the c_drop of IndexFree for both CBox<Index> (sole reference) and CArc<Index> (shared counted reference)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_has_conflicts",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: entry flags scanned for stage > 0."
      }
     }
    ]
@@ -13054,6 +13579,45 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_index_owner",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: rc.owner."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "other"
+     },
+     "nullable": true,
+     "mutable": true,
+     "note": "The repository keeping this index (set_index: GIT_REFCOUNT_OWN + a counted index reference), lent uncounted; NULL for an index no repository keeps (every fresh git_index_new/open result). Cleared (GIT_REFCOUNT_OWN NULL) when the repository releases the index, which may outlive it, so no index borrow bounds it: the wrapper only reports presence and compares identity."
+    }
+   }
   },
   {
    "name": "git_libgit2_buildinfo",

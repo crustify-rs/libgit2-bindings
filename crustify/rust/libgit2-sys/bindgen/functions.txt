@@ -504,3 +504,14 @@ git_reference_name_to_id
 
 # index wave 1 batch 0: git_index_options constructor
 git_index_options_init
+
+# index wave 1 batch 2: index symbol wrappers
+git_index_clear
+git_index_conflict_cleanup
+git_index_conflict_remove
+git_index_extension_add
+git_index_extension_lookup
+git_index_extension_remove
+git_index_find
+git_index_find_prefix
+git_index_has_conflicts

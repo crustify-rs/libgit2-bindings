@@ -11,8 +11,8 @@ use libgit2::libgit2::index::index::{Index, IndexArc, IndexBox};
 use libgit2::libgit2::oid::oid::OidType;
 
 use crate::fixture::index::{
-    add, add_intent_to_add, entry_count, has_owner, isolated_tolerating_leaks, path,
-    repository_index, set_repository_index, set_version, write,
+    add, add_intent_to_add, isolated_tolerating_leaks, path, repository_index,
+    set_repository_index, set_version, write,
 };
 use crate::fixture::{TempRepo, isolated};
 
@@ -120,16 +120,20 @@ fn fresh_indexes_are_released_once() {
     let _shared = index.as_ref();
     let _exclusive = index.as_mut();
     assert_eq!(
-        (entry_count(&index), path(&index), has_owner(&index)),
+        (
+            index.as_ref().entry_count(),
+            path(&index),
+            index.as_ref().has_owner()
+        ),
         (0, None, false)
     );
     drop(index);
 
     let index = IndexBox::new().unwrap();
-    assert_eq!(entry_count(&index), 0);
+    assert_eq!(index.as_ref().entry_count(), 0);
     let index = IndexArc::new().unwrap();
     let _ = index.as_ref();
-    assert_eq!(entry_count(&index), 0);
+    assert_eq!(index.as_ref().entry_count(), 0);
 }
 
 /// Indexes of each object id type, through the typed constructors: fresh and on
@@ -148,12 +152,16 @@ fn typed_indexes_are_built_and_released_once() {
         let _shared = fresh.as_ref();
         let _exclusive = fresh.as_mut();
         assert_eq!(
-            (entry_count(&fresh), path(&fresh), has_owner(&fresh)),
+            (
+                fresh.as_ref().entry_count(),
+                path(&fresh),
+                fresh.as_ref().has_owner()
+            ),
             (0, None, false)
         );
         assert_eq!(add(&mut fresh, c"a"), 0);
         let shared: IndexArc = fresh.into();
-        assert_eq!(entry_count(&shared), 1);
+        assert_eq!(shared.as_ref().entry_count(), 1);
         drop(shared);
 
         let file = c_path(&scratch.file(&format!("index-{kind:?}")));
@@ -164,9 +172,9 @@ fn typed_indexes_are_built_and_released_once() {
         }
         assert_eq!(write(&mut index), 0);
         let reread = Index::open_with_oid_type(&file, kind).unwrap();
-        assert_eq!(entry_count(&reread), 3);
+        assert_eq!(reread.as_ref().entry_count(), 3);
         drop(index);
-        assert_eq!(entry_count(&reread), 3);
+        assert_eq!(reread.as_ref().entry_count(), 3);
         assert!(Index::open_with_oid_type(&file, other).is_err());
         assert_eq!(Index::open(&file).is_ok(), kind == OidType::Sha1);
         drop(reread);
@@ -181,7 +189,7 @@ fn shared_box_is_released_once() {
     let mut index = Index::new().unwrap();
     assert_eq!(add(&mut index, c"a"), 0);
     let shared: IndexArc = index.into();
-    assert_eq!(entry_count(&shared), 1);
+    assert_eq!(shared.as_ref().entry_count(), 1);
     let _ = shared.as_ref();
 }
 
@@ -193,7 +201,10 @@ fn open_copies_its_path() {
     let scratch = Scratch::new("copies-path");
     let file = c_path(&scratch.file("missing.index"));
     let index = Index::open(&file.clone()).unwrap();
-    assert_eq!((entry_count(&index), path(&index)), (0, Some(file)));
+    assert_eq!(
+        (index.as_ref().entry_count(), path(&index)),
+        (0, Some(file))
+    );
 
     // libgit2 would open it, and writing that index is undefined behaviour.
     assert!(Index::open(c"").is_err());
@@ -211,9 +222,9 @@ fn open_reads_a_written_index() {
     }
     assert_eq!(write(&mut index), 0);
     let reread = Index::open(&file).unwrap();
-    assert_eq!(entry_count(&reread), 3);
+    assert_eq!(reread.as_ref().entry_count(), 3);
     drop(index);
-    assert_eq!(entry_count(&reread), 3);
+    assert_eq!(reread.as_ref().entry_count(), 3);
 }
 
 /// Unreadable files fail without leaking the half-built index.
@@ -254,7 +265,7 @@ fn open_survives_truncated_and_corrupted_files() {
             corrupt[body..].fill(0);
             std::fs::write(&file, &corrupt).unwrap();
             if let Ok(index) = Index::open(&c_file) {
-                let _ = entry_count(&index);
+                let _ = index.as_ref().entry_count();
             }
         }
     }
@@ -272,9 +283,15 @@ fn open_reads_every_version_and_extension() {
         let bytes = versioned_index_bytes(&scratch, version);
         let entries = if version >= 3 { 5 } else { 4 };
         std::fs::write(&file, &bytes).unwrap();
-        assert_eq!(entry_count(&Index::open(&c_file).unwrap()), entries);
+        assert_eq!(
+            Index::open(&c_file).unwrap().as_ref().entry_count(),
+            entries
+        );
         std::fs::write(&file, all_extensions(&bytes)).unwrap();
-        assert_eq!(entry_count(&Index::open(&c_file).unwrap()), entries);
+        assert_eq!(
+            Index::open(&c_file).unwrap().as_ref().entry_count(),
+            entries
+        );
         for refused in [
             with_extensions(&bytes, &[(b"link", b"mandatory")]),
             with_extensions(&bytes, &[(b"REUC", b"a\x00")]),
@@ -307,7 +324,7 @@ fn sweep(scratch: &Scratch, bytes: &[u8]) {
             corrupt[at] ^= flip;
             std::fs::write(&file, &corrupt).unwrap();
             if let Ok(index) = Index::open(&c_file) {
-                let _ = entry_count(&index);
+                let _ = index.as_ref().entry_count();
             }
         }
     }
@@ -353,12 +370,12 @@ fn shared_index_outlives_its_repository() {
     let index = repository_index(&repo);
     let again = repository_index(&repo);
     assert!(CArc::ptr_eq(&index, &again));
-    assert!(has_owner(&index));
+    assert!(index.as_ref().has_owner());
     drop(repo);
-    assert!(!has_owner(&index));
-    assert_eq!(entry_count(&index), 0);
+    assert!(!index.as_ref().has_owner());
+    assert_eq!(index.as_ref().entry_count(), 0);
     drop(again);
-    assert_eq!(entry_count(&index), 0);
+    assert_eq!(index.as_ref().entry_count(), 0);
 }
 
 /// The repository outlives the counted references it handed out.
@@ -369,7 +386,7 @@ fn repository_outlives_its_shared_index() {
     drop(repository_index(&repo));
     let index = repository_index(&repo);
     drop(index);
-    assert_eq!(entry_count(&repository_index(&repo)), 0);
+    assert_eq!(repository_index(&repo).as_ref().entry_count(), 0);
 }
 
 /// A built index handed to a repository, as an arc, is released once whichever of the
@@ -383,18 +400,18 @@ fn index_shared_with_a_repository_is_released_once() {
         assert_eq!(add(&mut index, c"kept"), 0);
         let index: IndexArc = index.into();
         set_repository_index(&mut repo, &index);
-        assert!(has_owner(&index));
+        assert!(index.as_ref().has_owner());
         let from_repo = repository_index(&repo);
         assert!(CArc::ptr_eq(&index, &from_repo));
         drop(from_repo);
         if arc_first {
             drop(index);
-            assert_eq!(entry_count(&repository_index(&repo)), 1);
+            assert_eq!(repository_index(&repo).as_ref().entry_count(), 1);
             drop(repo);
         } else {
             drop(repo);
-            assert!(!has_owner(&index));
-            assert_eq!(entry_count(&index), 1);
+            assert!(!index.as_ref().has_owner());
+            assert_eq!(index.as_ref().entry_count(), 1);
         }
     }
 }
@@ -408,10 +425,13 @@ fn replaced_repository_index_stays_with_its_arc() {
     let old = repository_index(&repo);
     let new: IndexArc = Index::new().unwrap().into();
     set_repository_index(&mut repo, &new);
-    assert!(!has_owner(&old));
-    assert!(has_owner(&new));
+    assert!(!old.as_ref().has_owner());
+    assert!(new.as_ref().has_owner());
     drop(repo);
-    assert_eq!((entry_count(&old), entry_count(&new)), (0, 0));
+    assert_eq!(
+        (old.as_ref().entry_count(), new.as_ref().entry_count()),
+        (0, 0)
+    );
 }
 
 /// Threads building and releasing their own indexes race nothing, the first of them
@@ -432,7 +452,7 @@ fn threads_build_their_own_indexes() {
                             let mut index = Index::new().unwrap();
                             assert_eq!(add(&mut index, c"x"), 0);
                             let shared: IndexArc = index.into();
-                            assert_eq!(entry_count(&shared), 1);
+                            assert_eq!(shared.as_ref().entry_count(), 1);
                             let mut on_disk = Index::open(&file).unwrap();
                             assert_eq!(add(&mut on_disk, c"y"), 0);
                             assert_eq!(write(&mut on_disk), 0);
@@ -969,5 +989,517 @@ mod options_value {
                 });
             }
         });
+    }
+}
+
+/// The index routines over either owner's handles: counts, capabilities, ownership,
+/// lookups across stages, conflict removal, clearing and extensions, every result copied
+/// or scalar; and the repository-backed additions, with their callbacks.
+mod routines {
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::path::PathBuf;
+
+    use libgit2::libgit2::core::strarray::StrArrayView;
+    use libgit2::libgit2::core::types::{ObjectType, SignatureView, Time};
+    use libgit2::libgit2::index::index::{
+        AddFlags, Capabilities, Index, IndexArc, IndexBox, MatchedPathCallback, MatchedPathResult,
+    };
+    use libgit2::libgit2::object::commit::{CreateOptions, create_from_stage};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use super::{Scratch, all_extensions, c_path, index_bytes};
+    use crate::fixture::index::isolated_tolerating_leaks;
+    use crate::fixture::index::{
+        add, add_staged_id, repository_index, repository_index_box, write,
+    };
+    use crate::fixture::object_and_tree_entry::repository;
+    use crate::fixture::{TempRepo, isolated};
+
+    /// A repository with a working directory, freed and removed on drop.
+    struct WorkRepo {
+        dir: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl WorkRepo {
+        fn new(tag: &str, bare: bool) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-index-ub-work-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let repo = Some(Repository::init(&c_path(&dir), bare).unwrap());
+            Self { dir, repo }
+        }
+
+        fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
+        }
+
+        fn write(&self, path: &str, contents: &str) {
+            let file = self.dir.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, contents).unwrap();
+        }
+    }
+
+    impl Drop for WorkRepo {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// A repository nested in `work`'s working directory at `name`, with an empty
+    /// initial commit when `committed`.
+    fn nested(work: &WorkRepo, name: &str, committed: bool) {
+        let sub = Repository::init(&c_path(&work.dir.join(name)), false).unwrap();
+        if committed {
+            let me = SignatureView::new(
+                c"A U Thor",
+                c"author@example.com",
+                Time::new(1_700_000_000, 60),
+            );
+            let mut options = CreateOptions::new();
+            options.as_mut().set_author(Some(me.as_ref()));
+            options.as_mut().set_committer(Some(me.as_ref()));
+            options.as_mut().set_allow_empty_commit(true);
+            create_from_stage(sub.as_ref(), c"initial\n", Some(options.as_mut())).unwrap();
+        }
+    }
+
+    /// The paths at each position, through `find`, as far as the index answers.
+    fn stages_at(index: &mut IndexBox, paths: &[&CStr]) -> Vec<Option<usize>> {
+        paths.iter().map(|p| index.as_mut().find(p)).collect()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn counts_and_capabilities_through_either_owner() {
+        let mut index = Index::new().unwrap();
+        let shared = index.as_ref();
+        let copy = shared;
+        assert_eq!(
+            (
+                copy.entry_count(),
+                shared.has_conflicts(),
+                shared.capabilities()
+            ),
+            (0, false, Capabilities::empty())
+        );
+        for (i, name) in [c"b", c"a", c"dir/c"].into_iter().enumerate() {
+            assert_eq!(add(&mut index, name), 0);
+            assert_eq!(index.as_ref().entry_count(), i + 1);
+        }
+        assert_eq!(add_staged_id(&mut index, c"a", 2, &[2]), 0);
+        assert_eq!(add_staged_id(&mut index, c"a", 3, &[3]), 0);
+        let exclusive = index.as_mut();
+        assert_eq!(
+            (
+                exclusive.as_ref().entry_count(),
+                exclusive.as_ref().has_conflicts()
+            ),
+            (5, true)
+        );
+        let arc: IndexArc = index.into();
+        assert_eq!(
+            (arc.as_ref().entry_count(), arc.as_ref().has_conflicts()),
+            (5, true)
+        );
+        assert!(!arc.as_ref().has_owner());
+        drop(arc);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn finds_across_stages_and_prefixes() {
+        let mut index = Index::new().unwrap();
+        assert_eq!(index.as_mut().find(c""), None);
+        assert_eq!(index.as_mut().find_prefix(c""), None);
+        assert_eq!(index.as_mut().find_prefix(c"a"), None);
+        let names: Vec<CString> = (0..64)
+            .rev()
+            .map(|i| CString::new(format!("d{}/f{i:02}", i % 4)).unwrap())
+            .collect();
+        for name in &names {
+            assert_eq!(add(&mut index, name), 0);
+        }
+        // Three sides of a conflict, and an entry with a non-UTF-8 path.
+        for stage in 1..=3 {
+            assert_eq!(
+                add_staged_id(&mut index, c"d1/f01", stage, &[stage as u8]),
+                0
+            );
+        }
+        assert_eq!(add(&mut index, c"\xff\xfe"), 0);
+        let long = CString::new("x".repeat(4096)).unwrap();
+        assert_eq!(add(&mut index, &long), 0);
+
+        let mut handle = index.as_mut();
+        let first = handle.find(c"d0/f00").unwrap();
+        assert_eq!(handle.find_prefix(c""), Some(0));
+        assert_eq!(handle.find_prefix(c"d0/"), Some(first));
+        // The normal entry sorts first among `d1/f01`'s stages.
+        let conflicted = handle.find(c"d1/f01").unwrap();
+        assert_eq!(handle.find_prefix(c"d1/f01"), Some(conflicted));
+        assert_eq!(handle.find_prefix(c"d1/f02"), None);
+        assert_eq!(handle.find(c"d1"), None);
+        assert_eq!(handle.find(c"d1/"), None);
+        assert_eq!(
+            handle.find(c"\xff\xfe"),
+            Some(handle.as_ref().entry_count() - 1)
+        );
+        assert!(handle.find(&long).is_some());
+        assert_eq!(handle.find_prefix(&long), handle.find(&long));
+        let mut reborrow = handle.as_mut();
+        assert_eq!(reborrow.find_prefix(c"d3/f63"), reborrow.find(c"d3/f63"));
+        drop(index);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn conflicts_are_removed_and_cleared_once() {
+        let mut index = Index::new().unwrap();
+        let paths = [c"a", c"b", c"c"];
+        for (i, path) in paths.into_iter().enumerate() {
+            assert_eq!(add(&mut index, path), 0);
+            for stage in 1..=3 {
+                assert_eq!(
+                    add_staged_id(&mut index, path, stage, &[(i * 3) as u8 + stage as u8]),
+                    0
+                );
+            }
+        }
+        assert_eq!(add_staged_id(&mut index, c"only-conflict", 2, &[9]), 0);
+        assert_eq!(index.as_ref().entry_count(), 13);
+
+        let error = index.as_mut().remove_conflict(c"missing").unwrap_err();
+        assert_eq!(
+            (error.code(), error.class()),
+            (Some(ErrorCode::NotFound), Some(ErrorClass::Index))
+        );
+        index.as_mut().remove_conflict(c"b").unwrap();
+        assert_eq!(index.as_ref().entry_count(), 10);
+        // A path left with its normal entry alone has nothing more to remove.
+        index.as_mut().remove_conflict(c"b").unwrap();
+        index.as_mut().remove_conflict(c"only-conflict").unwrap();
+        assert_eq!(index.as_mut().find(c"only-conflict"), None);
+        assert_eq!(stages_at(&mut index, &paths).iter().flatten().count(), 3);
+        assert!(index.as_ref().has_conflicts());
+        index.as_mut().clear_conflicts().unwrap();
+        assert!(!index.as_ref().has_conflicts());
+        assert_eq!(index.as_ref().entry_count(), 3);
+        index.as_mut().clear_conflicts().unwrap();
+        index.as_mut().clear().unwrap();
+        assert_eq!(index.as_ref().entry_count(), 0);
+        index.as_mut().clear().unwrap();
+        assert_eq!(stages_at(&mut index, &paths), [None, None, None]);
+        assert_eq!(add(&mut index, c"again"), 0);
+        assert_eq!(index.as_ref().entry_count(), 1);
+    }
+
+    /// Extensions grow past the list's first allocation, are replaced, read back as
+    /// independent copies that outlive the index, and are removed, cleared and written.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn extensions_are_copied_in_and_out() {
+        let scratch = Scratch::new("routines-extensions");
+        let file = c_path(&scratch.file("index"));
+        let mut index = Index::open(&file).unwrap();
+        let signatures: Vec<[u8; 4]> = (0..20u8).map(|i| [b'Z', b'A' + i, b'X', b'\xff']).collect();
+        for (i, signature) in signatures.iter().enumerate() {
+            let data = vec![i as u8; i * 7];
+            index.as_mut().set_extension(signature, &data).unwrap();
+        }
+        let mut copies = Vec::new();
+        for (i, signature) in signatures.iter().enumerate() {
+            let copy = index.as_mut().extension(signature).unwrap().unwrap();
+            assert_eq!(copy.as_slice(), vec![i as u8; i * 7]);
+            copies.push(copy);
+        }
+        index
+            .as_mut()
+            .set_extension(b"ZAX\xff", b"\0binary\0")
+            .unwrap();
+        assert_eq!(copies[0].as_slice(), b"");
+        assert_eq!(
+            index
+                .as_mut()
+                .extension(b"ZAX\xff")
+                .unwrap()
+                .unwrap()
+                .as_slice(),
+            b"\0binary\0"
+        );
+        assert_eq!(index.as_mut().remove_extension(b"ZBX\xff"), Ok(true));
+        assert_eq!(index.as_mut().remove_extension(b"ZBX\xff"), Ok(false));
+        assert!(index.as_mut().extension(b"ZBX\xff").unwrap().is_none());
+        assert!(index.as_mut().extension(b"TREE").unwrap().is_none());
+
+        // Written after libgit2's own extensions, and read back as unknown ones.
+        assert_eq!(add(&mut index, c"file"), 0);
+        assert_eq!(write(&mut index), 0);
+        let mut reread = Index::open(&file).unwrap();
+        assert_eq!(
+            reread
+                .as_mut()
+                .extension(b"ZAX\xff")
+                .unwrap()
+                .unwrap()
+                .as_slice(),
+            b"\0binary\0"
+        );
+        assert!(reread.as_mut().extension(b"ZBX\xff").unwrap().is_none());
+        index.as_mut().clear().unwrap();
+        assert!(index.as_mut().extension(b"ZAX\xff").unwrap().is_none());
+        drop((index, reread));
+        // The copies are the caller's.
+        for (i, copy) in copies.iter().enumerate() {
+            assert_eq!(copy.as_slice(), vec![i as u8; i * 7]);
+        }
+        drop(copies);
+
+        // A mandatory extension (lowercase) makes the file unreadable, not unsound.
+        let mut index = Index::open(&file).unwrap();
+        index
+            .as_mut()
+            .set_extension(b"zman", b"must be understood")
+            .unwrap();
+        assert_eq!(write(&mut index), 0);
+        let error = Index::open(&file).unwrap_err();
+        assert_eq!(error.class(), Some(ErrorClass::Index));
+    }
+
+    /// The optional extension an index file carries is kept and copied out; those
+    /// libgit2 parses are not extensions it lends.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn file_extensions_are_kept() {
+        let scratch = Scratch::new("routines-file-extensions");
+        let file = scratch.file("index");
+        std::fs::write(&file, all_extensions(&index_bytes(&scratch, 3))).unwrap();
+        let mut index = Index::open(&c_path(&file)).unwrap();
+        assert_eq!(
+            index
+                .as_mut()
+                .extension(b"ZOPT")
+                .unwrap()
+                .unwrap()
+                .as_slice(),
+            b"kept as is"
+        );
+        for parsed in [b"TREE", b"REUC", b"NAME"] {
+            assert!(index.as_mut().extension(parsed).unwrap().is_none());
+        }
+        let kept = index.as_mut().extension(b"ZOPT").unwrap().unwrap();
+        index.as_mut().clear().unwrap();
+        assert!(index.as_mut().extension(b"ZOPT").unwrap().is_none());
+        drop(index);
+        assert_eq!(kept.as_slice(), b"kept as is");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn owners_are_told_apart() {
+        let repo = TempRepo::new("routines-owner");
+        let other = TempRepo::new("routines-owner-other");
+        let index = repository_index(&repo);
+        let handle = index.as_ref();
+        assert!(handle.has_owner());
+        assert!(handle.is_owned_by(repository(&repo)));
+        assert!(!handle.is_owned_by(repository(&other)));
+        let lone = Index::new().unwrap();
+        assert!(!lone.as_ref().has_owner());
+        assert!(!lone.as_ref().is_owned_by(repository(&repo)));
+        drop(repo);
+        // The repository disowned its index as it went; the arc keeps it.
+        assert!(!index.as_ref().has_owner());
+        assert!(!index.as_ref().is_owned_by(repository(&other)));
+    }
+
+    /// Additions through a repository's index: single paths, every failure kind, scans
+    /// with and without a callback (applying, skipping, aborting, panicking, reused),
+    /// and the index released before or after its repository. In a child process, as
+    /// the additions load filters, whose first loads race in libgit2.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn additions_through_a_repository_index() {
+        isolated(
+            concat!(module_path!(), "::additions_through_a_repository_index"),
+            || {
+                for index_first in [true, false] {
+                    let work = WorkRepo::new(&format!("additions-{index_first}"), false);
+                    work.write("a", "a");
+                    work.write("d/f", "f");
+                    work.write("d/g", "g");
+                    work.write(".gitignore", "ignored\n");
+                    work.write("ignored", "i");
+                    nested(&work, "nested", true);
+                    nested(&work, "reg", true);
+                    work.write(
+                        ".gitmodules",
+                        "[submodule \"reg\"]\n\tpath = reg\n\turl = ./reg\n",
+                    );
+                    let long = CString::new("x".repeat(5000)).unwrap();
+                    let blob = work
+                        .repo()
+                        .as_ref()
+                        .hash_file(c"a", ObjectType::Blob, None)
+                        .unwrap();
+                    let mut index = repository_index_box(work.repo());
+                    assert!(index.as_ref().is_owned_by(work.repo().as_ref()));
+
+                    index.as_mut().add_path(c"a").unwrap();
+                    index.as_mut().add_path(c"a").unwrap();
+                    for (path, code) in [
+                        (c"d" as &CStr, Some(ErrorCode::Directory)),
+                        (c"missing", Some(ErrorCode::NotFound)),
+                        (c"", Some(ErrorCode::Generic)),
+                        (c"d/", Some(ErrorCode::Generic)),
+                        (c".git/config", Some(ErrorCode::Generic)),
+                        (c"\xff", Some(ErrorCode::NotFound)),
+                        (long.as_c_str(), Some(ErrorCode::InvalidSpec)),
+                    ] {
+                        let error = index.as_mut().add_path(path).unwrap_err();
+                        assert_eq!(error.code(), code, "{path:?}");
+                    }
+                    assert_eq!(index.as_ref().entry_count(), 1);
+                    // A repository that is no submodule, then a submodule: gitlinks.
+                    index.as_mut().add_path(c"nested").unwrap();
+                    index.as_mut().add_path(c"reg").unwrap();
+                    assert_eq!(index.as_ref().entry_count(), 3);
+                    index.as_mut().remove_conflict(c"nested").unwrap();
+                    assert_eq!(index.as_ref().entry_count(), 3);
+                    index.as_mut().find(c"reg").unwrap();
+
+                    // A conflict at `a` is resolved by adding it.
+                    assert_eq!(add_staged_id(&mut index, c"a", 2, &blob.as_ref().id()), 0);
+                    assert!(index.as_ref().has_conflicts());
+                    index.as_mut().add_path(c"a").unwrap();
+                    assert!(!index.as_ref().has_conflicts());
+
+                    let seen = RefCell::new(Vec::new());
+                    let answer = RefCell::new(MatchedPathResult::SKIP);
+                    let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                        seen.borrow_mut()
+                            .push((path.to_owned(), pattern.map(CStr::to_owned)));
+                        *answer.borrow()
+                    };
+                    let mut callback = MatchedPathCallback::new(&mut f);
+                    let patterns = StrArrayView::new(&[c"d/*", c"ignored"]);
+                    index
+                        .as_mut()
+                        .add_all(patterns.as_ref(), AddFlags::DEFAULT, Some(&mut callback))
+                        .unwrap();
+                    assert_eq!(index.as_ref().entry_count(), 3);
+                    *answer.borrow_mut() = MatchedPathResult::from_code(-77);
+                    let error = index
+                        .as_mut()
+                        .add_all(patterns.as_ref(), AddFlags::DEFAULT, Some(&mut callback))
+                        .unwrap_err();
+                    assert_eq!(error.raw_code(), -77);
+                    assert_eq!(callback.stopped(), Some(-77));
+                    *answer.borrow_mut() = MatchedPathResult::APPLY;
+                    index
+                        .as_mut()
+                        .add_all(patterns.as_ref(), AddFlags::DEFAULT, Some(&mut callback))
+                        .unwrap();
+                    drop(callback);
+                    assert_eq!(index.as_ref().entry_count(), 5);
+                    let seen = seen.into_inner();
+                    assert_eq!(seen.len(), 2 + 1 + 2);
+                    assert!(seen.iter().all(|(_, p)| p.as_deref() == Some(c"d/*")));
+
+                    let error = index
+                        .as_mut()
+                        .add_all(patterns.as_ref(), AddFlags::CHECK_PATHSPEC, None)
+                        .unwrap_err();
+                    assert_eq!(error.code(), Some(ErrorCode::InvalidSpec));
+                    index
+                        .as_mut()
+                        .add_all(patterns.as_ref(), AddFlags::FORCE, None)
+                        .unwrap();
+                    assert!(index.as_mut().find(c"ignored").is_some());
+
+                    // A panic stops the scan, and resumes once libgit2 has returned.
+                    work.write("new", "n");
+                    let mut f = |_: &CStr, _: Option<&CStr>| -> MatchedPathResult {
+                        panic!("from the callback")
+                    };
+                    let mut callback = MatchedPathCallback::new(&mut f);
+                    let everything = StrArrayView::default();
+                    let panic = catch_unwind(AssertUnwindSafe(|| {
+                        index.as_mut().add_all(
+                            everything.as_ref(),
+                            AddFlags::DEFAULT,
+                            Some(&mut callback),
+                        )
+                    }));
+                    assert!(panic.is_err());
+                    assert_eq!(callback.stopped(), Some(MatchedPathResult::ABORT.code()));
+                    drop(callback);
+                    assert!(index.as_mut().find(c"new").is_none());
+                    index
+                        .as_mut()
+                        .add_all(everything.as_ref(), AddFlags::DEFAULT, None)
+                        .unwrap();
+                    assert!(index.as_mut().find(c"new").is_some());
+
+                    if index_first {
+                        drop(index);
+                        drop(work);
+                    } else {
+                        let mut work = work;
+                        drop(work.repo.take());
+                        assert!(!index.as_ref().has_owner());
+                        assert!(index.as_mut().add_path(c"a").is_err());
+                        let error = index
+                            .as_mut()
+                            .add_all(everything.as_ref(), AddFlags::DEFAULT, None)
+                            .unwrap_err();
+                        assert_eq!(error.class(), Some(ErrorClass::Index));
+                        drop(index);
+                    }
+                }
+
+                // A bare repository refuses both.
+                let bare = WorkRepo::new("additions-bare", true);
+                let mut index = repository_index_box(bare.repo());
+                let error = index.as_mut().add_path(c"a").unwrap_err();
+                assert_eq!(error.code(), Some(ErrorCode::BareRepo));
+                let error = index
+                    .as_mut()
+                    .add_all(StrArrayView::default().as_ref(), AddFlags::DEFAULT, None)
+                    .unwrap_err();
+                assert_eq!(error.code(), Some(ErrorCode::BareRepo));
+            },
+        );
+    }
+
+    /// A directory holding a repository with no commit, which is no submodule, is
+    /// refused; libgit2 leaks what it built for the entry and the nested repository
+    /// (`add_repo_as_submodule`, `src/libgit2/index.c`), so LeakSanitizer is off in the
+    /// child, which also keeps the filter loads to itself.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unborn_nested_repository_is_refused() {
+        isolated_tolerating_leaks(
+            concat!(module_path!(), "::unborn_nested_repository_is_refused"),
+            || {
+                let work = WorkRepo::new("unborn", false);
+                nested(&work, "unborn", false);
+                let mut index = repository_index_box(work.repo());
+                for _ in 0..2 {
+                    let error = index.as_mut().add_path(c"unborn").unwrap_err();
+                    assert_eq!(error.code(), Some(ErrorCode::UnbornBranch));
+                }
+                assert_eq!(index.as_ref().entry_count(), 0);
+                drop(work);
+                drop(index);
+            },
+        );
     }
 }
