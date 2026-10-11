@@ -1,0 +1,9 @@
+{
+  "counts_unavailable": null,
+  "pathspec_smells": {
+    "raw_ptr_priv_smell": {"count": 1, "item": "finish (match-list batch, pre-existing, unchanged)"},
+    "unsafe_fns_priv_smell": {"count": 1, "item": "finish (match-list batch, pre-existing, unchanged)"}
+  },
+  "pathspec_undocumented": [],
+  "removed_by_this_batch": ["MatchList::from_index", "MatchList::from_tree", "MatchList::from_workdir", "MatchList::from_diff: pub unsafe fn with *mut git_pathspec"]
+}

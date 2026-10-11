@@ -2027,6 +2027,36 @@
    "fields": []
   },
   {
+   "name": "git_pathspec",
+   "defined_in": "src/libgit2/pathspec.h",
+   "_comment_agent": "Public opaque type: only new/free lifecycle. __init/__clear serve private inline storage (index.c); no public init, clone or up-ref. new copies prefix/patterns into owned vector and pool. match_list increments rc and releases via free. revwalk_pathspec stores an uncounted borrow, never frees it: future wrapper must tie revwalk lifetime. CBox for sole new result, CArc for ownership shared with retained C lists, both released by git_pathspec_free. No public fields.",
+   "fields": [
+    {
+     "name": "prefix",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_pathspec_prefix allocates a detached git_str buffer; __clear frees it. Immutable after construction. NULL for empty/no common prefix."
+     }
+    },
+    {
+     "name": "rc",
+     "refcount": true
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_flag_t",
+   "defined_in": "include/git2/pathspec.h",
+   "_comment_agent": "Public combinable bit flags, uint32_t at call sites. C masks known bits; unknown bits ignored. IGNORE_CASE wins over USE_CASE where interpreted; matches_path uses only IGNORE_CASE and NO_GLOB. No pointers or lifecycle.",
+   "fields": []
+  },
+  {
    "name": "git_pathspec_match_list",
    "defined_in": "src/libgit2/pathspec.h",
    "_comment_agent": "Opaque public type; no public fields. Sole owning list, no refcount/clone/init/disposer. Public constructors: match_workdir/index/tree/diff; free releases arrays,pool,and counted pathspec, never deltas. Contrary to stale alloc comment, pathspec_build_failure_array strdup-copies failures into own pool. String sources may be dropped immediately. No locks/Send/Sync.",
@@ -14447,6 +14477,114 @@
    ]
   },
   {
+   "name": "git_pathspec__clear",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "ps",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive live storage borrow; releases nested prefix/vector/pool then zeroes without freeing object. Internal only."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec__init",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "ps",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "paths",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Call-only read borrow. Deep copies patterns/prefix."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-provided uninitialized storage, zeroed then initialized; error clears fields. Does not set counted ownership."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_free",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "ps",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes one counted reference; at zero disposes fields and frees object. NULL is no-op."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_pathspec_match_diff",
    "defined_in": "src/libgit2/pathspec.c",
    "lifetime": {
@@ -14908,6 +15046,59 @@
       "nullable": false,
       "mutable": true,
       "note": "Call-only source; filenames copied into list pool."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_new",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller output slot. Success writes a fresh fully initialized allocation with rc=1; caller owns one release. Failure leaves slot untouched; partial allocation is freed."
+     }
+    },
+    {
+     "name": "pathspec",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only call borrow. NULL/empty means match-all; patterns and prefix are copied. No strings or pointer slots retained."
      }
     }
    ]

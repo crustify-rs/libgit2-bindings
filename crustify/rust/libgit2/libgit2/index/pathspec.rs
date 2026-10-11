@@ -1,25 +1,205 @@
-//! Safe handles for the opaque match lists published by `git2/pathspec.h`.
+//! Safe lifecycle, flags and match lists for `include/git2/pathspec.h`.
 //!
-//! Filename matches and failed patterns are copied into the list's pool. The list
-//! also retains a counted reference to the compiled pathspec. Neither source paths,
-//! the index, tree nor repository need to survive the returned filename list.
-//! Diff matches instead borrow deltas: libgit2 does not retain the diff. `MatchList`
-//! carries that borrow as `'diff`; filename lists use `'static`.
+//! The compiled pathspec is opaque: only C owns its layout and allocation.
+//! Construction copies the patterns and prefix; no input string or array is
+//! retained. A new pathspec has one reference. Match lists retain another reference
+//! internally, released through the same down-ref, but C publishes no up-ref or
+//! copy routine. Use [`PathspecBox`] while sole, and convert to [`PathspecArc`]
+//! before passing it to a retaining matcher, which takes the shared owner. The
+//! revwalk API instead stores an **uncounted** borrow: its eventual wrapper must
+//! keep the pathspec alive until the walker releases it.
 //!
-//! All storage and destruction remain C-owned. There is no owning clone, in-place
-//! initializer, field disposer, field access or list mutation. No `Send`/`Sync`
-//! is asserted.
+//! Private `git_pathspec__init` / `__clear` support C stack storage, not the public
+//! opaque type, and are deliberately not exposed. No pathspec fields are published.
+//!
+//! Filename matches and failed patterns are copied into the list's pool. Neither
+//! source paths, the index, tree nor repository need to survive the returned
+//! filename list. Diff matches instead borrow deltas: libgit2 does not retain the
+//! diff. `MatchList` carries that borrow as `'diff`; filename lists use `'static`.
+//!
+//! All list storage and destruction remain C-owned. There is no owning clone,
+//! in-place initializer, field disposer, field access or list mutation. No
+//! `Send`/`Sync` is asserted for either type.
 
 use core::ffi::CStr;
 use core::marker::PhantomData;
+use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 use core::ptr::{self, NonNull};
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop};
+
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::diff::diff::{DiffDeltaRef, DiffRef};
 use crate::libgit2::index::index::IndexMut;
 use crate::libgit2::object::tree::TreeRef;
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryMut};
+use crate::libgit2::util::errors::{ErrorBuf, last};
+use crate::libgit2::util::sys::errors::runtime_pinned;
+
+define_ctype!(
+    /// A compiled, C-owned pathspec, reached only through owners and handles.
+    ///
+    /// Wraps: git_pathspec
+    Pathspec, PathspecRef, PathspecMut, ffi::git_pathspec
+);
+
+/// Releases one counted reference, freeing the patterns, prefix, pool and object
+/// when the count reaches zero. No public clone or up-ref routine exists.
+///
+/// Wraps: git_pathspec_free
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PathspecFree;
+
+impl_cdrop!(PathspecFree, Pathspec, ffi::git_pathspec_free);
+
+/// The sole reference to a compiled pathspec, with shared and exclusive handles.
+///
+/// Handles cannot survive their owner:
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::index::pathspec::PathspecBox;
+/// fn invalid(owner: PathspecBox) {
+///     let view = owner.as_ref();
+///     drop(owner);
+///     let _still_live = view;
+/// }
+/// ```
+/// An exclusive reborrow freezes its parent:
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::index::pathspec::PathspecBox;
+/// fn invalid(mut owner: PathspecBox) {
+///     let mut parent = owner.as_mut();
+///     let child = parent.as_mut();
+///     let other = parent.as_mut();
+///     let _both = (child, other);
+/// }
+/// ```
+/// A shared reborrow also excludes a mutable one:
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::index::pathspec::PathspecBox;
+/// fn invalid(mut owner: PathspecBox) {
+///     let mut parent = owner.as_mut();
+///     let shared = parent.as_ref();
+///     let exclusive = parent.as_mut();
+///     let _both = (shared, exclusive);
+/// }
+/// ```
+pub type PathspecBox = CBox<Pathspec, PathspecFree>;
+
+/// One counted reference, potentially shared with C match lists. Only shared
+/// handles are available; no public routine can clone it or prove sole ownership.
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::index::pathspec::PathspecArc;
+/// fn invalid(mut owner: PathspecArc) { let _ = owner.get_mut(); }
+/// ```
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::index::pathspec::PathspecArc;
+/// fn invalid(owner: PathspecArc) { let _ = owner.clone(); }
+/// ```
+/// Owners and handles remain thread-bound:
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::pathspec::PathspecArc;
+/// fn invalid(owner: PathspecArc) { std::thread::spawn(move || drop(owner)); }
+/// ```
+pub type PathspecArc = CArc<Pathspec, PathspecFree>;
+
+impl Pathspec {
+    /// Compiles an array of patterns, copying everything needed before returning.
+    /// An empty array, or an array of empty strings, matches every path. Either a
+    /// borrowed [`StrArrayView`](crate::libgit2::core::strarray::StrArrayView) or an
+    /// owned string array can provide the handle. Reports C's error on failure.
+    ///
+    /// Wraps: git_pathspec_new
+    pub fn new(patterns: StrArrayRef<'_>) -> Result<PathspecBox, ErrorBuf> {
+        if !runtime_pinned() {
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `patterns` supplies a live read-only array of non-null terminated
+        // strings (or an empty array). C copies them and retains no input pointer.
+        // `out` is a writable output slot; the pinned runtime outlives the result.
+        let rc = unsafe { ffi::git_pathspec_new(&mut out, patterns.as_ptr()) };
+        if rc < 0 {
+            // C cleans its partial allocation and leaves the output untouched.
+            return Err(last());
+        }
+        // SAFETY: success hands out one fresh, fully initialized allocation with
+        // refcount 1, released exactly once by the paired `git_pathspec_free` policy.
+        unsafe { PathspecBox::from_c(out) }.ok_or_else(last)
+    }
+}
+
+/// Combinable path-matching options. Unknown bits can be retained for forward
+/// compatibility; this C version ignores them. `IGNORE_CASE` takes precedence over
+/// `USE_CASE` where case flags apply. These are bits, not a Rust enum: combinations
+/// (including zero and both case flags) are valid.
+///
+/// Wraps: git_pathspec_flag_t
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PathspecFlags(u32);
+
+impl PathspecFlags {
+    /// Default matching, with no flags enabled.
+    pub const DEFAULT: Self = Self(ffi::GIT_PATHSPEC_DEFAULT);
+    /// Force case-insensitive matching.
+    pub const IGNORE_CASE: Self = Self(ffi::GIT_PATHSPEC_IGNORE_CASE);
+    /// Force case-sensitive matching where the operation supports it.
+    pub const USE_CASE: Self = Self(ffi::GIT_PATHSPEC_USE_CASE);
+    /// Disable glob matching (literal directory-prefix matching still applies).
+    pub const NO_GLOB: Self = Self(ffi::GIT_PATHSPEC_NO_GLOB);
+    /// Report no matches as `GIT_ENOTFOUND` in list-producing operations.
+    pub const NO_MATCH_ERROR: Self = Self(ffi::GIT_PATHSPEC_NO_MATCH_ERROR);
+    /// Record the patterns that had no matches.
+    pub const FIND_FAILURES: Self = Self(ffi::GIT_PATHSPEC_FIND_FAILURES);
+    /// Do not keep matching filenames; test for matches or collect failures only.
+    pub const FAILURES_ONLY: Self = Self(ffi::GIT_PATHSPEC_FAILURES_ONLY);
+
+    /// Preserve every supplied bit, including bits unknown to this C version.
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The bitset passed to the C matching operations.
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Whether every bit in `other` is enabled.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether no bits are enabled.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl BitOr for PathspecFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+impl BitOrAssign for PathspecFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+impl BitAnd for PathspecFlags {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+impl BitAndAssign for PathspecFlags {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
 
 /// An opaque pathspec match list, owned by [`MatchListBox`].
 ///
@@ -197,27 +377,36 @@ impl MatchList<'static> {
     /// Match an index, copying filenames and failed patterns into the result.
     ///
     /// The index iterator may sort its source, so it receives an exclusive
-    /// handle. The compiled pathspec is a temporary raw seam: its wrapper has
-    /// not yet landed. Replace this argument with its shared owner when available.
+    /// handle. The list takes its own counted reference to `pathspec`, which is
+    /// why the argument is the shared owner: a [`PathspecBox`] converts into one.
     ///
-    /// # Safety
-    /// `pathspec` must be non-null, initialized by `git_pathspec_new`, and kept
-    /// alive by a counted reference for this call. No concurrent access may
-    /// mutate it. C retains another counted reference until the list is freed:
-    /// any Rust owner of the original reference must permit shared ownership,
-    /// not promise exclusive access to the compiled pathspec.
+    /// A sole owner is not accepted as is:
+    /// ```compile_fail,E0308
+    /// use libgit2::libgit2::index::index::IndexMut;
+    /// use libgit2::libgit2::index::pathspec::{MatchList, PathspecBox, PathspecFlags};
+    /// fn invalid(index: IndexMut<'_>, sole: PathspecBox) {
+    ///     let _ = MatchList::from_index(index, &sole, PathspecFlags::DEFAULT);
+    /// }
+    /// ```
     ///
     /// Wraps: git_pathspec_match_index
-    pub unsafe fn from_index(
+    pub fn from_index(
         mut index: IndexMut<'_>,
-        pathspec: *mut ffi::git_pathspec,
-        flags: u32,
+        pathspec: &PathspecArc,
+        flags: PathspecFlags,
     ) -> Result<MatchListBox<'static>, RepositoryError> {
         let mut out = ptr::null_mut();
-        // SAFETY: exclusive source index and pathspec valid per the caller; writable
-        // out slot. C copies all names and releases its iterator before returning.
-        let rc =
-            unsafe { ffi::git_pathspec_match_index(&mut out, index.as_mut_ptr(), flags, pathspec) };
+        // SAFETY: exclusive source index and a live shared pathspec owner, whose
+        // patterns C only reads while atomically bumping their count; writable out
+        // slot. C copies all names and releases its iterator before returning.
+        let rc = unsafe {
+            ffi::git_pathspec_match_index(
+                &mut out,
+                index.as_mut_ptr(),
+                flags.bits(),
+                pathspec.as_ref().as_ptr().cast_mut(),
+            )
+        };
         // SAFETY: success transfers a fresh initialized list; failure frees and
         // nulls any list it allocated (or leaves our initial NULL unchanged).
         unsafe { finish(rc, out) }
@@ -225,20 +414,23 @@ impl MatchList<'static> {
 
     /// Match a tree; the result copies filenames and need not retain the tree.
     ///
-    /// # Safety
-    /// `pathspec` must satisfy [`MatchList::from_index`]'s pathspec contract.
-    ///
     /// Wraps: git_pathspec_match_tree
-    pub unsafe fn from_tree(
+    pub fn from_tree(
         tree: TreeRef<'_, '_>,
-        pathspec: *mut ffi::git_pathspec,
-        flags: u32,
+        pathspec: &PathspecArc,
+        flags: PathspecFlags,
     ) -> Result<MatchListBox<'static>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: tree and repository kept alive by the handle; immutable tree
-        // traversal, pathspec valid per the caller, and a writable output slot.
+        // traversal, a live shared pathspec owner (read, and its count atomically
+        // bumped, by C), and a writable output slot.
         let rc = unsafe {
-            ffi::git_pathspec_match_tree(&mut out, tree.as_ptr().cast_mut(), flags, pathspec)
+            ffi::git_pathspec_match_tree(
+                &mut out,
+                tree.as_ptr().cast_mut(),
+                flags.bits(),
+                pathspec.as_ref().as_ptr().cast_mut(),
+            )
         };
         // SAFETY: fresh initialized list on success, NULL on failure.
         unsafe { finish(rc, out) }
@@ -247,20 +439,23 @@ impl MatchList<'static> {
     /// Match the working directory, excluding ignored untracked files. A bare
     /// repository is an error. Filenames in the result are independent copies.
     ///
-    /// # Safety
-    /// `pathspec` must satisfy [`MatchList::from_index`]'s pathspec contract.
-    ///
     /// Wraps: git_pathspec_match_workdir
-    pub unsafe fn from_workdir(
+    pub fn from_workdir(
         mut repo: RepositoryMut<'_>,
-        pathspec: *mut ffi::git_pathspec,
-        flags: u32,
+        pathspec: &PathspecArc,
+        flags: PathspecFlags,
     ) -> Result<MatchListBox<'static>, RepositoryError> {
         let mut out = ptr::null_mut();
-        // SAFETY: exclusive repository handle, pathspec valid per the caller; C copies
-        // names, retains no repository, and writes only our output slot.
+        // SAFETY: exclusive repository handle and a live shared pathspec owner (read,
+        // and its count atomically bumped, by C); C copies names, retains no
+        // repository, and writes only our output slot.
         let rc = unsafe {
-            ffi::git_pathspec_match_workdir(&mut out, repo.as_mut_ptr(), flags, pathspec)
+            ffi::git_pathspec_match_workdir(
+                &mut out,
+                repo.as_mut_ptr(),
+                flags.bits(),
+                pathspec.as_ref().as_ptr().cast_mut(),
+            )
         };
         // SAFETY: fresh initialized list on success, NULL on failure.
         unsafe { finish(rc, out) }
@@ -275,30 +470,35 @@ impl<'diff> MatchList<'diff> {
     ///
     /// A source diff must outlive a returned list, including its destructor:
     /// ```compile_fail,E0597
+    /// use libgit2::libgit2::core::strarray::StrArrayView;
     /// use libgit2::libgit2::diff::diff::Diff;
-    /// use libgit2::libgit2::index::pathspec::MatchList;
-    /// unsafe fn invalid(ps: *mut libgit2::ffi::git_pathspec) {
-    ///     let list;
+    /// use libgit2::libgit2::index::pathspec::{MatchList, Pathspec, PathspecArc, PathspecFlags};
+    /// let ps: PathspecArc = Pathspec::new(StrArrayView::default().as_ref()).unwrap().into();
+    /// let list;
+    /// {
     ///     let diff = Diff::from_buffer(b"").unwrap();
-    ///     // SAFETY: this example assumes ps meets the constructor contract.
-    ///     list = unsafe { MatchList::from_diff(diff.as_ref(), ps, 0) };
+    ///     list = MatchList::from_diff(diff.as_ref(), &ps, PathspecFlags::DEFAULT);
     /// }
+    /// drop(list);
     /// ```
     ///
-    /// # Safety
-    /// `pathspec` must satisfy [`MatchList::from_index`]'s pathspec contract.
-    ///
     /// Wraps: git_pathspec_match_diff
-    pub unsafe fn from_diff(
+    pub fn from_diff(
         diff: DiffRef<'diff, '_>,
-        pathspec: *mut ffi::git_pathspec,
-        flags: u32,
+        pathspec: &PathspecArc,
+        flags: PathspecFlags,
     ) -> Result<MatchListBox<'diff>, RepositoryError> {
         let mut out = ptr::null_mut();
-        // SAFETY: live diff handle retaining deltas for 'diff and pathspec per caller; writable
-        // output slot. C retains the pathspec but merely borrows delta pointers.
+        // SAFETY: live diff handle retaining deltas for 'diff, a live shared
+        // pathspec owner, and a writable output slot. C reads the pathspec and
+        // retains it via its atomic count, but merely borrows delta pointers.
         let rc = unsafe {
-            ffi::git_pathspec_match_diff(&mut out, diff.as_ptr().cast_mut(), flags, pathspec)
+            ffi::git_pathspec_match_diff(
+                &mut out,
+                diff.as_ptr().cast_mut(),
+                flags.bits(),
+                pathspec.as_ref().as_ptr().cast_mut(),
+            )
         };
         // SAFETY: fresh initialized list on success, NULL on failure; its borrowed
         // deltas have the lifetime guaranteed by the shared diff handle.
@@ -319,6 +519,201 @@ unsafe fn finish<'diff>(
     // SAFETY: the successful constructor transferred one unique allocation,
     // released by MatchListFree; retained deltas satisfy the lifetime contract.
     unsafe { MatchListBox::from_c(out) }.ok_or_else(|| RepositoryError::from_libgit2(-1))
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use crate::libgit2::core::strarray::StrArrayView;
+
+    #[test]
+    fn flag_algebra_and_layout() {
+        assert_eq!(
+            size_of::<PathspecFlags>(),
+            size_of::<ffi::git_pathspec_flag_t>()
+        );
+        assert_eq!(
+            align_of::<PathspecFlags>(),
+            align_of::<ffi::git_pathspec_flag_t>()
+        );
+        assert_eq!(size_of::<Pathspec>(), size_of::<ffi::git_pathspec>());
+        assert_eq!(align_of::<Pathspec>(), align_of::<ffi::git_pathspec>());
+        assert_eq!(
+            size_of::<PathspecBox>(),
+            size_of::<*mut ffi::git_pathspec>()
+        );
+        assert_eq!(size_of::<PathspecArc>(), size_of::<PathspecBox>());
+        assert_eq!(size_of::<PathspecRef<'_>>(), size_of::<PathspecBox>());
+        assert_eq!(size_of::<PathspecMut<'_>>(), size_of::<PathspecBox>());
+        assert!(PathspecFlags::default().is_empty());
+        let mut flags = PathspecFlags::IGNORE_CASE | PathspecFlags::NO_GLOB;
+        assert!(flags.contains(PathspecFlags::IGNORE_CASE));
+        assert!(!flags.contains(PathspecFlags::USE_CASE));
+        flags |= PathspecFlags::USE_CASE;
+        flags &= PathspecFlags::IGNORE_CASE | PathspecFlags::USE_CASE;
+        assert_eq!(flags.bits(), 3);
+        assert_eq!((flags & PathspecFlags::NO_GLOB).bits(), 0);
+        assert_eq!(PathspecFlags::from_bits_retain(u32::MAX).bits(), u32::MAX);
+        assert!(format!("{flags:?}").contains("PathspecFlags"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn raw_seams_preserve_single_release() {
+        let patterns = StrArrayView::new(&[c"src/*.rs"]);
+        let owner = Pathspec::new(patterns.as_ref()).unwrap();
+        let raw = owner.into_c();
+        // SAFETY: the sole initialized reference just surrendered above is adopted
+        // exactly once, with the same release policy, without a concurrent borrower.
+        let mut owner = unsafe { PathspecBox::from_c(raw) }.unwrap();
+        assert_eq!(owner.as_ref().as_ptr(), raw.cast_const());
+        assert_eq!(owner.as_mut().as_mut_ptr(), raw);
+        // SAFETY: null transfers no ownership and yields None.
+        assert!(unsafe { PathspecBox::from_c(ptr::null_mut()) }.is_none());
+        let arc: PathspecArc = owner.into();
+        assert_eq!(arc.as_ref().as_ptr(), raw.cast_const());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn counted_c_list_outlives_rust_owner() {
+        let patterns = StrArrayView::new(&[c"missing/*"]);
+        let owner: PathspecArc = Pathspec::new(patterns.as_ref()).unwrap().into();
+        let mut index = crate::libgit2::index::index::Index::new().unwrap();
+        let list =
+            MatchList::from_index(index.as_mut(), &owner, PathspecFlags::FIND_FAILURES).unwrap();
+        drop(index);
+        drop(owner); // C's list is now the only counted reference.
+        drop(patterns);
+        assert_eq!(list.as_ref().failed_entry(0), Some(c"missing/*"));
+        // Dropping the list releases the last pathspec reference with its storage.
+        drop(list);
+    }
+
+    // Allocation fault injection lives in a fresh process: no other Rust test can
+    // observe or race the process-global C allocator replacement.
+    mod failures {
+        use super::*;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
+        use core::ffi::{CStr, c_int};
+        use core::ptr::NonNull;
+        use std::sync::atomic::{AtomicIsize, Ordering::SeqCst};
+
+        static FAIL_AT: AtomicIsize = AtomicIsize::new(-1);
+        static LIVE: AtomicIsize = AtomicIsize::new(0);
+        struct Failing;
+
+        // SAFETY: these callbacks use one libc allocator family throughout and
+        // reject allocations without changing ownership of existing allocations.
+        unsafe impl Alloc for Failing {
+            fn malloc(n: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
+                if FAIL_AT.load(SeqCst) == isize::MAX || FAIL_AT.fetch_sub(1, SeqCst) == 0 {
+                    return None;
+                }
+                // SAFETY: libc allocates a fresh block of the requested size.
+                let p = NonNull::new(unsafe { libc::malloc(n) }.cast());
+                if p.is_some() {
+                    LIVE.fetch_add(1, SeqCst);
+                }
+                p
+            }
+            unsafe fn realloc(
+                p: Option<NonNull<u8>>,
+                n: usize,
+                _: Option<&CStr>,
+                _: i32,
+            ) -> Option<NonNull<u8>> {
+                if FAIL_AT.load(SeqCst) == isize::MAX || FAIL_AT.fetch_sub(1, SeqCst) == 0 {
+                    return None;
+                }
+                // SAFETY: caller transfers a live libc block (or null) on success;
+                // libgit2 never requests realloc of a live block to zero bytes.
+                let result = NonNull::new(
+                    unsafe { libc::realloc(p.map_or(ptr::null_mut(), |p| p.as_ptr().cast()), n) }
+                        .cast(),
+                );
+                if p.is_none() && result.is_some() {
+                    LIVE.fetch_add(1, SeqCst);
+                }
+                result
+            }
+            unsafe fn free(p: NonNull<u8>) {
+                LIVE.fetch_sub(1, SeqCst);
+                // SAFETY: caller surrenders one live block of this allocator.
+                unsafe { libc::free(p.as_ptr().cast()) };
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2 and spawns child")]
+        fn construction_failure_cleanup() {
+            const CHILD: &str = "CRUSTIFY_PATHSPEC_FAILURE_CHILD";
+            if std::env::var_os(CHILD).is_none() {
+                let name = concat!(module_path!(), "::construction_failure_cleanup");
+                let name = name.split_once("::").unwrap().1;
+                for mode in ["init", "allocation"] {
+                    let output = std::process::Command::new(std::env::current_exe().unwrap())
+                        .args([name, "--exact", "--nocapture"])
+                        .env(CHILD, mode)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}\n{}",
+                        String::from_utf8_lossy(&output.stdout),
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+                }
+                return;
+            }
+            let allocator = Allocator::new::<Failing>();
+            // SAFETY: this fresh process has never initialized libgit2; the valid
+            // allocator table is copied by C before any allocations are made.
+            let rc = unsafe {
+                ffi::git_libgit2_opts(
+                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    allocator.as_ref().as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+            if std::env::var(CHILD).as_deref() == Ok("init") {
+                FAIL_AT.store(isize::MAX, SeqCst);
+                let view = StrArrayView::default();
+                assert!(Pathspec::new(view.as_ref()).is_err());
+                FAIL_AT.store(-1, SeqCst);
+                assert!(!runtime_pinned(), "failed initialization stays failed");
+                return;
+            }
+            assert!(runtime_pinned());
+            // Warm up the thread's error storage before counting live allocations.
+            crate::libgit2::util::sys::errors::set(
+                crate::libgit2::util::errors::ErrorClass::Invalid,
+                c"warm up",
+            );
+            let patterns = StrArrayView::new(&[c"src/*.rs", c"src/lib/*.c", c"src/other"]);
+            let baseline = LIVE.load(SeqCst);
+            let mut errors = 0;
+            let mut successes = 0;
+            for at in 0..20 {
+                FAIL_AT.store(at, SeqCst);
+                let result = Pathspec::new(patterns.as_ref());
+                FAIL_AT.store(-1, SeqCst);
+                if result.is_err() {
+                    errors += 1;
+                } else {
+                    successes += 1;
+                }
+                drop(result);
+                assert_eq!(
+                    LIVE.load(SeqCst),
+                    baseline,
+                    "allocation failure {at} leaked"
+                );
+            }
+            assert!(errors > 0 && successes > 0);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -349,24 +744,15 @@ mod match_list_unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn raw_adoption_transfers_one_list_and_release() {
+        use crate::libgit2::core::strarray::StrArrayView;
         use crate::libgit2::index::index::Index;
         let mut index = Index::new().unwrap();
-        let mut strings = [c"missing".as_ptr().cast_mut()];
-        let patterns = ffi::git_strarray {
-            strings: strings.as_mut_ptr(),
-            count: 1,
-        };
-        let mut ps = ptr::null_mut();
-        // SAFETY: initialized call-only string array and writable output. C copies
-        // the input, and the safe index constructor has pinned the runtime.
-        assert_eq!(unsafe { ffi::git_pathspec_new(&mut ps, &patterns) }, 0);
-        // SAFETY: a live heap pathspec; its original counted reference remains
-        // live for the call, and no owner promises exclusive access to it.
+        let patterns = StrArrayView::new(&[c"missing"]);
+        let ps: PathspecArc = Pathspec::new(patterns.as_ref()).unwrap().into();
         let list =
-            unsafe { MatchList::from_index(index.as_mut(), ps, ffi::GIT_PATHSPEC_FIND_FAILURES) }
-                .unwrap();
-        // SAFETY: release only the original reference; the list holds another.
-        unsafe { ffi::git_pathspec_free(ps) };
+            MatchList::from_index(index.as_mut(), &ps, PathspecFlags::FIND_FAILURES).unwrap();
+        // Release the original reference; the list holds another.
+        drop(ps);
         let raw = list.into_c();
         // SAFETY: the fresh list was just surrendered, with no remaining handles;
         // it owns copied strings and needs no external diff lifetime.

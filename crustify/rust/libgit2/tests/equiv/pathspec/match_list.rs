@@ -6,7 +6,7 @@ use libgit2::ffi;
 use libgit2::libgit2::core::types::FileMode;
 use libgit2::libgit2::diff::diff::{Diff, DiffBox};
 use libgit2::libgit2::index::index::{Index, IndexBox};
-use libgit2::libgit2::index::pathspec::{MatchList, MatchListRef};
+use libgit2::libgit2::index::pathspec::{MatchList, MatchListRef, PathspecFlags};
 #[path = "../../support/pathspec_match_list.rs"]
 mod support;
 use libgit2::libgit2::object::blob::create_from_buffer;
@@ -147,9 +147,11 @@ fn index_flag_sequences_and_release_order() {
         let safe_ps = patterns(&pats);
         let raw_ps = patterns(&pats);
         for bits in [0, 1, 2, 3, 4, 8, 16, 24, 32, 40, 48, 56, u32::MAX] {
-            let safe =
-                // SAFETY: the fixture holds a counted shared pathspec reference for the call; no concurrent mutation.
-                unsafe { MatchList::from_index(safe_index.as_mut(), safe_ps.as_c_ptr(), bits) };
+            let safe = MatchList::from_index(
+                safe_index.as_mut(),
+                &safe_ps,
+                PathspecFlags::from_bits_retain(bits),
+            );
             let mut raw = RawList(ptr::null_mut());
             // SAFETY: independent initialized index/pathspec and a writable out
             // slot. The source owners remain live; RawList releases each result.
@@ -177,15 +179,9 @@ fn index_flag_sequences_and_release_order() {
                 }
             }
         }
-        // SAFETY: the fixture holds a counted shared pathspec reference for the call; no concurrent mutation.
-        let list = unsafe {
-            MatchList::from_index(
-                safe_index.as_mut(),
-                safe_ps.as_c_ptr(),
-                libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
-            )
-        }
-        .unwrap();
+        let list =
+            MatchList::from_index(safe_index.as_mut(), &safe_ps, PathspecFlags::FIND_FAILURES)
+                .unwrap();
         let mut raw = RawList(ptr::null_mut());
         assert_eq!(
             // SAFETY: same independent initialized sources and writable out slot.
@@ -229,8 +225,8 @@ fn diff_variants_retain_only_borrowed_deltas() {
             let ps = patterns(&pats);
             let raw_ps = patterns(&pats);
             for bits in [0, 4, 8, 16, 24, 32, 40, 48, 56] {
-                // SAFETY: the fixture holds a counted shared pathspec reference for the call; no concurrent mutation.
-                let list = unsafe { MatchList::from_diff(diff.as_ref(), ps.as_c_ptr(), bits) };
+                let list =
+                    MatchList::from_diff(diff.as_ref(), &ps, PathspecFlags::from_bits_retain(bits));
                 let mut raw = RawList(ptr::null_mut());
                 // SAFETY: independent live diff and pathspec. The diff remains live
                 // and unchanged until after RawList releases its borrowed pointers.
@@ -278,14 +274,7 @@ fn tree_and_workdir_sources_and_bare_error() {
         }
         let ps = patterns(&[c"*.txt", c"missing"]);
         let raw_ps = patterns(&[c"*.txt", c"missing"]);
-        // SAFETY: the fixture holds a counted shared pathspec reference for the call; no concurrent mutation.
-        let list = unsafe {
-            MatchList::from_workdir(
-                repo.as_mut(),
-                ps.as_c_ptr(),
-                libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
-            )
-        };
+        let list = MatchList::from_workdir(repo.as_mut(), &ps, PathspecFlags::FIND_FAILURES);
         let mut raw = RawList(ptr::null_mut());
         // SAFETY: independent live repository/pathspec and writable output slot;
         // a bare repo is a supported error case, not an invalid pointer.
@@ -320,15 +309,7 @@ fn tree_and_workdir_sources_and_bare_error() {
             .unwrap();
         let raw_id = raw_builder.as_mut().write().unwrap();
         let raw_tree = Tree::lookup(raw_repo.as_ref(), raw_id.as_ref()).unwrap();
-        // SAFETY: the fixture holds a counted shared pathspec reference for the call; no concurrent mutation.
-        let list = unsafe {
-            MatchList::from_tree(
-                tree.as_ref(),
-                ps.as_c_ptr(),
-                libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
-            )
-        }
-        .unwrap();
+        let list = MatchList::from_tree(tree.as_ref(), &ps, PathspecFlags::FIND_FAILURES).unwrap();
         let mut raw_tree_list = RawList(ptr::null_mut());
         assert_eq!(
             // SAFETY: independently owned tree and pathspec; C copies every result.

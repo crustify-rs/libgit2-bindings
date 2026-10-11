@@ -9,7 +9,6 @@ mod checkout;
 mod commit;
 mod common;
 mod message;
-mod pathspec;
 mod refdb;
 mod repository;
 mod sys_alloc;
