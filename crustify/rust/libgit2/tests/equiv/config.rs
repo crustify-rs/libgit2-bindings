@@ -3375,7 +3375,7 @@ mod iterator_entries {
 mod backend_walk {
     use libgit2::ffi;
     use libgit2::libgit2::config::config::{ConfigLevel, EntryRef, ForeachCallback};
-    use libgit2::libgit2::config::sys::config::Backend;
+    use libgit2::libgit2::config::sys::config::{Backend, BackendMemoryOptions};
     use libgit2::libgit2::util::errors::last;
     use libgit2::libgit2::util::sys::errors::clear;
     use std::ffi::{CStr, c_int, c_void};
@@ -3383,8 +3383,16 @@ mod backend_walk {
     use std::ops::ControlFlow;
     use std::ptr;
 
+    /// Name, value, backend type, origin path, include depth and level.
     #[derive(Debug, PartialEq, Eq)]
-    struct Record(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, c_int);
+    struct Record(
+        Vec<u8>,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        Option<Vec<u8>>,
+        u32,
+        c_int,
+    );
     struct Capture {
         records: Vec<Record>,
         stop: c_int,
@@ -3409,6 +3417,8 @@ mod backend_walk {
                 bytes(entry.name).unwrap(),
                 bytes(entry.value),
                 bytes(entry.backend_type),
+                bytes(entry.origin_path),
+                entry.include_depth,
                 entry.level,
             ));
             capture.stop
@@ -3425,22 +3435,31 @@ mod backend_walk {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn backend_walk_multicall_callbacks_errors_and_stops_match_c() {
         let input = b"[A]\n b=one\n b=two\n flag\n empty=\n[section \"Case\"]\n key=\xff\n";
-        let mut rust = Backend::from_string(input, None)
+        // Both sides lend the copied option strings through every entry.
+        let mut options = BackendMemoryOptions::new();
+        options.as_mut().set_backend_type(Some(c"command line"));
+        options.as_mut().set_origin_path(Some(c"origin"));
+        let mut raw_options = ffi::git_config_backend_memory_options {
+            version: ffi::GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION,
+            backend_type: c"command line".as_ptr(),
+            origin_path: c"origin".as_ptr(),
+        };
+        let mut rust = Backend::from_string(input, Some(options.as_ref()))
             .unwrap()
             .open(ConfigLevel::LOCAL)
             .unwrap();
         let mut c = ptr::null_mut();
-        // SAFETY: readable independent bytes; constructor copies input into a fresh
+        // SAFETY: readable independent bytes and options; C copies both into a fresh
         // complete backend with its own free callback, transferred through out.
         assert_eq!(
-            // SAFETY: readable independent bytes; constructor copies input into a fresh
+            // SAFETY: readable independent bytes and options; C copies both into a fresh
             // complete backend with its own free callback, transferred through out.
             unsafe {
                 ffi::git_config_backend_from_string(
                     &mut c,
                     input.as_ptr().cast(),
                     input.len(),
-                    ptr::null_mut(),
+                    &mut raw_options,
                 )
             },
             0
@@ -3484,6 +3503,8 @@ mod backend_walk {
                         entry.name().unwrap().to_bytes().to_vec(),
                         entry.value().map(|v| v.to_bytes().to_vec()),
                         entry.backend_type().map(|v| v.to_bytes().to_vec()),
+                        entry.origin_path().map(|v| v.to_bytes().to_vec()),
+                        entry.include_depth(),
                         entry.level().raw(),
                     ));
                     NonZeroI32::new(stop).map_or(ControlFlow::Continue(()), ControlFlow::Break)

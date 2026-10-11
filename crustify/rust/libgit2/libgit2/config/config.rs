@@ -1835,42 +1835,22 @@ impl BackendMut<'_> {
                 Ok(inner) => inner,
                 Err(error) => return (error.raw_code(), Some(error)),
             };
-            let mut prepared = PreparedBackendWalk {
-                backend: ffi::git_config_backend {
-                    version: ffi::GIT_CONFIG_BACKEND_VERSION,
-                    iterator: Some(PreparedBackendWalk::iterator),
-                    ..Default::default()
-                },
-                iterator: ffi::git_config_iterator {
-                    backend: ptr::null_mut(),
-                    flags: 0,
-                    next: Some(PreparedBackendWalk::next),
-                    free: Some(PreparedBackendWalk::free),
-                },
-                state: PreparedWalkState {
-                    inner,
-                    failure: None,
-                    require_name: regexp.is_some(),
-                },
-            };
-            let p = ptr::from_mut(&mut prepared);
-            // SAFETY: project and initialize through the same raw provenance C
-            // will use; a fresh Rust reborrow would invalidate that retained tag.
-            unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
-            // SAFETY: stable Rust-owned ABI bases with matched adapter callbacks.
-            // C reads only backend.iterator, calls next/free synchronously, and
-            // retains nothing. The prepared owner pins entries and backend; the
-            // callback payload is exclusive and the optional NUL pattern is live.
-            let rc = unsafe {
-                ffi::git_config_backend_foreach_match(
-                    p.cast(),
-                    regexp.map_or(ptr::null(), CStr::as_ptr),
-                    cb,
-                    payload,
-                )
-            };
+            let (rc, mut state) = PreparedBackendWalk::run(inner, regexp.is_some(), |backend| {
+                // SAFETY: stable Rust-owned ABI bases with matched adapter callbacks.
+                // C reads only backend.iterator, calls next/free synchronously, and
+                // retains nothing. The prepared owner pins entries and backend; the
+                // callback payload is exclusive and the optional NUL pattern is live.
+                unsafe {
+                    ffi::git_config_backend_foreach_match(
+                        backend,
+                        regexp.map_or(ptr::null(), CStr::as_ptr),
+                        cb,
+                        payload,
+                    )
+                }
+            });
             // The inner iterator is dropped before walk_with can resume a panic.
-            (rc, prepared.state.failure.take())
+            (rc, state.failure.take())
         });
         if callback.stopped().is_none()
             && let Some(error) = failure
@@ -1896,7 +1876,42 @@ struct PreparedWalkState<'c> {
     failure: Option<ConfigError>,
     require_name: bool,
 }
-impl PreparedBackendWalk<'_> {
+impl<'c> PreparedBackendWalk<'c> {
+    /// Lays the adapter out in this frame and lends `walk` its backend base, the
+    /// only pointer C receives. Returns the walk's status and the Rust state, which
+    /// still owns the real iterator, after `walk` returns. Unit tests drive the
+    /// same setup under Miri, so the provenance of the base is checked there too.
+    fn run(
+        inner: IteratorBox<'c>,
+        require_name: bool,
+        walk: impl FnOnce(*mut ffi::git_config_backend) -> c_int,
+    ) -> (c_int, PreparedWalkState<'c>) {
+        let mut prepared = PreparedBackendWalk {
+            backend: ffi::git_config_backend {
+                version: ffi::GIT_CONFIG_BACKEND_VERSION,
+                iterator: Some(Self::iterator),
+                ..Default::default()
+            },
+            iterator: ffi::git_config_iterator {
+                backend: ptr::null_mut(),
+                flags: 0,
+                next: Some(Self::next),
+                free: Some(Self::free),
+            },
+            state: PreparedWalkState {
+                inner,
+                failure: None,
+                require_name,
+            },
+        };
+        let p = ptr::from_mut(&mut prepared);
+        // SAFETY: project and initialize through the same raw provenance C
+        // will use; a fresh Rust reborrow would invalidate that retained tag.
+        unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
+        let rc = walk(p.cast());
+        (rc, prepared.state)
+    }
+
     unsafe extern "C" fn iterator(
         out: *mut *mut ffi::git_config_iterator,
         backend: *mut ffi::git_config_backend,
@@ -3778,67 +3793,54 @@ pub(crate) mod unit_tests {
             }
         }
 
-        /// Rust-only adapter/provenance test. Manually dispatches the allocation's
-        /// Rust releaser instead of libgit2's dispatcher so Miri can execute it.
+        /// Rust-only adapter/provenance test over the setup `foreach_match` uses:
+        /// the walk below calls the slots in C's order, through the lent base.
+        /// Manually dispatches the allocation's Rust releaser instead of libgit2's
+        /// dispatcher so Miri can execute it.
         #[test]
         fn backend_walk_adapter_borrowed_bases_and_lending() {
             let releases = Rc::new(Cell::new(0));
             let inner = Scripted::adopt(&[0, ffi::GIT_ITEROVER], releases.clone());
-            let mut prepared = PreparedBackendWalk {
-                backend: ffi::git_config_backend {
-                    version: 1,
-                    iterator: Some(PreparedBackendWalk::iterator),
-                    ..Default::default()
-                },
-                iterator: ffi::git_config_iterator {
-                    backend: ptr::null_mut(),
-                    flags: 0,
-                    next: Some(PreparedBackendWalk::next),
-                    free: Some(PreparedBackendWalk::free),
-                },
-                state: PreparedWalkState {
-                    inner,
-                    failure: None,
-                    require_name: false,
-                },
-            };
-            let p = ptr::from_mut(&mut prepared);
-            // SAFETY: project and initialize through the same raw provenance C
-            // will use; a fresh Rust reborrow would invalidate that retained tag.
-            unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
-            let mut iterator = ptr::null_mut();
-            // SAFETY: exclusive stable initialized Rust-owned adapter; writable out.
-            assert_eq!(
-                // SAFETY: exclusive stable initialized Rust-owned adapter; writable out.
-                unsafe { PreparedBackendWalk::iterator(&mut iterator, p.cast()) },
-                0
-            );
-            assert_eq!(iterator, addr_of_mut!(prepared.iterator));
-            let mut entry = ptr::null_mut();
-            // SAFETY: adapter's exclusive matched iterator; writable slot. The
-            // inner Rust callback lends a static-string entry without foreign calls.
-            assert_eq!(
-                // SAFETY: adapter's exclusive matched iterator; writable slot. The
-                // inner Rust callback lends a static-string entry without foreign calls.
-                unsafe { PreparedBackendWalk::next(&mut entry, iterator) },
-                0
-            );
-            // SAFETY: previous successful advance lends an initialized live entry
-            // until the next advance. A shared view does not release its storage.
-            let view = unsafe { EntryRef::from_ptr(entry.cast()) }.unwrap();
-            assert_eq!(view.name(), Some(c"scripted.key"));
-            // SAFETY: prior entry borrow is over; same exclusive iterator and slot.
-            assert_eq!(
-                // SAFETY: prior entry borrow is over; same exclusive iterator and slot.
-                unsafe { PreparedBackendWalk::next(&mut entry, iterator) },
-                ffi::GIT_ITEROVER
-            );
-            // SAFETY: this base is borrowed stack storage; the matching free is a
-            // no-op and neither consumes nor changes the Rust owner.
-            unsafe { PreparedBackendWalk::free(iterator) };
+            let (rc, state) = PreparedBackendWalk::run(inner, true, |backend| {
+                // SAFETY: the lent base is initialized; slots are read by value.
+                let make_iterator = unsafe { addr_of!((*backend).iterator).read() }.unwrap();
+                let mut iterator = ptr::null_mut();
+                // SAFETY: the adapter's own callback on its base; writable out.
+                assert_eq!(unsafe { make_iterator(&mut iterator, backend) }, 0);
+                assert_eq!(
+                    iterator.cast::<u8>(),
+                    backend
+                        .cast::<u8>()
+                        .wrapping_add(core::mem::offset_of!(PreparedBackendWalk<'_>, iterator))
+                );
+                // SAFETY: the iterator base handed out above is initialized.
+                let (next, free) = unsafe {
+                    (
+                        addr_of!((*iterator).next).read(),
+                        addr_of!((*iterator).free).read(),
+                    )
+                };
+                let (next, free) = (next.unwrap(), free.unwrap());
+                let mut entry = ptr::null_mut();
+                // SAFETY: the adapter's matched iterator; writable slot. The inner
+                // Rust callback lends a static-string entry without foreign calls.
+                assert_eq!(unsafe { next(&mut entry, iterator) }, 0);
+                // SAFETY: the successful advance lends an initialized live entry
+                // until the next advance. A shared view does not release its storage.
+                let view = unsafe { EntryRef::from_ptr(entry.cast()) }.unwrap();
+                assert_eq!(view.name(), Some(c"scripted.key"));
+                // SAFETY: the entry borrow is over; same iterator and slot.
+                assert_eq!(unsafe { next(&mut entry, iterator) }, ffi::GIT_ITEROVER);
+                // SAFETY: this base is borrowed stack storage; the matching free is a
+                // no-op and neither consumes nor changes the Rust owner.
+                unsafe { free(iterator) };
+                assert_eq!(releases.get(), 0);
+                7
+            });
+            assert_eq!(rc, 7);
+            assert!(state.failure.is_none());
             assert_eq!(releases.get(), 0);
-            assert!(prepared.state.failure.is_none());
-            let raw = prepared.state.inner.into_c();
+            let raw = state.inner.into_c();
             // SAFETY: consumes exactly the complete Scripted Box created above,
             // via its own Rust callback, after all borrowed entry views ended.
             unsafe { Scripted::free(raw) };
