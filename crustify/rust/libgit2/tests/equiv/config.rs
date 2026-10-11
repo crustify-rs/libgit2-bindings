@@ -1272,3 +1272,255 @@ mod file_access {
         }
     }
 }
+
+mod writes_and_snapshots {
+    use super::*;
+    use libgit2::libgit2::config::config::{ConfigBox, ConfigError, ConfigLevel};
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    fn raw_config() -> ConfigBox<'static> {
+        let _pin = Config::new().unwrap();
+        let mut out = ptr::null_mut();
+        // SAFETY: runtime pinned, one writable result slot; C creates a sole ref.
+        assert_eq!(unsafe { ffi::git_config_new(&mut out) }, 0);
+        // SAFETY: fresh sole reference, not repository-bound, paired with config_free.
+        unsafe { ConfigBox::from_c(out) }.unwrap()
+    }
+
+    fn attach(config: &mut ConfigBox<'_>, file: &Path, level: ConfigLevel) {
+        let file = CString::new(file.to_str().unwrap()).unwrap();
+        config
+            .as_mut()
+            .add_file_ondisk(&file, level, None, false)
+            .unwrap();
+    }
+
+    fn observation(status: Result<(), ConfigError>) -> Record {
+        match status {
+            Ok(()) => (0, 0, None),
+            Err(e) => (
+                e.raw_code(),
+                0,
+                Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+            ),
+        }
+    }
+
+    fn set(config: &mut ConfigBox<'_>, raw: bool, name: &CStr, value: &CStr) -> Record {
+        if raw {
+            // SAFETY: live independent config; strings read/copied, not retained.
+            let rc = unsafe {
+                ffi::git_config_set_string(config.as_c_ptr(), name.as_ptr(), value.as_ptr())
+            };
+            record(rc, 0, c_error)
+        } else {
+            observation(config.as_mut().set_string(name, value))
+        }
+    }
+
+    fn order(config: &mut ConfigBox<'_>, raw: bool, levels: &[ConfigLevel]) -> Record {
+        if raw {
+            let mut levels: Vec<_> = levels.iter().map(|level| level.raw()).collect();
+            let p = if levels.is_empty() {
+                ptr::null_mut()
+            } else {
+                levels.as_mut_ptr()
+            };
+            // SAFETY: exclusive independent config, bounded array read only during call.
+            let rc = unsafe { ffi::git_config_set_writeorder(config.as_c_ptr(), p, levels.len()) };
+            record(rc, 0, c_error)
+        } else {
+            observation(config.as_mut().set_write_order(levels))
+        }
+    }
+
+    fn snapshot(config: &ConfigBox<'_>, raw: bool) -> Result<ConfigBox<'static>, Record> {
+        if raw {
+            let mut out = ptr::null_mut();
+            // SAFETY: live source; writable slot; C owns partial construction on failure.
+            let rc = unsafe { ffi::git_config_snapshot(&mut out, config.as_c_ptr()) };
+            if rc < 0 {
+                assert!(out.is_null());
+                return Err(record(rc, 0, c_error));
+            }
+            // SAFETY: success hands out one fresh sole snapshot, independent of source.
+            Ok(unsafe { ConfigBox::from_c(out) }.unwrap())
+        } else {
+            config.as_ref().snapshot().map_err(|e| observation(Err(e)))
+        }
+    }
+
+    fn get(config: &ConfigBox<'_>, name: &CStr, raw: bool) -> Record {
+        if !raw {
+            return match config.as_ref().get_i32(name) {
+                Ok(value) => (0, value, None),
+                Err(e) => (
+                    e.raw_code(),
+                    0,
+                    Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                ),
+            };
+        }
+        let mut value = 0;
+        // SAFETY: live config, output slot, NUL-terminated key; no retention.
+        let rc = unsafe { ffi::git_config_get_int32(&mut value, config.as_c_ptr(), name.as_ptr()) };
+        record(rc, value, c_error)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn multi_call_writes_order_and_snapshot_match_c() {
+        let mut configs = [raw_config(), Config::new().unwrap()];
+        let files: Vec<_> = ["c", "rust"]
+            .iter()
+            .map(|side| {
+                [
+                    scratch("string-local", side),
+                    scratch("string-global", side),
+                ]
+            })
+            .collect();
+        // Empty config, invalid names, empty values; errors copied before next call.
+        let mut observations = [Vec::new(), Vec::new()];
+        for side in 0..2 {
+            let raw = side == 0;
+            observations[side].push(set(&mut configs[side], raw, c"a.b", c"1"));
+            let empty = snapshot(&configs[side], raw).unwrap();
+            assert_eq!(get(&empty, c"a.b", raw).0, ErrorCode::NotFound.raw());
+            attach(&mut configs[side], &files[side][0], ConfigLevel::LOCAL);
+            attach(&mut configs[side], &files[side][1], ConfigLevel::GLOBAL);
+        }
+        assert_eq!(observations[0], observations[1]);
+        for levels in [
+            vec![ConfigLevel::GLOBAL],
+            vec![ConfigLevel::LOCAL],
+            vec![ConfigLevel::LOCAL, ConfigLevel::GLOBAL],
+            vec![ConfigLevel::GLOBAL, ConfigLevel::LOCAL],
+            vec![ConfigLevel::LOCAL, ConfigLevel::LOCAL],
+            vec![
+                ConfigLevel::from_raw(i32::MIN),
+                ConfigLevel::from_raw(i32::MAX),
+            ],
+            vec![],
+            vec![ConfigLevel::GLOBAL],
+        ] {
+            let mut step = [Vec::new(), Vec::new()];
+            for side in 0..2 {
+                let raw = side == 0;
+                step[side].push(order(&mut configs[side], raw, &levels));
+                for (name, value) in [
+                    (c"a.b", c"123"),
+                    (c"a.b", c"456"),
+                    (c"a.b", c"456"),
+                    (c"a.text", c""),
+                    (c"a.text", c" white # ; \" \\ \n\xff"),
+                    (c"invalid", c"1"),
+                    (c".broken", c"2"),
+                    (c"A.Subsection.KEY", c"3"),
+                ] {
+                    step[side].push(set(&mut configs[side], raw, name, value));
+                    step[side].push(get(&configs[side], c"a.b", raw));
+                }
+                let mut snap = snapshot(&configs[side], raw).unwrap();
+                step[side].push(get(&snap, c"a.b", raw));
+                step[side].push(set(&mut snap, raw, c"a.b", c"777"));
+                step[side].push(order(
+                    &mut snap,
+                    raw,
+                    &[ConfigLevel::LOCAL, ConfigLevel::GLOBAL],
+                ));
+                step[side].push(set(&mut snap, raw, c"a.b", c"888"));
+                step[side].push(set(&mut configs[side], raw, c"a.b", c"999"));
+                step[side].push(get(&snap, c"a.b", raw));
+                let nested = snapshot(&snap, raw).unwrap();
+                drop(snap);
+                step[side].push(get(&nested, c"a.b", raw));
+            }
+            assert_eq!(step[0], step[1], "levels {levels:?}");
+            for (c_file, rust_file) in files[0].iter().zip(&files[1]) {
+                assert_eq!(
+                    std::fs::read(c_file).unwrap_or_default(),
+                    std::fs::read(rust_file).unwrap_or_default()
+                );
+            }
+        }
+        drop(configs);
+        for file in files.iter().flatten() {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn multivar_and_file_lock_error_sequences_match_c() {
+        let mut observations = Vec::new();
+        for (side, raw) in [("c", true), ("rust", false)] {
+            let mut writer = if raw {
+                raw_config()
+            } else {
+                Config::new().unwrap()
+            };
+            let file = scratch("write-errors", side);
+            std::fs::write(&file, "[a]\n b = 1\n b = 2\n").unwrap();
+            attach(&mut writer, &file, ConfigLevel::LOCAL);
+            let duplicate = set(&mut writer, raw, c"a.b", c"3");
+            let mut blocker = Config::new().unwrap();
+            attach(&mut blocker, &file, ConfigLevel::LOCAL);
+            let lock = blocker.as_mut().lock().unwrap();
+            let locked = set(&mut writer, raw, c"a.unique", c"3");
+            assert_eq!(locked.0, ErrorCode::Locked.raw());
+            drop(lock);
+            drop(blocker);
+            let success = set(&mut writer, raw, c"a.unique", c"3");
+            let sequence: Vec<_> = [duplicate, locked, success]
+                .into_iter()
+                .map(|(rc, value, error)| {
+                    (
+                        rc,
+                        value,
+                        error.map(|(class, message)| {
+                            (class, message.replace(file.to_str().unwrap(), "<config>"))
+                        }),
+                    )
+                })
+                .collect();
+            observations.push((sequence, std::fs::read(&file).unwrap()));
+            drop(writer);
+            std::fs::remove_file(file).unwrap();
+        }
+        assert_eq!(observations[0], observations[1]);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn partial_snapshot_failure_matches_c_and_releases_partial_owner() {
+        let mut results = Vec::new();
+        for (side, raw) in [("c", true), ("rust", false)] {
+            let mut config = if raw {
+                raw_config()
+            } else {
+                Config::new().unwrap()
+            };
+            let good = scratch("partial-good", side);
+            let bad = scratch("partial-bad", side);
+            std::fs::write(&good, "[a]\n b = 12\n").unwrap();
+            std::fs::write(&bad, "[a]\n b = 34\n").unwrap();
+            attach(&mut config, &good, ConfigLevel::LOCAL);
+            attach(&mut config, &bad, ConfigLevel::GLOBAL);
+            // LOCAL is copied before GLOBAL's iterator discovers the malformed file.
+            std::fs::write(&bad, "[invalid\n").unwrap();
+            let error = snapshot(&config, raw).unwrap_err();
+            let (rc, _, failure) = error;
+            let (class, message) = failure.unwrap();
+            results.push((rc, class, message.replace(bad.to_str().unwrap(), "<bad>")));
+            std::fs::write(&bad, "[a]\n b = 56\n").unwrap();
+            let snap = snapshot(&config, raw).unwrap();
+            drop(config);
+            assert_eq!(get(&snap, c"a.b", raw).1, 12);
+            drop(snap);
+            std::fs::remove_file(good).unwrap();
+            std::fs::remove_file(bad).unwrap();
+        }
+        assert_eq!(results[0], results[1]);
+    }
+}
