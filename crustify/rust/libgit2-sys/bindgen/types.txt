@@ -17,6 +17,7 @@ git_commitbuilder
 git_config
 git_config_backend_memory_options
 git_config_level_t
+git_configmap_t
 git_error
 git_error_code
 git_error_t
@@ -67,6 +68,7 @@ git_submodule_update_t
 git_tag_foreach_cb
 git_time
 git_trace_level_t
+git_transaction
 git_tree_update_t
 git_treebuilder
 git_treebuilder_filter_cb

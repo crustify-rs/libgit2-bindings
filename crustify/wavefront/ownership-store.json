@@ -913,6 +913,12 @@
    "fields": []
   },
   {
+   "name": "git_configmap_t",
+   "defined_in": "include/git2/config.h",
+   "_comment_agent": "Resource-free enum with four named values; no lifecycle or pointer slots. config mapping switch recognizes exactly 0..3; Rust conversion checks values without transmute.",
+   "fields": []
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
@@ -1979,6 +1985,77 @@
    "defined_in": "include/git2/trace.h",
    "_comment_agent": "C enum, values 0..6 (NONE..TRACE), passed by value. Consumers: git_trace_set stores any value in git_trace__data.level (GIT_ASSERT_ARG level == 0 || callback != NULL, an abort in Debug builds); git_trace() emits when git_trace__data.level >= level, so the integer order is the verbosity order; internal emitters only pass named levels (INFO/DEBUG/TRACE) to git_trace_cb. Wrapped as the fieldless TraceLevel enum (repr u32, Ord over the C values) with a fallible from_raw in core/trace.rs.",
    "fields": []
+  },
+  {
+   "name": "git_transaction",
+   "defined_in": "src/libgit2/transaction.c",
+   "_comment_agent": "Opaque public type, no public fields. C discriminator owns two allocation shapes: pool containing tx (refs), standalone calloc (config). All pointer fields scalar. No clone. Free aborts pending work and owns teardown. Ref parent and config parent borrows must be retained. Internal config_new only used by public config_lock; backend reference acquisition occurs in its caller.",
+   "fields": [
+    {
+     "name": "cfg",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Config variant borrows config without up-ref; config owner must remain live through commit/free. Cleared after commit; NULL on refs variant."
+     }
+    },
+    {
+     "name": "cfg_data",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Actually backend_instance*: git_config_lock increments its refcount after config_new; commit/free consumes via git_config_unlock, decrements and may free backend. NULL for refs or committed config."
+     }
+    },
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Refs constructor obtains a counted git_repository_refdb reference, released by git_refdb_free after pending locks unlock; NULL for config."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Reference variant borrows repo, stores without up-ref; copy_common and refdb backend operations access it. NULL on config variant."
+     }
+    }
+   ]
   },
   {
    "name": "git_tree",
@@ -6859,6 +6936,59 @@
       "nullable": true,
       "mutable": true,
       "note": "Releases one reference (NULL is a no-op): GIT_REFCOUNT_DEC frees the config (config_free: down-ref each backend instance, which frees its backend at 0; dispose both vectors; git__free) once the atomic count reaches 0 and no repository owns it (rc.owner NULL); a repository-owned config at 0 is freed by the repository's set_config(NULL). Wrapped as the drop of ConfigFree (config/config.rs), behind ConfigBox and ConfigArc."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_lock",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained borrowed parent, must outlive transaction. No parent reference increment."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable caller slot; success transfers one fresh transaction, failure leaves unchanged."
      }
     }
    ]
@@ -14655,6 +14785,155 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_transaction_config_new",
+   "defined_in": "src/libgit2/transaction.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "cfg",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cfg"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained borrowed parent, must outlive transaction. No parent reference increment."
+     }
+    },
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "Scalar backend_instance erased to void; config_new stores it without up-ref. Its only caller config_lock locks backend then increments reference; commit/free consumes through config_unlock."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable caller slot; success transfers one fresh transaction, failure leaves unchanged."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_transaction_free",
+   "defined_in": "src/libgit2/transaction.c",
+   "lifetime": {
+    "for": "tx",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "tx",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes initialized refs/config transaction, aborts remaining locks, releases counted dependencies and matching allocation; NULL no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_transaction_new",
+   "defined_in": "src/libgit2/transaction.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable caller slot; success transfers one fresh transaction, failure leaves unchanged."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Retained borrowed parent, must outlive transaction. No parent reference increment."
      }
     }
    ]

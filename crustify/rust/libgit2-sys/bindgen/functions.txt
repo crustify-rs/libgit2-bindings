@@ -79,6 +79,8 @@ git_config_add_file_ondisk
 git_config_backend_memory_options_init
 git_config_free
 git_config_get_int32
+git_config_lock
+git_config_lookup_map_value
 git_config_new
 git_config_set_int32
 git_diff_free
@@ -322,6 +324,11 @@ git_tag_target
 git_tag_target_id
 git_tag_target_type
 git_trace_set
+git_transaction_commit
+git_transaction_free
+git_transaction_lock_ref
+git_transaction_new
+git_transaction_remove
 git_tree_create_updated
 git_tree_dup
 git_tree_entry_byid

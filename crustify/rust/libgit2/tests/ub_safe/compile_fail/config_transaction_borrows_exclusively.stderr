@@ -1,0 +1,23 @@
+error[E0499]: cannot borrow `config` as mutable more than once at a time
+ --> tests/ub_safe/compile_fail/config_transaction_borrows_exclusively.rs:5:18
+  |
+4 |     let tx = config.as_mut().lock().unwrap();
+  |              ------ first mutable borrow occurs here
+5 |     let _alias = config.as_mut();
+  |                  ^^^^^^ second mutable borrow occurs here
+6 |     drop(config);
+7 |     drop(tx);
+  |          -- first borrow later used here
+
+error[E0505]: cannot move out of `config` because it is borrowed
+ --> tests/ub_safe/compile_fail/config_transaction_borrows_exclusively.rs:6:10
+  |
+3 |     let mut config = Config::new().unwrap();
+  |         ---------- binding `config` declared here
+4 |     let tx = config.as_mut().lock().unwrap();
+  |              ------ borrow of `config` occurs here
+5 |     let _alias = config.as_mut();
+6 |     drop(config);
+  |          ^^^^^^ move out of `config` occurs here
+7 |     drop(tx);
+  |          -- borrow later used here
