@@ -555,7 +555,9 @@ fn mapping_mode_values_match_c_behavior() {
 mod entry_and_map_types {
     use super::*;
     use core::ptr::addr_of;
-    use libgit2::libgit2::config::config::{ConfigLevel, ConfigMap, ConfigRef, MapMatch};
+    use libgit2::libgit2::config::config::{
+        ConfigLevel, ConfigMap, ConfigRef, MapMatch, lookup_map_value,
+    };
     use libgit2::libgit2::repository::repository::Repository;
 
     fn bytes(p: *const core::ffi::c_char) -> Option<Vec<u8>> {
@@ -788,7 +790,7 @@ mod entry_and_map_types {
         // SAFETY: `maps` addresses `n` initialized records whose String rules
         // have live strings; the input is NUL-terminated, the output writable.
         let rc = unsafe { ffi::git_config_lookup_map_value(&mut out, maps, n, input.as_ptr()) };
-        record(rc, out, c_error)
+        record(rc, if rc < 0 { 0 } else { out }, c_error)
     }
 
     /// Tables of records built and edited through `ConfigMap` and of C records
@@ -839,10 +841,8 @@ mod entry_and_map_types {
             }
             for n in 0..=c.len() {
                 for input in inputs {
-                    // `ConfigMap` is transparent over `git_configmap`.
-                    let rust_maps = rust.as_ptr().cast::<ffi::git_configmap>();
                     assert_eq!(
-                        lookup(rust_maps, n, input),
+                        rust_record(lookup_map_value(&rust[..n], Some(input))),
                         lookup(c.as_ptr(), n, input),
                         "{step}: {input:?} over {n} records"
                     );
@@ -2037,5 +2037,305 @@ mod writes_and_snapshots {
             std::fs::remove_file(bad).unwrap();
         }
         assert_eq!(results[0], results[1]);
+    }
+}
+
+mod mapping_callbacks {
+    use super::*;
+    use libgit2::libgit2::config::config::{
+        ConfigMap, EntryRef, ForeachCallback, MapMatch, lookup_map_value,
+    };
+    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::sys::errors::{clear, set};
+    use std::ffi::c_void;
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+
+    /// Includes last-error state even on successful speculative mapping.
+    fn observe(result: Result<i32, ConfigError>) -> (Record, (c_int, Vec<u8>)) {
+        let record = rust_record(result);
+        let error = last();
+        (
+            record,
+            (error.raw_class(), error.message().to_bytes().to_vec()),
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn map_lookup_matches_c_after_each_table_edit() {
+        init();
+        let rust_text = CString::new("input").unwrap();
+        let c_text = CString::new("input").unwrap();
+        let mut maps = [
+            ConfigMap::new(MapMatch::False, i32::MIN),
+            ConfigMap::new(MapMatch::True, i32::MAX),
+            ConfigMap::new(MapMatch::String(&rust_text), 17),
+            ConfigMap::new(MapMatch::Int32, -999),
+        ];
+        let mut raw = [
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_FALSE,
+                str_match: ptr::null(),
+                map_value: i32::MIN,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_TRUE,
+                str_match: ptr::null(),
+                map_value: i32::MAX,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_STRING,
+                str_match: c_text.as_ptr(),
+                map_value: 17,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_INT32,
+                str_match: ptr::null(),
+                map_value: -999,
+            },
+        ];
+        for step in 0..3 {
+            for n in 0..=maps.len() {
+                for value in [
+                    None,
+                    Some(c""),
+                    Some(c"no"),
+                    Some(c"on"),
+                    Some(c"INPUT"),
+                    Some(c"2k"),
+                    Some(c"2147483648"),
+                    Some(c"garbage"),
+                    Some(c"\xff"),
+                    Some(c"1kb"),
+                ] {
+                    set(ErrorClass::Odb, c"previous");
+                    let safe = observe(lookup_map_value(&maps[..n], value));
+                    set(ErrorClass::Odb, c"previous");
+                    let mut out = 0;
+                    // SAFETY: independently owned initialized C table and live
+                    // immutable strings, exact prefix count, writable output.
+                    let rc = unsafe {
+                        ffi::git_config_lookup_map_value(
+                            &mut out,
+                            raw.as_ptr(),
+                            n,
+                            value.map_or(ptr::null(), CStr::as_ptr),
+                        )
+                    };
+                    let record = record(rc, if rc < 0 { 0 } else { out }, c_error);
+                    let error = last();
+                    assert_eq!(
+                        safe,
+                        (
+                            record,
+                            (error.raw_class(), error.message().to_bytes().to_vec())
+                        ),
+                        "step {step}, prefix {n}, value {value:?}"
+                    );
+                }
+            }
+            match step {
+                0 => {
+                    maps[0].as_mut().set_match(MapMatch::String(c""));
+                    raw[0].type_ = ffi::GIT_CONFIGMAP_STRING;
+                    raw[0].str_match = c"".as_ptr();
+                }
+                _ => {
+                    maps[3].as_mut().set_map_value(42);
+                    raw[3].map_value = 42;
+                }
+            }
+        }
+        clear();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapped_config_matches_c_across_writes_snapshots_and_errors() {
+        init();
+        let rust_path = scratch("mapped", "rust");
+        let c_path = scratch("mapped", "c");
+        for path in [&rust_path, &c_path] {
+            std::fs::write(path, b"[a]\n b = input\n flag\n").unwrap();
+        }
+        let rust_config =
+            Config::open(&CString::new(rust_path.to_str().unwrap()).unwrap()).unwrap();
+        let mut raw_config = ptr::null_mut();
+        let c_name = CString::new(c_path.to_str().unwrap()).unwrap();
+        // SAFETY: exclusive output slot and live NUL path; C creates one owner.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw_config, c_name.as_ptr()) };
+        assert_eq!(rc, 0);
+        let maps = [
+            ConfigMap::new(MapMatch::String(c"input"), 7),
+            ConfigMap::new(MapMatch::True, 8),
+            ConfigMap::new(MapMatch::Int32, 9),
+        ];
+        let raw_maps = [
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_STRING,
+                str_match: c"input".as_ptr(),
+                map_value: 7,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_TRUE,
+                str_match: ptr::null(),
+                map_value: 8,
+            },
+            ffi::git_configmap {
+                type_: ffi::GIT_CONFIGMAP_INT32,
+                str_match: ptr::null(),
+                map_value: 9,
+            },
+        ];
+        for content in [
+            b"[a]\n b = input\n flag\n".as_slice(),
+            b"[a]\n b = 2k\n flag\n extra = 1\n",
+            b"[a]\n b = invalid\n flag\n extra = longer\n",
+        ] {
+            for path in [&rust_path, &c_path] {
+                std::fs::write(path, content).unwrap();
+            }
+            for name in [c"A.B", c"a.flag", c"a.missing", c"invalid", c""] {
+                for n in 0..=maps.len() {
+                    clear();
+                    let safe = observe(rust_config.as_ref().get_mapped(name, &maps[..n]));
+                    clear();
+                    let mut out = 0;
+                    // SAFETY: live independent C config with a valid file, name
+                    // and mapping strings are NUL-terminated; exact table count.
+                    let rc = unsafe {
+                        ffi::git_config_get_mapped(
+                            &mut out,
+                            raw_config,
+                            name.as_ptr(),
+                            raw_maps.as_ptr(),
+                            n,
+                        )
+                    };
+                    let record = record(rc, if rc < 0 { 0 } else { out }, c_error);
+                    let error = last();
+                    assert_eq!(
+                        safe,
+                        (
+                            record,
+                            (error.raw_class(), error.message().to_bytes().to_vec())
+                        ),
+                        "{name:?}, {n}"
+                    );
+                }
+            }
+        }
+        let snapshot = rust_config.as_ref().snapshot().unwrap();
+        let mut c_snapshot = ptr::null_mut();
+        // SAFETY: live config and writable output; successful snapshot owns one reference.
+        let rc = unsafe { ffi::git_config_snapshot(&mut c_snapshot, raw_config) };
+        assert_eq!(rc, 0);
+        drop(rust_config);
+        // SAFETY: release the owned C config once; its snapshot is independent.
+        unsafe { ffi::git_config_free(raw_config) };
+        assert_eq!(snapshot.as_ref().get_mapped(c"a.flag", &maps).unwrap(), 8);
+        let mut out = 0;
+        // SAFETY: independent live C snapshot, writable scalar, valid table/key.
+        let rc = unsafe {
+            ffi::git_config_get_mapped(
+                &mut out,
+                c_snapshot,
+                c"a.flag".as_ptr(),
+                raw_maps.as_ptr(),
+                raw_maps.len(),
+            )
+        };
+        assert_eq!(rc, 0);
+        assert_eq!(out, 8);
+        // SAFETY: releases this owned snapshot once, with no remaining borrows.
+        unsafe { ffi::git_config_free(c_snapshot) };
+        for path in [&rust_path, &c_path] {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    struct Calls {
+        code: c_int,
+        values: Vec<Option<Vec<u8>>>,
+    }
+    /// # Safety
+    /// entry is a live immutable C entry for this call; payload addresses a
+    /// live exclusively borrowed Calls on this thread. Neither is retained.
+    unsafe extern "C" fn c_callback(
+        entry: *const ffi::git_config_entry,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: test caller lends an initialized immutable entry for this call.
+        let value = unsafe { core::ptr::addr_of!((*entry).value).read() };
+        let value = if value.is_null() {
+            None
+        } else {
+            // SAFETY: non-NULL entry values are immutable NUL strings live for the call.
+            Some(unsafe { CStr::from_ptr(value) }.to_bytes().to_vec())
+        };
+        // SAFETY: payload is the exclusively borrowed Calls state of this invocation.
+        let calls = unsafe { &mut *payload.cast::<Calls>() };
+        calls.values.push(value);
+        calls.code
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn borrowed_callback_values_and_nonzero_codes_match_c() {
+        let rpath = scratch("callback", "rust");
+        let cpath = scratch("callback", "c");
+        for path in [&rpath, &cpath] {
+            std::fs::write(path, b"[a]\n value = input\n flag\n empty =\n").unwrap();
+        }
+        let config = Config::open(&CString::new(rpath.to_str().unwrap()).unwrap()).unwrap();
+        let mut raw_config = ptr::null_mut();
+        let path = CString::new(cpath.to_str().unwrap()).unwrap();
+        // SAFETY: live path and writable output; creates independently owned config.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw_config, path.as_ptr()) };
+        assert_eq!(rc, 0);
+        for code in [0, 1, -7, i32::MIN, i32::MAX, ffi::GIT_ITEROVER] {
+            let mut safe_values = Vec::new();
+            let mut f = |entry: EntryRef<'_>| {
+                safe_values.push(entry.value().map(|s| s.to_bytes().to_vec()));
+                NonZero::new(code).map_or(ControlFlow::Continue(()), ControlFlow::Break)
+            };
+            let mut callback = ForeachCallback::new(&mut f);
+            let mut calls = Calls {
+                code,
+                values: Vec::new(),
+            };
+            for key in [c"a.value", c"a.flag", c"a.empty"] {
+                let entry = config.as_ref().entry(key).unwrap();
+                let mut raw_entry = ptr::null_mut();
+                // SAFETY: live config, key, and writable output slot; success acquires an entry.
+                let rc = unsafe {
+                    // Acquire only the C side's independently owned reference.
+                    ffi::git_config_get_entry(&mut raw_entry, raw_config, key.as_ptr())
+                };
+                assert_eq!(rc, 0);
+                // SAFETY: this C callback receives a live acquired entry and
+                // exclusive typed payload, retaining or freeing neither.
+                let c_rc = unsafe { c_callback(raw_entry, core::ptr::from_mut(&mut calls).cast()) };
+                let rc = match callback.call(entry.as_ref()) {
+                    ControlFlow::Continue(()) => 0,
+                    ControlFlow::Break(code) => code.get(),
+                };
+                assert_eq!(rc, c_rc);
+                assert_eq!(
+                    callback.stopped().map(NonZero::get),
+                    NonZero::new(code).map(NonZero::get)
+                );
+                // SAFETY: one acquired reference, not the callback borrow, released once.
+                unsafe { ffi::git_config_entry_free(raw_entry) };
+            }
+            drop(callback);
+            assert_eq!(safe_values, calls.values);
+        }
+        // SAFETY: releases independently owned raw config once.
+        unsafe { ffi::git_config_free(raw_config) };
+        for path in [&rpath, &cpath] {
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }

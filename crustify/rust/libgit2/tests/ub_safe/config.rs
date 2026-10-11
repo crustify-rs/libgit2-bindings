@@ -1078,3 +1078,165 @@ mod writes_and_snapshots {
         });
     }
 }
+
+/// Public-only mapping and callback lifetime/foreign-write regressions.
+mod mapping_callbacks {
+    use super::*;
+    use libgit2::libgit2::config::config::{
+        ConfigMap, EntryRef, ForeachCallback, MapMatch, lookup_map_value,
+    };
+    use std::ffi::CString;
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapping_borrows_tables_and_returns_owned_results() {
+        let text = CString::new("input").unwrap();
+        let mut maps = [
+            ConfigMap::new(MapMatch::String(&text), i32::MIN),
+            ConfigMap::new(MapMatch::Int32, i32::MAX),
+        ];
+        assert_eq!(lookup_map_value(&maps, Some(c"INPUT")).unwrap(), i32::MIN);
+        assert_eq!(lookup_map_value(&maps, Some(c"-2k")).unwrap(), -2048);
+        let held = lookup_map_value(&maps, Some(c"input")).unwrap();
+        maps[0].as_mut().set_map_value(17);
+        maps[1].as_mut().set_match(MapMatch::True);
+        assert_eq!(held, i32::MIN);
+        assert_eq!(lookup_map_value(&maps, None).unwrap(), i32::MAX);
+        assert!(lookup_map_value(&[], None).is_err());
+        assert!(lookup_map_value(&maps, Some(c"\xff")).is_err());
+        drop(text);
+        assert_eq!(held, i32::MIN);
+        let falsy = [ConfigMap::new(MapMatch::False, 7)];
+        assert_eq!(lookup_map_value(&falsy, Some(c"")).unwrap(), 7);
+        assert!(lookup_map_value(&falsy, None).is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapped_refresh_errors_do_not_reach_uninitialized_entry() {
+        let path = scratch("mapped-refresh");
+        std::fs::write(path.to_str().unwrap(), b"[a]\n b = input\n").unwrap();
+        let config = Config::open(&path).unwrap();
+        let maps = [ConfigMap::new(MapMatch::String(c"input"), 9)];
+        assert_eq!(config.as_ref().get_mapped(c"a.b", &maps).unwrap(), 9);
+        std::fs::write(
+            path.to_str().unwrap(),
+            b"[invalid\nthis is a longer malformed config\n",
+        )
+        .unwrap();
+        assert!(config.as_ref().get_mapped(c"a.b", &maps).is_err());
+        std::fs::write(path.to_str().unwrap(), b"[a]\n b = input\n c = recovered\n").unwrap();
+        assert_eq!(config.as_ref().get_mapped(c"a.b", &maps).unwrap(), 9);
+        let shared = ConfigArc::from(config);
+        assert_eq!(shared.as_ref().get_mapped(c"a.b", &maps).unwrap(), 9);
+        let snapshot = shared.as_ref().snapshot().unwrap();
+        drop(shared);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(snapshot.as_ref().get_mapped(c"a.b", &maps).unwrap(), 9);
+        assert!(snapshot.as_ref().get_mapped(c"a.b", &[]).is_err());
+        assert!(snapshot.as_ref().get_mapped(c"a.missing", &maps).is_err());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn callback_parent_drop_nested_calls_and_panic_reuse() {
+        let path = scratch("foreach-callback");
+        std::fs::write(path.to_str().unwrap(), b"[a]\n b = input\n flag\n").unwrap();
+        let mut parent = Some(Config::open(&path).unwrap());
+        let entry = parent.as_ref().unwrap().as_ref().entry(c"a.b").unwrap();
+        let flag = parent.as_ref().unwrap().as_ref().entry(c"a.flag").unwrap();
+        let mut seen = Vec::new();
+        let mut inner = |e: EntryRef<'_>| {
+            seen.push(e.name().unwrap().to_owned());
+            ControlFlow::Continue(())
+        };
+        let mut nested = ForeachCallback::new(&mut inner);
+        let mut outer = |e: EntryRef<'_>| {
+            drop(parent.take());
+            assert_eq!(e.value(), Some(c"input"));
+            assert_eq!(nested.call(flag.as_ref()), ControlFlow::Continue(()));
+            ControlFlow::Break(NonZero::new(37).unwrap())
+        };
+        let mut callback = ForeachCallback::new(&mut outer);
+        assert_eq!(
+            callback.call(entry.as_ref()),
+            ControlFlow::Break(NonZero::new(37).unwrap())
+        );
+        assert_eq!(callback.stopped().unwrap().get(), 37);
+        drop(callback);
+        drop(outer);
+        drop(nested);
+        assert_eq!(seen, [c"a.flag".to_owned()]);
+        let mut first = true;
+        let mut panicking = |e: EntryRef<'_>| {
+            if std::mem::take(&mut first) {
+                panic!("callback panic");
+            }
+            assert_eq!(e.value(), Some(c"input"));
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut panicking);
+        assert!(catch_unwind(AssertUnwindSafe(|| callback.call(entry.as_ref()))).is_err());
+        assert_eq!(callback.stopped().unwrap().get(), ErrorCode::User.raw());
+        assert_eq!(callback.call(entry.as_ref()), ControlFlow::Continue(()));
+        assert_eq!(callback.stopped(), None);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapping_tables_can_be_read_on_scoped_threads() {
+        let input = CString::new("input").unwrap();
+        let maps = [
+            ConfigMap::new(MapMatch::String(&input), 11),
+            ConfigMap::new(MapMatch::Int32, 0),
+        ];
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..32 {
+                        assert_eq!(lookup_map_value(&maps, Some(c"INPUT")).unwrap(), 11);
+                        assert_eq!(lookup_map_value(&maps, Some(c"2k")).unwrap(), 2048);
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapped_lower_backend_failure_preserves_the_previous_error() {
+        use libgit2::libgit2::util::errors::{ErrorClass, last};
+        use libgit2::libgit2::util::sys::errors::{clear, set};
+        let lower = scratch("mapped-lower");
+        let upper = scratch("mapped-upper");
+        for seeded in [false, true] {
+            std::fs::write(lower.to_str().unwrap(), b"[a]\n other = old\n").unwrap();
+            std::fs::write(upper.to_str().unwrap(), b"[a]\n b = input\n").unwrap();
+            let mut config = Config::open(&lower).unwrap();
+            config
+                .as_mut()
+                .add_file(&upper, ConfigLevel::APP, None, false)
+                .unwrap();
+            std::fs::write(
+                lower.to_str().unwrap(),
+                b"[broken\nlonger malformed backend\n",
+            )
+            .unwrap();
+            clear();
+            if seeded {
+                set(ErrorClass::Odb, c"previous error");
+            }
+            let before = last();
+            let maps = [ConfigMap::new(MapMatch::String(c"input"), 42)];
+            assert_eq!(config.as_ref().get_mapped(c"a.b", &maps).unwrap(), 42);
+            assert_eq!(last(), before);
+        }
+        for path in [&lower, &upper] {
+            std::fs::remove_file(path.to_str().unwrap()).unwrap();
+        }
+    }
+}

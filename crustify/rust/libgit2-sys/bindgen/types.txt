@@ -82,3 +82,6 @@ git_writestream
 # config wave 1 batch 0: entries and mapping records
 git_config_entry
 git_configmap
+
+# config wave 2 batch 1: borrowed enumeration callback
+git_config_foreach_cb

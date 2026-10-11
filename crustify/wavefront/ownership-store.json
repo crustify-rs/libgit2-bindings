@@ -7164,7 +7164,8 @@
       "owned": true,
       "borrowed": null,
       "nullable": true,
-      "mutable": true
+      "mutable": true,
+      "note": "Consumes one acquired backend entry reference (NULL is a no-op), dispatches the enclosing backend_entry.free; never release a callback/iterator borrow."
      }
     }
    ]
@@ -7234,6 +7235,46 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_foreach_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "All three invokers lend an immutable entry from an iterator-owned list; no transfer/upref, valid only during callback. Built-in iteration retains list until iterator_free; closure cannot retain entry/strings."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque caller-owned payload forwarded unchanged, never retained or freed. Known C instances point to ints or refspec context; Rust trampoline uses exclusive ForeachCallback state synchronously, no concurrent/reentrant call."
      }
     }
    ]
@@ -7345,10 +7386,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "call"
+       "lifetime": "arg:config"
       },
       "nullable": false,
-      "mutable": false
+      "mutable": false,
+      "note": "Read-only config borrow, may refresh backend internals. Snapshot lists/entries retain their own immutable list references."
      }
     },
     {
@@ -7359,10 +7401,11 @@
       "string": true,
       "owned": false,
       "borrowed": {
-       "lifetime": "call"
+       "lifetime": "arg:name"
       },
       "nullable": false,
-      "mutable": false
+      "mutable": false,
+      "note": "NUL key, normalized into temporary storage; never retained."
      }
     },
     {
@@ -7378,10 +7421,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "call"
+       "lifetime": "arg:out"
       },
       "nullable": false,
-      "mutable": true
+      "mutable": true,
+      "note": "Caller-owned writable slot receives one retained immutable backend entry on success. get_entry forms an uninitialized be-derived pointer on backend failure; safe acquisition uses existing reread/snapshot workaround."
      }
     }
    ]
@@ -7492,6 +7536,78 @@
       "nullable": false,
       "mutable": true,
       "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_mapped",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only config borrow; get_entry may refresh. On failed refresh C derives an uninitialized entry pointer, so wrap through reread + snapshot before calling mapper."
+     }
+    },
+    {
+     "name": "maps",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:maps"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "map_n contiguous caller-owned mapping records; read only and not retained. String rules require non-NULL immutable NUL strings."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL key copied transiently by normalization."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar; expose only successful output."
      }
     }
    ]
@@ -7715,6 +7831,61 @@
       "nullable": false,
       "mutable": true,
       "note": "Output slot borrowed for call; success writes a fresh config transaction (git__calloc'd by git_transaction_config_new) that git_transaction_free releases, unlocking the backend without committing; failure writes nothing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_lookup_map_value",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "maps",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:maps"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "map_n contiguous caller-owned records; ordered first-match dispatch, never retained or freed. Empty tables allowed; String mode requires non-NULL NUL str_match."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writable scalar; successful Int32 returns parsed input, not map_value. Failed parse may touch output; safe API exposes no failure output."
+     }
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:value"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL denotes valueless boolean true; empty denotes false. NUL bytes read only during call, case-insensitive string matching."
      }
     }
    ]
