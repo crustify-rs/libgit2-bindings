@@ -161,7 +161,7 @@ fn first_configs_race_to_init() {
 #[forbid(unsafe_code)]
 mod parsers {
     use super::*;
-    use libgit2::libgit2::config::config::{parse_bool, parse_int32, parse_int64};
+    use libgit2::libgit2::config::config::{parse_bool, parse_i32, parse_i64};
     use libgit2::libgit2::util::errors::ErrorClass;
     use libgit2::libgit2::util::sys::errors::{clear, set_str};
     use std::ffi::{CStr, CString};
@@ -174,17 +174,14 @@ mod parsers {
     fn nullable_and_boundary_inputs() {
         assert!(parse_bool(None).unwrap());
         assert!(!parse_bool(Some(c"")).unwrap());
-        assert!(parse_int32(None).is_err());
-        assert!(parse_int64(None).is_err());
-        assert_eq!(parse_int32(Some(c"-2147483648")).unwrap(), i32::MIN);
-        assert_eq!(parse_int32(Some(c"2147483647")).unwrap(), i32::MAX);
-        assert_eq!(
-            parse_int64(Some(c"-9223372036854775808")).unwrap(),
-            i64::MIN
-        );
-        assert_eq!(parse_int64(Some(c"9223372036854775807")).unwrap(), i64::MAX);
+        assert!(parse_i32(None).is_err());
+        assert!(parse_i64(None).is_err());
+        assert_eq!(parse_i32(Some(c"-2147483648")).unwrap(), i32::MIN);
+        assert_eq!(parse_i32(Some(c"2147483647")).unwrap(), i32::MAX);
+        assert_eq!(parse_i64(Some(c"-9223372036854775808")).unwrap(), i64::MIN);
+        assert_eq!(parse_i64(Some(c"9223372036854775807")).unwrap(), i64::MAX);
         for value in [c"2147483648", c"-2147483649", c"2G"] {
-            assert!(parse_int32(Some(value)).is_err());
+            assert!(parse_i32(Some(value)).is_err());
             assert!(parse_bool(Some(value)).is_err());
         }
         for value in [
@@ -202,23 +199,23 @@ mod parsers {
             c"-",
             c"0x",
         ] {
-            assert!(parse_int64(Some(value)).is_err());
+            assert!(parse_i64(Some(value)).is_err());
         }
         // The NUL sits at the very end of stack/heap storage; C's suffix lookahead
         // may read it but must not go beyond it. Invalid bytes need no UTF-8 claim.
         for bytes in [b"1k\0".as_slice(), b"1kb\0", b"\xff\0"] {
             let value = CStr::from_bytes_with_nul(bytes).unwrap();
             let _ = parse_bool(Some(value));
-            let _ = parse_int32(Some(value));
-            let _ = parse_int64(Some(value));
+            let _ = parse_i32(Some(value));
+            let _ = parse_i64(Some(value));
         }
         let long = CString::new("9".repeat(4096)).unwrap();
-        assert!(parse_int64(Some(&long)).is_err());
+        assert!(parse_i64(Some(&long)).is_err());
         for byte in 1..=255 {
             let input = CString::new([byte]).unwrap();
             let _ = parse_bool(Some(&input));
-            let _ = parse_int32(Some(&input));
-            let _ = parse_int64(Some(&input));
+            let _ = parse_i32(Some(&input));
+            let _ = parse_i64(Some(&input));
         }
     }
 
@@ -230,9 +227,9 @@ mod parsers {
             let invalid = CString::new([0xff, b'%']).unwrap();
             (
                 parse_bool(Some(&input)).unwrap(),
-                parse_int32(Some(&input)).unwrap(),
-                parse_int64(Some(&input)).unwrap(),
-                parse_int64(Some(&invalid)).unwrap_err(),
+                parse_i32(Some(&input)).unwrap(),
+                parse_i64(Some(&input)).unwrap(),
+                parse_i64(Some(&invalid)).unwrap_err(),
             )
         };
         let copy = error.clone();
@@ -255,12 +252,12 @@ mod parsers {
         let mut bytes = b"1k\0".to_vec();
         for _ in 0..64 {
             assert_eq!(
-                parse_int32(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
+                parse_i32(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
                 1024
             );
             bytes[0] = b'2';
             assert_eq!(
-                parse_int64(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
+                parse_i64(Some(CStr::from_bytes_with_nul(&bytes).unwrap())).unwrap(),
                 2048
             );
             bytes[0] = b'1';
@@ -279,17 +276,21 @@ mod parsers {
                         let barrier = &barrier;
                         scope.spawn(move || {
                             let invalid = CString::new(format!("invalid-thread-{index}")).unwrap();
+                            // Text after a suffix: the error the wrapper sets itself.
+                            let tail = CString::new(format!("1k-invalid-thread-{index}")).unwrap();
                             barrier.wait();
                             let mut kept = Vec::new();
                             for _ in 0..32 {
-                                kept.push(parse_int64(Some(&invalid)).unwrap_err());
-                                kept.push(parse_int32(Some(&invalid)).unwrap_err());
+                                kept.push(parse_i64(Some(&invalid)).unwrap_err());
+                                kept.push(parse_i64(Some(&tail)).unwrap_err());
+                                kept.push(parse_i32(Some(&invalid)).unwrap_err());
                                 kept.push(parse_bool(Some(&invalid)).unwrap_err());
                                 assert!(parse_bool(None).unwrap());
-                                assert_eq!(parse_int32(Some(c"1K")).unwrap(), 1024);
-                                assert_eq!(parse_int64(Some(c"1G")).unwrap(), 1 << 30);
+                                assert_eq!(parse_i32(Some(c"1K")).unwrap(), 1024);
+                                assert_eq!(parse_i64(Some(c"1G")).unwrap(), 1 << 30);
                             }
                             drop(invalid);
+                            drop(tail);
                             for error in kept {
                                 assert_eq!(error.class(), Some(ErrorClass::Config));
                                 assert!(

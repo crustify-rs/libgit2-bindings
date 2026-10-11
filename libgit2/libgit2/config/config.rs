@@ -60,12 +60,13 @@ use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
+use std::ffi::CString;
 
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew};
 
 use crate::ffi;
-use crate::libgit2::util::errors::{ErrorBuf, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
+use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 
 /// A configuration (`git_config`): an opaque, reference-counted object of
 /// libgit2's, reached only behind a pointer.
@@ -352,14 +353,14 @@ pub fn parse_bool(value: Option<&CStr>) -> Result<bool, ErrorBuf> {
 }
 
 /// Parses a signed 32-bit configuration integer, rejecting values outside its
-/// range. Uses [`parse_int64`]'s syntax, including binary multiplier suffixes.
+/// range. Uses [`parse_i64`]'s syntax, including binary multiplier suffixes.
 /// `None` and empty strings are errors.
 ///
 /// Borrows the input only for this call and returns an owned scalar or error.
 /// Pins libgit2's runtime before calling C, including on error paths.
 ///
 /// Wraps: git_config_parse_int32
-pub fn parse_int32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
+pub fn parse_i32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
     }
@@ -381,18 +382,21 @@ pub fn parse_int32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
 /// `None` and empty strings are errors.
 ///
 /// Borrows the input only for this call and returns an owned scalar or error.
-/// Pins libgit2's runtime before calling C, including on error paths.
+/// Pins libgit2's runtime before calling C, including on error paths, and clears
+/// the thread's last error first, so a success leaves none.
+///
 /// libgit2 fails on extra characters after a recognized suffix (e.g. `1kb`)
-/// without setting a new error; the returned error then copies the previous
-/// thread-local error, or "no error" if none existed. Success also leaves the
-/// previous error state untouched.
+/// without setting an error of its own, leaving whatever an earlier call set;
+/// this wrapper reports the failure as libgit2 reports every other one,
+/// `failed to parse '<value>' as an integer` in [`ErrorClass::Config`].
 ///
 /// Wraps: git_config_parse_int64
-pub fn parse_int64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
+pub fn parse_i64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
     }
     let mut out = 0;
+    clear();
     // SAFETY: `out` is one writable, aligned i64; `value` is NULL or a live
     // NUL-terminated string borrowed read-only for this call. C retains neither
     // pointer. The pinned runtime keeps error reporting's TLS key live.
@@ -400,7 +404,22 @@ pub fn parse_int64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
         ffi::git_config_parse_int64(&mut out, value)
     };
-    if rc < 0 { Err(last()) } else { Ok(out) }
+    if rc < 0 {
+        // The error state was cleared before the call, so `GIT_ERROR_NONE` is
+        // libgit2's silence: text after a suffix, the one failure that sets no error.
+        if last().class() == Some(ErrorClass::None) {
+            set(ErrorClass::Config, &integer_parse_error(value));
+        }
+        return Err(last());
+    }
+    Ok(out)
+}
+
+/// The message `git_config_parse_int64` sets for a value it cannot parse.
+fn integer_parse_error(value: Option<&CStr>) -> CString {
+    let value = value.map_or(b"(null)".as_slice(), CStr::to_bytes);
+    let message = [b"failed to parse '".as_slice(), value, b"' as an integer"].concat();
+    CString::new(message).expect("a C string's bytes and the quotes hold no NUL")
 }
 
 /// A configuration priority, including application-defined integer levels.
@@ -454,7 +473,7 @@ impl From<ConfigLevel> for ffi::git_config_level_t {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
+    use crate::libgit2::util::errors::ErrorCode;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{CStr, c_int, c_void};
     use core::mem::size_of;
@@ -714,10 +733,69 @@ mod unit_tests {
                 // Every parser refuses even otherwise-valid inputs without calling
                 // C when the runtime cannot be pinned.
                 assert_eq!(parse_bool(None).unwrap_err(), error);
-                assert_eq!(parse_int32(Some(c"1")).unwrap_err(), error);
-                assert_eq!(parse_int64(Some(c"1")).unwrap_err(), error);
+                assert_eq!(parse_i32(Some(c"1")).unwrap_err(), error);
+                assert_eq!(parse_i64(Some(c"1")).unwrap_err(), error);
             },
         );
+    }
+
+    /// The message quotes the value's bytes as they are, as C's `%s` does.
+    #[test]
+    fn integer_parse_error_quotes_the_value() {
+        assert_eq!(
+            integer_parse_error(None).as_c_str(),
+            c"failed to parse '(null)' as an integer"
+        );
+        assert_eq!(
+            integer_parse_error(Some(c"")).as_c_str(),
+            c"failed to parse '' as an integer"
+        );
+        assert_eq!(
+            integer_parse_error(Some(c"1k\xff%s")).as_c_str(),
+            c"failed to parse '1k\xff%s' as an integer"
+        );
+    }
+
+    /// libgit2 sets no error for text after a size suffix: the wrapper reports that
+    /// failure in libgit2's own words, not with the thread's earlier error (or "no
+    /// error"), and a success leaves no earlier error behind.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn parse_i64_suffix_tail_reports_its_own_error() {
+        for value in [c"1kb", c"1kz", c"-2Mx", c"1g ", c"0x10kk", c"1k\xff"] {
+            for seeded in [false, true] {
+                clear();
+                if seeded {
+                    set(ErrorClass::Odb, c"an earlier, unrelated failure");
+                }
+                let error = parse_i64(Some(value)).unwrap_err();
+                let expected = [
+                    b"failed to parse '".as_slice(),
+                    value.to_bytes(),
+                    b"' as an integer",
+                ];
+                assert_eq!(error.class(), Some(ErrorClass::Config), "{value:?}");
+                assert_eq!(error.message().to_bytes(), expected.concat(), "{value:?}");
+                assert_eq!(last(), error, "the thread's error describes it too");
+            }
+        }
+        // libgit2's own errors pass through unchanged.
+        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+        let error = parse_i64(Some(c"1x")).unwrap_err();
+        assert_eq!(error.message(), c"failed to parse '1x' as an integer");
+        let error = parse_i64(None).unwrap_err();
+        assert_eq!(error.message(), c"failed to parse '(null)' as an integer");
+        set(ErrorClass::Odb, c"an earlier, unrelated failure");
+        assert_eq!(parse_i64(Some(c"1k")), Ok(1024));
+        assert_eq!(last().class(), Some(ErrorClass::None));
+        // The 32-bit and boolean parsers set their own errors over it.
+        let error = parse_i32(Some(c"1kb")).unwrap_err();
+        assert_eq!(
+            error.message(),
+            c"failed to parse '1kb' as a 32-bit integer"
+        );
+        let error = parse_bool(Some(c"1kb")).unwrap_err();
+        assert_eq!(error.message(), c"failed to parse '1kb' as a boolean");
     }
     #[test]
     fn layout_and_custom_values() {
