@@ -418,3 +418,7 @@ git_config_next
 # config wave 2 batch 1: mapping and callback validation
 git_config_get_mapped
 git_config_foreach
+
+# config wave 3 batch 1: safe synchronous enumeration
+git_config_foreach_match
+git_config_get_multivar_foreach

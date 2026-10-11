@@ -1240,3 +1240,228 @@ mod mapping_callbacks {
         }
     }
 }
+
+mod enumeration {
+    use super::*;
+    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    fn input(tag: &str) -> (std::ffi::CString, ConfigBox<'static>) {
+        let path = scratch(tag);
+        std::fs::write(
+            path.to_str().unwrap(),
+            b"[A]\n m = one\n m = two\n flag\n empty =\n bytes = \xff\n",
+        )
+        .unwrap();
+        let config = Config::open(&path).unwrap();
+        (path, config)
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_nested_shared_and_mutable_reborrows() {
+        let (path, mut config) = input("enumeration-nested");
+        let m = config.as_mut();
+        let view = m.as_ref();
+        let mut seen = Vec::new();
+        let mut inner = |e: EntryRef<'_>| {
+            seen.push(e.value().map(CStr::to_owned));
+            ControlFlow::Continue(())
+        };
+        let mut nested = ForeachCallback::new(&mut inner);
+        let mut calls = 0;
+        let mut outer = |e: EntryRef<'_>| {
+            calls += 1;
+            // Reentry is into a distinct callback/iterator, never the active closure.
+            assert_eq!(
+                view.foreach_multivar(c"A.M", &mut nested).unwrap(),
+                ControlFlow::Continue(())
+            );
+            assert!(e.name().is_some());
+            ControlFlow::Continue(())
+        };
+        let mut cb = ForeachCallback::new(&mut outer);
+        assert_eq!(view.foreach(&mut cb).unwrap(), ControlFlow::Continue(()));
+        drop(cb);
+        drop(outer);
+        drop(nested);
+        assert_eq!(calls, 5);
+        assert_eq!(seen.len(), 10);
+        assert_eq!(seen[0], Some(c"one".to_owned()));
+        assert_eq!(seen[1], Some(c"two".to_owned()));
+        drop(config);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_stops_reuse_null_empty_and_non_utf8() {
+        let (path, config) = input("enumeration-stops");
+        let shared = ConfigArc::from(config);
+        for code in [
+            1,
+            -1,
+            ErrorCode::User.raw(),
+            ffi_iterover(),
+            i32::MIN,
+            i32::MAX,
+        ] {
+            let code = NonZero::new(code).unwrap();
+            let mut stop = |_: EntryRef<'_>| ControlFlow::Break(code);
+            let mut cb = ForeachCallback::new(&mut stop);
+            assert_eq!(
+                shared.as_ref().foreach(&mut cb).unwrap(),
+                ControlFlow::Break(code)
+            );
+            assert_eq!(
+                shared
+                    .as_ref()
+                    .foreach_match(Some(c"^a\\.m$"), &mut cb)
+                    .unwrap(),
+                ControlFlow::Break(code)
+            );
+            assert_eq!(
+                shared.as_ref().foreach_multivar(c"a.m", &mut cb).unwrap(),
+                ControlFlow::Break(code)
+            );
+            assert_eq!(
+                shared
+                    .as_ref()
+                    .foreach_match(Some(c"no-matches"), &mut cb)
+                    .unwrap(),
+                ControlFlow::Continue(())
+            );
+            assert_eq!(cb.stopped(), None);
+        }
+        let mut values = Vec::new();
+        let mut visit = |e: EntryRef<'_>| {
+            values.push((e.name().unwrap().to_owned(), e.value().map(CStr::to_owned)));
+            ControlFlow::Continue(())
+        };
+        assert_eq!(
+            shared
+                .as_ref()
+                .foreach_match(None, &mut ForeachCallback::new(&mut visit))
+                .unwrap(),
+            ControlFlow::Continue(())
+        );
+        assert!(values.contains(&(c"a.flag".to_owned(), None)));
+        assert!(values.contains(&(c"a.empty".to_owned(), Some(c"".to_owned()))));
+        assert!(values.contains(&(c"a.bytes".to_owned(), Some(c"\xff".to_owned()))));
+        let mut values = Vec::new();
+        let mut visit = |e: EntryRef<'_>| {
+            values.push(e.value().map(CStr::to_owned));
+            ControlFlow::Continue(())
+        };
+        // No C regex ever sees the NULL value, even when filtering in the closure.
+        assert_eq!(
+            shared
+                .as_ref()
+                .foreach_multivar(c"a.flag", &mut ForeachCallback::new(&mut visit))
+                .unwrap(),
+            ControlFlow::Continue(())
+        );
+        assert_eq!(values, [None]);
+        drop(shared);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    fn ffi_iterover() -> i32 {
+        ErrorCode::IterOver.raw()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_panics_cleanup_then_reuse_all_variants() {
+        let (path, config) = input("enumeration-panic");
+        for mode in 0..3 {
+            let mut first = true;
+            let mut calls = 0;
+            let mut f = |_: EntryRef<'_>| {
+                calls += 1;
+                if std::mem::take(&mut first) {
+                    panic!("enumeration panic");
+                }
+                ControlFlow::Continue(())
+            };
+            let mut cb = ForeachCallback::new(&mut f);
+            let walk = |cb: &mut ForeachCallback<'_>| match mode {
+                0 => config.as_ref().foreach(cb),
+                1 => config.as_ref().foreach_match(Some(c".*"), cb),
+                _ => config.as_ref().foreach_multivar(c"a.m", cb),
+            };
+            assert!(catch_unwind(AssertUnwindSafe(|| walk(&mut cb))).is_err());
+            assert_eq!(cb.stopped().unwrap().get(), ErrorCode::User.raw());
+            assert_eq!(walk(&mut cb).unwrap(), ControlFlow::Continue(()));
+            assert_eq!(cb.stopped(), None);
+            drop(cb);
+            assert_eq!(calls, if mode == 2 { 3 } else { 6 });
+        }
+        drop(config);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_errors_and_empty_walks_keep_callback_usable() {
+        let empty = Config::new().unwrap();
+        let mut calls = 0;
+        let mut f = |_: EntryRef<'_>| {
+            calls += 1;
+            ControlFlow::Continue(())
+        };
+        let mut cb = ForeachCallback::new(&mut f);
+        assert_eq!(
+            empty.as_ref().foreach(&mut cb).unwrap(),
+            ControlFlow::Continue(())
+        );
+        assert_eq!(
+            empty.as_ref().foreach_match(Some(c""), &mut cb).unwrap(),
+            ControlFlow::Continue(())
+        );
+        assert!(empty.as_ref().foreach_match(Some(c"["), &mut cb).is_err());
+        assert_eq!(
+            empty
+                .as_ref()
+                .foreach_multivar(c"a.m", &mut cb)
+                .unwrap_err()
+                .code(),
+            Some(ErrorCode::NotFound)
+        );
+        assert!(
+            empty
+                .as_ref()
+                .foreach_multivar(c"invalid", &mut cb)
+                .is_err()
+        );
+        drop(cb);
+        assert_eq!(calls, 0);
+        for mode in 0..3 {
+            let (path, config) = input(&format!("enumeration-refresh-{mode}"));
+            std::fs::write(
+                path.to_str().unwrap(),
+                b"[broken\na much longer malformed file\n",
+            )
+            .unwrap();
+            let mut f = |_: EntryRef<'_>| ControlFlow::Continue(());
+            let mut cb = ForeachCallback::new(&mut f);
+            let walk = |cb: &mut ForeachCallback<'_>| match mode {
+                0 => config.as_ref().foreach(cb),
+                1 => config.as_ref().foreach_match(Some(c".*"), cb),
+                _ => config.as_ref().foreach_multivar(c"a.m", cb),
+            };
+            assert!(walk(&mut cb).is_err());
+            assert_eq!(cb.stopped(), None);
+            std::fs::write(
+                path.to_str().unwrap(),
+                b"[a]\n m = repaired and longer than the malformed file contents\n",
+            )
+            .unwrap();
+            assert_eq!(walk(&mut cb).unwrap(), ControlFlow::Continue(()));
+            drop(config);
+            std::fs::remove_file(path.to_str().unwrap()).unwrap();
+        }
+    }
+}
