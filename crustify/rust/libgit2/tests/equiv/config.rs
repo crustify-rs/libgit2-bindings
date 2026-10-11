@@ -235,11 +235,13 @@ fn repository_configs_match() {
 }
 
 /// Each side owns its own input strings and replays the whole sequence without
-/// clearing errors between calls: success and suffix-tail failure preserve them.
+/// clearing errors between calls: the boolean and 32-bit parsers' successes preserve
+/// them. `parse_i64` clears the error before each call, and describes the one failure
+/// libgit2 leaves silent (text after a size suffix) itself.
 #[cfg(not(miri))]
 mod parsers {
     use super::*;
-    use libgit2::libgit2::config::config::{parse_bool, parse_int32, parse_int64};
+    use libgit2::libgit2::config::config::{parse_bool, parse_i32, parse_i64};
     use libgit2::libgit2::util::errors::ErrorBuf;
     use libgit2::libgit2::util::errors::ErrorClass;
     use libgit2::libgit2::util::sys::errors::{clear, set_str};
@@ -395,8 +397,62 @@ mod parsers {
             }};
         }
         compare!(ffi::git_config_parse_bool, parse_bool, c_int, |x| x != 0);
-        compare!(ffi::git_config_parse_int32, parse_int32, i32, |x| x);
-        compare!(ffi::git_config_parse_int64, parse_int64, i64, |x| x);
+        compare!(ffi::git_config_parse_int32, parse_i32, i32, |x| x);
+    }
+
+    /// C is replayed with its error cleared before each call, as `parse_i64` clears it,
+    /// and its silent failures are given the error C sets for every other one: the
+    /// documented correction (`config.rs::unit_tests::parse_i64_suffix_tail_reports_its_own_error`).
+    #[test]
+    fn parse_i64_sequences_match_c() {
+        clear();
+        let c_inputs = inputs();
+        let rust_inputs = inputs();
+        // C's own silence: a suffix-tail failure leaves the earlier error in place.
+        seed(true);
+        let mut out = 123;
+        // SAFETY: one aligned writable i64 and a live NUL-terminated read-only string;
+        // neither pointer is retained.
+        let rc = unsafe { ffi::git_config_parse_int64(&mut out, c"1kb".as_ptr()) };
+        assert_eq!((rc, out), (-1, 123));
+        let sentinel = (
+            ErrorClass::Invalid.raw(),
+            b"parser sequence sentinel".to_vec(),
+        );
+        assert_eq!(raw_error(), sentinel);
+        for with_error in [false, true] {
+            let mut silent = 0;
+            let c: Vec<_> = c_inputs
+                .iter()
+                .map(|value| {
+                    clear();
+                    let mut out: i64 = 123;
+                    let input = value.as_ref().map_or(ptr::null(), |s| s.as_ptr());
+                    // SAFETY: one aligned writable i64 and NULL or a live NUL-terminated
+                    // read-only string; neither pointer is retained.
+                    let rc = unsafe { ffi::git_config_parse_int64(&mut out, input) };
+                    if rc < 0 {
+                        assert_eq!(out, 123, "C must leave failed output untouched");
+                    }
+                    let mut observed = raw_observation(rc, out);
+                    if rc < 0 && observed.3.0 == ErrorClass::None.raw() {
+                        let value = value.as_deref().map_or(&b"(null)"[..], CStr::to_bytes);
+                        let message = [b"failed to parse '".as_slice(), value, b"' as an integer"];
+                        let error = (ErrorClass::Config.raw(), message.concat());
+                        observed.2 = Some(error.clone());
+                        observed.3 = error;
+                        silent += 1;
+                    }
+                    observed
+                })
+                .collect();
+            assert!(silent >= 4, "the suffix-tail inputs fail silently in C");
+            seed(with_error);
+            for (index, value) in rust_inputs.iter().enumerate() {
+                let rust = rust_observation(parse_i64(value.as_deref()));
+                assert_eq!(c[index], rust, "input {value:?}");
+            }
+        }
     }
 }
 
