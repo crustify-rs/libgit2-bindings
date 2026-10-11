@@ -112,8 +112,21 @@
 //! build one of their own the same way. So nothing it points at is owned: Rust holds
 //! the struct by value, borrowing the strings and the headers for `'o`.
 //!
+//! A [`CreateOptions`] is a `git_commit_create_options`: the options of the routines
+//! that commit the index or a tree on `HEAD` (`git_commit_create_from_stage`,
+//! `git_commit_create_from_tree`, `git_commit_amend_from_stage`,
+//! `git_commit_amend_from_tree`) — whether a commit that changes nothing is written,
+//! the author and the committer (the repository's default signature when unset), and
+//! the encoding, the extra headers and the signing callback, which those routines copy
+//! into a `git_commit_create_ext_options` of their own. It is held the same way: the
+//! caller builds it with `git_commit_create_options_init` and the routines read it,
+//! copying it or not, for the call only, so Rust holds it by value, borrowing the
+//! signatures, the strings and the headers for `'o`. `allow_empty_commit` is a one-bit
+//! bitfield, read and written through its storage byte.
+//!
 //! The signing callback is a [`SignatureCallback`], which
-//! [`CreateExtOptionsMut::set_signer`] stores with the callback itself as the payload.
+//! [`CreateExtOptionsMut::set_signer`] and [`CreateOptionsMut::set_signer`] store with
+//! the callback itself as the payload.
 //!
 //! # Signing
 //!
@@ -142,7 +155,7 @@ use ffibox::{
 
 use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
-use crate::libgit2::core::types::StreamError;
+use crate::libgit2::core::types::{SignatureRef, StreamError};
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
 use crate::libgit2::object::tree::TreeArc;
 use crate::libgit2::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataVec};
@@ -2137,10 +2150,476 @@ const _: () = assert!(
             == align_of::<ffi::git_commit_create_ext_options>()
 );
 
+/// Options for committing the index or a tree on `HEAD` with
+/// `git_commit_create_from_stage`, `git_commit_create_from_tree` and their `amend`
+/// counterparts (`git_commit_create_options`), held by value in Rust storage.
+///
+/// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: no empty
+/// commits, the default author and committer, no encoding header, no extra headers and
+/// no signing. Read it through [`as_ref`](Self::as_ref) and change it through
+/// [`as_mut`](Self::as_mut):
+///
+/// ```
+/// use libgit2::libgit2::core::types::{SignatureView, Time};
+/// use libgit2::libgit2::object::commit::{CreateOptions, Header};
+///
+/// const HEADERS: [Header<'static>; 1] = [Header::new(c"x-tool", c"crustify")];
+/// let author = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(0, 0));
+/// let mut options = CreateOptions::new();
+/// let mut m = options.as_mut();
+/// m.set_allow_empty_commit(true);
+/// m.set_author(Some(author.as_ref()));
+/// m.set_extra_headers(&HEADERS);
+/// let r = options.as_ref();
+/// assert!(r.allow_empty_commit());
+/// assert_eq!(r.author().unwrap().name(), Some(c"A U Thor"));
+/// assert!(r.committer().is_none());
+/// assert_eq!(r.extra_headers().len(), 1);
+/// ```
+///
+/// `#[repr(transparent)]` over `git_commit_create_options`, so a pointer to it is a
+/// pointer to the C struct, which C reads in place. `'o` is the lifetime of what it
+/// points at: the signatures, strings and headers its safe setters take are borrowed
+/// for `'o`, so the options cannot outlive them:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::core::types::{SignatureView, Time};
+/// use libgit2::libgit2::object::commit::CreateOptions;
+///
+/// let mut options = CreateOptions::new();
+/// {
+///     let committer = SignatureView::new(c"C", c"c@example.com", Time::new(0, 0));
+///     options.as_mut().set_committer(Some(committer.as_ref()));
+/// }
+/// let _ = options.as_ref().committer();
+/// ```
+///
+/// The exclusive handle is invariant in `'o`, so one cannot be shrunk to accept a
+/// shorter-lived borrow than its options were built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::object::commit::CreateOptionsMut;
+///
+/// fn shrink<'a, 'o>(m: CreateOptionsMut<'a, 'static>) -> CreateOptionsMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// Neither `Send` nor `Sync`: the payload of the signing callback
+/// ([`set_signer`](CreateOptionsMut::set_signer)) is a [`SignatureCallback`] borrowed
+/// exclusively, whose closure need not be `Send`, and which libgit2 calls on the thread
+/// writing the commit.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::object::commit::CreateOptions;
+///
+/// let options = CreateOptions::new();
+/// std::thread::spawn(move || drop(options));
+/// ```
+///
+/// Not `Clone`: the payload its callback receives may be an exclusive borrow, which a
+/// copy would alias. Build another with [`new`](Self::new) instead.
+///
+/// Wraps: git_commit_create_options
+/// Handwritten
+#[repr(transparent)]
+pub struct CreateOptions<'o>(
+    ffi::git_commit_create_options,
+    PhantomData<(*const (), &'o CStr, &'o [Header<'o>], SignatureRef<'o>)>,
+);
+
+/// Shared borrow of a [`CreateOptions`]. `Copy`, like `&T`; the getters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct CreateOptionsRef<'a, 'o>(CBorrowedPtr<'a, CreateOptions<'o>>);
+
+/// Exclusive borrow of a [`CreateOptions`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct CreateOptionsMut<'a, 'o>(
+    CreateOptionsRef<'a, 'o>,
+    // Invariant in the options, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut CreateOptions<'o>>,
+);
+
+// SAFETY: `CreateOptions` is `#[repr(transparent)]` over `git_commit_create_options`
+// with a zero-sized marker; both handles are `#[repr(transparent)]` over
+// `CBorrowedPtr<'a, CreateOptions<'o>>` (`CreateOptionsMut` through `CreateOptionsRef`)
+// with zero-sized markers and no `Drop`, hand out no reference to the options, and
+// `CreateOptionsRef` has no write operation. `CreateOptionsMut` is invariant in the
+// options through its `PhantomData<&'a mut CreateOptions<'o>>`.
+unsafe impl<'o> CCell for CreateOptions<'o> {
+    type C = ffi::git_commit_create_options;
+    type Ref<'a>
+        = CreateOptionsRef<'a, 'o>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = CreateOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+}
+
+impl<'o> CreateOptions<'o> {
+    /// libgit2's default options, as `GIT_COMMIT_CREATE_OPTIONS_INIT` spells them:
+    /// version 1, empty commits refused, every other field NULL, zero or `None`.
+    ///
+    /// `git_commit_create_options_init` only fails for a version other than
+    /// `GIT_COMMIT_CREATE_OPTIONS_VERSION`, and with that version it reaches no global,
+    /// no allocator and no thread state, so this needs no initialised library.
+    ///
+    /// Wraps: git_commit_create_options_init
+    pub fn new() -> Self {
+        // Zeroed rather than uninitialised: the bitfield's storage byte holds seven
+        // unnamed bits besides `allow_empty_commit`, which C may treat as padding.
+        let mut raw = MaybeUninit::<ffi::git_commit_create_options>::zeroed();
+        // SAFETY: `raw` is writable storage for one `git_commit_create_options`, which
+        // `git_commit_create_options_init` overwrites whole with the template for this
+        // version; nothing else reads it during the call.
+        let rc = unsafe {
+            ffi::git_commit_create_options_init(
+                raw.as_mut_ptr(),
+                ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(
+            rc, 0,
+            "git_commit_create_options_init refused its own version"
+        );
+        // SAFETY: a 0 return means the template was copied in: every field is
+        // initialised, the bitfield's storage byte included, every pointer NULL and the
+        // callback `None`.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// Shared handle to the options — the getters, and the pointer for C calls that
+    /// read them.
+    pub fn as_ref(&self) -> CreateOptionsRef<'_, 'o> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        CreateOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the options — the setters.
+    pub fn as_mut(&mut self) -> CreateOptionsMut<'_, 'o> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        CreateOptionsMut(CreateOptionsRef(ptr), PhantomData)
+    }
+}
+
+impl Default for CreateOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for CreateOptions<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'o> CreateOptionsRef<'a, 'o> {
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_commit_create_options *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_create_options {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The structure's version, `GIT_COMMIT_CREATE_OPTIONS_VERSION`; fixed by
+    /// [`CreateOptions::new`].
+    ///
+    /// Field: git_commit_create_options.version
+    pub fn version(&self) -> u32 {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        unsafe { addr_of!((*p).version).read() }
+    }
+
+    /// Whether a commit that changes nothing is written; `false`, the default, fails
+    /// the commit (class `GIT_ERROR_REPOSITORY`, "no changes are staged for commit")
+    /// when the tree is the one `HEAD` points at, or empty on an unborn `HEAD`:
+    /// `git_commit_create_from_stage` returns `GIT_EUNCHANGED`, while
+    /// `git_commit_create_from_tree` returns `-1` (`GIT_ERROR`) for the same check.
+    /// Only the routines creating a commit read it; amending ignores it.
+    ///
+    /// Field: git_commit_create_options.allow_empty_commit
+    pub fn allow_empty_commit(&self) -> bool {
+        let p = self.as_ptr();
+        // SAFETY: a read of the one-bit field's storage byte through the shared
+        // handle's pointer to live options; bindgen's accessor projects it with
+        // `addr_of!` and forms no reference.
+        unsafe { ffi::git_commit_create_options::allow_empty_commit_raw(p) != 0 }
+    }
+
+    /// The commit's author; `None`, the default, is the repository's default signature
+    /// (`user.name` and `user.email` from its configuration, at the current time) when
+    /// creating, and the amended commit's author when amending. Borrowed for `'o`, as
+    /// it was set.
+    ///
+    /// Field: git_commit_create_options.author
+    pub fn author(&self) -> Option<SignatureRef<'o>> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `SignatureRef<'o>`'s pointer: a live signature that
+        // outlives `'o` and that nothing writes, being shared-borrowed, whose strings
+        // are NULL or NUL-terminated and outlive it.
+        unsafe { SignatureRef::from_ptr(addr_of!((*p).author).read().cast_mut()) }
+    }
+
+    /// The commit's committer; `None`, the default, is the repository's default
+    /// signature, when creating and amending alike. Borrowed for `'o`, as it was set.
+    ///
+    /// Field: git_commit_create_options.committer
+    pub fn committer(&self) -> Option<SignatureRef<'o>> {
+        let p = self.as_ptr();
+        // SAFETY: as `author`: every setter stores NULL or a `SignatureRef<'o>`'s
+        // pointer, live and unwritten for `'o`.
+        unsafe { SignatureRef::from_ptr(addr_of!((*p).committer).read().cast_mut()) }
+    }
+
+    /// The message's encoding, written as the commit's `encoding` header; `None`, the
+    /// default, writes no such header (git reads the message as UTF-8). Amending
+    /// without a new message keeps the amended commit's encoding instead.
+    ///
+    /// Field: git_commit_create_options.message_encoding
+    pub fn message_encoding(&self) -> Option<&'o CStr> {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options. Every
+        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // outlives `'o` and that nothing writes, being shared-borrowed.
+        unsafe {
+            let s = addr_of!((*p).message_encoding).read();
+            (!s.is_null()).then(|| CStr::from_ptr(s))
+        }
+    }
+
+    /// The extra headers written after `committer` and any `encoding`, in order;
+    /// empty, the default, writes none. Borrowed for `'o`, as they were set; each reads
+    /// through its [`HeaderRef`].
+    ///
+    /// Field: git_commit_create_options.extra_headers
+    /// Field: git_commit_create_options.extra_headers_len
+    pub fn extra_headers(&self) -> CSlice<'o, Header<'o>> {
+        let p = self.as_ptr();
+        // SAFETY: reads through the shared handle's pointer to live options.
+        let (headers, len) = unsafe {
+            (
+                addr_of!((*p).extra_headers).read(),
+                addr_of!((*p).extra_headers_len).read(),
+            )
+        };
+        match NonNull::new(headers.cast_mut()) {
+            // SAFETY: every setter stores NULL with a length of 0, or the pointer and
+            // length of a `&'o [Header<'o>]`: `len` initialised headers (`Header` is
+            // transparent over `git_commit_header`) that outlive `'o` and that nothing
+            // writes, being shared-borrowed.
+            Some(headers) => unsafe { CSlice::from_raw_parts(headers.cast(), len) },
+            // NULL is no headers; a run may not start at NULL.
+            // SAFETY: zero elements at an aligned dangling pointer.
+            None => unsafe { CSlice::from_raw_parts(NonNull::dangling(), 0) },
+        }
+    }
+
+    /// Whether a signing callback is set
+    /// ([`set_signer`](CreateOptionsMut::set_signer)); `false` by default.
+    ///
+    /// Field: git_commit_create_options.sign
+    /// Field: git_commit_create_options.payload
+    pub fn has_signer(&self) -> bool {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to live options.
+        unsafe { addr_of!((*p).sign).read() }.is_some()
+    }
+
+    /// The signing callback and its payload as libgit2 reads them: `None` and NULL by
+    /// default, otherwise the trampoline of the [`SignatureCallback`] that
+    /// [`set_signer`](CreateOptionsMut::set_signer) stored, and that callback. For the
+    /// unit tests.
+    #[cfg(test)]
+    pub(crate) fn sign_callback(&self) -> (ffi::git_commit_signature_cb, *mut c_void) {
+        let p = self.as_ptr();
+        // SAFETY: reads through the shared handle's pointer to live options.
+        unsafe { (addr_of!((*p).sign).read(), addr_of!((*p).payload).read()) }
+    }
+}
+
+impl fmt::Debug for CreateOptionsRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CreateOptions")
+            .field("version", &self.version())
+            .field("allow_empty_commit", &self.allow_empty_commit())
+            .field("author", &self.author())
+            .field("committer", &self.committer())
+            .field("message_encoding", &self.message_encoding())
+            .field("extra_headers", &DebugHeaders(self.extra_headers()))
+            .field("sign_callback", &self.has_signer())
+            .finish()
+    }
+}
+
+impl<'a, 'o> CreateOptionsMut<'a, 'o> {
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_create_options {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> CreateOptionsRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> CreateOptionsMut<'_, 'o> {
+        CreateOptionsMut(self.0, PhantomData)
+    }
+
+    /// Sets whether a commit that changes nothing is written (see
+    /// [`CreateOptionsRef::allow_empty_commit`]).
+    ///
+    /// Field: git_commit_create_options.allow_empty_commit
+    pub fn set_allow_empty_commit(&mut self, allow: bool) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a read-modify-write of the one-bit field's storage byte through the
+        // exclusive handle's pointer to live options, leaving its other bits as they
+        // were; bindgen's accessor projects it with `addr_of_mut!` and forms no
+        // reference.
+        unsafe { ffi::git_commit_create_options::set_allow_empty_commit_raw(p, allow.into()) }
+    }
+
+    /// Sets the commit's author; `None` takes the default (see
+    /// [`CreateOptionsRef::author`]). Borrowed for `'o`.
+    ///
+    /// libgit2 writes the signature's strings as they are, and prints both: a wrapper
+    /// handing these options to libgit2 refuses a signature that lost its name or its
+    /// email (see the [signature docs](crate::libgit2::core::types#signatures)), which
+    /// the options store as given.
+    ///
+    /// Field: git_commit_create_options.author
+    pub fn set_author(&mut self, author: Option<SignatureRef<'o>>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop. The pointer is NULL or a
+        // `SignatureRef<'o>`'s, live and unwritten for `'o`, as `author()` requires.
+        unsafe { addr_of_mut!((*p).author).write(author.map_or(ptr::null(), |s| s.as_ptr())) }
+    }
+
+    /// Sets the commit's committer; `None` takes the default (see
+    /// [`CreateOptionsRef::committer`]). Borrowed for `'o`; refused by the writing
+    /// wrappers when it lost a string, as [`set_author`](Self::set_author)'s is.
+    ///
+    /// Field: git_commit_create_options.committer
+    pub fn set_committer(&mut self, committer: Option<SignatureRef<'o>>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: as `set_author`.
+        unsafe { addr_of_mut!((*p).committer).write(committer.map_or(ptr::null(), |s| s.as_ptr())) }
+    }
+
+    /// Sets the message's encoding, written as the commit's `encoding` header as given;
+    /// `None` writes no such header.
+    ///
+    /// Field: git_commit_create_options.message_encoding
+    pub fn set_message_encoding(&mut self, encoding: Option<&'o CStr>) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is plain data, so the old value needs no drop.
+        unsafe {
+            addr_of_mut!((*p).message_encoding).write(encoding.map_or(ptr::null(), CStr::as_ptr))
+        }
+    }
+
+    /// Sets the extra headers, written in order after `committer` and any `encoding`,
+    /// each as `<field> <value>`; an empty run writes none, and is stored as C stores
+    /// it, NULL with a length of 0. Borrowed for `'o`, run and strings alike.
+    ///
+    /// Field: git_commit_create_options.extra_headers
+    /// Field: git_commit_create_options.extra_headers_len
+    pub fn set_extra_headers(&mut self, headers: &'o [Header<'o>]) {
+        let run: *const ffi::git_commit_header = if headers.is_empty() {
+            ptr::null()
+        } else {
+            headers.as_ptr().cast()
+        };
+        let p = self.as_mut_ptr();
+        // SAFETY: writes through the exclusive handle's pointer to live options; the
+        // fields are plain data, so the old values need no drop. `run` is NULL with a
+        // length of 0, or `headers`' own pointer and length, a run of initialised
+        // `git_commit_header`s (`Header` is transparent over it) whose strings are
+        // non-NULL, as `extra_headers()` requires.
+        unsafe {
+            addr_of_mut!((*p).extra_headers).write(run);
+            addr_of_mut!((*p).extra_headers_len).write(headers.len());
+        }
+    }
+
+    /// Sets the signing callback, borrowed exclusively for `'o`; `None` signs nothing.
+    /// libgit2 calls it once per commit created or amended with these options, after
+    /// building the commit and before writing it, with the builder to add the
+    /// signature header to (see [`SignatureCallback`]); an error fails the call,
+    /// nothing written.
+    ///
+    /// The options store the callback's trampoline and, as its payload, the callback
+    /// itself, which they borrow until they are dropped: it cannot be used, moved or
+    /// dropped meanwhile, nor lent to other options, so each libgit2 call reaches it
+    /// alone. A panic of its closure stops the commit with `GIT_EUSER` and is kept in the
+    /// callback, which [`resume_panic`](SignatureCallback::resume_panic) resumes once the
+    /// options are gone.
+    ///
+    /// ```compile_fail,E0499
+    /// use libgit2::libgit2::core::types::StreamError;
+    /// use libgit2::libgit2::object::commit::{CommitBuilderMut, CreateOptions, SignatureCallback};
+    /// use libgit2::libgit2::repository::repository::RepositoryRef;
+    ///
+    /// let mut f = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &core::ffi::CStr| Ok::<(), StreamError>(());
+    /// let mut signer = SignatureCallback::new(&mut f);
+    /// let mut options = CreateOptions::new();
+    /// options.as_mut().set_signer(Some(&mut signer));
+    /// let mut other = CreateOptions::new();
+    /// other.as_mut().set_signer(Some(&mut signer));
+    /// drop((options, other));
+    /// ```
+    ///
+    /// Field: git_commit_create_options.sign
+    /// Field: git_commit_create_options.payload
+    pub fn set_signer(&mut self, signer: Option<&'o mut SignatureCallback<'_>>) {
+        let (callback, payload): (ffi::git_commit_signature_cb, *mut c_void) = match signer {
+            Some(signer) => (Some(sign_with_closure), ptr::from_mut(signer).cast()),
+            None => (None, ptr::null_mut()),
+        };
+        let p = self.as_mut_ptr();
+        // SAFETY: writes through the exclusive handle's pointer to live options; the
+        // fields are plain data, so the old values need no drop. The payload is the
+        // callback the options borrow exclusively for `'o`, for which the trampoline is
+        // sound with libgit2's arguments.
+        unsafe {
+            addr_of_mut!((*p).sign).write(callback);
+            addr_of_mut!((*p).payload).write(payload);
+        }
+    }
+}
+
+impl fmt::Debug for CreateOptionsMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// A `CreateOptions` is a `git_commit_create_options`, so C reads a value Rust holds in
+// place.
+const _: () = assert!(
+    size_of::<CreateOptions<'static>>() == size_of::<ffi::git_commit_create_options>()
+        && align_of::<CreateOptions<'static>>() == align_of::<ffi::git_commit_create_options>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::libgit2::core::types::ObjectType;
+    use crate::libgit2::core::types::{ObjectType, SignatureView, Time};
     use crate::libgit2::object::object::Object;
     use crate::libgit2::oid::oid::{Oid, OidType};
     use crate::libgit2::repository::repository::{Repository, RepositoryBox};
@@ -3546,5 +4025,288 @@ mod unit_tests {
         assert!(w.create(c"four\n", callback, payload).is_ok());
         drop(signer);
         assert_eq!((calls, w.commits()), (3, 2));
+    }
+
+    /// `GIT_COMMIT_CREATE_OPTIONS_INIT`, built in Rust so Miri can run the accessors;
+    /// `create_options_new_matches_the_template` ties it to
+    /// `git_commit_create_options_init`.
+    fn create_template<'o>() -> CreateOptions<'o> {
+        CreateOptions(
+            ffi::git_commit_create_options {
+                version: ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION,
+                ..Default::default()
+            },
+            PhantomData,
+        )
+    }
+
+    fn create_raw(options: &CreateOptions<'_>) -> ffi::git_commit_create_options {
+        // SAFETY: a read of the live options through their shared handle's pointer.
+        unsafe { options.as_ref().as_ptr().read() }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn create_options_new_matches_the_template() {
+        let (new, template) = (
+            create_raw(&CreateOptions::new()),
+            create_raw(&create_template()),
+        );
+        assert_eq!(new.version, template.version);
+        assert_eq!(new._bitfield_1.get(0, 8), 0);
+        assert_eq!(new.author, template.author);
+        assert_eq!(new.committer, template.committer);
+        assert_eq!(new.message_encoding, template.message_encoding);
+        assert_eq!(new.extra_headers, template.extra_headers);
+        assert_eq!(new.extra_headers_len, template.extra_headers_len);
+        assert!(new.sign.is_none() && template.sign.is_none());
+        assert_eq!(new.payload, template.payload);
+        assert_eq!(create_raw(&CreateOptions::default()).version, 1);
+    }
+
+    /// The one-bit field reads and writes its own bit of the storage byte, leaving the
+    /// seven others (and `version`, before it) as they were, as C's bitfield stores do.
+    #[test]
+    fn create_options_bitfield_keeps_its_neighbours() {
+        let mut options = CreateOptions(
+            ffi::git_commit_create_options {
+                version: 7,
+                _bitfield_1: ffi::__BindgenBitfieldUnit::new([0xfe]),
+                ..Default::default()
+            },
+            PhantomData,
+        );
+        assert!(!options.as_ref().allow_empty_commit());
+        options.as_mut().set_allow_empty_commit(true);
+        let raw = create_raw(&options);
+        assert_eq!((raw._bitfield_1.get(0, 8), raw.version), (0xff, 7));
+        assert_eq!(raw.allow_empty_commit(), 1);
+        assert!(options.as_ref().allow_empty_commit());
+        options.as_mut().set_allow_empty_commit(false);
+        let raw = create_raw(&options);
+        assert_eq!(
+            (raw._bitfield_1.get(0, 8), raw.allow_empty_commit()),
+            (0xfe, 0)
+        );
+        assert!(!options.as_ref().allow_empty_commit());
+    }
+
+    /// Every setter stores what its getter reads back, the signatures', strings' and
+    /// run's own pointers included, and clearing stores C's NULLs.
+    #[test]
+    fn create_options_setters_round_trip() {
+        let encoding = std::ffi::CString::new("ISO-8859-1").unwrap();
+        let headers = [Header::new(c"a", c"1"), Header::new(c"b", c"2")];
+        let author = SignatureView::new(c"A", c"a@example.com", Time::new(1, 60));
+        let committer = SignatureView::new(c"C", c"c@example.com", Time::new(2, -30));
+        let mut never = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            unreachable!("only stored: the options reach no libgit2 call")
+        };
+        let mut signer = SignatureCallback::new(&mut never);
+        let signer_at = ptr::from_mut(&mut signer).cast::<c_void>();
+        let mut options = create_template();
+        assert_eq!(
+            format!("{options:?}"),
+            "CreateOptions { version: 1, allow_empty_commit: false, author: None, \
+             committer: None, message_encoding: None, extra_headers: [], \
+             sign_callback: false }"
+        );
+        let mut m = options.as_mut();
+        m.set_allow_empty_commit(true);
+        m.set_author(Some(committer.as_ref()));
+        m.set_committer(Some(committer.as_ref()));
+        m.set_message_encoding(Some(&encoding));
+        m.set_extra_headers(&headers);
+        m.set_signer(Some(&mut signer));
+        {
+            let mut inner = m.as_mut();
+            inner.set_author(Some(author.as_ref()));
+            assert_eq!(inner.as_ref().author().unwrap().name(), Some(c"A"));
+        }
+        let r = m.as_ref();
+        assert_eq!(r.version(), 1);
+        assert!(r.allow_empty_commit());
+        assert_eq!(r.author().unwrap().as_ptr(), author.as_ref().as_ptr());
+        assert_eq!(r.committer().unwrap().as_ptr(), committer.as_ref().as_ptr());
+        assert_eq!(r.committer().unwrap(), committer.as_ref());
+        assert_eq!(r.message_encoding().unwrap().as_ptr(), encoding.as_ptr());
+        let run = r.extra_headers();
+        assert_eq!(run.len(), 2);
+        assert_eq!(run.as_ptr(), headers.as_ptr().cast());
+        assert_eq!(run.get(1).unwrap().value(), c"2");
+        let (sign, data) = r.sign_callback();
+        assert!(sign.is_some() && r.has_signer());
+        assert_eq!(data, signer_at);
+        assert_eq!(
+            format!("{m:?}"),
+            format!(
+                "CreateOptions {{ version: 1, allow_empty_commit: true, author: Some({:?}), \
+                 committer: Some({:?}), message_encoding: Some(\"ISO-8859-1\"), \
+                 extra_headers: [Header {{ field: \"a\", value: \"1\" }}, \
+                 Header {{ field: \"b\", value: \"2\" }}], sign_callback: true }}",
+                author.as_ref(),
+                committer.as_ref()
+            )
+        );
+
+        m.set_allow_empty_commit(false);
+        m.set_author(None);
+        m.set_committer(None);
+        m.set_message_encoding(None);
+        m.set_extra_headers(&headers[..0]);
+        m.set_signer(None);
+        let back = create_raw(&options);
+        assert_eq!(back._bitfield_1.get(0, 8), 0);
+        assert!(back.author.is_null() && back.committer.is_null());
+        assert!(back.extra_headers.is_null() && back.extra_headers_len == 0);
+        assert!(back.message_encoding.is_null());
+        assert!(back.sign.is_none() && back.payload.is_null());
+        assert!(options.as_ref().extra_headers().is_empty());
+        assert_eq!(format!("{options:?}"), format!("{:?}", create_template()));
+    }
+
+    /// `git_commit_create_from_tree` on the writer's `HEAD`, reading `options` in place:
+    /// the new commit's id, or the code and the thread's error.
+    fn create_from_tree(
+        w: &Writer,
+        options: &CreateOptions<'_>,
+    ) -> Result<ffi::git_oid, (c_int, ErrorBuf)> {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: a writable id; the live repository and its tree; a NUL-terminated
+        // message; options Rust holds, whose borrows outlive the call by their `'o`.
+        let rc = unsafe {
+            ffi::git_commit_create_from_tree(
+                &mut id,
+                w.repo,
+                w.tree,
+                c"msg\n".as_ptr(),
+                options.as_ref().as_ptr(),
+            )
+        };
+        if rc < 0 { Err((rc, last())) } else { Ok(id) }
+    }
+
+    /// libgit2 reads every field in place: empty commits are refused by default and
+    /// written when allowed; the signatures, encoding, headers and signer reach the
+    /// commit; an unset author or committer is the configured default identity, whose
+    /// failure fails the call; amending (which needs a `HEAD` commit) reads the same
+    /// struct, keeping the amended commit's author and encoding where the options leave
+    /// them unset, and ignoring `allow_empty_commit`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn create_options_read_in_place_by_libgit2() {
+        let w = Writer::new("create-options");
+        // Amending needs a `HEAD` commit.
+        let options = CreateOptions::new();
+        let mut amended = ffi::git_oid::default();
+        // SAFETY: a writable id; the live repository, whose `HEAD` is unborn, and its
+        // tree; no new message; options Rust holds.
+        let rc = unsafe {
+            ffi::git_commit_amend_from_tree(
+                &mut amended,
+                w.repo,
+                w.tree,
+                ptr::null(),
+                options.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, ErrorCode::UnbornBranch.raw());
+
+        // `git_commit_create_from_tree` reports the check's `GIT_EUNCHANGED` as -1.
+        let (rc, error) = create_from_tree(&w, &CreateOptions::new()).unwrap_err();
+        assert_eq!(rc, ErrorCode::Generic.raw());
+        assert_eq!(error.class(), Some(ErrorClass::Repository));
+        assert_eq!(error.message(), c"no changes are staged for commit");
+        assert_eq!(w.commits(), 0);
+
+        let headers = [Header::new(c"x-a", c"1")];
+        let author = SignatureView::new(c"A", c"a@example.com", Time::new(1, 60));
+        let committer = SignatureView::new(c"C", c"c@example.com", Time::new(2, -30));
+        let mut sign = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            builder
+                .add_header(c"gpgsig", c"sig")
+                .map_err(StreamError::from)
+        };
+        let mut signer = SignatureCallback::new(&mut sign);
+        let first = {
+            let mut options = CreateOptions::new();
+            let mut m = options.as_mut();
+            m.set_allow_empty_commit(true);
+            m.set_author(Some(author.as_ref()));
+            m.set_committer(Some(committer.as_ref()));
+            m.set_message_encoding(Some(c"ISO-8859-1"));
+            m.set_extra_headers(&headers);
+            m.set_signer(Some(&mut signer));
+            create_from_tree(&w, &options).unwrap()
+        };
+        signer.resume_panic();
+        let text = String::from_utf8(w.raw(&first)).unwrap();
+        assert!(
+            text.ends_with(
+                "\nauthor A <a@example.com> 1 +0100\ncommitter C <c@example.com> 2 -0030\n\
+                 encoding ISO-8859-1\nx-a 1\ngpgsig sig\n\nmsg\n"
+            ),
+            "{text}"
+        );
+
+        // An unset author or committer is the default identity, which libgit2 refuses
+        // when the configuration names it with an empty name.
+        let config = w.dir.join("config");
+        let mut text = std::fs::read_to_string(&config).unwrap();
+        text.push_str("[user]\n\tname = \n\temail = e@example.com\n");
+        std::fs::write(&config, text).unwrap();
+        let mut options = CreateOptions::new();
+        options.as_mut().set_allow_empty_commit(true);
+        options.as_mut().set_committer(Some(committer.as_ref()));
+        let empty = c"failed to parse signature - Signature cannot have an empty name or email";
+        let (rc, error) = create_from_tree(&w, &options).unwrap_err();
+        assert_eq!(
+            (rc, error.class(), error.message()),
+            (-1, Some(ErrorClass::Invalid), empty)
+        );
+        let mut amended = ffi::git_oid::default();
+        // SAFETY: as below, with options borrowing nothing.
+        let rc = unsafe {
+            ffi::git_commit_amend_from_tree(
+                &mut amended,
+                w.repo,
+                w.tree,
+                ptr::null(),
+                CreateOptions::new().as_ref().as_ptr(),
+            )
+        };
+        let error = last();
+        assert_eq!(
+            (rc, error.class(), error.message()),
+            (-1, Some(ErrorClass::Invalid), empty)
+        );
+        assert_eq!(w.commits(), 1);
+
+        // Amending: the author and the encoding come from the amended commit, the
+        // committer from the options; empty commits are not checked.
+        let mut options = CreateOptions::new();
+        options.as_mut().set_committer(Some(author.as_ref()));
+        let mut amended = ffi::git_oid::default();
+        // SAFETY: a writable id; the live repository, whose `HEAD` is `first`, and its
+        // tree; no new message; options Rust holds, borrowing `author` past the call.
+        let rc = unsafe {
+            ffi::git_commit_amend_from_tree(
+                &mut amended,
+                w.repo,
+                w.tree,
+                ptr::null(),
+                options.as_ref().as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let text = String::from_utf8(w.raw(&amended)).unwrap();
+        assert!(
+            text.ends_with(
+                "\nauthor A <a@example.com> 1 +0100\ncommitter A <a@example.com> 1 +0100\n\
+                 encoding ISO-8859-1\n\nmsg\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(w.commits(), 2);
     }
 }

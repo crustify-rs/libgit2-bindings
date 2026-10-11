@@ -1,0 +1,49 @@
+error[E0597]: `author` does not live long enough
+  --> tests/ub_safe/compile_fail/create_options_borrows_outlive_owner.rs:10:42
+   |
+ 9 |         let author = Signature::new(c"A", c"a@example.com", 0, 0).unwrap();
+   |             ------ binding `author` declared here
+10 |         options.as_mut().set_author(Some(author.as_ref()));
+   |                                          ^^^^^^ borrowed value does not live long enough
+11 |     }
+   |     - `author` dropped here while still borrowed
+12 |     let _ = options.as_ref().author();
+   |             ------- borrow later used here
+
+error[E0597]: `headers` does not live long enough
+  --> tests/ub_safe/compile_fail/create_options_borrows_outlive_owner.rs:17:44
+   |
+16 |         let headers = vec![Header::new(c"f", c"v")];
+   |             ------- binding `headers` declared here
+17 |         options.as_mut().set_extra_headers(&headers);
+   |                                            ^^^^^^^^ borrowed value does not live long enough
+18 |     }
+   |     - `headers` dropped here while still borrowed
+19 |     let _ = options.as_ref().extra_headers();
+   |             ------- borrow later used here
+
+error[E0597]: `encoding` does not live long enough
+  --> tests/ub_safe/compile_fail/create_options_borrows_outlive_owner.rs:24:52
+   |
+23 |         let encoding = CString::new("ISO-8859-1").unwrap();
+   |             -------- binding `encoding` declared here
+24 |         options.as_mut().set_message_encoding(Some(&encoding));
+   |                                                    ^^^^^^^^^ borrowed value does not live long enough
+25 |     }
+   |     - `encoding` dropped here while still borrowed
+26 |     let _ = options.as_ref().message_encoding();
+   |             ------- borrow later used here
+
+error[E0597]: `owner` does not live long enough
+  --> tests/ub_safe/compile_fail/create_options_borrows_outlive_owner.rs:33:45
+   |
+31 |         let owner = Signature::new(c"C", c"c@example.com", 0, 0).unwrap();
+   |             ----- binding `owner` declared here
+32 |         let mut options = CreateOptions::new();
+33 |         options.as_mut().set_committer(Some(owner.as_ref()));
+   |                                             ^^^^^ borrowed value does not live long enough
+34 |         committer = options.as_ref().committer();
+35 |     }
+   |     - `owner` dropped here while still borrowed
+36 |     let _ = committer;
+   |             --------- borrow later used here
