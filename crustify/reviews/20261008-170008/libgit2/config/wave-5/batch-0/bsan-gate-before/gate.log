@@ -1,0 +1,13 @@
+build start Sun Oct 11 11:35:07 UTC 2026
+build rc=0 Sun Oct 11 11:36:00 UTC 2026
+run libgit2_sys start Sun Oct 11 11:36:01 UTC 2026
+run libgit2_lib start Sun Oct 11 11:36:01 UTC 2026
+run ub_unsafe start Sun Oct 11 11:36:01 UTC 2026
+run ub_safe start Sun Oct 11 11:36:01 UTC 2026
+run equiv start Sun Oct 11 11:36:01 UTC 2026
+run libgit2_sys rc=0 Sun Oct 11 11:36:32 UTC 2026
+run libgit2_lib rc=0 Sun Oct 11 11:37:22 UTC 2026
+run ub_unsafe rc=0 Sun Oct 11 11:37:42 UTC 2026
+run ub_safe rc=0 Sun Oct 11 11:43:55 UTC 2026
+run equiv rc=0 Sun Oct 11 12:01:47 UTC 2026
+gate done Sun Oct 11 12:01:47 UTC 2026
