@@ -774,7 +774,8 @@ mod custom_backends {
         BackendEntry, BackendEntryArc, CustomBackend, EntryOrigin, UnopenedBackend,
     };
     use libgit2::libgit2::repository::repository::RepositoryRef;
-    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+    use libgit2::libgit2::util::sys::errors::clear;
     use std::cell::RefCell;
     use std::ffi::{CStr, CString, c_char, c_int};
     use std::ptr::{self, addr_of_mut};
@@ -1566,5 +1567,113 @@ mod custom_backends {
         // SAFETY: the one acquired reference, released once.
         unsafe { ffi::git_config_entry_free(out) };
         drop(owner);
+    }
+
+    /// Two levels behind C-ABI backends, and the same two stores behind
+    /// `CustomBackend`s: the higher level lacks keys the lower one holds. A C backend's
+    /// miss sets no error, so the thread's last error is compared after every step,
+    /// failed or not, each from a cleared state, along with the stores' calls. Over
+    /// both, the safe `get_i64` then describes C's silent int64 failure alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn layered_misses_leave_errors_like_a_c_backend() {
+        type Left = (c_int, (c_int, CString));
+        const BIG: &CStr = c"core.bigfilethreshold";
+        let stores = || {
+            let mut high = Store::new(&[(c"core.editor", c"vi")]);
+            // `1kb`: text after the suffix, which `git_config_parse_int64` refuses
+            // without describing.
+            let mut low = Store::new(&[(BIG, c"1kb"), (c"core.editor", c"vim")]);
+            let log = Rc::new(RefCell::new(Vec::new()));
+            (high.log, low.log) = (log.clone(), log.clone());
+            (log, [(high, ConfigLevel::APP), (low, ConfigLevel::LOCAL)])
+        };
+        let (c_log, c_stores) = stores();
+        let c = Config::new().unwrap();
+        for (store, level) in c_stores {
+            let backend = raw_backend(store, false);
+            // SAFETY: a live config and a complete backend, which it takes on success.
+            let rc = unsafe {
+                ffi::git_config_add_backend(c.as_c_ptr(), backend, level.raw(), ptr::null(), 0)
+            };
+            assert_eq!(rc, 0);
+        }
+        let (r_log, r_stores) = stores();
+        let mut r = Config::new().unwrap();
+        for (store, level) in r_stores {
+            let backend = UnopenedBackend::new(Safe(store));
+            r.as_mut().add_backend(backend, level, None, false).unwrap();
+        }
+        assert_eq!(c_log.take(), r_log.take());
+        let left = |rc: c_int| -> Left {
+            let error = last();
+            (rc, (error.raw_class(), error.message().to_owned()))
+        };
+        let get_entry = |config: *mut ffi::git_config, key: &CStr| {
+            let mut out = ptr::null_mut();
+            clear();
+            // SAFETY: a live config and key, a writable slot.
+            let rc = unsafe { ffi::git_config_get_entry(&mut out, config, key.as_ptr()) };
+            let left = left(rc);
+            // SAFETY: NULL or the one reference the lookup acquired, released once.
+            unsafe { ffi::git_config_entry_free(out) };
+            left
+        };
+        let get_int64 = |config: *mut ffi::git_config, key: &CStr| {
+            let mut out = 0;
+            clear();
+            // SAFETY: a live config and key, a writable scalar.
+            let rc = unsafe { ffi::git_config_get_int64(&mut out, config, key.as_ptr()) };
+            (left(rc), out)
+        };
+        let snapshot_string = |config: *mut ffi::git_config, key: &CStr| {
+            let mut snapshot = ptr::null_mut();
+            // SAFETY: a live config and a writable slot.
+            let rc = unsafe { ffi::git_config_snapshot(&mut snapshot, config) };
+            assert_eq!(rc, 0);
+            let mut value = ptr::null();
+            clear();
+            // SAFETY: the live read-only snapshot; the value lives with it.
+            let rc = unsafe { ffi::git_config_get_string(&mut value, snapshot, key.as_ptr()) };
+            let left = left(rc);
+            // SAFETY: as above, read before the snapshot is released.
+            let value = (rc == 0).then(|| unsafe { CStr::from_ptr(value) }.to_owned());
+            // SAFETY: the snapshot, released once.
+            unsafe { ffi::git_config_free(snapshot) };
+            (left, value)
+        };
+        for key in [BIG, c"core.editor", c"core.missing"] {
+            assert_eq!(
+                get_entry(c.as_c_ptr(), key),
+                get_entry(r.as_c_ptr(), key),
+                "{key:?}"
+            );
+            assert_eq!(c_log.take(), r_log.take(), "{key:?}");
+        }
+        let silent = get_int64(c.as_c_ptr(), BIG);
+        assert_eq!(silent, get_int64(r.as_c_ptr(), BIG));
+        assert_eq!(silent.0, (-1, (0, c"no error".to_owned())));
+        assert_eq!(c_log.take(), r_log.take());
+        let kept = snapshot_string(c.as_c_ptr(), BIG);
+        assert_eq!(kept, snapshot_string(r.as_c_ptr(), BIG));
+        assert_eq!(kept.1.as_deref(), Some(c"1kb"));
+        assert_eq!(c_log.take(), r_log.take());
+        let described = |config: &ConfigBox<'_>| {
+            let error = config.as_ref().get_i64(BIG).unwrap_err();
+            (
+                error.raw_code(),
+                error.raw_class(),
+                error.message().to_owned(),
+            )
+        };
+        let parse = described(&c);
+        assert_eq!(parse, described(&r));
+        assert_eq!(
+            parse.2.as_c_str(),
+            c"failed to parse configuration value as an integer"
+        );
+        assert_eq!(c_log.take(), r_log.take());
+        drop((c, r));
+        assert_eq!(c_log.take(), r_log.take());
     }
 }
