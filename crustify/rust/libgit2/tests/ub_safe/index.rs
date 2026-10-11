@@ -713,3 +713,259 @@ fn timestamp_extremes_and_reborrows() {
         }
     }
 }
+
+mod entry_value {
+    //! UB tests for the `IndexEntry` value (`git_index_entry`) and its handles: every
+    //! getter and setter, exclusive and shared reborrows, copies that outlive the handle
+    //! they came from, entries borrowing paths of several lifetimes, and values shared
+    //! and moved across threads.
+
+    use std::ffi::{CStr, CString};
+
+    use ffibox::CZeroable;
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::index::index::{
+        EntryExtendedFlags, EntryFlags, IndexEntry, IndexEntryMut, IndexEntryRef, IndexTime,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    fn id(kind: OidType, byte: u8) -> Oid {
+        let mut oid = Oid::zero(kind);
+        oid.as_mut().set_id([byte; 32]);
+        oid
+    }
+
+    /// Every field takes its extreme values through the exclusive handle, reborrowed
+    /// at each step, and reads back the same through shared reborrows and copies.
+    #[test]
+    fn every_field_round_trips_through_reborrows() {
+        let first = CString::new("dir/first").unwrap();
+        let second = CString::new("second").unwrap();
+        let mut entry = IndexEntry::new(&first, Oid::zeroed().as_ref(), FileMode::Blob);
+        for (step, value) in [0, 1, 0x7fff_ffff, u32::MAX].into_iter().enumerate() {
+            let mut handle: IndexEntryMut<'_, '_> = entry.as_mut();
+            {
+                let mut inner = handle.as_mut();
+                inner.set_dev(value);
+                inner.set_ino(value ^ 1);
+                inner.set_uid(value.wrapping_add(2));
+                inner.set_gid(value.wrapping_add(3));
+                inner.set_file_size(value.wrapping_add(4));
+                inner.set_mode(value);
+            }
+            let seconds = value as i32;
+            handle.set_ctime(IndexTime::new(seconds, value).as_ref());
+            handle.mtime_mut().set_seconds(seconds.wrapping_neg());
+            handle.mtime_mut().set_nanoseconds(!value);
+            handle.set_id(id(OidType::Sha256, step as u8).as_ref());
+            handle
+                .set_flags(EntryFlags::from_bits_retain(value & 0xffff))
+                .unwrap();
+            handle
+                .set_flags_extended(EntryExtendedFlags::from_bits_retain(value >> 16))
+                .unwrap();
+            handle.set_path(if step % 2 == 0 { &second } else { &first });
+            let shared: IndexEntryRef<'_, '_> = handle.as_ref();
+            let again = shared;
+            assert_eq!(shared.dev(), value);
+            assert_eq!(again.ino(), value ^ 1);
+            assert_eq!(shared.uid(), value.wrapping_add(2));
+            assert_eq!(shared.gid(), value.wrapping_add(3));
+            assert_eq!(shared.file_size(), value.wrapping_add(4));
+            assert_eq!(shared.mode(), value);
+            assert_eq!(shared.ctime().seconds(), seconds);
+            assert_eq!(shared.ctime().nanoseconds(), value);
+            assert_eq!(shared.mtime().seconds(), seconds.wrapping_neg());
+            assert_eq!(shared.mtime().nanoseconds(), !value);
+            assert_eq!(shared.id().kind(), Some(OidType::Sha256));
+            assert_eq!(shared.id().id(), [step as u8; 32]);
+            assert_eq!(shared.flags().bits(), value & 0xffff);
+            assert_eq!(shared.flags_extended().bits(), value >> 16);
+            let copy = shared.to_index_entry();
+            handle.set_dev(!value);
+            assert_eq!(copy.as_ref().dev(), value);
+            assert_eq!(handle.as_ref().path(), copy.as_ref().path());
+        }
+        let mode_cases = [
+            (FileMode::Unreadable, 0),
+            (FileMode::Tree, 0o040000),
+            (FileMode::Blob, 0o100644),
+            (FileMode::BlobExecutable, 0o100755),
+            (FileMode::Link, 0o120000),
+            (FileMode::Commit, 0o160000),
+        ];
+        for (mode, raw) in mode_cases {
+            entry.as_mut().set_filemode(mode);
+            assert_eq!(
+                (entry.as_ref().mode(), entry.as_ref().filemode()),
+                (raw, Some(mode))
+            );
+        }
+        entry.as_mut().set_mode(0o100664);
+        assert_eq!(entry.as_ref().filemode(), None);
+    }
+
+    /// The in-place id and time handles write the entry's own bytes, and the shared
+    /// projections they leave behind see the writes.
+    #[test]
+    fn projected_fields_write_in_place() {
+        let mut entry = IndexEntry::new(c"p", id(OidType::Sha1, 1).as_ref(), FileMode::Blob);
+        {
+            let mut handle = entry.as_mut();
+            let mut oid = handle.id_mut();
+            oid.set_kind(OidType::Sha256);
+            let mut bytes = oid.as_ref().id();
+            bytes[31] = 0xee;
+            oid.set_id(bytes);
+        }
+        {
+            let mut handle = entry.as_mut();
+            let mut ctime = handle.ctime_mut();
+            ctime.set_seconds(i32::MIN);
+            ctime.set_nanoseconds(1_000_000_000);
+        }
+        {
+            let mut handle = entry.as_mut();
+            handle.set_mtime(IndexTime::new(-5, 6).as_ref());
+            let debug = format!("{handle:?}");
+            assert!(debug.contains("mtime: (-5, 6)"), "{debug}");
+        }
+        let shared = entry.as_ref();
+        let id = shared.id();
+        let ctime = shared.ctime();
+        assert_eq!(
+            (id.kind(), id.id()[0], id.id()[31]),
+            (Some(OidType::Sha256), 1, 0xee)
+        );
+        assert_eq!(
+            (ctime.seconds(), ctime.nanoseconds()),
+            (i32::MIN, 1_000_000_000)
+        );
+        assert_eq!(
+            (shared.mtime().seconds(), shared.mtime().nanoseconds()),
+            (-5, 6)
+        );
+        assert_eq!(shared.path(), c"p");
+    }
+
+    /// Entries borrowing a vector of owned paths, a `'static` literal and a shorter-lived
+    /// string, swapped between them; every handle and copy is dropped before the paths.
+    #[test]
+    fn entries_borrow_paths_of_several_lifetimes() {
+        let paths: Vec<CString> = (0..64)
+            .map(|i| CString::new(format!("{i}/{}", "x".repeat(i))).unwrap())
+            .collect();
+        let mut entries: Vec<IndexEntry<'_>> = paths
+            .iter()
+            .map(|p| IndexEntry::new(p, Oid::zeroed().as_ref(), FileMode::Blob))
+            .collect();
+        let handles: Vec<IndexEntryRef<'_, '_>> = entries.iter().map(IndexEntry::as_ref).collect();
+        for (handle, path) in handles.iter().zip(&paths) {
+            assert_eq!(handle.path(), path.as_c_str());
+        }
+        let copies: Vec<IndexEntry<'_>> = handles.iter().map(|h| h.to_index_entry()).collect();
+        drop(handles);
+        for (i, entry) in entries.iter_mut().enumerate() {
+            entry.as_mut().set_path(&paths[63 - i]);
+        }
+        assert_eq!(entries[0].as_ref().path(), paths[63].as_c_str());
+        assert_eq!(copies[0].as_ref().path(), paths[0].as_c_str());
+        let literal: &'static CStr = c"static";
+        entries[1].as_mut().set_path(literal);
+        {
+            let short = CString::new("short").unwrap();
+            let mut scoped = entries[2];
+            scoped.as_mut().set_path(&short);
+            assert_eq!(scoped.as_ref().path(), c"short");
+            assert_eq!(entries[2].as_ref().path(), paths[61].as_c_str());
+        }
+        assert_eq!(entries[1].as_ref().path(), literal);
+        assert_ne!(entries[1], copies[1]);
+        drop((entries, copies));
+    }
+
+    /// The value is `Send` and `Sync`: threads read one entry together and each mutate a
+    /// copy of their own, while the paths outlive the scope.
+    #[test]
+    fn entry_values_cross_threads() {
+        let path = CString::new("threaded/path").unwrap();
+        let entry = IndexEntry::new(
+            &path,
+            id(OidType::Sha1, 9).as_ref(),
+            FileMode::BlobExecutable,
+        );
+        std::thread::scope(|s| {
+            for i in 0..8u32 {
+                let shared = &entry;
+                let mut mine = entry;
+                s.spawn(move || {
+                    assert_eq!(shared.as_ref().path(), c"threaded/path");
+                    assert_eq!(shared.as_ref().id().id()[0], 9);
+                    mine.as_mut().set_file_size(i);
+                    mine.as_mut().set_flags(EntryFlags::VALID).unwrap();
+                    assert_eq!(mine.as_ref().file_size(), i);
+                    assert_ne!(&mine, shared);
+                });
+            }
+        });
+        assert_eq!(entry.as_ref().file_size(), 0);
+    }
+}
+
+mod options_value {
+    //! UB tests for the `IndexOptions` value (`git_index_options`): its constructors,
+    //! handles and reborrows, the indexes built from it, and values shared and built
+    //! across threads.
+
+    use libgit2::libgit2::index::index::{Index, IndexOptions, IndexOptionsRef};
+    use libgit2::libgit2::oid::oid::OidType;
+
+    /// Defaults, typed options and every setter value read back through shared and
+    /// exclusive reborrows; the C-built value matches the one Rust compares it with.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_handles_and_reborrows() {
+        let mut options = IndexOptions::default();
+        assert_eq!(options, IndexOptions::new());
+        let shared: IndexOptionsRef<'_> = options.as_ref();
+        assert_eq!((shared.version(), shared.oid_type()), (1, None));
+        for kind in [Some(OidType::Sha256), None, Some(OidType::Sha1)] {
+            let mut handle = options.as_mut();
+            handle.as_mut().set_oid_type(kind);
+            assert_eq!(handle.as_ref().oid_type(), kind);
+        }
+        assert_eq!(options, IndexOptions::with_oid_type(OidType::Sha1));
+        let copy = options;
+        options.as_mut().set_oid_type(None);
+        assert_eq!(copy.as_ref().oid_type(), Some(OidType::Sha1));
+        assert_eq!(
+            format!("{copy:?}"),
+            "IndexOptions { version: 1, oid_type: Some(Sha1) }"
+        );
+    }
+
+    /// Threads build options through C concurrently, share one value, and build
+    /// indexes from typed options.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_cross_threads() {
+        let shared = IndexOptions::with_oid_type(OidType::Sha256);
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let shared = &shared;
+                s.spawn(move || {
+                    let kind = if i % 2 == 0 {
+                        OidType::Sha1
+                    } else {
+                        OidType::Sha256
+                    };
+                    let mut mine = IndexOptions::new();
+                    mine.as_mut().set_oid_type(Some(kind));
+                    assert_eq!(mine.as_ref().oid_type(), Some(kind));
+                    assert_eq!(shared.as_ref().oid_type(), Some(OidType::Sha256));
+                    drop(Index::with_oid_type(kind).unwrap());
+                });
+            }
+        });
+    }
+}

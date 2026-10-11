@@ -1683,6 +1683,28 @@
    ]
   },
   {
+   "name": "git_index_entry",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "By-value struct with no public lifecycle routine: libgit2 never hands the caller an entry to free, and never retains a caller's entry (it duplicates). Index-owned entries are mutated in place by C (index_entry_cpy on replace in index_insert, GIT_INDEX_ENTRY_UPTODATE set by git_index__fill/index_entry_update and cleared on every entry by write_index), so borrowed handles over them are neither Send nor Sync. Rust: IndexEntry<'p> layout type (Copy, Send, Sync as plain values plus a &'p CStr), IndexEntryRef/IndexEntryMut handles without Send/Sync.",
+   "fields": [
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated path, never owned by the entry. Entries the index holds are allocated by the private index_entry_create, which memcpy's the path into the flexible array of the enclosing entry_internal and points path at it (freed with the entry by the private index_entry_free); the public API only lends them as const git_index_entry * (get_byindex, get_bypath, iterator_next, conflict_get/next, merge driver sources). Caller-built entries passed to git_index_add / conflict_add / merge_file_from_index are read for the call only: index_entry_dup strlen's and copies the path, so it must be non-NULL, and index_entry_cpy keeps the target's own path. Nothing writes through path or frees it separately. In Rust it is a &'p CStr carried by IndexEntry<'p>; entries lent by an index bind 'p to the index borrow."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_entry_extended_flag_t",
    "defined_in": "include/git2/index.h",
    "_comment_agent": "Resource-free combinable enum bitmasks; INTENT_TO_ADD and SKIP_WORKTREE union is EXTENDED_FLAGS, UPTODATE is memory-only. git_index_add masks flags_extended to EXTENDED_FLAGS; writer persists that mask. Rust transparent scalar bitset preserves unknown bits, with u32 enum ABI (entry field is u16). No allocation/clone/free primitives.",
@@ -1761,6 +1783,12 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_index_options",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "Two scalars, no pointer field and no teardown. git_index_options_init copies GIT_INDEX_OPTIONS_INIT ({GIT_INDEX_OPTIONS_VERSION}, so oid_type 0) and fails only for another version; git_index_open_ext reads oid_type 0 as GIT_OID_DEFAULT and GIT_ASSERT_ARGs any other value is a valid git_oid_t. Read for the call only, never retained. Rust: IndexOptions value (define_ctype, Copy, Send, Sync), built by git_index_options_init; the setter only stores a named OidType or 0, keeping the assertion unreachable.",
+   "fields": []
   },
   {
    "name": "git_index_stage_t",
@@ -12151,6 +12179,39 @@
       "nullable": true,
       "mutable": false,
       "note": "Options, only read for the call (version checked; oid_type 0 = GIT_OID_DEFAULT, otherwise GIT_ASSERT_ARG(git_oid_type_is_valid), an abort in Debug builds). NULL = defaults."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_options_init",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage for one git_index_options, overwritten whole with GIT_INDEX_OPTIONS_INIT ({GIT_INDEX_OPTIONS_VERSION}, oid_type 0) for the call; GIT_ASSERT_ARG rejects NULL. Fails, leaving it untouched, only when version differs from GIT_INDEX_OPTIONS_VERSION. Not retained."
      }
     }
    ]

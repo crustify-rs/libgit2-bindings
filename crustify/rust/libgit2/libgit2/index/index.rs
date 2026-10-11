@@ -50,12 +50,17 @@
 //! ```
 
 use core::ffi::{CStr, c_int};
-use core::ptr::{self, NonNull};
+use core::fmt;
+use core::marker::PhantomData;
+use core::mem::MaybeUninit;
+use core::num::TryFromIntError;
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CArc, CBox, CNew, CZeroable, define_ctype, impl_cdrop};
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CNew, CZeroable, define_ctype, impl_cdrop};
 
 use crate::ffi;
-use crate::libgit2::oid::oid::OidType;
+use crate::libgit2::core::types::FileMode;
+use crate::libgit2::oid::oid::{OidMut, OidRef, OidType};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
@@ -176,12 +181,179 @@ fn constructed(rc: c_int, index: Option<IndexBox>) -> Result<IndexBox, ErrorBuf>
     index.filter(|_| rc >= 0).ok_or_else(last)
 }
 
-/// The options `git_index_new_ext` / `git_index_open_ext` read: this version's struct
-/// with `oid_type`, the only setting it has.
-fn options(oid_type: OidType) -> ffi::git_index_options {
-    ffi::git_index_options {
-        version: ffi::GIT_INDEX_OPTIONS_VERSION,
-        oid_type: oid_type.raw(),
+define_ctype!(
+    /// The options for creating or opening an index (`git_index_options`): the struct's
+    /// version, and the type of the object ids the index holds.
+    ///
+    /// A plain value of two integers, resource-free: `Copy`, held inline, never
+    /// released, and read by libgit2 only for the call it is passed to. Build one with
+    /// [`new`](Self::new) (or `Default`), libgit2's own defaults, or
+    /// [`with_oid_type`](Self::with_oid_type); read and change it through
+    /// [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut):
+    ///
+    /// ```
+    /// use libgit2::libgit2::index::index::IndexOptions;
+    /// use libgit2::libgit2::oid::oid::OidType;
+    ///
+    /// # if cfg!(miri) { return; }
+    /// let mut options = IndexOptions::new();
+    /// assert_eq!(options.as_ref().oid_type(), None); // SHA-1, libgit2's default
+    /// options.as_mut().set_oid_type(Some(OidType::Sha256));
+    /// assert_eq!(options, IndexOptions::with_oid_type(OidType::Sha256));
+    /// ```
+    ///
+    /// The version is always this binding's `GIT_INDEX_OPTIONS_VERSION`: it tells
+    /// libgit2 the struct's layout, which is this type's, so there is no setter. The
+    /// object id type is a named [`OidType`] or unset; nothing stores another value, so
+    /// libgit2's assertion that a set type is valid never fires.
+    ///
+    /// Its handles borrow it:
+    ///
+    /// ```compile_fail,E0597
+    /// use libgit2::libgit2::index::index::IndexOptions;
+    ///
+    /// let handle;
+    /// {
+    ///     let options = IndexOptions::new();
+    ///     handle = options.as_ref();
+    /// }
+    /// let _ = handle.version();
+    /// ```
+    ///
+    /// The shared handle only reads:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::index::index::IndexOptions;
+    ///
+    /// let options = IndexOptions::new();
+    /// options.as_ref().set_oid_type(None);
+    /// ```
+    ///
+    /// Wraps: git_index_options
+    #[derive(Clone, Copy)]
+    IndexOptions, IndexOptionsRef, IndexOptionsMut, ffi::git_index_options
+);
+
+// SAFETY: `IndexOptions` is two integers: no pointer, no interior mutability, no thread
+// affinity, nothing to release, so moving one to another thread moves bytes.
+unsafe impl Send for IndexOptions {}
+// SAFETY: `IndexOptionsMut` is an exclusive borrow of such a value, as
+// `&mut IndexOptions`.
+unsafe impl Send for IndexOptionsMut<'_> {}
+
+// SAFETY: shared access only reads the integers (every write goes through
+// `IndexOptionsMut`, which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for IndexOptions {}
+// SAFETY: as above; `IndexOptionsRef` is a shared borrow, as `&IndexOptions`.
+unsafe impl Send for IndexOptionsRef<'_> {}
+// SAFETY: as above.
+unsafe impl Sync for IndexOptionsRef<'_> {}
+// SAFETY: `&IndexOptionsMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for IndexOptionsMut<'_> {}
+
+impl IndexOptions {
+    /// libgit2's default options, as `GIT_INDEX_OPTIONS_INIT` spells them: this version,
+    /// and no object id type, which the index constructors read as SHA-1.
+    ///
+    /// `git_index_options_init` only fails for a version other than
+    /// `GIT_INDEX_OPTIONS_VERSION`, and with that version it reaches no global, no
+    /// allocator and no thread state, so this needs no initialised library.
+    ///
+    /// Wraps: git_index_options_init
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_index_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_index_options`, which
+        // `git_index_options_init` overwrites whole with the template for this version;
+        // nothing else reads it during the call, and C keeps no pointer to it.
+        let rc = unsafe {
+            ffi::git_index_options_init(raw.as_mut_ptr(), ffi::GIT_INDEX_OPTIONS_VERSION)
+        };
+        assert_eq!(rc, 0, "git_index_options_init refused its own version");
+        // SAFETY: a 0 return means the template was copied in, so both integers are
+        // initialised: the version, and an `oid_type` of 0.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+
+    /// The default options with the object id type set to `oid_type`.
+    pub fn with_oid_type(oid_type: OidType) -> Self {
+        let mut options = Self::new();
+        options.as_mut().set_oid_type(Some(oid_type));
+        options
+    }
+
+    /// The raw `git_index_options`, for C code that takes the struct by value or keeps
+    /// it; it owns nothing.
+    pub fn into_raw(self) -> ffi::git_index_options {
+        self.0
+    }
+}
+
+impl Default for IndexOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartialEq for IndexOptions {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.as_ref(), other.as_ref());
+        (a.version(), a.raw_oid_type()) == (b.version(), b.raw_oid_type())
+    }
+}
+
+impl Eq for IndexOptions {}
+
+impl fmt::Debug for IndexOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl IndexOptionsRef<'_> {
+    /// The struct's version, `GIT_INDEX_OPTIONS_VERSION`.
+    ///
+    /// Field: git_index_options.version
+    pub fn version(&self) -> u32 {
+        // SAFETY: a read through the shared handle's pointer to live options; the field
+        // is a plain integer.
+        unsafe { addr_of!((*self.as_ptr()).version).read() }
+    }
+
+    /// The type of the object ids in the index; `None` when unset, which libgit2 reads
+    /// as [`OidType::default`] (SHA-1).
+    ///
+    /// Field: git_index_options.oid_type
+    pub fn oid_type(&self) -> Option<OidType> {
+        OidType::from_raw(self.raw_oid_type())
+    }
+
+    /// `oid_type` as stored: 0, or a named type's value (see the setter).
+    fn raw_oid_type(&self) -> ffi::git_oid_t {
+        // SAFETY: a read through the shared handle's pointer to live options; the field
+        // is a plain integer.
+        unsafe { addr_of!((*self.as_ptr()).oid_type).read() }
+    }
+}
+
+impl fmt::Debug for IndexOptionsRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IndexOptions")
+            .field("version", &self.version())
+            .field("oid_type", &self.oid_type())
+            .finish()
+    }
+}
+
+impl IndexOptionsMut<'_> {
+    /// Sets the type of the object ids in the index, or unsets it with `None` (stored
+    /// as 0) so that libgit2 picks its default.
+    ///
+    /// Field: git_index_options.oid_type
+    pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
+        let raw = oid_type.map_or(0, OidType::raw);
+        // SAFETY: a write through the exclusive handle's pointer to live options of 0 or
+        // a named type, the only values `git_index_open_ext` accepts without asserting.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).oid_type).write(raw) }
     }
 }
 
@@ -277,12 +449,12 @@ impl Index {
         if !runtime_pinned() {
             return Err(last());
         }
-        let opts = options(oid_type);
+        let opts = IndexOptions::with_oid_type(oid_type);
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, which libgit2 writes only on success; `opts`
         // is a live options struct of this version naming a valid type, which the
         // routine reads for the call and does not retain. The runtime is pinned.
-        let rc = unsafe { ffi::git_index_new_ext(&mut out, &opts) };
+        let rc = unsafe { ffi::git_index_new_ext(&mut out, opts.as_ref().as_ptr()) };
         // SAFETY: as in `new`: `out` is NULL, or a fresh index holding its only
         // reference, released by `git_index_free` as `IndexFree` does.
         constructed(rc, unsafe { IndexBox::from_c(out) })
@@ -304,11 +476,12 @@ impl Index {
         if !path_is_usable(path) {
             return Err(last());
         }
-        let opts = options(oid_type);
+        let opts = IndexOptions::with_oid_type(oid_type);
         let mut out = ptr::null_mut();
         // SAFETY: as in `open`; `opts` is a live options struct of this version naming a
         // valid type, which the routine reads for the call and does not retain.
-        let rc = unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), &opts) };
+        let rc =
+            unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), opts.as_ref().as_ptr()) };
         // SAFETY: as in `open`.
         constructed(rc, unsafe { IndexBox::from_c(out) })
     }
@@ -1192,9 +1365,620 @@ impl IndexTimeMut<'_> {
     }
 }
 
+/// A file entry of an index (`git_index_entry`): the path, object id and mode of one
+/// staged file, its stage and flags, and the truncated `stat` data that tells libgit2
+/// whether the working-directory file changed.
+///
+/// Build one to hand to the index routines that take an entry, which copy it, path and
+/// all, and keep nothing:
+///
+/// ```
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::{EntryExtendedFlags, IndexEntry, IndexTime};
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// let mut entry = IndexEntry::new(c"src/lib.rs", Oid::zeroed().as_ref(), FileMode::Blob);
+/// assert_eq!(entry.as_ref().path(), c"src/lib.rs");
+/// assert_eq!(entry.as_ref().filemode(), Some(FileMode::Blob));
+/// let mut handle = entry.as_mut();
+/// handle.set_file_size(42);
+/// handle.set_mtime(IndexTime::new(1_700_000_000, 5).as_ref());
+/// handle.set_flags_extended(EntryExtendedFlags::INTENT_TO_ADD).unwrap();
+/// assert_eq!(entry.as_ref().mtime().seconds(), 1_700_000_000);
+/// ```
+///
+/// `#[repr(transparent)]` over `git_index_entry`, so a pointer to it is a pointer to the
+/// C struct, which C reads in place. `'p` is the lifetime of the path it points at, so
+/// an entry cannot outlive it:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::IndexEntry;
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+/// use std::ffi::CString;
+///
+/// let entry;
+/// {
+///     let path = CString::new("file.txt").unwrap();
+///     entry = IndexEntry::new(&path, Oid::zeroed().as_ref(), FileMode::Blob);
+/// }
+/// let _ = entry.as_ref().path();
+/// ```
+///
+/// The exclusive handle is invariant in `'p`, so one cannot be shrunk to store a
+/// shorter-lived path than its entry was built for:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::index::index::IndexEntryMut;
+///
+/// fn shrink<'a, 'p>(m: IndexEntryMut<'a, 'static>) -> IndexEntryMut<'a, 'p> {
+///     m
+/// }
+/// ```
+///
+/// The shared handle only reads:
+///
+/// ```compile_fail,E0599
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::IndexEntry;
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// let entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+/// entry.as_ref().set_file_size(1);
+/// ```
+///
+/// libgit2 publishes no routine that allocates, copies or frees an entry for its
+/// caller. The entries an index holds are its own (each allocated with its path inline,
+/// and freed with the index or when removed), and the index routines only lend them as
+/// `const git_index_entry *`; those are reached as an [`IndexEntryRef`] borrowing the
+/// index, never as an owner. So an entry built here is a plain value, with no teardown.
+/// Every field holds a value its getter accepts: integers, an id's bytes, and a path
+/// that is never NULL.
+///
+/// The value is `Copy`, `Send` and `Sync`, as integers and a `&'p CStr` are: nothing
+/// writes through the path, and only the exclusive handle writes the fields. Its
+/// handles are neither, because the entries an index lends are rewritten in place by C
+/// (when `git_index_add` replaces one, and when writing the index clears every entry's
+/// [`UP_TO_DATE`](EntryExtendedFlags::UP_TO_DATE) flag), and an index is not shared
+/// across threads:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::index::IndexEntryRef;
+///
+/// fn send<T: Send>() {}
+/// send::<IndexEntryRef<'static, 'static>>();
+/// ```
+///
+/// Equal when every field is, the id by its type and bytes and the path by its contents.
+///
+/// Wraps: git_index_entry
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct IndexEntry<'p>(ffi::git_index_entry, PhantomData<&'p CStr>);
+
+/// Shared borrow of an [`IndexEntry`]: one built in Rust, or one an index lends. `Copy`,
+/// like `&T`; the getters live here.
+///
+/// Neither the handle nor the fields it projects in place outlive the entry:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::IndexEntry;
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// let id;
+/// {
+///     let entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+///     id = entry.as_ref().id();
+/// }
+/// let _ = id.raw_kind();
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct IndexEntryRef<'a, 'p>(CBorrowedPtr<'a, IndexEntry<'p>>);
+
+/// Exclusive borrow of an [`IndexEntry`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the setters live here.
+///
+/// A shared reborrow freezes it until the reborrow's last use:
+///
+/// ```compile_fail,E0502
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::IndexEntry;
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// let mut entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+/// let mut handle = entry.as_mut();
+/// let ctime = handle.as_ref().ctime();
+/// handle.ctime_mut().set_seconds(1);
+/// let _ = ctime.seconds();
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct IndexEntryMut<'a, 'p>(
+    IndexEntryRef<'a, 'p>,
+    // Invariant in the entry, and so in `'p`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut IndexEntry<'p>>,
+);
+
+// SAFETY: `IndexEntry` is `#[repr(transparent)]` over `git_index_entry` with a zero-sized
+// marker; both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, IndexEntry<'p>>`
+// (`IndexEntryMut` through `IndexEntryRef`) with zero-sized markers and no `Drop`, hand
+// out no reference to the entry, and `IndexEntryRef` has no write operation.
+// `IndexEntryMut` is invariant in the entry through its
+// `PhantomData<&'a mut IndexEntry<'p>>`.
+unsafe impl<'p> CCell for IndexEntry<'p> {
+    type C = ffi::git_index_entry;
+    type Ref<'a>
+        = IndexEntryRef<'a, 'p>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = IndexEntryMut<'a, 'p>
+    where
+        Self: 'a;
+}
+
+// SAFETY: an entry value is integers, an id's bytes and a string pointer, a `&'p CStr`'s
+// (per the handles' invariant): a shared, immutable borrow of `CStr`, which is `Sync`, so
+// it may be read from any thread. Nothing in the struct has thread affinity or interior
+// mutability, and nothing is released on drop. The handles, which may borrow an entry
+// an index owns, implement neither trait.
+unsafe impl Send for IndexEntry<'_> {}
+// SAFETY: as above, and shared access to a value only reads its fields (every write goes
+// through `IndexEntryMut`, which excludes other handles), so concurrent readers race
+// nothing.
+unsafe impl Sync for IndexEntry<'_> {}
+
+impl<'p> IndexEntry<'p> {
+    /// An entry for the file at `path` (relative to the working directory, components
+    /// separated by `/`), naming the object `id` with mode `filemode`, at stage 0, with
+    /// every other field zero.
+    ///
+    /// Nothing is checked here: the routine the entry is handed to checks it when it
+    /// runs, refusing for instance an invalid path or mode.
+    pub fn new(path: &'p CStr, id: OidRef<'_>, filemode: FileMode) -> Self {
+        Self(
+            ffi::git_index_entry {
+                mode: filemode.raw(),
+                id: copy_id(id),
+                path: path.as_ptr(),
+                ..Default::default()
+            },
+            PhantomData,
+        )
+    }
+
+    /// The raw `git_index_entry`, for C code that takes the struct; its path is borrowed
+    /// for `'p`, and nothing is to be freed.
+    pub fn into_raw(self) -> ffi::git_index_entry {
+        self.0
+    }
+
+    /// Shared handle to the entry — the getters, and the pointer for C calls that read
+    /// it.
+    pub fn as_ref(&self) -> IndexEntryRef<'_, 'p> {
+        // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
+        IndexEntryRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    /// Exclusive handle to the entry — the setters.
+    pub fn as_mut(&mut self) -> IndexEntryMut<'_, 'p> {
+        // SAFETY: as `as_ref`, from an exclusive borrow, so the pointer carries write
+        // provenance and no other handle exists while the result lives.
+        let ptr = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        IndexEntryMut(IndexEntryRef(ptr), PhantomData)
+    }
+}
+
+/// The `git_oid` `id` holds, copied field by field (`OidRef`'s comparisons go through C).
+fn copy_id(id: OidRef<'_>) -> ffi::git_oid {
+    ffi::git_oid {
+        type_: id.raw_kind(),
+        id: id.id(),
+    }
+}
+
+impl PartialEq for IndexEntry<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.as_ref(), other.as_ref());
+        let time = |t: IndexTimeRef<'_>| (t.seconds(), t.nanoseconds());
+        let (x, y) = (a.id(), b.id());
+        time(a.ctime()) == time(b.ctime())
+            && time(a.mtime()) == time(b.mtime())
+            && (a.dev(), a.ino(), a.mode(), a.uid(), a.gid(), a.file_size())
+                == (b.dev(), b.ino(), b.mode(), b.uid(), b.gid(), b.file_size())
+            && (x.raw_kind(), x.id()) == (y.raw_kind(), y.id())
+            && (a.flags(), a.flags_extended()) == (b.flags(), b.flags_extended())
+            && a.path() == b.path()
+    }
+}
+
+impl Eq for IndexEntry<'_> {}
+
+impl fmt::Debug for IndexEntry<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'a, 'p> IndexEntryRef<'a, 'p> {
+    /// Borrows the entry at `ptr`; `None` if it is NULL.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live, initialised entry that stays live, and that
+    /// nothing writes, for `'a`, whose `path` is non-NULL and addresses a NUL-terminated
+    /// string that stays live and unchanged for `'p`. For an entry an index lends, both
+    /// end before the index is next changed or released: the path lives in the entry's
+    /// own allocation.
+    #[allow(dead_code)] // Used by the index symbol waves, which lend entries.
+    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_index_entry) -> Option<Self> {
+        let ptr = NonNull::new(ptr.cast_mut().cast::<IndexEntry<'p>>())?;
+        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
+        // liveness, the lifetimes and the absence of writers.
+        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
+    }
+
+    /// Read-only pointer to the C struct, for FFI calls taking
+    /// `const git_index_entry *`.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_index_entry {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// When the file's metadata last changed, truncated to 32-bit seconds; in place, for
+    /// as long as the entry is borrowed.
+    ///
+    /// Field: git_index_entry.ctime
+    pub fn ctime(&self) -> IndexTimeRef<'a> {
+        let p = self.as_ptr();
+        // SAFETY: the field projected from the shared handle's pointer to a live entry is
+        // an initialised `git_index_time`, which lives for `'a` with the entry and which
+        // nothing writes meanwhile (per the handle's contract); `IndexTimeRef` only
+        // reads it.
+        unsafe { IndexTimeRef::from_ptr(addr_of!((*p).ctime).cast_mut()) }
+            .expect("a field is never NULL")
+    }
+
+    /// When the file's contents last changed, truncated to 32-bit seconds; in place, for
+    /// as long as the entry is borrowed.
+    ///
+    /// Field: git_index_entry.mtime
+    pub fn mtime(&self) -> IndexTimeRef<'a> {
+        let p = self.as_ptr();
+        // SAFETY: as `ctime`, for `mtime`.
+        unsafe { IndexTimeRef::from_ptr(addr_of!((*p).mtime).cast_mut()) }
+            .expect("a field is never NULL")
+    }
+
+    /// The device holding the file, truncated to 32 bits.
+    ///
+    /// Field: git_index_entry.dev
+    pub fn dev(&self) -> u32 {
+        // SAFETY: a read through the shared handle's pointer to a live entry; the field
+        // is a plain integer.
+        unsafe { addr_of!((*self.as_ptr()).dev).read() }
+    }
+
+    /// The file's inode number, truncated to 32 bits.
+    ///
+    /// Field: git_index_entry.ino
+    pub fn ino(&self) -> u32 {
+        // SAFETY: as `dev`, for `ino`.
+        unsafe { addr_of!((*self.as_ptr()).ino).read() }
+    }
+
+    /// The entry's mode as stored: a [`FileMode`] value for every entry libgit2 adds,
+    /// but whatever an index file spelled for one it read.
+    ///
+    /// Field: git_index_entry.mode
+    pub fn mode(&self) -> u32 {
+        // SAFETY: as `dev`, for `mode`.
+        unsafe { addr_of!((*self.as_ptr()).mode).read() }
+    }
+
+    /// The entry's mode as a [`FileMode`]; `None` for a mode without a variant, which
+    /// [`mode`](Self::mode) has.
+    ///
+    /// Field: git_index_entry.mode
+    pub fn filemode(&self) -> Option<FileMode> {
+        FileMode::from_raw(self.mode())
+    }
+
+    /// The file owner's user id, truncated to 32 bits.
+    ///
+    /// Field: git_index_entry.uid
+    pub fn uid(&self) -> u32 {
+        // SAFETY: as `dev`, for `uid`.
+        unsafe { addr_of!((*self.as_ptr()).uid).read() }
+    }
+
+    /// The file owner's group id, truncated to 32 bits.
+    ///
+    /// Field: git_index_entry.gid
+    pub fn gid(&self) -> u32 {
+        // SAFETY: as `dev`, for `gid`.
+        unsafe { addr_of!((*self.as_ptr()).gid).read() }
+    }
+
+    /// The file's size in bytes, truncated to 32 bits.
+    ///
+    /// Field: git_index_entry.file_size
+    pub fn file_size(&self) -> u32 {
+        // SAFETY: as `dev`, for `file_size`.
+        unsafe { addr_of!((*self.as_ptr()).file_size).read() }
+    }
+
+    /// The id of the blob (or a submodule's commit) the entry names, in place, for as
+    /// long as the entry is borrowed.
+    ///
+    /// Field: git_index_entry.id
+    pub fn id(&self) -> OidRef<'a> {
+        let p = self.as_ptr();
+        // SAFETY: the field projected from the shared handle's pointer to a live entry is
+        // an initialised `git_oid`, which lives for `'a` with the entry and which nothing
+        // writes meanwhile (per the handle's contract); `OidRef` only reads it.
+        unsafe { OidRef::from_ptr(addr_of!((*p).id).cast_mut()) }.expect("a field is never NULL")
+    }
+
+    /// The entry's 16 flag bits, widened: the path length (`GIT_INDEX_ENTRY_NAMEMASK`),
+    /// the stage (`GIT_INDEX_ENTRY_STAGEMASK`), and [`EntryFlags::EXTENDED`] and
+    /// [`EntryFlags::VALID`].
+    ///
+    /// Field: git_index_entry.flags
+    pub fn flags(&self) -> EntryFlags {
+        // SAFETY: as `dev`, for `flags`.
+        let raw = unsafe { addr_of!((*self.as_ptr()).flags).read() };
+        EntryFlags::from_bits_retain(raw.into())
+    }
+
+    /// The entry's 16 extended flag bits, widened: those written to disk
+    /// ([`EntryExtendedFlags::ON_DISK`]) and those libgit2 only keeps in memory.
+    ///
+    /// Field: git_index_entry.flags_extended
+    pub fn flags_extended(&self) -> EntryExtendedFlags {
+        // SAFETY: as `dev`, for `flags_extended`.
+        let raw = unsafe { addr_of!((*self.as_ptr()).flags_extended).read() };
+        EntryExtendedFlags::from_bits_retain(raw.into())
+    }
+
+    /// The file's path, relative to the working directory, borrowed for `'p`.
+    ///
+    /// Field: git_index_entry.path
+    pub fn path(&self) -> &'p CStr {
+        let p = self.as_ptr();
+        // SAFETY: a read through the shared handle's pointer to a live entry. Per the
+        // handles' invariant, which `new`, `set_path` and `from_ptr` keep, `path` is
+        // non-NULL and addresses a NUL-terminated string live and unchanged for `'p`.
+        unsafe { CStr::from_ptr(addr_of!((*p).path).read()) }
+    }
+
+    /// A copy of the entry, as a value of its own, borrowing the same path.
+    pub fn to_index_entry(&self) -> IndexEntry<'p> {
+        // SAFETY: a read of the whole struct through the shared handle's pointer to a live,
+        // initialised entry; it is plain data, and the copy's path keeps the handles'
+        // invariant for `'p`, as this entry's does.
+        IndexEntry(unsafe { self.as_ptr().read() }, PhantomData)
+    }
+}
+
+impl fmt::Debug for IndexEntryRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let time = |t: IndexTimeRef<'_>| (t.seconds(), t.nanoseconds());
+        f.debug_struct("IndexEntry")
+            .field("ctime", &time(self.ctime()))
+            .field("mtime", &time(self.mtime()))
+            .field("dev", &self.dev())
+            .field("ino", &self.ino())
+            .field("mode", &format_args!("{:o}", self.mode()))
+            .field("uid", &self.uid())
+            .field("gid", &self.gid())
+            .field("file_size", &self.file_size())
+            .field("id", &self.id())
+            .field("flags", &self.flags())
+            .field("flags_extended", &self.flags_extended())
+            .field("path", &self.path())
+            .finish()
+    }
+}
+
+impl<'p> IndexEntryMut<'_, 'p> {
+    /// Writable pointer to the C struct, for the setters.
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_index_entry {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    pub fn as_ref(&self) -> IndexEntryRef<'_, 'p> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> IndexEntryMut<'_, 'p> {
+        IndexEntryMut(self.0, PhantomData)
+    }
+
+    /// The metadata change time, in place, borrowed exclusively to change it.
+    ///
+    /// Field: git_index_entry.ctime
+    pub fn ctime_mut(&mut self) -> IndexTimeMut<'_> {
+        let p = self.as_mut_ptr();
+        // SAFETY: the field projected from the exclusive handle's pointer to a live entry
+        // is an initialised `git_index_time`, any of whose values may be written; the
+        // result borrows this handle exclusively, so nothing else reaches the entry
+        // meanwhile.
+        unsafe { IndexTimeMut::from_ptr(addr_of_mut!((*p).ctime)) }.expect("a field is never NULL")
+    }
+
+    /// Replaces the metadata change time with a copy of `time`.
+    ///
+    /// Field: git_index_entry.ctime
+    pub fn set_ctime(&mut self, time: IndexTimeRef<'_>) {
+        let mut ctime = self.ctime_mut();
+        ctime.set_seconds(time.seconds());
+        ctime.set_nanoseconds(time.nanoseconds());
+    }
+
+    /// The contents change time, in place, borrowed exclusively to change it.
+    ///
+    /// Field: git_index_entry.mtime
+    pub fn mtime_mut(&mut self) -> IndexTimeMut<'_> {
+        let p = self.as_mut_ptr();
+        // SAFETY: as `ctime_mut`, for `mtime`.
+        unsafe { IndexTimeMut::from_ptr(addr_of_mut!((*p).mtime)) }.expect("a field is never NULL")
+    }
+
+    /// Replaces the contents change time with a copy of `time`.
+    ///
+    /// Field: git_index_entry.mtime
+    pub fn set_mtime(&mut self, time: IndexTimeRef<'_>) {
+        let mut mtime = self.mtime_mut();
+        mtime.set_seconds(time.seconds());
+        mtime.set_nanoseconds(time.nanoseconds());
+    }
+
+    /// Replaces the device number.
+    ///
+    /// Field: git_index_entry.dev
+    pub fn set_dev(&mut self, dev: u32) {
+        // SAFETY: a write through the exclusive handle's pointer to a live entry; every
+        // `u32` is valid.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).dev).write(dev) }
+    }
+
+    /// Replaces the inode number.
+    ///
+    /// Field: git_index_entry.ino
+    pub fn set_ino(&mut self, ino: u32) {
+        // SAFETY: as `set_dev`, for `ino`.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).ino).write(ino) }
+    }
+
+    /// Replaces the mode with any value, named or not; the index routines refuse an
+    /// entry whose mode is not one of the insertable [`FileMode`]s.
+    ///
+    /// Field: git_index_entry.mode
+    pub fn set_mode(&mut self, mode: u32) {
+        // SAFETY: as `set_dev`, for `mode`.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).mode).write(mode) }
+    }
+
+    /// Replaces the mode with `filemode`'s value.
+    ///
+    /// Field: git_index_entry.mode
+    pub fn set_filemode(&mut self, filemode: FileMode) {
+        self.set_mode(filemode.raw());
+    }
+
+    /// Replaces the owner's user id.
+    ///
+    /// Field: git_index_entry.uid
+    pub fn set_uid(&mut self, uid: u32) {
+        // SAFETY: as `set_dev`, for `uid`.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).uid).write(uid) }
+    }
+
+    /// Replaces the owner's group id.
+    ///
+    /// Field: git_index_entry.gid
+    pub fn set_gid(&mut self, gid: u32) {
+        // SAFETY: as `set_dev`, for `gid`.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).gid).write(gid) }
+    }
+
+    /// Replaces the file size.
+    ///
+    /// Field: git_index_entry.file_size
+    pub fn set_file_size(&mut self, file_size: u32) {
+        // SAFETY: as `set_dev`, for `file_size`.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).file_size).write(file_size) }
+    }
+
+    /// The id the entry names, in place, borrowed exclusively to change it.
+    ///
+    /// Field: git_index_entry.id
+    pub fn id_mut(&mut self) -> OidMut<'_> {
+        let p = self.as_mut_ptr();
+        // SAFETY: the field projected from the exclusive handle's pointer to a live entry
+        // is an initialised `git_oid`, any of whose bytes may be written; the result
+        // borrows this handle exclusively, so nothing else reaches the entry meanwhile.
+        unsafe { OidMut::from_ptr(addr_of_mut!((*p).id)) }.expect("a field is never NULL")
+    }
+
+    /// Replaces the id with a copy of `id`, type and all 32 bytes.
+    ///
+    /// Field: git_index_entry.id
+    pub fn set_id(&mut self, id: OidRef<'_>) {
+        let id = copy_id(id);
+        // SAFETY: a write through the exclusive handle's pointer to a live entry; the
+        // field is plain bytes, and `id` was copied out before the write.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).id).write(id) }
+    }
+
+    /// Replaces the 16 flag bits with `flags`, stage and path-length bits included.
+    ///
+    /// Fails, changing nothing, when `flags` has a bit above the field's 16.
+    ///
+    /// Field: git_index_entry.flags
+    pub fn set_flags(&mut self, flags: EntryFlags) -> Result<(), TryFromIntError> {
+        let raw = u16::try_from(flags.bits())?;
+        // SAFETY: as `set_dev`, for `flags`; every `u16` is valid.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(raw) }
+        Ok(())
+    }
+
+    /// Replaces the 16 extended flag bits with `flags`, the in-memory ones included.
+    ///
+    /// Fails, changing nothing, when `flags` has a bit above the field's 16.
+    ///
+    /// Field: git_index_entry.flags_extended
+    pub fn set_flags_extended(&mut self, flags: EntryExtendedFlags) -> Result<(), TryFromIntError> {
+        let raw = u16::try_from(flags.bits())?;
+        // SAFETY: as `set_dev`, for `flags_extended`; every `u16` is valid.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).flags_extended).write(raw) }
+        Ok(())
+    }
+
+    /// Replaces the path with `path`, borrowed for `'p`. The previous path is only
+    /// borrowed, so nothing is released.
+    ///
+    /// Field: git_index_entry.path
+    pub fn set_path(&mut self, path: &'p CStr) {
+        // SAFETY: a write through the exclusive handle's pointer to a live entry; the
+        // pointer stored is a `&'p CStr`'s, non-NULL and live and unchanged for `'p`,
+        // which keeps the handles' invariant.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).path).write(path.as_ptr()) }
+    }
+}
+
+impl fmt::Debug for IndexEntryMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+// An `IndexEntry` is a `git_index_entry`, and a handle one pointer.
+const _: () = assert!(
+    size_of::<IndexEntry<'static>>() == size_of::<ffi::git_index_entry>()
+        && align_of::<IndexEntry<'static>>() == align_of::<ffi::git_index_entry>()
+        && size_of::<IndexEntryRef<'static, 'static>>() == size_of::<*const ()>()
+        && size_of::<IndexOptions>() == size_of::<ffi::git_index_options>()
+        && align_of::<IndexOptions>() == align_of::<ffi::git_index_options>()
+);
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use crate::libgit2::oid::oid::Oid;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use std::ffi::CString;
     use std::process::Command;
@@ -1459,9 +2243,10 @@ mod unit_tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
     fn options_carry_this_version_and_the_type() {
         for kind in [OidType::Sha1, OidType::Sha256] {
-            let opts = options(kind);
+            let opts = IndexOptions::with_oid_type(kind).into_raw();
             assert_eq!(opts.version, ffi::GIT_INDEX_OPTIONS_VERSION);
             assert_eq!(OidType::from_raw(opts.oid_type), Some(kind));
         }
@@ -2080,6 +2865,163 @@ mod unit_tests {
             // SAFETY: the live index is only read after every scan returns.
             assert_eq!(unsafe { ffi::git_index_entrycount(index.as_c_ptr()) }, 2);
         }
+    }
+
+    /// An entry lent as a raw pointer, as an index lends its own: borrowed through
+    /// `from_ptr`, read through the projected fields, copied out with its path, and
+    /// handed back to C through `as_ptr` unchanged. NULL borrows nothing.
+    #[test]
+    fn entry_borrowed_from_a_raw_pointer() {
+        // SAFETY: NULL is accepted by the contract and yields no handle.
+        assert!(unsafe { IndexEntryRef::<'_, '_>::from_ptr(ptr::null()) }.is_none());
+        let path = CString::new("dir/lent").unwrap();
+        let mut raw = ffi::git_index_entry {
+            ctime: ffi::git_index_time {
+                seconds: -1,
+                nanoseconds: u32::MAX,
+            },
+            dev: 1,
+            ino: 2,
+            mode: 0o100664,
+            uid: 3,
+            gid: 4,
+            file_size: 5,
+            flags: 0x3fff,
+            flags_extended: u16::MAX,
+            path: path.as_ptr(),
+            ..Default::default()
+        };
+        raw.id.type_ = 7;
+        raw.id.id[31] = 0xab;
+        let mut copy = {
+            // SAFETY: `raw` is initialised, outlives the handle and is not written while
+            // it lives; its path is a live NUL-terminated string that outlives `copy`.
+            let entry = unsafe { IndexEntryRef::from_ptr(&raw const raw) }.unwrap();
+            assert_eq!(entry.as_ptr(), &raw const raw);
+            assert_eq!(
+                (entry.ctime().seconds(), entry.ctime().nanoseconds()),
+                (-1, u32::MAX)
+            );
+            assert_eq!(
+                (entry.mtime().seconds(), entry.mtime().nanoseconds()),
+                (0, 0)
+            );
+            assert_eq!(
+                (
+                    entry.dev(),
+                    entry.ino(),
+                    entry.uid(),
+                    entry.gid(),
+                    entry.file_size()
+                ),
+                (1, 2, 3, 4, 5)
+            );
+            assert_eq!((entry.mode(), entry.filemode()), (0o100664, None));
+            assert_eq!((entry.id().raw_kind(), entry.id().id()[31]), (7, 0xab));
+            assert_eq!(entry.flags().bits(), 0x3fff);
+            assert_eq!(entry.flags_extended().bits(), u32::from(u16::MAX));
+            assert_eq!(entry.path(), path.as_c_str());
+            assert!(format!("{entry:?}").contains("mode: 100664"));
+            entry.to_index_entry()
+        };
+        copy.as_mut().set_dev(9);
+        assert_eq!((raw.dev, copy.as_ref().dev()), (1, 9));
+        assert_eq!(copy.into_raw().path, path.as_ptr());
+    }
+
+    /// The flag setters refuse a value wider than the 16-bit fields, leaving them as they
+    /// were, and store every value that fits unchanged.
+    #[test]
+    fn entry_flag_setters_refuse_bits_above_sixteen() {
+        let mut entry = IndexEntry::new(c"f", Oid::zeroed().as_ref(), FileMode::Blob);
+        let mut handle = entry.as_mut();
+        handle
+            .set_flags(EntryFlags::from_bits_retain(0xffff))
+            .unwrap();
+        handle
+            .set_flags_extended(EntryExtendedFlags::from_bits_retain(0x8001))
+            .unwrap();
+        for bits in [0x1_0000, 0x8000_0000, u32::MAX] {
+            assert!(
+                handle
+                    .set_flags(EntryFlags::from_bits_retain(bits))
+                    .is_err()
+            );
+            assert!(
+                handle
+                    .set_flags_extended(EntryExtendedFlags::from_bits_retain(bits))
+                    .is_err()
+            );
+        }
+        assert_eq!(handle.as_ref().flags().bits(), 0xffff);
+        assert_eq!(handle.as_ref().flags_extended().bits(), 0x8001);
+        let raw = entry.into_raw();
+        assert_eq!((raw.flags, raw.flags_extended), (0xffff, 0x8001));
+    }
+
+    /// The constructor zeroes every field it is not given, and equality and the debug
+    /// form follow every field, the path by contents.
+    #[test]
+    fn entry_constructor_equality_and_debug() {
+        let mut id = Oid::zeroed();
+        id.as_mut().set_kind(OidType::Sha256);
+        let entry = IndexEntry::new(c"a/b", id.as_ref(), FileMode::Link);
+        let raw = entry.into_raw();
+        assert_eq!(raw.mode, ffi::GIT_FILEMODE_LINK);
+        assert_eq!(raw.id.type_, ffi::GIT_OID_SHA256 as u8);
+        let zero = ffi::git_index_entry::default();
+        assert_eq!(
+            (
+                raw.dev,
+                raw.ino,
+                raw.uid,
+                raw.gid,
+                raw.file_size,
+                raw.flags,
+                raw.flags_extended
+            ),
+            (zero.dev, zero.ino, zero.uid, zero.gid, zero.file_size, 0, 0)
+        );
+        let other_path = CString::new("a/b").unwrap();
+        let mut same = IndexEntry::new(&other_path, id.as_ref(), FileMode::Link);
+        assert_eq!(entry, same);
+        same.as_mut().ctime_mut().set_nanoseconds(1);
+        assert_ne!(entry, same);
+        let mut moved = entry;
+        moved.as_mut().id_mut().set_kind(OidType::Sha1);
+        assert_ne!(entry, moved);
+        let debug = format!("{entry:?}");
+        assert!(
+            debug.starts_with("IndexEntry {") && debug.contains("\"a/b\""),
+            "{debug}"
+        );
+    }
+
+    /// The options' accessors and comparisons, on a value Rust builds itself (Miri cannot
+    /// call `git_index_options_init`): unset reads as `None`, and only named types or 0
+    /// are ever stored.
+    #[test]
+    fn options_accessors_store_named_types_or_zero() {
+        let raw = ffi::git_index_options {
+            version: ffi::GIT_INDEX_OPTIONS_VERSION,
+            oid_type: 0,
+        };
+        let mut options = IndexOptions(raw, PhantomData);
+        assert_eq!(options.as_ref().version(), ffi::GIT_INDEX_OPTIONS_VERSION);
+        assert_eq!(options.as_ref().oid_type(), None);
+        let unset = options;
+        for kind in [Some(OidType::Sha256), Some(OidType::Sha1), None] {
+            options.as_mut().set_oid_type(kind);
+            assert_eq!(options.as_ref().oid_type(), kind);
+            assert_eq!(options.into_raw().oid_type, kind.map_or(0, OidType::raw));
+        }
+        assert_eq!(options, unset);
+        options.as_mut().set_oid_type(Some(OidType::Sha1));
+        assert_ne!(options, unset);
+        assert_eq!(
+            format!("{options:?}"),
+            "IndexOptions { version: 1, oid_type: Some(Sha1) }"
+        );
     }
 
     #[test]
