@@ -432,3 +432,7 @@ git_config_init_backend
 # config wave 5 batch 0: backend registration and enumeration
 git_config_add_backend
 git_config_backend_foreach_match
+
+# index wave 0 batch 1: capability equivalence tests
+git_index_caps
+git_index_set_caps

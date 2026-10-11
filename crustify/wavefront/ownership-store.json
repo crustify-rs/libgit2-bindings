@@ -1490,6 +1490,18 @@
    ]
   },
   {
+   "name": "git_index_add_option_t",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "include/git2/index.h:163-167 declares a resource-free unsigned bitmask (0,1,2,4). git_index_add_all and index_apply_to_wd_diff consume scalar flags by value; foreach_diff_data stores a scalar copy only during synchronous diff traversal. No pointer fields, ownership, borrowing, allocation, release or clone routines. Preserve combinations verbatim: index_apply_to_wd_diff tests flags == FORCE, not a bit test. No Rust consumers presently use this enum.",
+   "fields": []
+  },
+  {
+   "name": "git_index_capability_t",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "include/git2/index.h:143-147 and src/libgit2/index.c:615-655: resource-free signed enum. Explicit bits 1,2,4 become three booleans in git_index_set_caps; git_index_caps returns only those bits. -1 is a distinct command to read owner configuration, failing without an owner, not a combinable capability. No pointer fields, ownership or lifecycle routines. Rust will expose checked explicit Capabilities and a separate CapabilitySetting::FromOwner; no existing Rust consumers require replacement.",
+   "fields": []
+  },
+  {
    "name": "git_libgit2_opt_t",
    "defined_in": "include/git2/common.h",
    "_comment_agent": "Fieldless C enum of the keys git_libgit2_opts (settings.c:105) dispatches on, dense 0..=47 (GIT_OPT_GET_MWINDOW_SIZE .. GIT_OPT_SET_PACK_MAX_OBJECT_SIZE; bindgen types it c_uint, but git_libgit2_opts takes `int option, ...`). No storage or lifecycle. Every value without a constant (negative included) hits the default arm: -1, GIT_ERROR_INVALID 'invalid option key', and no va_arg is read, so calling with the bare key is sound. Each named key fixes the variadic argument list (documented per variant in core/common.rs LibraryOption). Hazards for the git_libgit2_opts wrapper: SET_SSL_CIPHERS strdups its argument with no NULL check (NULL = crash); SET_ALLOCATOR memcpys a git_allocator (NULL restores stdalloc) and swaps the global allocator under live allocations; GET/SET_WINDOWS_SHAREMODE are no-ops off Windows (the out pointer is left unwritten, rc 0); SET_SSL_CERT_LOCATIONS with OpenSSL fails GIT_ERROR_SSL when neither location loads; ADD_SSL_X509_CERT(NULL) adds nothing and returns 0; SET_SEARCH_PATH/GET_SEARCH_PATH take an int config level, only SYSTEM(2)/XDG(3)/GLOBAL(4) accepted (GIT_ERROR_INVALID 'invalid config path selector %d'); SET_SERVER_(CONNECT_)TIMEOUT refuse negatives (GIT_ERROR_INVALID); SET_OWNER_VALIDATION stores !=0; GET_EXTENSIONS hands out a git_strarray to dispose; GET_* buf options fill a git_buf. Settings are unsynchronised globals (git_sysdir_set etc.). Rust side: LibraryOption::from_raw/from_key/TryFrom -> UnnamedLibraryOption; key() gives the int.",

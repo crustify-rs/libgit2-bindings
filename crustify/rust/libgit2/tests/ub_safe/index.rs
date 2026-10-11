@@ -457,3 +457,66 @@ fn owners_are_pointer_sized() {
         size_of::<usize>()
     );
 }
+
+/// Pointer-free options remain independent values under every combination and
+/// extreme integer input; these tests can also run under Miri without C calls.
+#[test]
+fn scalar_options_exhaustive() {
+    use libgit2::libgit2::index::index::{AddFlags, Capabilities, CapabilitySetting};
+
+    for a in 0..8 {
+        for b in 0..8 {
+            let lhs = AddFlags::from_bits_retain(a);
+            let rhs = AddFlags::from_bits_retain(b);
+            assert_eq!((lhs | rhs).bits(), a | b);
+            assert_eq!(lhs.contains(rhs), a & b == b);
+            assert_eq!(lhs.without(rhs).bits(), a & !b);
+            let mut assigned = lhs;
+            assigned |= rhs;
+            assert_eq!(assigned, lhs.union(rhs));
+
+            let lhs = Capabilities::from_bits(a as i32).unwrap();
+            let rhs = Capabilities::from_bits(b as i32).unwrap();
+            assert_eq!((lhs | rhs).bits(), (a | b) as i32);
+            assert_eq!(lhs.contains(rhs), a & b == b);
+            assert_eq!(lhs.without(rhs).bits(), (a & !b) as i32);
+            let mut assigned = lhs;
+            assigned |= rhs;
+            assert_eq!(assigned, lhs.union(rhs));
+            assert_eq!(CapabilitySetting::from(assigned).to_raw(), (a | b) as i32);
+        }
+    }
+    for bits in [0, 8, 1 << 31, u32::MAX] {
+        let flags = AddFlags::from_bits_retain(bits);
+        assert_eq!(flags.bits(), bits);
+        assert_eq!((flags | AddFlags::FORCE).bits(), bits | 1);
+        assert_eq!(flags.without(flags), AddFlags::empty());
+    }
+    assert_eq!(CapabilitySetting::FromOwner.to_raw(), -1);
+}
+
+/// Auto Send/Sync is appropriate: each option is just a copied integer, with no
+/// hidden foreign state. Shared readers cannot observe writes to another copy.
+#[test]
+fn scalar_options_threads() {
+    use libgit2::libgit2::index::index::{AddFlags, Capabilities, CapabilitySetting};
+
+    let flags = AddFlags::FORCE | AddFlags::CHECK_PATHSPEC | AddFlags::DISABLE_PATHSPEC_MATCH;
+    let caps = Capabilities::IGNORE_CASE | Capabilities::NO_FILEMODE | Capabilities::NO_SYMLINKS;
+    let setting = CapabilitySetting::FromOwner;
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            let shared = (&flags, &caps, &setting);
+            scope.spawn(move || {
+                let mut local = *shared.0;
+                local |= AddFlags::from_bits_retain(1 << 31);
+                assert_eq!(shared.0.bits(), 7);
+                assert_eq!(local.bits(), 7 | 1 << 31);
+                assert_eq!(*shared.1, Capabilities::all());
+                assert_eq!(shared.2.to_raw(), -1);
+            });
+        }
+    });
+    let handle = std::thread::spawn(move || (flags, caps, setting));
+    assert_eq!(handle.join().unwrap(), (flags, caps, setting));
+}

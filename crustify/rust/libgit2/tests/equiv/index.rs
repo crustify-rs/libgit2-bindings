@@ -837,3 +837,135 @@ mod oid_types {
         }
     }
 }
+
+/// The resource-free types' constants and every combination retain the values
+/// published by the C header, including the signed owner-command sentinel.
+#[test]
+fn scalar_options_match_c_values() {
+    use libgit2::libgit2::index::index::{AddFlags, Capabilities, CapabilitySetting};
+
+    assert_eq!(AddFlags::DEFAULT.bits(), ffi::GIT_INDEX_ADD_DEFAULT);
+    let add = [
+        AddFlags::FORCE,
+        AddFlags::DISABLE_PATHSPEC_MATCH,
+        AddFlags::CHECK_PATHSPEC,
+    ];
+    let c_add = [
+        ffi::GIT_INDEX_ADD_FORCE,
+        ffi::GIT_INDEX_ADD_DISABLE_PATHSPEC_MATCH,
+        ffi::GIT_INDEX_ADD_CHECK_PATHSPEC,
+    ];
+    let caps = [
+        Capabilities::IGNORE_CASE,
+        Capabilities::NO_FILEMODE,
+        Capabilities::NO_SYMLINKS,
+    ];
+    let c_caps = [
+        ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE,
+        ffi::GIT_INDEX_CAPABILITY_NO_FILEMODE,
+        ffi::GIT_INDEX_CAPABILITY_NO_SYMLINKS,
+    ];
+    for mask in 0..8 {
+        let (mut rust_add, mut raw_add) = (AddFlags::empty(), 0);
+        let (mut rust_caps, mut raw_caps) = (Capabilities::empty(), 0);
+        for bit in 0..3 {
+            if mask & (1 << bit) != 0 {
+                rust_add |= add[bit];
+                raw_add |= c_add[bit];
+                rust_caps |= caps[bit];
+                raw_caps |= c_caps[bit];
+            }
+        }
+        assert_eq!(rust_add.bits(), raw_add);
+        assert_eq!(rust_caps.bits(), raw_caps);
+        assert_eq!(CapabilitySetting::from(rust_caps).to_raw(), raw_caps);
+    }
+    assert_eq!(
+        CapabilitySetting::FromOwner.to_raw(),
+        ffi::GIT_INDEX_CAPABILITY_FROM_OWNER
+    );
+}
+
+/// Repeatedly apply typed and raw capability values to independent indexes,
+/// comparing state after each call. Index methods consuming these enums are a
+/// later symbol batch; this test uses the raw boundary only to observe C.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn scalar_capabilities_c_state_sequence() {
+    use libgit2::libgit2::index::index::{Capabilities, CapabilitySetting};
+
+    let typed = Index::new().unwrap();
+    let reference = Index::new().unwrap();
+    for bits in [0, 7, 1, 2, 3, 4, 5, 6, 0] {
+        let setting = CapabilitySetting::from(Capabilities::from_bits(bits).unwrap());
+        // SAFETY: two distinct live indexes, exclusively owned for these calls.
+        let (a, b) = unsafe {
+            (
+                ffi::git_index_set_caps(typed.as_c_ptr(), setting.to_raw()),
+                ffi::git_index_set_caps(reference.as_c_ptr(), bits),
+            )
+        };
+        assert_eq!((a, b), (0, 0));
+        // SAFETY: both indexes remain live and unaliased; getters copy integers.
+        let (a, b) = unsafe {
+            (
+                ffi::git_index_caps(typed.as_c_ptr()),
+                ffi::git_index_caps(reference.as_c_ptr()),
+            )
+        };
+        assert_eq!((a, b), (bits, bits));
+        // Neither index has an owner. The command must fail without setting all
+        // bits or changing the previous explicit state.
+        // SAFETY: the same two live indexes; the sentinel is a valid C command.
+        let (a, b) = unsafe {
+            (
+                ffi::git_index_set_caps(typed.as_c_ptr(), CapabilitySetting::FromOwner.to_raw()),
+                ffi::git_index_set_caps(reference.as_c_ptr(), ffi::GIT_INDEX_CAPABILITY_FROM_OWNER),
+            )
+        };
+        assert_eq!((a, b), (-1, -1));
+        // SAFETY: both indexes are still live; failed setters do not free them.
+        let (a, b) = unsafe {
+            (
+                ffi::git_index_caps(typed.as_c_ptr()),
+                ffi::git_index_caps(reference.as_c_ptr()),
+            )
+        };
+        assert_eq!((a, b), (bits, bits));
+    }
+}
+
+/// The sentinel also reaches its successful owner-configuration branch. No
+/// index wrapper method is added by this type batch; C observes the typed value.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn scalar_capabilities_from_owner() {
+    use libgit2::libgit2::index::index::{Capabilities, CapabilitySetting};
+
+    let typed_repo = Repo::new("scalar-caps-typed");
+    let raw_repo = Repo::new("scalar-caps-raw");
+    // Convert to shared owners before the repositories retain their references.
+    let typed: IndexArc = Index::new().unwrap().into();
+    let raw: IndexArc = Index::new().unwrap().into();
+    typed_repo.set_index(typed.as_c_ptr());
+    raw_repo.set_index(raw.as_c_ptr());
+    for initial in [Capabilities::empty(), Capabilities::all()] {
+        // SAFETY: the live indexes and retaining repositories remain on this
+        // thread, without simultaneous access or borrowed index contents.
+        unsafe {
+            assert_eq!(ffi::git_index_set_caps(typed.as_c_ptr(), initial.bits()), 0);
+            assert_eq!(ffi::git_index_set_caps(raw.as_c_ptr(), initial.bits()), 0);
+            assert_eq!(
+                ffi::git_index_set_caps(typed.as_c_ptr(), CapabilitySetting::FromOwner.to_raw()),
+                0
+            );
+            assert_eq!(
+                ffi::git_index_set_caps(raw.as_c_ptr(), ffi::GIT_INDEX_CAPABILITY_FROM_OWNER),
+                0
+            );
+            let actual = ffi::git_index_caps(typed.as_c_ptr());
+            assert_eq!(actual, ffi::git_index_caps(raw.as_c_ptr()));
+            assert!(Capabilities::from_bits(actual).is_some());
+        }
+    }
+}
