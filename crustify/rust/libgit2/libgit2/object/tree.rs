@@ -1401,6 +1401,25 @@ impl<'a, 'r> TreeBuilderRef<'a, 'r> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// The repository the builder was built for, where it looks objects up and writes
+    /// its trees. libgit2 publishes no accessor: this reads `git_treebuilder`'s first
+    /// member, `git_repository *repo` (`src/libgit2/tree.h`), which `git_treebuilder_new`
+    /// sets and nothing changes afterwards.
+    pub(crate) fn repository(&self) -> RepositoryRef<'r> {
+        let repo = self.as_ptr().cast::<*mut ffi::git_repository>();
+        // SAFETY: the handle addresses a live builder, whose private struct starts with
+        // its `repo` pointer (`struct git_treebuilder` in `src/libgit2/tree.h`, the
+        // revision this crate links), aligned as a pointer; libgit2 writes it only when
+        // building the builder, so the read races with nothing.
+        let repo = unsafe { repo.read() };
+        // SAFETY: a `TreeBuilder<'r>` is only built from a `RepositoryRef<'r>`
+        // (`TreeBuilder::new`, `TreeBuilder::from_tree`), whose repository libgit2 stores
+        // uncounted (`git_treebuilder_new` refuses NULL): it is live, shared and used on
+        // this thread for `'r`, so the handle returned is the one the builder was built
+        // from.
+        unsafe { RepositoryRef::from_ptr(repo) }.expect("a builder always has a repository")
+    }
 }
 
 impl<'a, 'r> TreeBuilderMut<'a, 'r> {
@@ -1608,8 +1627,17 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     ///   `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`, when turned off, skips the lookup for
     ///   every mode.
     ///
-    /// The id is stored as it is, so an id of another type than the repository's makes
-    /// the builder write a malformed tree, as libgit2 does.
+    /// An id of another type than the repository's is refused before libgit2 looks it
+    /// up, with code `-1` and libgit2's `GIT_ERROR_INVALID` error "specified object ID
+    /// type does not match repository object ID type": the object database's loose
+    /// backend would format it into a path sized for the repository's type, out of
+    /// bounds for a SHA-256 id in a SHA-1 repository (see the
+    /// [`object` module](crate::libgit2::object::object#looking-objects-up)). The refusal
+    /// comes after libgit2's own checks of the mode and the zero id, which run first,
+    /// but before its check of the name. A [`FileMode::Commit`] entry's id is never
+    /// looked up, and is stored as it is, so one of another type makes the builder
+    /// write a malformed tree, as libgit2 does; so is any id libgit2 would not look up
+    /// with strict object creation turned off, which the wrapper refuses all the same.
     ///
     /// Fails, with a `GIT_ERROR_INVALID` error "tree entry path too long", for a `name`
     /// of more than 65535 bytes, which a tree cannot store. libgit2 accepts one, sets
@@ -1650,13 +1678,18 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
             set(ErrorClass::Invalid, c"tree entry path too long");
             return Err(last());
         }
+        if !matches!(mode, FileMode::Commit | FileMode::Unreadable) && !id.is_zero() {
+            // libgit2 looks the object up: its id must be of the repository's type.
+            id_fits(self.as_ref().repository(), id)?;
+        }
         let mut out = ptr::null();
         // SAFETY: `out` is a writable slot, set only on success; the exclusive handle's
         // pointer addresses a live builder that nothing else reaches meanwhile, whose
         // repository is live for `'r` and used on this thread only, as `RepositoryRef`
         // allows, where libgit2 looks the object up; `name` is NUL-terminated and `id` a
         // live id, both copied; `mode` is a named file mode. A name of at most 65535
-        // bytes is stored whole.
+        // bytes is stored whole. An id libgit2 looks up (any mode but a commit's or an
+        // unreadable one, a non-zero id) is of the repository's type, checked above.
         let rc = unsafe {
             ffi::git_treebuilder_insert(
                 &mut out,
@@ -3737,6 +3770,35 @@ mod unit_tests {
             assert!(!callback.stopped());
             drop(callback);
             assert_eq!(calls, 1);
+        }
+
+        /// `repository` reads the repository a builder keeps from libgit2's private
+        /// struct: the very repository it was built for, empty or seeded, of either id
+        /// type. This pins the layout assumption (`repo` first in `struct
+        /// git_treebuilder`) the id-type check of `insert` rests on.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn builders_name_the_repository_they_were_built_for() {
+            let temp = TempRepo::new("builder-repo");
+            let repo = temp.repo();
+            let sha256 = Repository::with_oid_type(OidType::Sha256).unwrap();
+            for r in [repo.as_ref(), sha256.as_ref()] {
+                let builder = TreeBuilder::new(r).unwrap();
+                let kept = builder.as_ref().repository();
+                assert_eq!(kept.as_ptr(), r.as_ptr());
+                assert_eq!(kept.oid_type(), r.oid_type());
+            }
+            let empty = TreeBuilder::new(repo.as_ref())
+                .unwrap()
+                .as_mut()
+                .write()
+                .unwrap();
+            let tree = lookup(repo, &empty);
+            let seeded = TreeBuilder::from_tree(sha256.as_ref(), tree.as_ref()).unwrap();
+            assert_eq!(
+                seeded.as_ref().repository().as_ptr(),
+                sha256.as_ref().as_ptr()
+            );
         }
 
         /// The corrected divergence: libgit2 inserts a name of more than 65535 bytes,

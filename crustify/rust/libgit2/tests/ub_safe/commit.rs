@@ -599,8 +599,8 @@ mod commit {
 /// reading past them or after them). libgit2 reads the options for one call and keeps
 /// nothing: one test hands them to `git_commit_create_ext`, its strings and headers on
 /// the heap, freed right after the call (ASan, BSan: a retained pointer). Options that
-/// outlive their borrows, aliased handles and the raw seam without `unsafe` do not
-/// compile (`compile_fail/` and the type's doctests). The options are neither `Send`
+/// outlive their borrows, aliased handles and a signer that does not outlive the options
+/// do not compile (`compile_fail/` and the type's doctests). The options are neither `Send`
 /// nor `Sync`, so there is no thread test. `CreateExtOptions::new` fills the options
 /// through libgit2, so Miri skips every test here; the module's `unit_tests` run the
 /// same projections under Miri over options built in Rust.

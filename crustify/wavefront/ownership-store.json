@@ -11850,7 +11850,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "Asserted non-NULL; zero id refused; looked up in the ODB unless mode is COMMIT or strict object creation is off; copied by value (git_oid_cpy), not retained."
+      "note": "Asserted non-NULL; zero id refused; copied by value (git_oid_cpy), not retained. Unless the mode is COMMIT (or invalid, refused first) or strict object creation is off, looked up in the ODB (git_object__is_valid -> git_odb_read_header) WITHOUT checking that its type is the repository's: the loose backend's object_file_name sizes the path for bld->repo's oid type but git_oid_pathfmt writes the id's own hex size, so a SHA-256 id in a SHA-1 repository writes 24 bytes past the git_str (ASan heap-buffer-overflow for objects paths under ~80 bytes), and a SHA-1 id in a SHA-256 repository leaves part of the path uninitialised. Callers must pass an id of the builder's repository type for looked-up modes; Rust refuses another type before FFI (id_fits against the builder's repo)."
      }
     }
    ]

@@ -1367,9 +1367,10 @@ mod create_ext_options {
 /// Each side has its own bare repository holding the empty tree, and runs one script:
 /// commits written unsigned and signed (default and custom fields, multi-line
 /// signatures, a parent), contents that do not parse, signed contents without a blank
-/// line, a missing tree; then every written commit's signature extracted under each
-/// field, from commits with no, one and two signature headers, from a blob and from a
-/// missing id. After every step the ids, the two buffers, or the codes, error classes
+/// line (unparsable, and parsable), a missing tree; then every written commit's
+/// signature extracted under each field (a newline among them, which matches the blank
+/// line before the message), from commits with no, one and two signature headers, from
+/// a blob and from a missing id. After every step the ids, the two buffers, or the codes, error classes
 /// and messages are compared.
 ///
 /// libgit2 matches the field as a prefix of each header line, so a header whose name
@@ -1621,6 +1622,20 @@ mod signatures {
                 Some(sig),
                 None,
             ),
+            // Contents that parse but have no blank line: signing them is malformed.
+            (
+                content(&[], "", "x")
+                    .split_once("\n\n")
+                    .unwrap()
+                    .0
+                    .to_owned()
+                    + "\n",
+                Some(sig),
+                None,
+            ),
+            // A message whose first line starts with a space and does not end: the
+            // field `\n` takes the blank line before it as a header, which is malformed.
+            (content(&[], "", " unterminated"), None, None),
             // A signature header whose continuation never ends: extracting it is malformed.
             (
                 content(&[], "", "x")
@@ -1674,6 +1689,7 @@ mod signatures {
                 Some("gpg"),
                 Some("gpgsig-sha256"),
                 Some("encoding"),
+                Some("\n"),
             ] {
                 let c_out = c_extract(&c, id, field);
                 found += usize::from(c_out.is_ok());
