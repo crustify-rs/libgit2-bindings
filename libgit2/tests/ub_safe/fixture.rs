@@ -959,6 +959,7 @@ pub mod index {
 
     use libgit2::ffi;
     use libgit2::libgit2::index::index::{IndexArc, IndexBox};
+    use libgit2::libgit2::oid::oid::Oid;
 
     use super::{CHILD, TempRepo};
 
@@ -1075,6 +1076,50 @@ pub mod index {
     pub fn write(index: &mut IndexBox) -> c_int {
         // SAFETY: the box's live index, borrowed exclusively.
         unsafe { ffi::git_index_write(index.as_c_ptr()) }
+    }
+
+    /// `git_index_reuc_add`, replacing any record for `path`; the status. Stands in
+    /// for the safe REUC add until the index symbol batch lands it.
+    pub fn add_reuc(index: &mut IndexBox, path: &CStr, modes: [c_int; 3], ids: [&Oid; 3]) -> c_int {
+        let ids = ids.map(|id| std::ptr::from_ref(id).cast::<ffi::git_oid>());
+        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live
+        // across the replacement free; `path` and each `Oid` (transparent over
+        // `git_oid`) are read and copied for the call.
+        unsafe {
+            ffi::git_index_reuc_add(
+                index.as_c_ptr(),
+                path.as_ptr(),
+                modes[0],
+                ids[0],
+                modes[1],
+                ids[1],
+                modes[2],
+                ids[2],
+            )
+        }
+    }
+
+    /// `git_index_reuc_remove`; the status. A stand-in, as [`add_reuc`].
+    pub fn remove_reuc(index: &mut IndexBox, position: usize) -> c_int {
+        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live.
+        unsafe { ffi::git_index_reuc_remove(index.as_c_ptr(), position) }
+    }
+
+    /// `git_index_reuc_clear`; the status. A stand-in, as [`add_reuc`].
+    pub fn clear_reuc(index: &mut IndexBox) -> c_int {
+        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live.
+        unsafe { ffi::git_index_reuc_clear(index.as_c_ptr()) }
+    }
+
+    /// `git_index_set_caps` with ignore-case on or off; the status.
+    pub fn set_ignore_case(index: &mut IndexBox, on: bool) -> c_int {
+        let caps = if on {
+            ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE as c_int
+        } else {
+            0
+        };
+        // SAFETY: the box's live index, borrowed exclusively; C re-sorts its vectors.
+        unsafe { ffi::git_index_set_caps(index.as_c_ptr(), caps) }
     }
 }
 

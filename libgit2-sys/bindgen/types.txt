@@ -109,6 +109,9 @@ git_index_stage_t
 # index wave 0 batch 3: opaque snapshot iterator and entry flag enum
 git_index_iterator
 git_index_entry_flag_t
+
+# index wave 1 batch 1: resolve-undo entry
+git_index_reuc_entry
 # Diff generator option flags (required by the raw options seam tests)
 git_diff_option_t
 
