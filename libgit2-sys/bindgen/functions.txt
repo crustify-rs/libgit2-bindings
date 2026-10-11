@@ -404,3 +404,8 @@ git_config_parse_path
 git_config_set_bool
 git_config_set_int64
 git_config_set_multivar
+
+# config wave 1 batch 2
+git_config_set_string
+git_config_set_writeorder
+git_config_snapshot

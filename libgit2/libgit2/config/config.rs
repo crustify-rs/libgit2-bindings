@@ -228,6 +228,110 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     }
 }
 
+impl ConfigRef<'_, '_> {
+    /// Copies the current entries into an independent, read-only configuration.
+    /// Neither this config nor its repository must outlive the result. Later
+    /// changes to the source do not change the snapshot. The result uses the
+    /// existing config release policy and remains thread-bound, like `Config`.
+    ///
+    /// Wraps: git_config_snapshot
+    pub fn snapshot(&self) -> Result<ConfigBox<'static>, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: this handle keeps the source and its repository live. `out` is
+        // a writable pointer slot. C copies entries synchronously, retaining no
+        // Rust borrow, and frees partial construction on failure.
+        let rc = unsafe { ffi::git_config_snapshot(&mut out, self.as_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success returns a fresh sole reference paired with
+        // git_config_free. Its backends own copied entries and never access the
+        // source/repository after construction, so the owner is `'static`.
+        unsafe { ConfigBox::from_c(out) }.ok_or_else(|| ConfigError::from_libgit2(-1))
+    }
+}
+
+impl ConfigMut<'_, '_> {
+    /// Sets a string in the first enabled, writable backend. Both strings are
+    /// borrowed only for this call; C copies the value. Empty and non-UTF-8
+    /// values are supported. Invalid names, non-unique keys, locked files and
+    /// configurations without a writer return C's code and copied error.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::Config;
+    /// let config = Config::new().unwrap();
+    /// config.as_ref().set_string(c"a.b", c"value");
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::Config;
+    /// let mut config = Config::new().unwrap();
+    /// let shared = config.as_ref();
+    /// config.as_mut().set_string(c"a.b", c"value");
+    /// let _ = shared.snapshot();
+    /// ```
+    ///
+    /// Wraps: git_config_set_string
+    pub fn set_string(&mut self, name: &CStr, value: &CStr) -> Result<(), ConfigError> {
+        // SAFETY: the exclusive handle permits mutation and keeps any repository
+        // the backend reads live. Both strings are nonnull and NUL-terminated;
+        // C reads/copies them during this call and retains neither pointer.
+        let rc =
+            unsafe { ffi::git_config_set_string(self.as_mut_ptr(), name.as_ptr(), value.as_ptr()) };
+        config_status(rc)
+    }
+
+    /// Enables writing only to the listed levels; an empty slice disables all
+    /// writers. Missing levels are ignored and duplicate levels use their first
+    /// index. C reads but does not retain or modify the slice.
+    ///
+    /// C assigns higher write priority to later indices. However, its cached
+    /// sorted-vector flag currently prevents re-sorting existing backends, so
+    /// their original order is retained. This wrapper preserves that behavior;
+    /// selecting a single level reliably selects that backend. This does not
+    /// change read priority or make read-only backends writable.
+    ///
+    /// Fails before calling C if the length is not less than `i32::MAX`, which
+    /// C requires to represent indices and safely compare priorities.
+    ///
+    /// Wraps: git_config_set_writeorder
+    pub fn set_write_order(&mut self, levels: &[ConfigLevel]) -> Result<(), ConfigError> {
+        validate_write_order_len(levels.len())?;
+        // SAFETY: exclusive config access, and a readable contiguous slice of
+        // transparent git_config_level_t wrappers. Despite its mutable C type,
+        // C only reads levels[0..len] and retains no pointer. For zero length C
+        // never dereferences levels; NULL represents that case explicitly.
+        let rc = unsafe {
+            let levels_ptr = if levels.is_empty() {
+                ptr::null_mut()
+            } else {
+                levels.as_ptr().cast::<ffi::git_config_level_t>().cast_mut()
+            };
+            ffi::git_config_set_writeorder(self.as_mut_ptr(), levels_ptr, levels.len())
+        };
+        config_status(rc)
+    }
+}
+
+fn config_status(rc: c_int) -> Result<(), ConfigError> {
+    if rc < 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_write_order_len(len: usize) -> Result<(), ConfigError> {
+    if len >= c_int::MAX as usize {
+        set(
+            ErrorClass::Invalid,
+            c"write order length must be less than INT_MAX",
+        );
+        return Err(ConfigError::from_libgit2(-1));
+    }
+    Ok(())
+}
+
 impl fmt::Debug for ConfigRef<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ConfigRef").field(&self.as_ptr()).finish()
@@ -1632,7 +1736,7 @@ mod unit_tests {
     use core::ffi::{CStr, c_int, c_void};
     use core::mem::size_of;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1656,7 +1760,109 @@ mod unit_tests {
         );
     }
 
+    #[test]
+    #[cfg_attr(miri, ignore = "error reporting calls libgit2")]
+    fn write_order_length_is_checked_before_ffi() {
+        for len in [0, 1, c_int::MAX as usize - 1] {
+            assert!(validate_write_order_len(len).is_ok());
+        }
+        for len in [c_int::MAX as usize, c_int::MAX as usize + 1, usize::MAX] {
+            let error = validate_write_order_len(len).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Generic));
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(
+                error.message(),
+                c"write order length must be less than INT_MAX"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn snapshot_allocation_failure_leaves_source_live() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::snapshot_allocation_failure_leaves_source_live"
+            ),
+            || {
+                install_refusing();
+                let source = Config::new().unwrap();
+                assert_eq!(get(source.as_ref(), c"a.b"), Err(ErrorCode::NotFound.raw()));
+                REFUSING.store(true, SeqCst);
+                let error = source.as_ref().snapshot().unwrap_err();
+                REFUSING.store(false, SeqCst);
+                assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                assert_eq!(get(source.as_ref(), c"a.b"), Err(ErrorCode::NotFound.raw()));
+                let snapshot = source.as_ref().snapshot().unwrap();
+                drop(source);
+                assert_eq!(
+                    get(snapshot.as_ref(), c"a.b"),
+                    Err(ErrorCode::NotFound.raw())
+                );
+            },
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn snapshot_backend_allocation_failure_releases_new_config() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::snapshot_backend_allocation_failure_releases_new_config"
+            ),
+            || {
+                install_refusing();
+                let mut source = Config::new().unwrap();
+                let path = std::env::temp_dir()
+                    .join(format!("crustify-snapshot-oom-{}", std::process::id()));
+                std::fs::write(&path, "[a]\n b = 12\n").unwrap();
+                let file = CString::new(path.to_str().unwrap()).unwrap();
+                source.as_mut().add_file_ondisk(&file, ConfigLevel::LOCAL, None, false).unwrap();
+                assert_eq!(get(source.as_ref(), c"a.b"), Ok(12));
+                // Prime TLS error storage before refusing allocations. The fresh
+                // output config and its two vectors need three allocations; the
+                // next (the backend snapshot) fails. Partial ownership stays C's.
+                assert_eq!(
+                    get(source.as_ref(), c"a.missing"),
+                    Err(ErrorCode::NotFound.raw())
+                );
+                ALLOWED_ALLOCATIONS.store(3, SeqCst);
+                let error = source.as_ref().snapshot().unwrap_err();
+                ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
+                assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                assert_eq!(get(source.as_ref(), c"a.b"), Ok(12));
+                let snapshot = source.as_ref().snapshot().unwrap();
+                drop(source);
+                assert_eq!(get(snapshot.as_ref(), c"a.b"), Ok(12));
+                drop(snapshot);
+                std::fs::remove_file(path).unwrap();
+            },
+        );
+    }
+
     static REFUSING: AtomicBool = AtomicBool::new(false);
+    static ALLOWED_ALLOCATIONS: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+    fn refuse_allocation() -> bool {
+        if REFUSING.load(SeqCst) {
+            return true;
+        }
+        let mut remaining = ALLOWED_ALLOCATIONS.load(SeqCst);
+        loop {
+            if remaining == usize::MAX {
+                return false;
+            }
+            if remaining == 0 {
+                return true;
+            }
+            match ALLOWED_ALLOCATIONS.compare_exchange(remaining, remaining - 1, SeqCst, SeqCst) {
+                Ok(_) => return false,
+                Err(current) => remaining = current,
+            }
+        }
+    }
 
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
@@ -1670,7 +1876,7 @@ mod unit_tests {
     // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
     unsafe impl Alloc for Refusing {
         fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
-            if REFUSING.load(SeqCst) {
+            if refuse_allocation() {
                 return None;
             }
             // SAFETY: plain libc allocation.
@@ -1682,7 +1888,7 @@ mod unit_tests {
             _: Option<&CStr>,
             _: i32,
         ) -> Option<NonNull<u8>> {
-            if REFUSING.load(SeqCst) {
+            if refuse_allocation() {
                 return None;
             }
             let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
@@ -1710,11 +1916,7 @@ mod unit_tests {
 
     /// `git_config_get_int32` on `config`: the value, or the return code.
     fn get(config: ConfigRef<'_, '_>, name: &CStr) -> Result<i32, c_int> {
-        let mut value = 0;
-        // SAFETY: `config` is live for the call, which only reads it; `value` is a
-        // writable slot and `name` NUL-terminated.
-        let rc = unsafe { ffi::git_config_get_int32(&mut value, config.as_ptr(), name.as_ptr()) };
-        if rc < 0 { Err(rc) } else { Ok(value) }
+        config.get_i32(name).map_err(|e| e.raw_code())
     }
 
     #[test]

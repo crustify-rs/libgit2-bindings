@@ -7143,6 +7143,33 @@
    ]
   },
   {
+   "name": "git_config_entry_free",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "entry",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_find_global",
    "defined_in": "src/libgit2/config.c",
    "ptr_args": [
@@ -7207,33 +7234,6 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
-     }
-    }
-   ]
-  },
-  {
-   "name": "git_config_entry_free",
-   "defined_in": "src/libgit2/config.c",
-   "lifetime": {
-    "for": "entry",
-    "is_dropper": true,
-    "is_disposer": false,
-    "is_cloner": null,
-    "is_constructor": null
-   },
-   "ptr_args": [
-    {
-     "name": "entry",
-     "ptr": {
-      "scalar": {
-       "by_val": true
-      },
-      "array": null,
-      "string": false,
-      "owned": true,
-      "borrowed": null,
-      "nullable": true,
-      "mutable": true
      }
     }
    ]
@@ -7317,6 +7317,71 @@
       "nullable": false,
       "mutable": true,
       "note": "Borrowed for this call; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_entry",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true
      }
     }
    ]
@@ -7597,71 +7662,6 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
-     }
-    }
-   ]
-  },
-  {
-   "name": "git_config_get_entry",
-   "defined_in": "src/libgit2/config.c",
-   "lifetime": {
-    "for": "out",
-    "is_dropper": false,
-    "is_disposer": false,
-    "is_cloner": null,
-    "is_constructor": {
-     "alloc": true,
-     "init": false
-    }
-   },
-   "ptr_args": [
-    {
-     "name": "config",
-     "ptr": {
-      "scalar": {
-       "by_val": true
-      },
-      "array": null,
-      "string": false,
-      "owned": false,
-      "borrowed": {
-       "lifetime": "call"
-      },
-      "nullable": false,
-      "mutable": false
-     }
-    },
-    {
-     "name": "name",
-     "ptr": {
-      "scalar": null,
-      "array": null,
-      "string": true,
-      "owned": false,
-      "borrowed": {
-       "lifetime": "call"
-      },
-      "nullable": false,
-      "mutable": false
-     }
-    },
-    {
-     "name": "out",
-     "ptr": {
-      "scalar": {
-       "by_ref": {
-        "owned": true,
-        "borrowed": null
-       }
-      },
-      "array": null,
-      "string": false,
-      "owned": false,
-      "borrowed": {
-       "lifetime": "call"
-      },
-      "nullable": false,
-      "mutable": true
      }
     }
    ]
@@ -8284,6 +8284,152 @@
       "nullable": false,
       "mutable": false,
       "note": "NUL-terminated string borrowed for call and copied when backend retains its contents."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_string",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed config; backend writes entries and file and clears repository owner cache on success. No refcount change; repository must remain live."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Nonnull NUL string read by backend normalization and error formatting; not retained. Callers pass keys freed after call."
+     }
+    },
+    {
+     "name": "value",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:value"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL returns -1 before accessing config. Nonnull NUL string copied/escaped by file backend; memory and snapshot backends reject writes; never retained. Rust exposes only nonnull valid value form."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_set_writeorder",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Mutates backend entry write_order and sorts writer vector; no transfer or refcount change. Existing sorted flag prevents actual re-sort (observed C bug)."
+     }
+    },
+    {
+     "name": "levels",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:levels"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read-only despite nonconst signature: len inline config levels, len < INT_MAX. NULL valid only with len=0 (or no readers); no pointer retained, freed or written. Arbitrary integers compare for equality only."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_snapshot",
+   "defined_in": "src/libgit2/config.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "in",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:in"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Source is borrowed for synchronous snapshot/open/iteration; built-in backends may refresh internal cache but no Rust references cover C storage. Snapshot stores source pointer for construction only; open copies entries, later getter/iterator/free never access source or repo. Snapshot-of-snapshot copies its own list; output independent and repository-free. Backend iterator can refresh C-owned caches; logical shared snapshot access uses interior C mutation, with no Rust reference to C bytes and no Send/Sync."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "One writable out slot: initially NULL; success transfers sole reference to newly allocated config with copied backend lists/entries; git_config_free releases it. Failure frees partial construction."
      }
     }
    ]

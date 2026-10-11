@@ -745,3 +745,171 @@ mod file_access {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+// Constructs through the safe config and backend APIs now available at this wave tip.
+fn string_file_config(tag: &str) -> (ConfigBox<'static>, std::ffi::CString) {
+    let mut config = Config::new().unwrap();
+    let file = scratch(tag);
+    config
+        .as_mut()
+        .add_file_ondisk(
+            &file,
+            libgit2::libgit2::config::config::ConfigLevel::LOCAL,
+            None,
+            false,
+        )
+        .unwrap();
+    (config, file)
+}
+
+#[forbid(unsafe_code)]
+mod writes_and_snapshots {
+    use super::*;
+    use libgit2::libgit2::config::config::ConfigLevel;
+    use libgit2::libgit2::config::config::ConfigRef;
+    use std::ffi::{CStr, CString};
+
+    fn number(config: ConfigRef<'_, '_>, name: &CStr) -> Result<i32, i32> {
+        config.get_i32(name).map_err(|e| e.raw_code())
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn string_inputs_and_order_slices_are_not_retained() {
+        let (mut config, file) = string_file_config("strings-not-retained");
+        let mut name = CString::new("a.b").unwrap();
+        let mut value = CString::new("123").unwrap();
+        let mut levels = vec![
+            ConfigLevel::LOCAL,
+            ConfigLevel::LOCAL,
+            ConfigLevel::from_raw(i32::MIN),
+        ];
+        let mut m = config.as_mut();
+        m.set_write_order(&levels).unwrap();
+        levels.clear();
+        levels.shrink_to_fit();
+        m.as_mut().set_string(&name, &value).unwrap();
+        name = CString::new("other.name").unwrap();
+        value = CString::new("999").unwrap();
+        assert_eq!(number(config.as_ref(), c"a.b"), Ok(123));
+        drop((name, value, levels));
+        for value in [c"", c"  spaces # ; quotes \" slash \\ \n", c"\xff"] {
+            config.as_mut().set_string(c"a.text", value).unwrap();
+            config.as_mut().set_string(c"a.text", value).unwrap();
+        }
+        config.as_mut().set_write_order(&[]).unwrap();
+        let error = config.as_mut().set_string(c"a.b", c"7").unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::ReadOnly));
+        let copy = error.clone();
+        config
+            .as_mut()
+            .set_write_order(&[ConfigLevel::LOCAL])
+            .unwrap();
+        config.as_mut().set_string(c"a.b", c"456").unwrap();
+        assert_eq!(number(config.as_ref(), c"a.b"), Ok(456));
+        drop(config);
+        assert_eq!(error, copy);
+        std::fs::remove_file(file.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn snapshot_copies_survive_source_and_repository_drop() {
+        let empty = Config::new().unwrap();
+        let mut snapshot = empty.as_ref().snapshot().unwrap();
+        drop(empty);
+        assert_eq!(
+            snapshot
+                .as_mut()
+                .set_string(c"a.b", c"1")
+                .unwrap_err()
+                .code(),
+            Some(ErrorCode::ReadOnly)
+        );
+        let (mut source, file) = string_file_config("snapshot-independent");
+        source.as_mut().set_string(c"a.b", c"12").unwrap();
+        let mut first = source.as_mut().as_ref().snapshot().unwrap();
+        source.as_mut().set_string(c"a.b", c"34").unwrap();
+        let shared = ConfigArc::from(source);
+        let second = shared.as_ref().snapshot().unwrap();
+        drop(shared);
+        assert_eq!(number(first.as_ref(), c"a.b"), Ok(12));
+        assert_eq!(number(second.as_ref(), c"a.b"), Ok(34));
+        first
+            .as_mut()
+            .set_write_order(&[ConfigLevel::LOCAL])
+            .unwrap();
+        assert_eq!(
+            first.as_mut().set_string(c"a.b", c"56").unwrap_err().code(),
+            Some(ErrorCode::ReadOnly)
+        );
+        let third = first.as_ref().snapshot().unwrap();
+        drop(first);
+        assert_eq!(number(third.as_ref(), c"a.b"), Ok(12));
+        std::fs::remove_file(file.to_str().unwrap()).unwrap();
+        let path = CString::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git"
+        ))
+        .unwrap();
+        let repo = Repository::open(&path).unwrap();
+        let config = repo.as_ref().config().unwrap();
+        let snapshot = config.as_ref().snapshot().unwrap();
+        drop(config);
+        drop(repo);
+        assert_eq!(
+            number(snapshot.as_ref(), c"core.repositoryformatversion"),
+            Ok(0)
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn multivar_and_locked_file_failures_leave_owned_errors() {
+        let (mut writer, file) = string_file_config("write-failures");
+        std::fs::write(file.to_str().unwrap(), "[a]\n b = 1\n b = 2\n").unwrap();
+        // A lookup refreshes the file backend cache after an external edit.
+        assert!(number(writer.as_ref(), c"a.b").is_ok());
+        let duplicate = writer.as_mut().set_string(c"a.b", c"3").unwrap_err();
+        assert_eq!(
+            duplicate.message(),
+            c"entry is not unique due to being a multivar"
+        );
+        let mut blocker = Config::new().unwrap();
+        blocker
+            .as_mut()
+            .add_file_ondisk(&file, ConfigLevel::LOCAL, None, false)
+            .unwrap();
+        let lock = blocker.as_mut().lock().unwrap();
+        let locked = writer.as_mut().set_string(c"a.unique", c"3").unwrap_err();
+        assert_eq!(locked.code(), Some(ErrorCode::Locked));
+        drop(lock);
+        drop(blocker);
+        writer.as_mut().set_string(c"a.unique", c"3").unwrap();
+        drop(writer);
+        assert_eq!(
+            duplicate.message(),
+            c"entry is not unique due to being a multivar"
+        );
+        assert_eq!(locked.code(), Some(ErrorCode::Locked));
+        std::fs::remove_file(file.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn independent_writes_and_snapshots_on_threads() {
+        thread::scope(|s| {
+            for worker in 0..4 {
+                s.spawn(move || {
+                    let (mut source, file) = string_file_config(&format!("thread-{worker}"));
+                    source.as_mut().set_string(c"a.b", c"123").unwrap();
+                    let snapshot = source.as_ref().snapshot().unwrap();
+                    drop(source);
+                    assert_eq!(number(snapshot.as_ref(), c"a.b"), Ok(123));
+                    drop(snapshot);
+                    std::fs::remove_file(file.to_str().unwrap()).unwrap();
+                });
+            }
+        });
+    }
+}
