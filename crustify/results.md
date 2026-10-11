@@ -18,7 +18,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **`--min-fields`** — `20`
 - **orchestrator parallelism** — `10` concurrent batch processes through `libgit2/core`; `16` from `libgit2/repository`
 - **branch** — `crustify/campaigns/20261008-170008`, tip `<sha>`
-- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `scan-unsafe` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; every recorded `scan-unsafe` from `4771856`), ffibox `695d52d` (`main`)
+- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `scan-unsafe` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; every batch and wave `scan-unsafe` from `4771856`, the sub-campaign and campaign scans from `cbf6fbc`), ffibox `695d52d` (`main`)
 - **build version** — `1`
 - **C test baseline** — `3443/3498, 55 skipped, and ctest targets invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online, online_customcert, proxy, auth_clone, auth_clone_and_push disabled`
 
@@ -551,63 +551,71 @@ Deterministic `crustify scan-unsafe <workdir>`; no model.
 
 ### Final tally overview
 
-| | final (`<sha>`) |
+| | final (`a26547a6d`) |
 |---|---|
-| unsafe loc | `<n>` |
-| % of loc | `<n>`% |
-| blocks | `<n>` |
-| % in `impl T` | `<n>`% |
-| `unsafe fn` | `<n>` |
-| ...of which not sanctioned | `<n>` |
-| raw-ptr smell | `<n>` |
-| void-ptr smell | `<n>` |
-| FFI calls | `<n>` |
-| `&`/`&mut` on a wrapper | `<n>` |
-| field proj outside an accessor | `<n>` |
+| unsafe loc | `2137` |
+| % of loc | `15.64`% |
+| blocks | `1313` |
+| % in `impl T` | `71.97`% |
+| `unsafe fn` | `254` |
+| ...of which not sanctioned | `59` |
+| raw-ptr smell | `25` |
+| void-ptr smell | `7` |
+| FFI calls | `435` |
+| `&`/`&mut` on a wrapper | `8` |
+| field proj outside an accessor | `4` |
 
 ### All metrics
 
-| metric | final (`<sha>`) | `<link-unit>/<subsystem>` (`<sha>`) | … |
-|---|---|---|---|
-| `code_lines` | `<n>` | `<n>` | … |
-| `total_stmts` | `<n>` | `<n>` | … |
-| `unsafe_blocks` | `<n>` | `<n>` | … |
-| `unsafe_block_stmts` | `<n>` | `<n>` | … |
-| `unsafe_block_lines` | `<n>` | `<n>` | … |
-| `unsafe_block_code_lines` | `<n>` | `<n>` | … |
-| `unsafe_blocks_wrapper_impl` | `<n>` | `<n>` | … |
-| `unsafe_blocks_ffi_export` | `<n>` | `<n>` | … |
-| `unsafe_fns` | `<n>` | `<n>` | … |
-| `unsafe_fns_seam` | `<n>` | `<n>` | … |
-| **`unsafe fn` smell** | **`<n>`** | `<n>` | … |
-| `unsafe_fns_pub_smell` | `<n>` | `<n>` | … |
-| `unsafe_fns_priv_smell` | `<n>` | `<n>` | … |
-| `unsafe_impls` / `unsafe_traits` | `<n>` / `<n>` | `<n>` / `<n>` | … |
-| `ffi_calls` | `<n>` | `<n>` | … |
-| `wrapper_newtypes` | `<n>` | `<n>` | … |
-| `wrapper_newtypes_declared` | `<n>` | `<n>` | … |
-| `wrapper_declared_nonconformant` | `<n>` | `<n>` | … |
-| `wrapper_newtypes_undeclared` | `<n>` | `<n>` | … |
-| `raw_ptr_args` | `<n>` | `<n>` | … |
-| `raw_ptr_rets` | `<n>` | `<n>` | … |
-| `raw_ptr_fields` | `<n>` | `<n>` | … |
-| **total positions** | **`<n>`** | `<n>` | … |
-| `raw_ptr_seam` | `<n>` | `<n>` | … |
-| `raw_ptr_pub_smell` | `<n>` | `<n>` | … |
-| `raw_ptr_priv_smell` | `<n>` | `<n>` | … |
-| **smell (total − seam)** | **`<n>`** | `<n>` | … |
-| `raw_ptr_wrapped` | `<n>` | `<n>` | … |
-| `raw_ptr_derefs` | `<n>` | `<n>` | … |
-| `ref_to_type_wrapper_sanctioned` | `<n>` | `<n>` | … |
-| `ref_to_type_wrapper_smell` | `<n>` | `<n>` | … |
-| `ref_to_type_wrapper_body_smell` | `<n>` | `<n>` | … |
-| `deref_impl_on_wrapper` | `<n>` | `<n>` | … |
-| `field_proj_wrapped` | `<n>` | `<n>` | … |
-| `field_proj_outside_impl` | `<n>` | `<n>` | … |
-| `field_ref_wrapped` | `<n>` | `<n>` | … |
-| `void_ptr_seam` | `<n>` | `<n>` | … |
-| `void_ptr_pub_smell` | `<n>` | `<n>` | … |
-| `void_ptr_priv_smell` | `<n>` | `<n>` | … |
+| metric | final (`a26547a6d`) | `raw-lifetime-void` (`99533715f`) | `raw-lifetime-string` (`3830c3c3d`) | `libgit2/util` (`6993f6bcd`) | `libgit2/oid` (`2752d23f4`) | `libgit2/core` (`bde2697ad`) | `libgit2/repository` (`e2e2a7473`) | `libgit2/object` (`8faffad69`) | `libgit2/config` (`6afdb3b46`) |
+|---|---|---|---|---|---|---|---|---|---|
+| `code_lines` | `13666` | `92` | `239` | `571` | `1106` | `3209` | `6735` | `11421` | `13666` |
+| `total_stmts` | `3318` | `29` | `71` | `248` | `378` | `794` | `1647` | `2806` | `3318` |
+| `unsafe_blocks` | `1313` | `12` | `30` | `64` | `117` | `312` | `642` | `1081` | `1313` |
+| `unsafe_block_stmts` | `79` | `0` | `0` | `0` | `9` | `18` | `40` | `72` | `79` |
+| `unsafe_block_lines` | `2183` | `12` | `30` | `64` | `150` | `436` | `922` | `1832` | `2183` |
+| `unsafe_block_code_lines` | `2137` | `12` | `30` | `62` | `146` | `412` | `884` | `1789` | `2137` |
+| `unsafe_blocks_wrapper_impl` | `945` | `0` | `11` | `30` | `78` | `157` | `435` | `758` | `945` |
+| `unsafe_blocks_ffi_export` | `76` | `0` | `0` | `4` | `4` | `9` | `16` | `37` | `76` |
+| `unsafe_fns` | `254` | `6` | `12` | `22` | `30` | `101` | `152` | `206` | `254` |
+| `unsafe_fns_seam` | `195` | `3` | `6` | `15` | `23` | `48` | `93` | `148` | `195` |
+| `unsafe_fns_pub_seam` | `49` | `3` | `6` | `6` | `8` | `14` | `26` | `44` | `49` |
+| `unsafe_fns_priv_seam` | `146` | `0` | `0` | `9` | `15` | `34` | `67` | `104` | `146` |
+| **`unsafe fn` smell** | **`59`** | `3` | `6` | `7` | `7` | `53` | `59` | `58` | `59` |
+| `unsafe_fns_pub_smell` | `42` | `0` | `1` | `1` | `1` | `36` | `42` | `41` | `42` |
+| `unsafe_fns_priv_smell` | `17` | `3` | `5` | `6` | `6` | `17` | `17` | `17` | `17` |
+| `fns_pub` | `1207` | `7` | `23` | `58` | `111` | `335` | `676` | `1037` | `1207` |
+| `fns_priv` | `474` | `6` | `12` | `30` | `50` | `112` | `224` | `362` | `474` |
+| `unsafe_impls` / `unsafe_traits` | `241` / `1` | `5` / `0` | `7` / `0` | `15` / `1` | `35` / `1` | `76` / `1` | `140` / `1` | `213` / `1` | `241` / `1` |
+| `ffi_calls` | `435` | `3` | `3` | `10` | `29` | `76` | `203` | `380` | `435` |
+| `wrapper_newtypes` | `60` | `0` | `1` | `3` | `6` | `12` | `27` | `45` | `60` |
+| `wrapper_newtypes_declared` | `52` | `0` | `0` | `2` | `5` | `10` | `25` | `43` | `52` |
+| `wrapper_declared_nonconformant` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `wrapper_newtypes_undeclared` | `8` | `0` | `1` | `1` | `1` | `2` | `2` | `2` | `8` |
+| `raw_ptr_args` | `200` | `5` | `8` | `19` | `25` | `49` | `91` | `142` | `200` |
+| `raw_ptr_rets` | `172` | `2` | `6` | `16` | `26` | `49` | `99` | `143` | `172` |
+| `raw_ptr_fields` | `1` | `0` | `0` | `0` | `0` | `1` | `2` | `1` | `1` |
+| **total positions** | **`373`** | `7` | `14` | `35` | `51` | `99` | `192` | `286` | `373` |
+| `raw_ptr_seam` | `348` | `2` | `5` | `25` | `41` | `81` | `163` | `261` | `348` |
+| `raw_ptr_pub_seam` | `5` | `2` | `5` | `5` | `5` | `5` | `5` | `5` | `5` |
+| `raw_ptr_priv_seam` | `343` | `0` | `0` | `20` | `36` | `76` | `158` | `256` | `343` |
+| `raw_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `9` | `6` | `6` |
+| `raw_ptr_priv_smell` | `19` | `5` | `9` | `10` | `10` | `18` | `20` | `19` | `19` |
+| `raw_ptr_pub` | `11` | `2` | `5` | `5` | `5` | `5` | `14` | `11` | `11` |
+| `raw_ptr_priv` | `362` | `5` | `9` | `30` | `46` | `94` | `178` | `275` | `362` |
+| **smell (total − seam)** | **`25`** | `5` | `9` | `10` | `10` | `18` | `29` | `25` | `25` |
+| `raw_ptr_wrapped` | `5` | `0` | `0` | `0` | `0` | `5` | `5` | `5` | `5` |
+| `raw_ptr_derefs` | `311` | `0` | `0` | `8` | `26` | `65` | `152` | `243` | `311` |
+| `ref_to_type_wrapper_sanctioned` | `134` | `0` | `2` | `8` | `21` | `36` | `70` | `110` | `134` |
+| `ref_to_type_wrapper_smell` | `8` | `0` | `8` | `8` | `8` | `8` | `8` | `8` | `8` |
+| `ref_to_type_wrapper_body_smell` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `deref_impl_on_wrapper` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `field_proj_wrapped` | `285` | `0` | `0` | `8` | `26` | `60` | `144` | `227` | `285` |
+| `field_proj_outside_impl` | `4` | `0` | `0` | `0` | `0` | `4` | `4` | `4` | `4` |
+| `field_ref_wrapped` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `void_ptr_seam` | `89` | `0` | `0` | `10` | `16` | `31` | `55` | `73` | `89` |
+| `void_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `6` | `6` | `6` |
+| `void_ptr_priv_smell` | `1` | `0` | `0` | `0` | `0` | `0` | `1` | `1` | `1` |
 
 ## Notes
 
@@ -864,6 +872,25 @@ smell deltas in the batch tables were recomputed from the same scanner, which mo
 `libgit2/oid` wave 0 batch 0 and wave 1 batch 0 from `+1` to `+0` `unsafe fn` smell; no other earlier row
 changed.
 
+
+### Safety audit columns and `cbf6fbc` counters
+
+Crustify `cbf6fbc` added eight `scan-unsafe` counters, all split by effective visibility:
+`unsafe_fns_pub_seam`/`_priv_seam`, `raw_ptr_pub_seam`/`_priv_seam`, `raw_ptr_pub`/`_priv`
+and `fns_pub`/`fns_priv`. It changed no existing counter. The campaign scan and every
+sub-campaign scan were rerun with it, and the batch and wave scans, whose counters it left
+unchanged, were not. The rerun matched every earlier value. Each All-metrics column is the
+crate-wide scan at that sub-campaign's end, so the columns accumulate left to right. `final`
+is the campaign tip. `libgit2/config` is scanned at its tip after the export revert and the
+`git_config_backend` follow-up, so it equals `final`.
+
+In the Final tally, `unsafe loc` is `unsafe_block_code_lines` and `% of loc` is
+`unsafe_loc_ratio`. `% in impl T` is `unsafe_blocks_wrapper_impl` over `unsafe_blocks`, and
+`...of which not sanctioned` is `unsafe_fn_smell`. `void-ptr smell` sums the public and
+private `void *` smells. `&`/`&mut` on a wrapper sums `ref_to_type_wrapper_smell` and
+`ref_to_type_wrapper_body_smell`, and `field proj outside an accessor` is
+`field_proj_outside_impl`. The 8 wrapper-reference smells have stood since
+`raw-lifetime-string`, and the 4 outside-accessor projections since `libgit2/core`.
 ### Parallelism and review caps from `libgit2/repository`
 
 Before `libgit2/repository` the operator raised the batch parallelism from orchestrator's
