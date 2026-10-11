@@ -987,4 +987,155 @@ mod backends {
         assert_eq!(raw.cfg.is_null(), rust.as_ref().config_identity().is_none());
         assert!(raw.open.is_none() && raw.free.is_none());
     }
+
+    /// A writable C-ABI backend whose `get` forwards to an opened memory backend.
+    /// It implements no `snapshot`, so only its own `get` slot can answer.
+    #[repr(C)]
+    struct Writable {
+        base: ffi::git_config_backend,
+        inner: *mut ffi::git_config_backend,
+    }
+
+    impl Writable {
+        unsafe extern "C" fn get(
+            p: *mut ffi::git_config_backend,
+            key: *const std::ffi::c_char,
+            out: *mut *mut ffi::git_config_backend_entry,
+        ) -> i32 {
+            // SAFETY: installed only on complete Writable boxes; inner is opened,
+            // owned by this allocation, and its get acquires a retained entry.
+            unsafe {
+                let inner = (*p.cast::<Self>()).inner;
+                ((*inner).get.unwrap())(inner, key, out)
+            }
+        }
+
+        unsafe extern "C" fn free(p: *mut ffi::git_config_backend) {
+            // SAFETY: called once with the sole owner of the Writable box, which
+            // uniquely owns inner.
+            unsafe {
+                let this = Box::from_raw(p.cast::<Self>());
+                ((*this.inner).free.unwrap())(this.inner);
+            }
+        }
+
+        fn allocate(data: &[u8]) -> *mut ffi::git_config_backend {
+            let inner = raw_string(data);
+            assert_eq!(raw_open(&inner, ConfigLevel::LOCAL), 0);
+            let base = ffi::git_config_backend {
+                version: ffi::GIT_CONFIG_BACKEND_VERSION,
+                readonly: 0,
+                get: Some(Self::get),
+                free: Some(Self::free),
+                ..Default::default()
+            };
+            let inner = std::mem::ManuallyDrop::new(inner).0;
+            Box::into_raw(Box::new(Self { base, inner })).cast()
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn writable_get_dispatches_its_own_slot_like_c() {
+        let _runtime = libgit2::libgit2::core::global::init().unwrap();
+        let data = b"[a]\nb = one\nb = two\nflag\n";
+        let raw = Raw(Writable::allocate(data));
+        // SAFETY: a complete, exclusively owned, opened allocation whose callbacks
+        // obey the public interface; the NULL slots are documented as permitted.
+        let mut rust = unsafe { BackendBox::from_c(Writable::allocate(data)) }.unwrap();
+        assert_eq!(rust.as_ref().readonly_raw(), 0);
+        for key in [c"a.b", c"a.flag", c"missing.key", c"a.b"] {
+            compare_get(&raw, &mut rust, key);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls C")]
+    fn backend_options_and_open_errors_match_c() {
+        let _runtime = libgit2::libgit2::core::global::init().unwrap();
+        let mut options = BackendMemoryOptions::new();
+        options.as_mut().set_backend_type(Some(c"command line"));
+        options.as_mut().set_origin_path(Some(c"origin"));
+        let mut raw_options = ffi::git_config_backend_memory_options {
+            version: ffi::GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION,
+            backend_type: c"command line".as_ptr(),
+            origin_path: c"origin".as_ptr(),
+        };
+        let values = [c"a.b=one", c"A.B=two", c"a.empty="];
+        let pointers: Vec<_> = values.iter().map(|v| v.as_ptr()).collect();
+        let mut out = ptr::null_mut();
+        // SAFETY: readable array, strings and options, writable out; C copies all.
+        let rc = unsafe {
+            ffi::git_config_backend_from_values(
+                &mut out,
+                pointers.as_ptr().cast_mut(),
+                pointers.len(),
+                &mut raw_options,
+            )
+        };
+        assert_eq!(rc, 0);
+        let raw = Raw(out);
+        assert_eq!(raw_open(&raw, ConfigLevel::WORKTREE), 0);
+        let mut rust = Backend::from_values(&values, Some(options.as_ref()))
+            .unwrap()
+            .open(ConfigLevel::WORKTREE)
+            .unwrap();
+        for key in [c"a.b", c"A.B", c"a.empty", c"missing.key"] {
+            compare_get(&raw, &mut rust, key);
+        }
+        compare_iterator(&raw, &mut rust);
+
+        let data = b"[a]\nb = one\n[sec \"Sub\"]\nKey = two\n";
+        let mut out = ptr::null_mut();
+        // SAFETY: readable bytes and options, writable out; C copies all input.
+        let rc = unsafe {
+            ffi::git_config_backend_from_string(
+                &mut out,
+                data.as_ptr().cast(),
+                data.len(),
+                &mut raw_options,
+            )
+        };
+        assert_eq!(rc, 0);
+        let raw = Raw(out);
+        assert_eq!(raw_open(&raw, ConfigLevel::SYSTEM), 0);
+        let mut rust = Backend::from_string(data, Some(options.as_ref()))
+            .unwrap()
+            .open(ConfigLevel::SYSTEM)
+            .unwrap();
+        for key in [c"a.b", c"sec.Sub.key", c"sec.sub.key"] {
+            compare_get(&raw, &mut rust, key);
+        }
+        compare_iterator(&raw, &mut rust);
+        // A snapshot of a snapshot, after its source is gone, on both sides.
+        let mut raw_first = ptr::null_mut();
+        // SAFETY: live exclusive source and writable out; opened right below.
+        let rc = unsafe { ((*raw.0).snapshot.unwrap())(&mut raw_first, raw.0) };
+        assert_eq!(rc, 0);
+        let raw_first = Raw(raw_first);
+        assert_eq!(raw_open(&raw_first, ConfigLevel::LOCAL), 0);
+        let mut raw_second = ptr::null_mut();
+        // SAFETY: as above, with the first snapshot as the live source.
+        let rc = unsafe { ((*raw_first.0).snapshot.unwrap())(&mut raw_second, raw_first.0) };
+        assert_eq!(rc, 0);
+        let raw_second = Raw(raw_second);
+        assert_eq!(raw_open(&raw_second, ConfigLevel::LOCAL), 0);
+        let mut first = rust.as_mut().snapshot().unwrap();
+        let mut second = first.as_mut().snapshot().unwrap();
+        drop((raw, rust, raw_first, first));
+        compare_get(&raw_second, &mut second, c"sec.Sub.key");
+        compare_iterator(&raw_second, &mut second);
+
+        // An empty key fails during open, with the same code and error.
+        let raw = raw_values(&[c"a.b=one", c"=x"]);
+        let rc = raw_open(&raw, ConfigLevel::LOCAL);
+        let c_error = libgit2::libgit2::util::errors::last();
+        let error = Backend::from_values(&[c"a.b=one", c"=x"], None)
+            .unwrap()
+            .open(ConfigLevel::LOCAL)
+            .unwrap_err();
+        assert!(rc < 0);
+        assert_eq!(rc, error.raw_code());
+        assert_eq!(&c_error, error.error());
+    }
 }

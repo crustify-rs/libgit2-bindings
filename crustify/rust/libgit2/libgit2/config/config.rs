@@ -2348,7 +2348,7 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
 }
 
 #[cfg(test)]
-mod unit_tests {
+pub(crate) mod unit_tests {
     use super::*;
     use crate::libgit2::util::errors::ErrorCode;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
@@ -2814,7 +2814,7 @@ mod unit_tests {
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
     /// Runs `body` alone in a child process, where nothing has initialised libgit2.
-    fn isolated(test: &str, body: fn()) {
+    pub(crate) fn isolated(test: &str, body: fn()) {
         let name = test.split_once("::").map_or(test, |(_, rest)| rest);
         if std::env::var(CHILD).as_deref() == Ok(name) {
             body();
@@ -2966,7 +2966,7 @@ mod unit_tests {
     }
 
     static REFUSING: AtomicBool = AtomicBool::new(false);
-    static ALLOWED_ALLOCATIONS: AtomicUsize = AtomicUsize::new(usize::MAX);
+    pub(crate) static ALLOWED_ALLOCATIONS: AtomicUsize = AtomicUsize::new(usize::MAX);
 
     fn refuse_allocation() -> bool {
         if REFUSING.load(SeqCst) {
@@ -3025,7 +3025,7 @@ mod unit_tests {
         }
     }
 
-    fn install_refusing() {
+    pub(crate) fn install_refusing() {
         let allocator = Allocator::new::<Refusing>();
         // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, with every
         // member set; libgit2 copies it before anything is allocated.
