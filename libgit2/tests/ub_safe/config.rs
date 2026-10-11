@@ -341,3 +341,88 @@ fn mapping_modes_are_checked() {
     assert_eq!(MapType::from_raw(4), None);
     assert_eq!(MapType::from_raw(u32::MAX), None);
 }
+
+
+#[forbid(unsafe_code)]
+mod entry_and_map_types {
+    use libgit2::libgit2::config::config::{Config, ConfigLevel, ConfigMap, EntryArc, MapMatch};
+    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::util::errors::ErrorCode;
+    use std::ffi::CString;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_retain_storage_across_parent_drop_and_refresh() {
+        let dir = std::env::temp_dir().join(format!("crustify-entry-b0-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = CString::new(dir.to_str().unwrap()).unwrap();
+        let repo = Repository::init(&path, false).unwrap();
+        let config_path = dir.join(".git/config");
+        std::fs::write(&config_path,
+            b"[core]\nrepositoryformatversion = 0\nbare = false\n[test]\nflag\nempty =\nvalue = first\n[include]\npath = extra\n").unwrap();
+        std::fs::write(dir.join(".git/extra"), b"[test]\nincluded = nested\n").unwrap();
+        let cfg = repo.as_ref().config().unwrap();
+        let first = cfg.as_ref().entry(c"TEST.value").unwrap();
+        let second = cfg.as_ref().entry(c"test.value").unwrap();
+        assert!(EntryArc::ptr_eq(&first, &second));
+        assert_eq!(first.as_ref().name(), Some(c"test.value"));
+        assert_eq!(first.as_ref().value(), Some(c"first"));
+        assert_eq!(first.as_ref().backend_type(), Some(c"file"));
+        assert_eq!(first.as_ref().level(), ConfigLevel::LOCAL);
+        assert_eq!(first.as_ref().include_depth(), 0);
+        let origin = CString::new(config_path.to_str().unwrap()).unwrap();
+        assert_eq!(first.as_ref().origin_path(), Some(origin.as_c_str()));
+        let flag = cfg.as_ref().entry(c"test.flag").unwrap();
+        let empty = cfg.as_ref().entry(c"test.empty").unwrap();
+        let included = cfg.as_ref().entry(c"test.included").unwrap();
+        assert_eq!(flag.as_ref().value(), None);
+        assert_eq!(empty.as_ref().value(), Some(c""));
+        assert_eq!(included.as_ref().include_depth(), 1);
+        // Changed size guarantees refresh notices this, independent of timestamp precision.
+        std::fs::write(&config_path, b"[core]\nrepositoryformatversion = 0\nbare = false\n[test]\nvalue = changed-and-longer\n").unwrap();
+        let changed = cfg.as_ref().entry(c"test.value").unwrap();
+        assert_eq!(changed.as_ref().value(), Some(c"changed-and-longer"));
+        assert_eq!(first.as_ref().value(), Some(c"first"));
+        drop(first);
+        drop(cfg);
+        drop(repo);
+        assert_eq!(second.as_ref().value(), Some(c"first"));
+        assert_eq!(included.as_ref().value(), Some(c"nested"));
+        assert_eq!(changed.as_ref().value(), Some(c"changed-and-longer"));
+        drop((second, flag, empty, included, changed));
+        std::fs::remove_dir_all(dir).unwrap();
+        let cfg = Config::new().unwrap();
+        assert_eq!(
+            cfg.as_ref().entry(c"test.missing").unwrap_err().code(),
+            Some(ErrorCode::NotFound)
+        );
+        assert!(cfg.as_ref().entry(c"invalid").is_err());
+    }
+
+    #[test]
+    fn maps_preserve_borrows_across_clone_and_mutable_reborrows() {
+        let text = CString::new([b'x', 0xff]).unwrap();
+        let cloned = {
+            let mut map = ConfigMap::new(MapMatch::String(&text), i32::MIN);
+            let cloned = map.clone();
+            let mut m = map.as_mut();
+            for rule in [
+                MapMatch::False,
+                MapMatch::True,
+                MapMatch::Int32,
+                MapMatch::String(c""),
+                MapMatch::String(&text),
+            ] {
+                m.as_mut().set_match(rule);
+                assert_eq!(m.as_ref().rule(), rule);
+                m.set_map_value(i32::MAX);
+                assert_eq!(m.as_ref().map_value(), i32::MAX);
+                m.set_str_match(&text);
+                assert_eq!(m.as_ref().str_match(), Some(text.as_c_str()));
+            }
+            cloned
+        };
+        assert_eq!(cloned.as_ref().str_match(), Some(text.as_c_str()));
+        assert_eq!(cloned.as_ref().map_value(), i32::MIN);
+    }
+}
