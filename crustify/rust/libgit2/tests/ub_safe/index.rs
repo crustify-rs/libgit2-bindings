@@ -585,3 +585,16 @@ mod matched_path_callback {
         assert_eq!(callback.stopped(), None);
     }
 }
+
+/// Stage decoding is pure Rust, including extreme/unknown discriminants.
+#[test]
+fn stage_decoding_is_total() {
+    use libgit2::libgit2::index::index::Stage;
+    for n in [i32::MIN, -2, -1, 0, 1, 2, 3, 4, i32::MAX] {
+        let decoded = Stage::from_raw(n);
+        assert_eq!(decoded.is_some(), (-1..=3).contains(&n));
+        if let Some(stage) = decoded {
+            assert_eq!(stage.raw(), n);
+        }
+    }
+}

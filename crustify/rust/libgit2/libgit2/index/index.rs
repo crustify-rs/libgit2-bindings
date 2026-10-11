@@ -683,6 +683,41 @@ unsafe extern "C" fn matched_path_with(
     code
 }
 
+/// An index stage, or the wildcard accepted by stage-matching operations.
+/// `Any` is not a stored entry stage; operations requiring a concrete stage must
+/// reject it. Raw values not named by the header are never transmuted into Rust.
+///
+/// Wraps: git_index_stage_t
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(i32)]
+pub enum Stage {
+    Any = ffi::GIT_INDEX_STAGE_ANY,
+    Normal = ffi::GIT_INDEX_STAGE_NORMAL,
+    Ancestor = ffi::GIT_INDEX_STAGE_ANCESTOR,
+    Ours = ffi::GIT_INDEX_STAGE_OURS,
+    Theirs = ffi::GIT_INDEX_STAGE_THEIRS,
+}
+
+impl Stage {
+    /// Decode one of this version's named stage values, including the wildcard.
+    pub const fn from_raw(raw: ffi::git_index_stage_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_INDEX_STAGE_ANY => Some(Self::Any),
+            ffi::GIT_INDEX_STAGE_NORMAL => Some(Self::Normal),
+            ffi::GIT_INDEX_STAGE_ANCESTOR => Some(Self::Ancestor),
+            ffi::GIT_INDEX_STAGE_OURS => Some(Self::Ours),
+            ffi::GIT_INDEX_STAGE_THEIRS => Some(Self::Theirs),
+            _ => None,
+        }
+    }
+
+    /// Value accepted by C's stage-matching APIs.
+    pub const fn raw(self) -> ffi::git_index_stage_t {
+        self as ffi::git_index_stage_t
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -690,6 +725,26 @@ mod unit_tests {
     use std::ffi::CString;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
+
+    #[test]
+    fn stage_values_are_checked() {
+        for value in -8..=8 {
+            assert_eq!(
+                Stage::from_raw(value).map(Stage::raw),
+                (-1..=3).contains(&value).then_some(value)
+            );
+        }
+        assert_eq!(Stage::from_raw(i32::MIN), None);
+        assert_eq!(Stage::from_raw(i32::MAX), None);
+        assert_eq!(
+            size_of::<Stage>(),
+            size_of::<crate::ffi::git_index_stage_t>()
+        );
+        assert_eq!(
+            align_of::<Stage>(),
+            align_of::<crate::ffi::git_index_stage_t>()
+        );
+    }
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -897,6 +952,51 @@ mod unit_tests {
             )
         };
         assert_eq!(rc, 0);
+    }
+
+    /// NAME construction must free partial strings and leave the vector unchanged
+    /// when any allocation (including vector growth) fails.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn name_allocation_failures_release_partial_records() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::name_allocation_failures_release_partial_records"
+            ),
+            || {
+                install_countdown();
+                assert!(runtime_pinned());
+                let mut failures = 0;
+                let mut successes = 0;
+                for allowed in 0..=8 {
+                    let before = LIVE.load(SeqCst);
+                    let mut index = Index::new().unwrap();
+                    // Fill the initial vector so the next insertion must grow it.
+                    for _ in 0..8 {
+                        index
+                            .as_mut()
+                            .add_name(Some(c"a"), Some(c"o"), Some(c"t"))
+                            .unwrap();
+                    }
+                    ALLOWED.store(allowed, SeqCst);
+                    REFUSING.store(true, SeqCst);
+                    let result = index.as_mut().add_name(Some(c"b"), Some(c"p"), Some(c"u"));
+                    REFUSING.store(false, SeqCst);
+                    if result.is_err() {
+                        failures += 1;
+                        assert_eq!(index.as_ref().name_entry_count(), 8);
+                    } else {
+                        successes += 1;
+                        assert_eq!(index.as_ref().name_entry_count(), 9);
+                    }
+                    index.as_mut().clear_names().unwrap();
+                    drop(index);
+                    assert_eq!(LIVE.load(SeqCst), before, "allocation allowance {allowed}");
+                }
+                assert!(failures >= 4 && successes > 0);
+            },
+        );
     }
 
     /// When libgit2 cannot be initialised, neither constructor calls it.

@@ -101,3 +101,7 @@ git_index_capability_t
 
 # index wave 0 batch 8: synchronous matched-path callback
 git_index_matched_path_cb
+
+# index wave 0 batch 4
+git_index_name_entry
+git_index_stage_t

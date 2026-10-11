@@ -1104,3 +1104,29 @@ mod matched_path_callback {
         }
     }
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn stage_values_match_c() {
+    use libgit2::libgit2::index::index::Stage;
+    for stage in [
+        Stage::Any,
+        Stage::Normal,
+        Stage::Ancestor,
+        Stage::Ours,
+        Stage::Theirs,
+    ] {
+        assert_eq!(Stage::from_raw(stage.raw()), Some(stage));
+        if stage == Stage::Any {
+            assert_eq!(stage.raw(), ffi::GIT_INDEX_STAGE_ANY);
+            continue;
+        }
+        let raw = ffi::git_index_entry {
+            flags: ((stage.raw() as u16) << 12) | 0xcfff,
+            ..Default::default()
+        };
+        // SAFETY: initialized local entry; entry_stage reads only its flags.
+        let observed = unsafe { ffi::git_index_entry_stage(&raw) };
+        assert_eq!(observed, stage.raw());
+    }
+}

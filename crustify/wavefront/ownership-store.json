@@ -1502,6 +1502,58 @@
    "fields": []
   },
   {
+   "name": "git_index_name_entry",
+   "defined_in": "include/git2/sys/index.h",
+   "_comment_agent": "No public standalone allocation, clone or release. git_index_name_add constructs in index->names; git_index_name_clear and index free/read clear invalidate all entry and string borrows. Internal free helper is static. Returned entries must borrow an exclusively accessible index because get_byindex sorts the names vector. checkout consumers only read/copy fields. C owns all storage; safe wrapper exposes only borrowed getters.",
+   "fields": [
+    {
+     "name": "ancestor",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_index_name_add duplicates non-null inputs; read_conflict_names allocates copies (empty on disk becomes null). index_name_entry_free releases each field. All consumers read strings without mutation; public get_byindex is read-only and index-owned."
+     }
+    },
+    {
+     "name": "ours",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_index_name_add duplicates non-null inputs; read_conflict_names allocates copies (empty on disk becomes null). index_name_entry_free releases each field. All consumers read strings without mutation; public get_byindex is read-only and index-owned."
+     }
+    },
+    {
+     "name": "theirs",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": false,
+      "note": "git_index_name_add duplicates non-null inputs; read_conflict_names allocates copies (empty on disk becomes null). index_name_entry_free releases each field. All consumers read strings without mutation; public get_byindex is read-only and index-owned."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_stage_t",
+   "defined_in": "include/git2/index.h",
+   "_comment_agent": "Value-only enum with signed ANY=-1 wildcard and stored stages 0..3. No pointers or lifecycle. ANY is a selector, not a valid stored stage; use checked conversions.",
+   "fields": []
+  },
+  {
    "name": "git_libgit2_opt_t",
    "defined_in": "include/git2/common.h",
    "_comment_agent": "Fieldless C enum of the keys git_libgit2_opts (settings.c:105) dispatches on, dense 0..=47 (GIT_OPT_GET_MWINDOW_SIZE .. GIT_OPT_SET_PACK_MAX_OBJECT_SIZE; bindgen types it c_uint, but git_libgit2_opts takes `int option, ...`). No storage or lifecycle. Every value without a constant (negative included) hits the default arm: -1, GIT_ERROR_INVALID 'invalid option key', and no va_arg is read, so calling with the bare key is sound. Each named key fixes the variadic argument list (documented per variant in core/common.rs LibraryOption). Hazards for the git_libgit2_opts wrapper: SET_SSL_CIPHERS strdups its argument with no NULL check (NULL = crash); SET_ALLOCATOR memcpys a git_allocator (NULL restores stdalloc) and swaps the global allocator under live allocations; GET/SET_WINDOWS_SHAREMODE are no-ops off Windows (the out pointer is left unwritten, rc 0); SET_SSL_CERT_LOCATIONS with OpenSSL fails GIT_ERROR_SSL when neither location loads; ADD_SSL_X509_CERT(NULL) adds nothing and returns 0; SET_SEARCH_PATH/GET_SEARCH_PATH take an int config level, only SYSTEM(2)/XDG(3)/GLOBAL(4) accepted (GIT_ERROR_INVALID 'invalid config path selector %d'); SET_SERVER_(CONNECT_)TIMEOUT refuse negatives (GIT_ERROR_INVALID); SET_OWNER_VALIDATION stores !=0; GET_EXTENSIONS hands out a git_strarray to dispose; GET_* buf options fill a git_buf. Settings are unsynchronised globals (git_sysdir_set etc.). Rust side: LibraryOption::from_raw/from_key/TryFrom -> UnnamedLibraryOption; key() gives the int.",
@@ -10254,6 +10306,166 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_index_name_add",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "ancestor",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Transient input duplicated into new index-owned record. At least two of three inputs must be non-null. No ownership transfer."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed index; no refcount retained. get_byindex sorts its names vector; clear destroys its entries."
+     }
+    },
+    {
+     "name": "ours",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ours"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Transient input duplicated into new index-owned record. At least two of three inputs must be non-null. No ownership transfer."
+     }
+    },
+    {
+     "name": "theirs",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:theirs"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Transient input duplicated into new index-owned record. At least two of three inputs must be non-null. No ownership transfer."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_name_clear",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "index",
+    "is_dropper": false,
+    "is_disposer": true,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed index; no refcount retained. get_byindex sorts its names vector; clear destroys its entries."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_name_entrycount",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed index; no refcount retained. get_byindex sorts its names vector; clear destroys its entries."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_name_get_byindex",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed index; no refcount retained. get_byindex sorts its names vector; clear destroys its entries."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Read-only single index-owned entry, null out of bounds; invalidated by clearing/reloading/freeing index."
+    }
+   }
   },
   {
    "name": "git_index_new",
@@ -19727,6 +19939,34 @@
       "nullable": false,
       "mutable": false,
       "note": "GIT_ASSERT_ARG. Live worktree, only read (its six owned strings); never retained. Checks gitdir_path (is_worktree_dir), parent_path (when set), commondir_path, worktree_path exist; GIT_ERROR + GIT_ERROR_WORKTREE message on the first missing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "index_name_entry_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "ne",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "ne",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes entry and all three independently allocated optional strings using git__free. Internal static helper; public clients never release an entry directly."
      }
     }
    ]
