@@ -1,0 +1,10 @@
+[package]
+name = "delete-readonly-error-is-stale"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libgit2 = { path = "../../../../../../../../rust/libgit2" }
