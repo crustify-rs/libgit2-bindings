@@ -6,6 +6,11 @@
 //! the options. There is no C allocation, destruction or cloning primitive for
 //! the options themselves. A Rust clone simply shares the immutable string borrows,
 //! and the options cross threads as the borrows they hold do.
+//!
+//! Backend entries retain immutable storage via an allocation-specific callback.
+//! Acquired references use [`BackendEntryArc`]; borrowed handles never release
+//! storage. [`BackendEntry::from_entry`] safely exposes the full backend layout
+//! of the public entry owner's already-required enclosing allocation.
 
 use core::ffi::CStr;
 use core::fmt;
@@ -13,7 +18,9 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBorrowedPtr, CCell};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, define_ctype};
+
+use crate::libgit2::config::config::{Entry, EntryArc, EntryFree, EntryMut, EntryRef};
 
 use crate::ffi;
 
@@ -363,5 +370,268 @@ mod unit_tests {
         let expected = r#"BackendMemoryOptions { version: 1, backend_type: Some("label"), origin_path: Some("") }"#;
         assert_eq!(format!("{:?}", options.as_ref()), expected);
         assert_eq!(format!("{:?}", options.as_mut()), expected);
+    }
+
+    mod backend_entries {
+        use super::*;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // C has no standalone entry constructor. This Rust-owned fixture has static
+        // strings; acquired-reference fixtures below pair a Box with its callback.
+        fn fixture() -> ffi::git_config_backend_entry {
+            ffi::git_config_backend_entry {
+                entry: ffi::git_config_entry {
+                    name: c"test.name".as_ptr(),
+                    value: ptr::null(),
+                    backend_type: c"test".as_ptr(),
+                    origin_path: ptr::null(),
+                    include_depth: u32::MAX,
+                    level: ffi::GIT_CONFIG_LEVEL_LOCAL,
+                },
+                free: Some(release_fixture),
+            }
+        }
+
+        #[repr(C)]
+        struct AcquiredFixture {
+            entry: ffi::git_config_backend_entry,
+            releases: Rc<Cell<usize>>,
+            child: Option<BackendEntryArc>,
+        }
+
+        unsafe extern "C" fn release_fixture(ptr: *mut ffi::git_config_backend_entry) {
+            // SAFETY: called once for the acquired fixture's Box, whose first field
+            // is the backend entry. No pointer into it remains in use after release.
+            let allocation = unsafe { Box::from_raw(ptr.cast::<AcquiredFixture>()) };
+            allocation.releases.set(allocation.releases.get() + 1);
+        }
+
+        fn acquired(releases: Rc<Cell<usize>>) -> BackendEntryArc {
+            acquired_with_child(releases, None)
+        }
+
+        fn acquired_with_child(
+            releases: Rc<Cell<usize>>,
+            child: Option<BackendEntryArc>,
+        ) -> BackendEntryArc {
+            let allocation = Box::new(AcquiredFixture {
+                entry: fixture(),
+                releases,
+                child,
+            });
+            // SAFETY: Box has the entry at offset zero with immutable static strings;
+            // release_fixture consumes this one reference with the matching allocator.
+            unsafe { BackendEntryArc::from_c(Box::into_raw(allocation).cast()) }.unwrap()
+        }
+
+        #[test]
+        fn layout_and_exclusive_projection() {
+            assert_eq!(
+                size_of::<BackendEntry>(),
+                size_of::<ffi::git_config_backend_entry>()
+            );
+            assert_eq!(
+                align_of::<BackendEntry>(),
+                align_of::<ffi::git_config_backend_entry>()
+            );
+            assert_eq!(size_of::<BackendEntryRef>(), size_of::<*const ()>());
+            assert_eq!(size_of::<BackendEntryMut>(), size_of::<*mut ()>());
+            assert_eq!(
+                core::mem::offset_of!(ffi::git_config_backend_entry, entry),
+                0
+            );
+            let mut raw = fixture();
+            // SAFETY: exclusive initialized fixture; strings are immutable and static.
+            let mut m = unsafe { BackendEntryMut::from_ptr(&raw mut raw) }.unwrap();
+            assert_eq!(m.entry_mut().as_ref().name(), Some(c"test.name"));
+            assert_eq!(m.as_mut().entry_mut().as_ref().include_depth(), u32::MAX);
+            let shared = m.as_ref();
+            let copied = shared;
+            assert_eq!(copied.entry().value(), None);
+            assert_eq!(shared.entry().backend_type(), Some(c"test"));
+            let _policy = shared.release_policy();
+            // SAFETY: NULL is rejected without dereferencing.
+            assert!(unsafe { BackendEntryRef::from_ptr(ptr::null_mut()) }.is_none());
+            // SAFETY: NULL is rejected without dereferencing.
+            assert!(unsafe { BackendEntryMut::from_ptr(ptr::null_mut()) }.is_none());
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "EntryFree calls C; projections tested separately")]
+        fn acquired_callback_and_owner_roundtrip() {
+            let releases = Rc::new(Cell::new(0));
+            let owner = acquired(releases.clone());
+            let address = owner.as_c_ptr();
+            let public = BackendEntry::into_entry(owner);
+            assert_eq!(
+                public.as_c_ptr().cast::<ffi::git_config_backend_entry>(),
+                address
+            );
+            assert_eq!(releases.get(), 0);
+            let owner = BackendEntry::from_entry(public);
+            assert_eq!(owner.as_c_ptr(), address);
+            let policy = owner.as_ref().release_policy();
+            policy.release(owner);
+            assert_eq!(releases.get(), 1);
+            drop(acquired(releases.clone()));
+            assert_eq!(releases.get(), 2);
+            drop(BackendEntry::into_entry(acquired(releases.clone())));
+            assert_eq!(releases.get(), 3);
+            let child = acquired(releases.clone());
+            let parent = acquired_with_child(releases.clone(), Some(child));
+            // Freeing the payload reenters C's release dispatch for another owner.
+            // Each reference is consumed once; neither callback retains a borrow.
+            BackendEntryFree.release(parent);
+            assert_eq!(releases.get(), 5);
+        }
+    }
+}
+
+define_ctype!(
+    /// A backend entry, including its storage-specific release callback.
+    ///
+    /// Lookups acquire a reference to immutable backing storage, whereas an
+    /// iterator only lends an entry. Even acquired references may alias: use
+    /// [`BackendEntryArc`], never a sole-owner box for a backend lookup result.
+    /// There is no public C up-ref or standalone copy primitive. The callback
+    /// may be thread-bound, so no thread-safety traits are asserted.
+    ///
+    /// The callback is fixed by the allocator, not a replaceable user hook;
+    /// replacing it could release unrelated storage. The embedded entry's
+    /// strings are immutable borrows, not independently owned fields.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendEntryArc;
+    /// fn mutate(mut entry: BackendEntryArc) { entry.as_mut(); }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendEntryArc;
+    /// fn escape(entry: BackendEntryArc) {
+    ///     let name = entry.as_ref().entry().name();
+    ///     drop(entry);
+    ///     assert!(name.is_some());
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendEntryArc;
+    /// fn clone(entry: BackendEntryArc) { let _ = entry.clone(); }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendEntryArc;
+    /// fn send(entry: BackendEntryArc) { std::thread::spawn(move || drop(entry)); }
+    /// ```
+    ///
+    /// Wraps: git_config_backend_entry
+    BackendEntry, BackendEntryRef, BackendEntryMut, ffi::git_config_backend_entry
+);
+
+/// Releases one acquired reference through the entry's own callback. State is
+/// recovered from the object; no callback from a different allocation is saved.
+/// Reuses [`EntryFree`], the existing `git_config_entry_free` lifecycle wrapper.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BackendEntryFree;
+
+// SAFETY: an owned backend entry has an acquired reference and a matching release
+// callback. Its first field is layout-compatible with Entry, whose policy calls
+// git_config_entry_free and consumes exactly that reference, without assuming
+// that the allocation is only the size of the public entry.
+unsafe impl CDrop<BackendEntry> for BackendEntryFree {
+    unsafe fn c_drop(&self, ptr: NonNull<BackendEntry>) {
+        // SAFETY: the caller transfers an acquired reference; entry is the live
+        // initialized first field and remains valid until EntryFree releases it.
+        unsafe {
+            let entry = addr_of_mut!((*ptr.as_ptr().cast::<ffi::git_config_backend_entry>()).entry);
+            EntryFree.c_drop(NonNull::new_unchecked(entry.cast::<Entry>()));
+        }
+    }
+}
+
+/// One acquired reference; intentionally neither cloneable nor mutable.
+pub type BackendEntryArc = CArc<BackendEntry, BackendEntryFree>;
+
+impl BackendEntry {
+    /// Promotes an acquired public entry to its full backend layout, without
+    /// copying or acquiring another reference. `EntryArc`'s release contract
+    /// already requires this larger allocation, unlike an arbitrary `EntryRef`.
+    pub fn from_entry(entry: EntryArc) -> BackendEntryArc {
+        let ptr = entry.into_c();
+        // SAFETY: EntryArc owns an acquired backend entry reference (C's release
+        // routine casts it to this exact enclosing type). entry is at offset
+        // zero; transferring the owner preserves its callback and keepalive.
+        unsafe { BackendEntryArc::from_c(ptr.cast()) }.expect("entry owner is non-null")
+    }
+
+    /// Returns the public-entry owner, transferring the same single reference.
+    pub fn into_entry(entry: BackendEntryArc) -> EntryArc {
+        let ptr = entry.into_c();
+        // SAFETY: BackendEntryArc owns an acquired reference, and its first field
+        // is the public entry. EntryFree invokes the same enclosing callback.
+        unsafe { EntryArc::from_c(ptr.cast()) }.expect("backend entry owner is non-null")
+    }
+}
+
+impl<'a> BackendEntryRef<'a> {
+    /// Shared view of the inline entry, kept alive by this backend-entry borrow.
+    ///
+    /// Field: git_config_backend_entry.entry
+    pub fn entry(&self) -> EntryRef<'a> {
+        // SAFETY: projects the initialized inline field, without forming a Rust
+        // reference to foreign storage. Its immutable strings live for 'a.
+        unsafe { EntryRef::from_ptr(addr_of!((*self.as_ptr()).entry).cast_mut()) }
+            .expect("inline entry is non-null")
+    }
+
+    /// The allocation-matched release strategy, not an unbound function pointer.
+    /// Calling it requires moving an acquired owner; a borrowed iterator entry
+    /// cannot be freed. The strategy recovers the callback from the owner it is
+    /// given, never from a different entry that supplied this token.
+    ///
+    /// Field: git_config_backend_entry.free
+    pub fn release_policy(&self) -> BackendEntryFree {
+        // SAFETY: reads the initialized callback through the live shared handle.
+        let callback = unsafe { addr_of!((*self.as_ptr()).free).read() };
+        assert!(
+            callback.is_some(),
+            "backend entry lacks its release callback"
+        );
+        BackendEntryFree
+    }
+}
+
+impl BackendEntryMut<'_> {
+    /// Exclusive view of the inline entry. Only genuinely exclusive storage
+    /// (not an acquired backend lookup reference) can supply this handle.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::BackendEntryMut;
+    /// fn alias(mut parent: BackendEntryMut<'_>) {
+    ///     let mut child = parent.entry_mut();
+    ///     let other = parent.as_mut();
+    ///     assert!(child.as_ref().name().is_some());
+    ///     drop(other);
+    /// }
+    /// ```
+    pub fn entry_mut(&mut self) -> EntryMut<'_> {
+        // SAFETY: the exclusive parent borrow includes its inline field; the
+        // child cannot outlive this reborrow or alias another parent handle.
+        unsafe { EntryMut::from_ptr(addr_of_mut!((*self.as_mut_ptr()).entry)) }
+            .expect("inline entry is non-null")
+    }
+}
+
+impl BackendEntryFree {
+    /// Invokes an owner's release callback exactly once, consuming its reference.
+    /// This is also what dropping the owner does; borrowed handles cannot call it.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::sys::config::{BackendEntryFree, BackendEntryRef};
+    /// fn free_borrowed(entry: BackendEntryRef<'_>) { BackendEntryFree.release(entry); }
+    /// ```
+    pub fn release(self, entry: BackendEntryArc) {
+        drop(entry);
     }
 }

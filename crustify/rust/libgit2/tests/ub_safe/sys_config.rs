@@ -94,3 +94,67 @@ fn memory_options_cross_threads() {
     .unwrap();
     assert_eq!(observed, (1, Some(LABEL.to_owned()), true));
 }
+
+mod backend_entries {
+    use libgit2::libgit2::config::config::Config;
+    use libgit2::libgit2::config::sys::config::BackendEntry;
+    use std::ffi::CString;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "acquisition and release call libgit2")]
+    fn backend_entry_retained_storage_and_release() {
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-backend-entry-safe-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("config");
+        std::fs::write(
+            &file,
+            b"[test]\nvalue = first\nflag\nempty =\n[include]\npath = extra\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("extra"), b"[test]\nnested = included\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let mut config = Config::open(&path).unwrap();
+        let first = BackendEntry::from_entry(config.as_ref().entry(c"TEST.value").unwrap());
+        let second = BackendEntry::from_entry(config.as_ref().entry(c"test.value").unwrap());
+        let flag = BackendEntry::from_entry(config.as_ref().entry(c"test.flag").unwrap());
+        let empty = BackendEntry::from_entry(config.as_ref().entry(c"test.empty").unwrap());
+        let nested = BackendEntry::from_entry(config.as_ref().entry(c"test.nested").unwrap());
+        {
+            let borrowed = first.as_ref();
+            let copy = borrowed;
+            assert_eq!(copy.entry().name(), Some(c"test.value"));
+            assert_eq!(borrowed.entry().value(), Some(c"first"));
+            assert_eq!(borrowed.entry().origin_path(), Some(path.as_c_str()));
+        }
+        assert_eq!(flag.as_ref().entry().value(), None);
+        assert_eq!(empty.as_ref().entry().value(), Some(c""));
+        assert_eq!(nested.as_ref().entry().include_depth(), 1);
+        // An entry owner does not borrow its config: refreshing cannot invalidate it.
+        let bytes = CString::new([b'x', 0xff]).unwrap();
+        config.as_mut().set_string(c"test.value", &bytes).unwrap();
+        let changed = BackendEntry::from_entry(config.as_ref().entry(c"test.value").unwrap());
+        assert_eq!(first.as_ref().entry().value(), Some(c"first"));
+        assert_eq!(changed.as_ref().entry().value(), Some(bytes.as_c_str()));
+        let policy = first.as_ref().release_policy();
+        let public = BackendEntry::into_entry(first);
+        assert_eq!(public.as_ref().value(), Some(c"first"));
+        let first = BackendEntry::from_entry(public);
+        drop(config);
+        drop(bytes);
+        // No parent or input string remains: backing storage owns the copies.
+        assert_eq!(
+            changed.as_ref().entry().value().unwrap().to_bytes(),
+            &[b'x', 0xff]
+        );
+        policy.release(first);
+        assert_eq!(second.as_ref().entry().value(), Some(c"first"));
+        assert_eq!(nested.as_ref().entry().value(), Some(c"included"));
+        // A strategy from a now-released entry recovers the second owner's callback.
+        policy.release(second);
+        drop((flag, empty, nested, changed));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

@@ -870,6 +870,30 @@
    ]
   },
   {
+   "name": "git_config_backend_entry",
+   "defined_in": "include/git2/sys/config.h",
+   "_comment_agent": "Verified type route for wrap. entry is an inline git_config_entry at offset zero, with immutable nullable string borrows retained by backing storage. config_memory_get and config_snapshot_get increment the backing list; config_file_get takes a list reference. Lookup transfers that acquired reference, but config_iterator_next only lends entries kept alive by its iterator. git_config_list_entry_free down-refs the list, so even separately acquired references to the same entry cannot be mutated exclusively. No public constructor or clone/up-ref exists for a standalone backend entry; ConfigRef::entry plus a consuming layout-preserving conversion is the safe acquisition path. Destruction stays with git_config_entry_free/EntryFree; no arbitrary callback replacement can preserve its allocator contract. C list duplication constructs new entries, not a public per-entry clone.",
+   "fields": [
+    {
+     "name": "free",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Function pointer selected by the allocator/backend, not a data owner. All built-in producers set git_config_list_entry_free. git_config_entry_free unconditionally invokes it with the whole backend entry and consumes one acquired reference; iterator/foreach entries are borrowed and must never release it. A custom callback must remain callable while any entry reference exists."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_backend_memory_options",
    "defined_in": "include/git2/sys/config.h",
    "_comment_agent": "Stack/by-value options initialized by git_config_backend_memory_options_init; no allocation, destructor or C clone. Native shallow Clone retains immutable string borrows. Both backend constructors read options but neither retains the struct or string pointers; config_backend_new owns strdup copies and config_memory_free releases only those copies.",
@@ -7778,6 +7802,34 @@
       "nullable": false,
       "mutable": true,
       "note": "Caller-owned initialized buffer exclusively borrowed. C transfers allocated byte fields to it, disposed by git_buf_dispose, including partial error output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_list_entry_free",
+   "defined_in": "src/libgit2/config_list.c",
+   "lifetime": {
+    "for": "e",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "e",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": false,
+      "note": "Consumes one acquired reference. Only valid for git_config_list_entry allocations: casts the offset-zero base, reads config_list, and releases that list, potentially freeing this entry and its strings. Never valid on an iterator's borrowed entry or another backend's allocation."
      }
     }
    ]
