@@ -7485,7 +7485,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Optional NUL regex, compiled into iterator-owned regex and disposed after walk. foreach_match filters names; multivar filters values, dereferencing NULL valueless entries. Invalid multivar regex leaks normalized name; safe wrapper omits that parameter."
+      "note": "Optional NUL name regex (PCRE2 in this build), compiled into the glob iterator and disposed with it before return; never retained. NULL walks every entry; an empty pattern matches every name. An invalid pattern returns -1 with a GIT_ERROR_REGEX error before any callback. Exposed by the safe wrapper as Option<&CStr>."
      }
     }
    ]
@@ -7873,7 +7873,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "Required NUL key; normalized into iterator-owned copied string; copy freed on ordinary completion/errors."
+      "note": "Required NUL key, normalized into an iterator-owned copy (an invalid name returns GIT_EINVALIDSPEC before any callback) that the iterator frees, except when value-regex compilation then fails, which leaks it. When nothing matches, GIT_ENOTFOUND quotes the caller's original spelling."
      }
     },
     {
@@ -7905,7 +7905,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Optional NUL regex, compiled into iterator-owned regex and disposed after walk. foreach_match filters names; multivar filters values, dereferencing NULL valueless entries. Invalid multivar regex leaks normalized name; safe wrapper omits that parameter."
+      "note": "Optional NUL value regex compiled into the multivar iterator and disposed with it. C passes a valueless entry's NULL value to git_regexp_match (strlen(NULL)), and an invalid pattern (GIT_EINVALIDSPEC, GIT_ERROR_REGEX) leaks the normalized name. The safe wrapper always passes NULL here; a filtered walk is composed over multivar_iterator's Rust PCRE2 value filter, which skips valueless entries."
      }
     }
    ]
