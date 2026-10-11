@@ -625,6 +625,14 @@ mod custom_backends {
             {
                 entries.insert(1, Err(ConfigError::new(ErrorClass::Config, c"walk failed")));
             }
+            if self
+                .values
+                .0
+                .iter()
+                .any(|(k, _)| k.as_c_str() == c"walk.first")
+            {
+                entries.insert(0, Err(ConfigError::new(ErrorClass::Config, c"walk failed")));
+            }
             Ok(entries.into_iter())
         }
         fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
@@ -1021,6 +1029,14 @@ mod custom_backends {
         // `entry` rereads through a walk first, which the failure must not stall.
         let error = config.as_ref().entry(c"a.b").unwrap_err();
         assert_eq!(error.message(), c"walk failed");
+        // A walk failing on its first entry: the config reports it, and the backend's
+        // ended walk lets the next advance finish.
+        let config = registered(Store::new(&[(c"walk.first", c"1")], &log), false);
+        let mut iter = config.as_ref().iterator().unwrap();
+        let mut m = iter.as_mut();
+        assert_eq!(m.advance().unwrap_err().message(), c"walk failed");
+        assert!(m.advance().unwrap().is_none());
+        drop(iter);
         // A backend with nothing to walk says so as not found: the walk moves on.
         let mut config = registered(Store::new(&[(c"a.b", c"c")], &log), false);
         let none = UnopenedBackend::new(Store::new(&[(c"walk.none", c"1")], &log));

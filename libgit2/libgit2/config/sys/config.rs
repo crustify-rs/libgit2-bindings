@@ -1120,6 +1120,16 @@ fn missing_slot(slot: &str) -> ConfigError {
     );
     ConfigError::from_libgit2(ffi::GIT_ERROR)
 }
+/// A backend's miss of `key`, described as `get_entry`'s `config_error_notfound`
+/// describes it, byte for byte.
+fn not_found(key: &CStr) -> ConfigError {
+    let message = [&b"config value '"[..], key.to_bytes(), b"' was not found"].concat();
+    set(
+        ErrorClass::Config,
+        &CString::new(message).expect("a C string's bytes contain no NUL"),
+    );
+    ConfigError::from_libgit2(ffi::GIT_ENOTFOUND)
+}
 fn backend_status(rc: i32) -> Result<(), ConfigError> {
     if rc == 0 {
         Ok(())
@@ -1177,9 +1187,10 @@ impl UnopenedBackend {
         self.0.as_ref()
     }
 
-    /// Opens once, without repository-dependent includes. Memory constructors
-    /// ignore repo. Repository-retaining custom/file constructors are not exposed
-    /// by this phase type and require a lifetime-carrying owner when scheduled.
+    /// Opens once, without a repository: a [`CustomBackend`]'s `open` receives `None`
+    /// ([`ConfigMut::add_backend`] lends one). Repository-retaining file constructors
+    /// are not exposed by this phase type and require a lifetime-carrying owner when
+    /// scheduled.
     pub fn open(self, level: ConfigLevel) -> Result<BackendBox, ConfigError> {
         BackendOpen.call(self, level)
     }
@@ -1305,7 +1316,8 @@ impl BackendMut<'_> {
     /// Acquires a retained immutable entry, independent of the backend lifetime,
     /// through the backend's own get callback, as C dispatches it. A writable
     /// file backend rereads a changed file first and reports a failed reread
-    /// without writing an entry.
+    /// without writing an entry. Backends report a missing key as `GIT_ENOTFOUND`
+    /// without an error, so the miss is described as `get_entry` describes it.
     /// Field: git_config_backend.get
     pub fn get(&mut self, key: &CStr) -> Result<BackendEntryArc, ConfigError> {
         let p = self.as_mut_ptr();
@@ -1314,7 +1326,11 @@ impl BackendMut<'_> {
         let mut out = ptr::null_mut();
         // SAFETY: exclusive opened backend, readable key for this call, writable
         // out, which is read below only after the callback reports success.
-        backend_status(unsafe { get(p, key.as_ptr(), &mut out) })?;
+        let rc = unsafe { get(p, key.as_ptr(), &mut out) };
+        if rc == ffi::GIT_ENOTFOUND {
+            return Err(not_found(key));
+        }
+        backend_status(rc)?;
         // SAFETY: success acquires one reference with its matching free callback.
         Ok(unsafe { BackendEntryArc::from_c(out) }.expect("backend get returned NULL"))
     }
@@ -1511,10 +1527,10 @@ impl Drop for BackendTransaction<'_> {
 /// suits a read-only store; `open` defaults to success.
 ///
 /// A store that keeps a config or repository through which a callback reaches its own
-/// backend again is refused there, rather than lent twice: `get` answers not found, the
-/// other callbacks fail with a `Config`-class error, and a release requested meanwhile
-/// waits for the outer callback to return. A panic aborts the process, since it cannot
-/// unwind into C.
+/// backend again is refused there, rather than lent twice: `get` answers not found (with
+/// the refusal as the thread's error), the other callbacks fail with a `Config`-class
+/// error, and a release requested meanwhile waits for the outer callback to return. A
+/// panic aborts the process, since it cannot unwind into C.
 ///
 /// ```
 /// use std::collections::BTreeMap;
@@ -1576,8 +1592,8 @@ pub trait CustomBackend: 'static {
     }
 
     /// The entry holding the normalized `key`, or `None`, which libgit2 reads as
-    /// `GIT_ENOTFOUND` and moves on to the next backend. The key is lent for the
-    /// call only:
+    /// `GIT_ENOTFOUND` and moves on to the next backend. As with libgit2's own backends,
+    /// a miss leaves the thread's last error alone. The key is lent for the call only:
     ///
     /// ```compile_fail
     /// use std::ffi::CStr;
@@ -1671,14 +1687,6 @@ fn null_argument() -> ConfigError {
         ErrorClass::Invalid,
         c"NULL string passed to a config backend",
     )
-}
-
-/// A Rust backend's answer to a lookup it cannot satisfy, worded as libgit2's.
-fn not_found(key: &CStr) -> c_int {
-    let message = format!("config value '{}' was not found", key.to_string_lossy());
-    let message = CString::new(message).expect("a C string's bytes contain no NUL");
-    let error = ConfigError::new(ErrorClass::Config, &message).with_code(ErrorCode::NotFound);
-    error.raise()
 }
 
 /// A Rust callback's result as its slot's return: 0, or the error's code once it is
@@ -1889,7 +1897,9 @@ impl<B: CustomBackend> Custom<B> {
     }
 
     /// `git_config_backend.get` over [`CustomBackend::get`]: success, or
-    /// `GIT_ENOTFOUND` with NULL written.
+    /// `GIT_ENOTFOUND` with NULL written. A miss sets no error, as with libgit2's own
+    /// backends: `get_entry` describes it itself when its caller wants an error, and
+    /// otherwise moves on to the next backend or succeeds without one.
     unsafe extern "C" fn get(
         p: *mut ffi::git_config_backend,
         key: *const c_char,
@@ -1898,13 +1908,13 @@ impl<B: CustomBackend> Custom<B> {
         // SAFETY: C passes a writable slot, which is written before any return.
         unsafe { out.write(ptr::null_mut()) };
         if key.is_null() {
-            return not_found(c"(null)");
+            return ffi::GIT_ENOTFOUND;
         }
         // SAFETY: a non-NULL key is NUL-terminated and live for the call.
         let key = unsafe { CStr::from_ptr(key) };
         // SAFETY: C calls this slot with the live backend it was installed on.
         let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
-            return not_found(key);
+            return reentered().with_code(ErrorCode::NotFound).raise();
         };
         match entered.backend().get(key) {
             Some(entry) => {
@@ -1914,7 +1924,7 @@ impl<B: CustomBackend> Custom<B> {
                 unsafe { out.write(entry.into_c()) };
                 0
             }
-            None => not_found(key),
+            None => ffi::GIT_ENOTFOUND,
         }
     }
 
@@ -3145,7 +3155,8 @@ mod unit_tests {
         fn custom_dispatch_reaches_store_and_releases_once() {
             let seen = Rc::new(Seen::default());
             let unopened = UnopenedBackend(probe(&seen, false));
-            let mut backend = unopened.open(ConfigLevel::GLOBAL).unwrap();
+            let open = unopened.as_ref().open_callback();
+            let mut backend = open.call(unopened, ConfigLevel::GLOBAL).unwrap();
             {
                 let mut b = backend.as_mut();
                 b.set(c"a.b", c"one").unwrap();
@@ -3286,9 +3297,15 @@ mod unit_tests {
             );
             assert_eq!(slot(b.lock().map(drop)), expected("lock"));
             assert_eq!(slot(b.snapshot().map(drop)), "no snapshot");
+            // The store's miss sets no error; `get` describes it as `get_entry` does,
+            // with the key's bytes as given.
+            crate::libgit2::util::sys::errors::set(ErrorClass::Odb, c"earlier");
             let missing = b.get(c"a.b").unwrap_err();
             assert_eq!(missing.code(), Some(ErrorCode::NotFound));
             assert_eq!(missing.message(), c"config value 'a.b' was not found");
+            let missing = b.get(c"a.\xff%s").unwrap_err();
+            assert_eq!(missing.class(), Some(ErrorClass::Config));
+            assert_eq!(missing.message(), c"config value 'a.\xff%s' was not found");
             assert!(b.iterator().unwrap().as_mut().advance().unwrap().is_none());
             assert!(Minimal.unlock(true).is_err());
             assert!(Minimal.open(ConfigLevel::APP, None).is_ok());

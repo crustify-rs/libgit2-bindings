@@ -956,7 +956,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed. Implementer contract observed in config.c: get_entry forms &be->entry from the out slot on any status other than GIT_ENOTFOUND (an unwritten pointer on failure), so an implementation may only succeed or return GIT_ENOTFOUND; on a readonly backend, git_config_get_string frees the acquired entry and returns its value pointer, so the entry's strings must outlive that release until the backend is freed (git_signature_default reads them). Rust CustomBackend::get returns Option and read-only backends keep their answers."
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed. Implementer contract observed in config.c: get_entry forms &be->entry from the out slot on any status other than GIT_ENOTFOUND (an unwritten pointer on failure), so an implementation may only succeed or return GIT_ENOTFOUND; on a readonly backend, git_config_get_string frees the acquired entry and returns its value pointer, so the entry's strings must outlive that release until the backend is freed (git_signature_default reads them). Rust CustomBackend::get returns Option and read-only backends keep their answers. A miss must also leave the thread's error alone, as config_list_get does: get_entry describes GIT_ENOTFOUND itself only for GET_ALL_ERRORS callers (config.c:820) and returns 0 for GET_NO_MISSING/GET_NO_ERRORS lookups (git_config__lookup_entry, *_force getters), so an error set on a miss survives a successful call or a later silent failure (git_config_get_int64's suffix tail)."
      }
     },
     {
@@ -973,7 +973,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed. Implementer contract observed in all_iter_next (config.c:436-494): GIT_ENOTFOUND from the slot skips the backend; another failure is returned, and the next advance moves on to the next backend. A failing next is called again on the following advance, so an iterator must end (GIT_ITEROVER) after an error. The produced iterator is owned by the caller, freed through its own free slot, and lends each entry until the next advance or free."
      }
     },
     {
@@ -990,7 +990,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed. Observed in git_config_lock (config.c:1318-1320): unlock is dispatched only after lock succeeds, but when git_transaction_config_new then fails the backend stays locked with no unlock."
      }
     },
     {
@@ -1058,7 +1058,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed."
+      "note": "Allocation-specific immutable function pointer; nullable in git_config_init_backend template. Function code/plugin must remain live through all calls and destruction. Safe dispatch always recovers callback from its receiving allocation; replacement is not exposed. Implementer contract observed in git_config_snapshot (config.c:182-212): the produced backend is unopened and should be read-only; git_config_add_backend opens it at the source's level with a NULL repository, and C frees it through its own free slot when that fails."
      }
     },
     {

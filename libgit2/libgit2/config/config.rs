@@ -1235,7 +1235,7 @@ impl ConfigError {
     }
 
     /// The same failure, returned as `code` ([`ErrorCode::NotFound`], say).
-    /// [`ErrorCode::Ok`] would read as success, so the code then stays `GIT_ERROR`.
+    /// [`ErrorCode::Ok`] would read as success, so the error then keeps its code.
     pub fn with_code(mut self, code: ErrorCode) -> Self {
         if code != ErrorCode::Ok {
             self.code = code.raw();
@@ -3614,6 +3614,36 @@ pub(crate) mod unit_tests {
         let unnamed = ConfigError::from_libgit2(-1000);
         assert_eq!((unnamed.code(), unnamed.raw_code()), (None, -1000));
         assert!(format!("{unnamed:?}").starts_with("ConfigError { code: -1000,"));
+    }
+
+    /// A store's own failure: `GIT_ERROR` until given another code, never success, and
+    /// raised verbatim (an OS-class message gains no `errno` suffix) with its code.
+    #[test]
+    #[cfg_attr(miri, ignore = "raises libgit2 errors")]
+    fn store_errors_take_codes_and_raise_verbatim() {
+        let _config = Config::new().unwrap();
+        let error = ConfigError::new(ErrorClass::Os, c"store refused %s");
+        assert_eq!(error.code(), Some(ErrorCode::Generic));
+        assert_eq!(
+            (error.class(), error.message()),
+            (Some(ErrorClass::Os), c"store refused %s")
+        );
+        let missing = error.clone().with_code(ErrorCode::NotFound);
+        assert_eq!(missing.raw_code(), ffi::GIT_ENOTFOUND);
+        // `Ok` would read as success: the error keeps whatever code it had.
+        assert_eq!(
+            missing.clone().with_code(ErrorCode::Ok).code(),
+            Some(ErrorCode::NotFound)
+        );
+        assert_eq!(
+            error.clone().with_code(ErrorCode::Ok).code(),
+            Some(ErrorCode::Generic)
+        );
+        clear();
+        assert_eq!(missing.raise(), ffi::GIT_ENOTFOUND);
+        let raised = last();
+        assert_eq!(raised.raw_class(), ffi::GIT_ERROR_OS as c_int);
+        assert_eq!(raised.message(), c"store refused %s");
     }
 
     /// libgit2 sets no error when a delete finds no writer: the wrappers report that
