@@ -11,13 +11,14 @@
 //!
 //! A [`TreeUpdate`] is a `git_tree_update`: one change, an [`UpdateAction`] at a path
 //! with the id and [`FileMode`] of the entry an upsert puts there, of the array
-//! `git_tree_create_updated` applies to a tree. libgit2 neither allocates, copies nor
-//! frees one: it reads the caller's array in place through a `const` pointer, for that
-//! call only, and keeps none of it. So Rust holds an update by value, `Copy`, with no
-//! teardown, `#[repr(transparent)]` over the C struct, so that a `[TreeUpdate]` is the
-//! array C reads. Its path is a `const char *` libgit2 dereferences unchecked and never
-//! frees: a `&'p CStr` the update borrows for `'p`, never NULL. Its action and mode are
-//! only ever set from [`UpdateAction`] and [`FileMode`] variants.
+//! `git_tree_create_updated` ([`Tree::create_updated`]) applies to a tree. libgit2
+//! neither allocates, copies nor frees one: it reads the caller's array in place
+//! through a `const` pointer, for that call only, and keeps none of it. So Rust holds an
+//! update by value, `Copy`, with no teardown, `#[repr(transparent)]` over the C struct,
+//! so that a `[TreeUpdate]` is the array C reads. Its path is a `const char *` libgit2
+//! dereferences unchecked and never frees: a `&'p CStr` the update borrows for `'p`,
+//! never NULL. Its action and mode are only ever set from [`UpdateAction`] and
+//! [`FileMode`] variants.
 //!
 //! # Trees
 //!
@@ -1251,6 +1252,90 @@ impl<'r> Tree<'r> {
         // releases it as `git_tree_free` would.
         let object = unsafe { ObjectArc::from_c(raw.cast()) };
         object.expect("an owner is never NULL")
+    }
+
+    /// Writes the tree `baseline` becomes once `updates` are applied to it (or an empty
+    /// tree, for `None`) into `repo`'s object database, with every tree above a changed
+    /// path, and returns the new root tree's id. `baseline` itself is left as it is.
+    ///
+    /// libgit2 applies the updates in the order of their paths' bytes, not the slice's:
+    /// it descends into each path's trees, creating the missing ones, upserts or
+    /// removes its last component, and writes each changed tree on the way back up,
+    /// dropping a tree the updates left empty. With no update it writes `baseline`
+    /// again. The ids of the trees, commits and blobs it writes are of `repo`'s type.
+    ///
+    /// Fails with `-1` and a `GIT_ERROR_TREE` error for two updates of one path
+    /// ("duplicate entries given for update"), a path crossing an entry that is not a
+    /// tree ("D/F conflict when updating tree"), and an upsert replacing an entry with
+    /// one of another type ("cannot replace 'blob' with 'tree' at '…'"); with
+    /// libgit2's error for an upsert the tree builder refuses (an invalid name or mode,
+    /// a zero id, or, under strict object creation, an object `repo` lacks with the
+    /// mode's type), a removal of an entry the tree lacks ("failed to remove entry:
+    /// file isn't in the tree - …"), a tree that cannot be read, or an object database
+    /// that cannot be loaded or written. Trees written before the failure stay in the
+    /// object database.
+    ///
+    /// Three inputs are refused before libgit2 runs, with `-1`, whatever the updates'
+    /// order: a `baseline` of another object id type than `repo`'s, and an upsert of
+    /// an id of another type that libgit2 would look up (any mode but a commit's, a
+    /// non-zero id), each with `GIT_ERROR_INVALID` ("specified object ID type does not
+    /// match repository object ID type"), as libgit2 would format them out of bounds of
+    /// the loose object path; and an upsert with a path component of more than 65535
+    /// bytes, with `GIT_ERROR_INVALID` ("tree entry path too long"), which libgit2
+    /// would write into a corrupt tree, its length truncated (see
+    /// [`TreeBuilderMut::insert`]).
+    ///
+    /// Wraps: git_tree_create_updated
+    pub fn create_updated(
+        repo: RepositoryRef<'r>,
+        baseline: Option<TreeRef<'_, '_>>,
+        updates: &[TreeUpdate<'_>],
+    ) -> Result<Oid, RepositoryError> {
+        if let Some(baseline) = baseline {
+            // libgit2 looks the baseline's subtrees up in `repo` by their ids.
+            id_fits(repo, baseline.as_object().id())?;
+        }
+        for update in updates.iter().map(TreeUpdate::as_ref) {
+            if update.action() != UpdateAction::Upsert {
+                continue;
+            }
+            if update
+                .path()
+                .to_bytes()
+                .split(|&b| b == b'/')
+                .any(|c| c.len() > NAME_MAX)
+            {
+                set(ErrorClass::Invalid, c"tree entry path too long");
+                return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+            }
+            let id = update.id();
+            if !matches!(update.filemode(), FileMode::Commit | FileMode::Unreadable)
+                && !id.is_zero()
+            {
+                // The tree builder looks the object up: its id must be of `repo`'s type.
+                id_fits(repo, id)?;
+            }
+        }
+        let mut id = Oid::zeroed();
+        let baseline = baseline.map_or(ptr::null_mut(), |tree| tree.as_ptr().cast_mut());
+        // SAFETY: a writable id; a live repository on this thread, used through this shared
+        // handle; NULL or a live tree of `repo`'s id type, counted and released in the
+        // call; `updates.len()` live updates (transparent over `git_tree_update`), with
+        // borrowed NUL-terminated paths and named actions and modes, read in place. Ids
+        // looked up fit `repo`, and no upserted component exceeds 65535 bytes (above).
+        let rc = unsafe {
+            ffi::git_tree_create_updated(
+                id.as_mut().as_mut_ptr(),
+                repo.as_ptr().cast_mut(),
+                baseline,
+                updates.len(),
+                updates.as_ptr().cast(),
+            )
+        };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        Ok(id)
     }
 }
 
@@ -3138,7 +3223,7 @@ mod unit_tests {
         use core::mem::size_of;
         use ffibox::CDrop;
         use std::process::Command;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -3172,8 +3257,37 @@ mod unit_tests {
             );
         }
 
-        /// Whether [`Refusing`] refuses every request.
+        /// As [`isolated`], with LeakSanitizer off in the child, for bodies that drive
+        /// libgit2 down allocation failures on which it leaks.
+        fn isolated_tolerating_leaks(test: &str, body: fn()) {
+            let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+            if std::env::var(CHILD).as_deref() == Ok(name) {
+                body();
+                return;
+            }
+            let inherited = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+            let separator = if inherited.is_empty() { "" } else { ":" };
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, name)
+                .env(
+                    "ASAN_OPTIONS",
+                    format!("{inherited}{separator}detect_leaks=0"),
+                )
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// Whether [`Refusing`] refuses requests: every one, after the first [`ALLOW`].
         static REFUSE: AtomicBool = AtomicBool::new(false);
+        /// How many requests [`Refusing`] still grants while [`REFUSE`] is set.
+        static ALLOW: AtomicIsize = AtomicIsize::new(0);
 
         unsafe extern "C" {
             fn malloc(n: usize) -> *mut c_void;
@@ -3186,7 +3300,7 @@ mod unit_tests {
 
         impl Refusing {
             fn grant() -> bool {
-                !REFUSE.load(SeqCst)
+                !REFUSE.load(SeqCst) || ALLOW.fetch_sub(1, SeqCst) > 0
             }
         }
 
@@ -3392,6 +3506,74 @@ mod unit_tests {
                     }
                     assert!(cloned.is_none());
                     assert_eq!(view(owned.clone().as_ref()), expected("README", README));
+                },
+            );
+        }
+
+        /// `create_updated` with every allocation refused in turn, from the first on: each
+        /// refusal is reported as an error (out of memory, mostly), never a crash; with
+        /// every allocation granted the same tree is written as without the allocator.
+        ///
+        /// libgit2 leaks on some of these failures: where `git_tree_create_updated` runs
+        /// out of memory for a stack level or a component's name, `GIT_ERROR_CHECK_ALLOC`
+        /// returns past its cleanup, keeping every builder, tree and name on its stack.
+        /// The child runs with LeakSanitizer off.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn create_updated_reports_allocation_failures() {
+            isolated_tolerating_leaks(
+                concat!(
+                    module_path!(),
+                    "::create_updated_reports_allocation_failures"
+                ),
+                || {
+                    install_refusing();
+                    let path = std::env::temp_dir().join(format!(
+                        "crustify-tree-unit-{}-updated-oom",
+                        std::process::id()
+                    ));
+                    let _ = std::fs::remove_dir_all(&path);
+                    let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+                    let repo = Repository::init(&c_path, true).unwrap();
+                    let id = Oid::from_string(README, OidType::Sha1).unwrap();
+                    let updates = [
+                        TreeUpdate::upsert(c"z/y/x", id.as_ref(), FileMode::Commit),
+                        TreeUpdate::upsert(c"a/b", id.as_ref(), FileMode::Commit),
+                        TreeUpdate::upsert(c"a/c/d", id.as_ref(), FileMode::Commit),
+                        TreeUpdate::upsert(c"top", id.as_ref(), FileMode::Commit),
+                        TreeUpdate::remove(c"gone/never"),
+                    ];
+                    let (expected, valid) = (&updates[..4], &updates);
+                    let written = Tree::create_updated(repo.as_ref(), None, expected).unwrap();
+                    let mut refused = 0;
+                    for set in [expected, &valid[..]] {
+                        for k in 0.. {
+                            ALLOW.store(k, SeqCst);
+                            REFUSE.store(true, SeqCst);
+                            let result = Tree::create_updated(repo.as_ref(), None, set);
+                            REFUSE.store(false, SeqCst);
+                            let exhausted = ALLOW.load(SeqCst) <= 0;
+                            match result {
+                                Ok(id) => {
+                                    assert_eq!(id, written);
+                                    if !exhausted {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    refused += usize::from(e.class() == Some(ErrorClass::NoMemory));
+                                    if !exhausted {
+                                        // The removal of a missing entry, once memory suffices.
+                                        assert_eq!(e.class(), Some(ErrorClass::Tree), "{e:?}");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assert!(refused > 10, "{refused}");
+                    drop(repo);
+                    let _ = std::fs::remove_dir_all(&path);
                 },
             );
         }
@@ -4362,6 +4544,150 @@ mod unit_tests {
             let tree = lookup(repo, &written);
             let stored = tree.as_ref().get_by_name(&longest).unwrap();
             assert_eq!(stored.name().count_bytes(), 65535);
+        }
+
+        /// `create_updated` refuses, before libgit2 runs, what libgit2 would format out
+        /// of bounds: a baseline of another id type than the repository's, whose subtrees
+        /// it would look up there, and an upsert of an id of another type that the tree
+        /// builder would look up. A commit's id, which the builder stores unchecked, and
+        /// a removal's id, which is never read, are left to libgit2.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn create_updated_refuses_foreign_ids() {
+            use crate::libgit2::repository::repository::{InitFlag, InitOptions};
+            let temp = TempRepo::new("updated-foreign");
+            let repo = temp.repo();
+            let path = temp.path.with_extension("sha256");
+            let _ = std::fs::remove_dir_all(&path);
+            let mut opts = InitOptions::new();
+            opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
+            opts.as_mut().set_oid_type(Some(OidType::Sha256));
+            let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+            let wide = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
+            let wide_tree = TreeBuilder::new(wide.as_ref())
+                .unwrap()
+                .as_mut()
+                .write()
+                .unwrap();
+            let wide_tree = lookup(&wide, &wide_tree);
+            let mismatch = |e: RepositoryError| {
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                assert_eq!(
+                    e.message(),
+                    c"specified object ID type does not match repository object ID type"
+                );
+            };
+            let objects = || {
+                std::fs::read_dir(temp.path.join("objects"))
+                    .unwrap()
+                    .count()
+            };
+            let before = objects();
+
+            mismatch(
+                Tree::create_updated(repo.as_ref(), Some(wide_tree.as_ref()), &[]).unwrap_err(),
+            );
+            let long_id = Oid::from_raw(&[7; 32], OidType::Sha256).unwrap();
+            for mode in [
+                FileMode::Blob,
+                FileMode::BlobExecutable,
+                FileMode::Link,
+                FileMode::Tree,
+            ] {
+                let updates = [
+                    TreeUpdate::upsert(c"ok", id(1).as_ref(), FileMode::Commit),
+                    TreeUpdate::upsert(c"dir/wide", long_id.as_ref(), mode),
+                ];
+                mismatch(Tree::create_updated(repo.as_ref(), None, &updates).unwrap_err());
+            }
+            assert_eq!(objects(), before);
+
+            // A commit's id is stored as it is, and a removal reads no id.
+            let mut removal = TreeUpdate::remove(c"gone");
+            removal.as_mut().set_id(long_id.as_ref());
+            let e = Tree::create_updated(repo.as_ref(), None, &[removal]).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Tree));
+            let commit = [TreeUpdate::upsert(
+                c"sub",
+                long_id.as_ref(),
+                FileMode::Commit,
+            )];
+            assert!(Tree::create_updated(repo.as_ref(), None, &commit).is_ok());
+            // So is a zero id, which the builder refuses before any lookup.
+            let zero = Oid::zero(OidType::Sha256);
+            let zeroed = [TreeUpdate::upsert(c"z", zero.as_ref(), FileMode::Blob)];
+            let e = Tree::create_updated(repo.as_ref(), None, &zeroed).unwrap_err();
+            assert_eq!(e.message(), c"failed to insert entry: invalid null OID - z");
+            drop(wide_tree);
+            drop(wide);
+            let _ = std::fs::remove_dir_all(&path);
+        }
+
+        /// The corrected divergence: `git_tree_create_updated` upserts a path component
+        /// of more than 65535 bytes, as a leaf or a directory, and writes a tree that
+        /// cannot be read back, reporting success; `create_updated` refuses one with the
+        /// tree builder's "tree entry path too long" before libgit2 runs. A removal's
+        /// path is left to libgit2, which fails to find it, and the longest component a
+        /// tree stores is written whole.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn create_updated_refuses_overlong_components() {
+            let temp = TempRepo::new("updated-long");
+            let repo = temp.repo();
+            let long = |n: usize| "n".repeat(n);
+
+            // C: accepted, then written as a corrupt tree.
+            let leaf = CString::new(long(65536)).unwrap();
+            let raw = [TreeUpdate::upsert(&leaf, id(7).as_ref(), FileMode::Commit)];
+            let mut out = Oid::zero(OidType::Sha1);
+            // SAFETY: a live repository, unaliased; a writable id; a live array of one
+            // update whose path outlives the call.
+            let rc = unsafe {
+                ffi::git_tree_create_updated(
+                    out.as_mut().as_mut_ptr(),
+                    repo.as_c_ptr(),
+                    ptr::null_mut(),
+                    raw.len(),
+                    raw.as_ptr().cast(),
+                )
+            };
+            assert_eq!(rc, 0);
+            let e = Object::lookup(repo.as_ref(), out.as_ref(), None).unwrap_err();
+            assert_eq!(e.message(), c"failed to parse tree: object is corrupted");
+
+            // Rust: refused, as a leaf or a directory, at every length past the limit.
+            for n in [65536, 65537, 131072] {
+                for path in [
+                    long(n),
+                    format!("dir/{}", long(n)),
+                    format!("{}/leaf", long(n)),
+                ] {
+                    let path = CString::new(path).unwrap();
+                    let updates = [
+                        TreeUpdate::upsert(c"keep", id(1).as_ref(), FileMode::Commit),
+                        TreeUpdate::upsert(&path, id(2).as_ref(), FileMode::Commit),
+                    ];
+                    let e = Tree::create_updated(repo.as_ref(), None, &updates).unwrap_err();
+                    assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                    assert_eq!(e.message(), c"tree entry path too long");
+                }
+            }
+
+            // A removal of one reaches libgit2, which does not find it.
+            let path = CString::new(long(65536)).unwrap();
+            let e = Tree::create_updated(repo.as_ref(), None, &[TreeUpdate::remove(&path)])
+                .unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Tree));
+
+            // The longest component a tree stores, as a directory and as a leaf.
+            let longest = long(65535);
+            let path = CString::new(format!("{longest}/{longest}")).unwrap();
+            let updates = [TreeUpdate::upsert(&path, id(3).as_ref(), FileMode::Commit)];
+            let written = Tree::create_updated(repo.as_ref(), None, &updates).unwrap();
+            let root = lookup(repo, &written);
+            let entry = TreeEntry::bypath(root.as_ref(), &path).unwrap();
+            assert_eq!(entry.as_ref().name().count_bytes(), 65535);
+            assert_eq!(entry.as_ref().filemode(), FileMode::Commit);
         }
     }
 }

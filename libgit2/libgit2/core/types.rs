@@ -123,7 +123,9 @@
 //! newline is written into objects git cannot parse back.
 //!
 //! `git_signature_default` and `git_signature_default_from_env` read the identity from a
-//! repository's configuration, so they are wrapped with the repository.
+//! repository's configuration, so they are wrapped in
+//! [`object::signature`](crate::libgit2::object::signature), as [`Signature::default`]
+//! and [`Signature::default_from_env`].
 
 use core::ffi::{CStr, c_char, c_int};
 use core::fmt;

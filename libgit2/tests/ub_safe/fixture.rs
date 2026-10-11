@@ -2137,3 +2137,27 @@ pub mod blob {
         if rc < 0 { Err(rc) } else { Ok(bytes) }
     }
 }
+
+// --- `git2/signature.h`: repository defaults ----------------------------------------
+
+pub mod signature {
+    use std::ffi::CString;
+    use std::path::Path;
+
+    use libgit2::libgit2::core::common::{SearchPathLevel, set_search_path};
+
+    /// Points the system, global and XDG configuration levels at `dir`, so that only a
+    /// repository's own configuration names an identity. Stands in for a scoped
+    /// configuration the crate does not have.
+    pub fn isolate_config_levels(dir: &Path) {
+        let dir = CString::new(dir.to_str().unwrap()).unwrap();
+        for level in [
+            SearchPathLevel::System,
+            SearchPathLevel::Global,
+            SearchPathLevel::Xdg,
+        ] {
+            // SAFETY: called from `isolated` children, which run one thread meanwhile.
+            unsafe { set_search_path(level, Some(&dir)) }.unwrap();
+        }
+    }
+}

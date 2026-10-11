@@ -2724,3 +2724,271 @@ mod tree_reads {
         });
     }
 }
+
+mod updates {
+    //! UB tests for `Tree::create_updated` (`git_tree_create_updated`).
+    //!
+    //! libgit2 reads the caller's array of updates in place, sorting pointers to its
+    //! elements, and each update's path through a bare pointer, for the call only: the
+    //! paths sit in exact-length heap buffers (ASan: a read past their NUL) that the
+    //! tests rewrite and free right after the call (BSan: a retained foreign pointer),
+    //! and the arrays range from empty to thousands of updates. It counts a reference
+    //! on the baseline tree and builds a builder and a subtree reference per level of
+    //! each path, all released whatever the outcome (ASan, LSan): every refusal it
+    //! makes (duplicates, D/F conflicts, missing removals, invalid names, missing
+    //! objects) runs, beside the inputs the wrapper refuses before C (an id or a
+    //! baseline of another object id type, which C formats out of bounds, and an
+    //! over-long path component). The baseline is dropped before the result is used.
+    //! Each thread updates trees of a repository of its own, as a repository is not
+    //! `Sync` (TSan). Every test calls libgit2, so Miri skips them all.
+
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::object::tree::{Tree, TreeBuilder, TreeEntry, TreeUpdate, UpdateAction};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{
+        InitFlag, InitOptions, Repository, RepositoryBox,
+    };
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    use crate::fixture::init;
+
+    /// Commit `763d71a`'s tree in `testrepo.git`: `README`, `ab/` three levels deep.
+    const BASE: &str = "ae90f12eea699729ed24555e40b9fd669da12a12";
+    const README: &str = "1385f264afb75a56a5bec74243be9b367ba4ca08";
+    const OTHER: &str = "a8233120f6ad708f843d861ce2b7228ec4e3dec6";
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A private copy of `testrepo.git`, opened; removed on drop after the repository.
+    struct Sandbox {
+        path: PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Sandbox {
+        fn new(tag: &str) -> Self {
+            init();
+            let path = std::env::temp_dir().join(format!(
+                "crustify-tree-update-ub-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            let source = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../tests/resources/testrepo.git"
+            );
+            copy_dir(Path::new(source), &path);
+            let repo = Repository::open(&CString::new(path.as_os_str().as_bytes()).unwrap());
+            Self {
+                path,
+                repo: Some(repo.unwrap()),
+            }
+        }
+
+        fn repo(&self) -> &RepositoryBox {
+            self.repo.as_ref().unwrap()
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn id(hex: &str) -> Oid {
+        Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap()
+    }
+
+    /// Overwrites a string's bytes in place, keeping its length, then frees it.
+    fn scribble(s: CString) {
+        let mut bytes = s.into_bytes();
+        bytes.fill(b'#');
+        drop(bytes);
+    }
+
+    /// Updates over paths in heap buffers of their exact length, rewritten and freed
+    /// after each call; the baseline is dropped before the written tree is read.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn paths_are_read_for_the_call_only() {
+        let sandbox = Sandbox::new("paths");
+        let repo = sandbox.repo();
+        let (readme, other) = (id(README), id(OTHER));
+        for n in [0usize, 1, 2, 16, 300] {
+            let paths: Vec<CString> = (0..n)
+                .map(|i| {
+                    CString::new(format!("d{}/{}/f{i}", i % 3, "x".repeat(i % 7 + 1))).unwrap()
+                })
+                .collect();
+            let mut updates: Vec<TreeUpdate<'_>> = paths
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let blob = if i % 2 == 0 { &readme } else { &other };
+                    TreeUpdate::upsert(p, blob.as_ref(), FileMode::Blob)
+                })
+                .collect();
+            // Reversed: libgit2 sorts its own pointers into the array.
+            updates.reverse();
+            let base = Tree::lookup(repo.as_ref(), id(BASE).as_ref()).unwrap();
+            let written = Tree::create_updated(repo.as_ref(), Some(base.as_ref()), &updates);
+            drop(base);
+            drop(updates);
+            let written = written.unwrap();
+            let tree = Tree::lookup(repo.as_ref(), written.as_ref()).unwrap();
+            for p in paths {
+                assert!(TreeEntry::bypath(tree.as_ref(), &p).is_ok());
+                scribble(p);
+            }
+        }
+    }
+
+    /// Every refusal, libgit2's and the wrapper's, releases what the call built.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refusals_release_everything() {
+        let sandbox = Sandbox::new("refusals");
+        let repo = sandbox.repo();
+        let (readme, other) = (id(README), id(OTHER));
+        let missing = id("dededededededededededededededededededede");
+        let wide = Oid::from_raw(&[7; 32], OidType::Sha256).unwrap();
+        let long = CString::new(format!("dir/{}", "n".repeat(70_000))).unwrap();
+        let sets: Vec<Vec<TreeUpdate<'_>>> = vec![
+            vec![
+                TreeUpdate::upsert(c"x", readme.as_ref(), FileMode::Blob),
+                TreeUpdate::upsert(c"x", other.as_ref(), FileMode::Blob),
+            ],
+            vec![TreeUpdate::upsert(
+                c"README/x",
+                readme.as_ref(),
+                FileMode::Blob,
+            )],
+            vec![TreeUpdate::upsert(c"ab", readme.as_ref(), FileMode::Blob)],
+            vec![TreeUpdate::remove(c"ab/de/fgh/missing")],
+            vec![
+                TreeUpdate::upsert(c"ab/de/fgh/new", readme.as_ref(), FileMode::Blob),
+                TreeUpdate::upsert(c"ab/de/fgh/zz/.git", readme.as_ref(), FileMode::Blob),
+            ],
+            vec![TreeUpdate::upsert(c"a//b", readme.as_ref(), FileMode::Blob)],
+            vec![TreeUpdate::upsert(
+                c"new/deep/x",
+                missing.as_ref(),
+                FileMode::Blob,
+            )],
+            vec![TreeUpdate::upsert(
+                c"new",
+                other.as_ref(),
+                FileMode::Unreadable,
+            )],
+            vec![TreeUpdate::upsert(c"wide/x", wide.as_ref(), FileMode::Blob)],
+            vec![TreeUpdate::upsert(&long, readme.as_ref(), FileMode::Commit)],
+        ];
+        for (i, updates) in sets.iter().enumerate() {
+            let base = Tree::lookup(repo.as_ref(), id(BASE).as_ref()).unwrap();
+            let result = Tree::create_updated(repo.as_ref(), Some(base.as_ref()), updates);
+            assert!(result.is_err(), "set {i}");
+            let unbased = Tree::create_updated(repo.as_ref(), None, updates);
+            // Without a baseline, nothing is in the way of sets 1 and 2.
+            assert_eq!(unbased.is_ok(), matches!(i, 1 | 2), "set {i}");
+        }
+        // A removal reads no id, whatever its type.
+        let mut removal = TreeUpdate::remove(c"README");
+        removal.as_mut().set_id(wide.as_ref());
+        removal.as_mut().set_action(UpdateAction::Remove);
+        let base = Tree::lookup(repo.as_ref(), id(BASE).as_ref()).unwrap();
+        assert!(Tree::create_updated(repo.as_ref(), Some(base.as_ref()), &[removal]).is_ok());
+    }
+
+    /// A baseline of another object id type is refused before libgit2 would look its
+    /// subtrees up in a repository of the other type; one of the same type but another
+    /// repository is looked up in the repository given.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn baselines_of_other_repositories_stay_in_bounds() {
+        let sandbox = Sandbox::new("foreign-base");
+        let repo = sandbox.repo();
+        let path = sandbox.path.with_extension("sha256");
+        let _ = std::fs::remove_dir_all(&path);
+        let mut opts = InitOptions::new();
+        opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
+        opts.as_mut().set_oid_type(Some(OidType::Sha256));
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let wide = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
+        let mut builder = TreeBuilder::new(wide.as_ref()).unwrap();
+        let empty = builder.as_mut().write().unwrap();
+        drop(builder);
+        let wide_tree = Tree::lookup(wide.as_ref(), empty.as_ref()).unwrap();
+        let e = Tree::create_updated(repo.as_ref(), Some(wide_tree.as_ref()), &[]).unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        let readme = id(README);
+        let updates = [TreeUpdate::upsert(c"a/b", readme.as_ref(), FileMode::Blob)];
+        let e = Tree::create_updated(wide.as_ref(), None, &updates).unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+
+        let other = Sandbox::new("other-base");
+        let base = Tree::lookup(other.repo().as_ref(), id(BASE).as_ref()).unwrap();
+        let updates = [TreeUpdate::upsert(
+            c"ab/c/new",
+            readme.as_ref(),
+            FileMode::Blob,
+        )];
+        let written = Tree::create_updated(repo.as_ref(), Some(base.as_ref()), &updates).unwrap();
+        drop(base);
+        drop(other);
+        assert!(Tree::lookup(repo.as_ref(), written.as_ref()).is_ok());
+        drop(wide_tree);
+        drop(wide);
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// Threads update trees at once, each in a repository of its own.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn updates_on_threads() {
+        let sandboxes: Vec<Sandbox> = (0..4)
+            .map(|i| Sandbox::new(&format!("thread-{i}")))
+            .collect();
+        let paths: Vec<CString> = sandboxes
+            .iter()
+            .map(|s| CString::new(s.path.as_os_str().as_bytes()).unwrap())
+            .collect();
+        thread::scope(|s| {
+            for (t, path) in paths.iter().enumerate() {
+                s.spawn(move || {
+                    let repo = Repository::open(path).unwrap();
+                    let readme = id(README);
+                    for k in 0..8 {
+                        let name = CString::new(format!("t{t}/k{k}/file")).unwrap();
+                        let updates = [
+                            TreeUpdate::upsert(&name, readme.as_ref(), FileMode::Blob),
+                            TreeUpdate::remove(c"README"),
+                        ];
+                        let base = Tree::lookup(repo.as_ref(), id(BASE).as_ref()).unwrap();
+                        let written =
+                            Tree::create_updated(repo.as_ref(), Some(base.as_ref()), &updates)
+                                .unwrap();
+                        assert!(Tree::lookup(repo.as_ref(), written.as_ref()).is_ok());
+                    }
+                });
+            }
+        });
+    }
+}

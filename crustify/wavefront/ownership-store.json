@@ -11307,6 +11307,222 @@
    ]
   },
   {
+   "name": "git_tag_annotation_create",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Appended verbatim after the blank line; read for the call."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's id slot: written with the tag object's id on success (and, for git_tag_create, with the existing reference's target before GIT_EEXISTS)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository; odb (and for git_tag_create the refdb) loaded and written; not retained."
+     }
+    },
+    {
+     "name": "tag_name",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; printed into the object with %s unchecked (a newline corrupts it). git_tag_create refuses '-'-led and HEAD."
+     }
+    },
+    {
+     "name": "tagger",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tagger"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only read by git_signature__writebuf, which prints name and email with %s: both must be non-NULL (a signature parsed out of memory may hold NULL)."
+     }
+    },
+    {
+     "name": "target",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:target"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live object, only its owner (git_tag_create compares it with repo), id and type are read; never retained. git_tag_annotation_create does not check the owner."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_create",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Appended verbatim after the blank line; read for the call."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller's id slot: written with the tag object's id on success (and, for git_tag_create, with the existing reference's target before GIT_EEXISTS)."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository; odb (and for git_tag_create the refdb) loaded and written; not retained."
+     }
+    },
+    {
+     "name": "tag_name",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call; printed into the object with %s unchecked (a newline corrupts it). git_tag_create refuses '-'-led and HEAD."
+     }
+    },
+    {
+     "name": "tagger",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tagger"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Only read by git_signature__writebuf, which prints name and email with %s: both must be non-NULL (a signature parsed out of memory may hold NULL)."
+     }
+    },
+    {
+     "name": "target",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:target"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live object, only its owner (git_tag_create compares it with repo), id and type are read; never retained. git_tag_annotation_create does not check the owner."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tag_create_from_buffer",
    "defined_in": "src/libgit2/tag.c",
    "ptr_args": [
@@ -11525,6 +11741,63 @@
    ]
   },
   {
+   "name": "git_tag_foreach",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "git_tag_foreach_cb, called synchronously on the calling thread with the full refname (borrowed from the iterator) and a stack-local resolved id, both valid for the call only; a non-zero return stops the walk and is returned (git_error_set_after_callback_function sets GIT_ERROR_CALLBACK if no error)."
+     }
+    },
+    {
+     "name": "cb_data",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb_data"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque payload handed to cb unchanged; never dereferenced by libgit2."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository whose refdb is iterated (git_reference_foreach_name); each name resolved with git_reference_name_to_id."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_tag_foreach_cb",
    "defined_in": null,
    "ptr_args": [
@@ -11606,6 +11879,45 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_tag_id",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read (git_object_id behind a cast)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "Address of the id cached in the tag (&obj->cached.oid): never NULL for a live tag, valid as long as the tag, written once at parse."
+    }
+   }
   },
   {
    "name": "git_tag_list",
@@ -11843,6 +12155,84 @@
    ]
   },
   {
+   "name": "git_tag_message",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; NULL refused by assert (returns NULL)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:t"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "t->message: NULL when the content ends with the header; otherwise a NUL-terminated copy owned by the tag (embedded NULs truncate the C view)."
+    }
+   }
+  },
+  {
+   "name": "git_tag_name",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; NULL is refused by GIT_ASSERT_ARG_WITH_RETVAL (returns NULL)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:t"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "t->tag_name: NUL-terminated copy the parse allocates (non-NULL on parse success), freed by git_tag__free with the tag."
+    }
+   }
+  },
+  {
    "name": "git_tag_name_is_valid",
    "defined_in": "src/libgit2/tag.c",
    "ptr_args": [
@@ -11876,6 +12266,252 @@
       "nullable": false,
       "mutable": true,
       "note": "Out-parameter: written 0 first, then 1 if `refs/tags/<name>` is a valid reference name. NULL fails GIT_ASSERT (returns -1, sets GIT_ERROR_INTERNAL)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_owner",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read (git_object_owner behind a cast)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj"
+     },
+     "nullable": false,
+     "mutable": true,
+     "note": "obj->repo: the repository the tag was looked up in, stored without a count and never cleared; borrowed from whoever owns the repository (the tag must not outlive it). Non-NULL for any looked-up tag."
+    }
+   }
+  },
+  {
+   "name": "git_tag_peel",
+   "defined_in": "src/libgit2/tag.c",
+   "lifetime": {
+    "for": "tag_target",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "tag",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, read; its repository is used for each lookup."
+     }
+    },
+    {
+     "name": "tag_target",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tag_target"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success one counted reference to the first non-tag object of the chain (git_object_peel with GIT_OBJECT_ANY), released with git_object_free. Untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_tagger",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; no NULL check (NULL crashes)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:t"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "t->tagger: NULL for a taggerless tag; else a git_signature the tag owns (git_tag__free frees it). Its name/email may be NULL if git_signature__parse ran out of memory copying them."
+    }
+   }
+  },
+  {
+   "name": "git_tag_target",
+   "defined_in": "src/libgit2/tag.c",
+   "lifetime": {
+    "for": "target",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; its repository (uncounted) is used for the lookup, so it must be live and its cache is filled."
+     }
+    },
+    {
+     "name": "target",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:target"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success one counted reference to the target object (git_object_lookup of t->target with t->type through t->object.repo), released with git_object_free; it keeps the repository uncounted. Untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tag_target_id",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; NULL refused by assert (returns NULL)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:t"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&t->target: the parsed target id, of the repository's oid type; valid as long as the tag."
+    }
+   }
+  },
+  {
+   "name": "git_tag_target_type",
+   "defined_in": "src/libgit2/tag.c",
+   "ptr_args": [
+    {
+     "name": "t",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:t"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tag, only read; NULL refused by assert (returns GIT_OBJECT_INVALID). Parse guarantees one of commit/tree/blob/tag."
      }
     }
    ]
@@ -11920,6 +12556,80 @@
       "nullable": true,
       "mutable": null,
       "note": "Function pointer stored verbatim in the unlocked global git_trace__data.callback and called (by git_trace, from any thread running the HTTP client) until the next git_trace_set: borrowed for as long as it stays installed, never released. NULL only with level == 0 (GIT_ASSERT_ARG: -1 GIT_ERROR_INVALID in release, abort in debug). git_trace reads level/callback without a lock and re-reads callback after the NULL check (TOCTOU), so a set racing a trace is a data race and clearing can make C call NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_tree_create_updated",
+   "defined_in": "src/libgit2/tree.c",
+   "ptr_args": [
+    {
+     "name": "baseline",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:baseline"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional tree; git_tree_dup'd and freed within the call, entries copied into the root builder. Its subtrees are looked up in repo by id, so its id type must match repo's (else the loose path is formatted out of bounds)."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Written with the new root tree id on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository; odb loaded and written, cache filled; every builder keeps it uncounted for the call only."
+     }
+    },
+    {
+     "name": "updates",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:updates"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Array of nupdates git_tree_update read in place for the call (sorted by path into a vector of pointers, never copied or retained). Each path is dereferenced unchecked (non-NULL); upsert ids reach git_treebuilder_insert's object lookup (type must match repo's), components > 65535 bytes are truncated into a corrupt tree."
      }
     }
    ]

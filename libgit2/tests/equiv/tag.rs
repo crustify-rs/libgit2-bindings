@@ -629,13 +629,19 @@ mod repository_tags {
     use std::path::{Path, PathBuf};
     use std::ptr;
 
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+
     use libgit2::ffi;
+    use libgit2::libgit2::core::types::{SignatureView, Time};
     use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tag::{
-        create_from_buffer, create_lightweight, delete, list, list_match,
+        ForeachCallback, Tag, create, create_annotation, create_from_buffer, create_lightweight,
+        delete, foreach, list, list_match,
     };
-    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+    use libgit2::libgit2::util::errors::last;
 
     use super::{c_last, init};
 
@@ -701,6 +707,70 @@ mod repository_tags {
         Foreign(&'static str),
         Buffer(String, bool),
         Delete(&'static str),
+        /// `git_tag_create`: name, target, tagger, message, force.
+        Annotated(&'static str, &'static str, Tagger, &'static str, bool),
+        /// `git_tag_annotation_create`: name, target, tagger, message.
+        Annotation(&'static str, &'static str, Tagger, &'static str),
+        /// Either writer, with a target of another repository: name, `force` (or
+        /// `None` for `git_tag_annotation_create`).
+        ForeignAnnotated(&'static str, Option<bool>),
+        /// `git_tag_foreach`, its callback breaking with the code at the given call.
+        Foreach(Option<(usize, c_int)>),
+        /// A symbolic reference `refs/tags/<name>` to a missing branch, written into
+        /// each side's repository.
+        Dangle(&'static str),
+    }
+
+    /// The tagger a writer is given.
+    #[derive(Clone, Copy, Debug)]
+    enum Tagger {
+        /// A signature over borrowed strings: name, email, seconds, offset.
+        View(&'static str, &'static str, i64, i32),
+        /// The tagger of the tag object `TAG`, borrowed from the tag libgit2 parsed.
+        Parsed,
+    }
+
+    const TAGGER: Tagger = Tagger::View("A U Thor", "author@example.com", 1_700_000_000, 90);
+
+    fn annotated_script() -> Vec<Step> {
+        use Step::*;
+        let lisa = Tagger::View("Lisa", "lisa@example.com", 0, -420);
+        vec![
+            Foreach(None),
+            Annotated("ann", COMMIT, TAGGER, "first\n", false),
+            Annotated("ann", COMMIT, TAGGER, "first\n", false),
+            Annotated("ann", TREE, lisa, "replaced\n", true),
+            Annotated("to-blob", BLOB, TAGGER, "", false),
+            Annotated("to-tag", TAG, Tagger::Parsed, "no newline", false),
+            Annotated("multi", COMMIT, TAGGER, "line 1\n\nline 3\n", false),
+            Annotated("-dash", COMMIT, TAGGER, "m\n", false),
+            Annotated("HEAD", COMMIT, TAGGER, "m\n", false),
+            Annotated("bad..name", COMMIT, TAGGER, "m\n", false),
+            Annotated("trailing/", COMMIT, TAGGER, "m\n", false),
+            Annotated("nested/deep/name", COMMIT, lisa, "m\n", false),
+            Annotated("test", COMMIT, TAGGER, "m\n", false),
+            Annotated("test", COMMIT, TAGGER, "replaces test\n", true),
+            ForeignAnnotated("foreign", Some(false)),
+            ForeignAnnotated("foreign", None),
+            Annotation("ann", COMMIT, TAGGER, "first\n"),
+            Annotation("-dash", BLOB, lisa, "any name\n"),
+            Annotation("bad..name", TREE, Tagger::Parsed, ""),
+            Annotation("new\nline", COMMIT, TAGGER, "m\n"),
+            Foreach(None),
+            Foreach(Some((0, 1))),
+            Foreach(Some((3, -1))),
+            Foreach(Some((5, -12345))),
+            Foreach(Some((100, 7))),
+            Dangle("zz-dangling"),
+            Foreach(None),
+            Foreach(Some((1, 9))),
+            Delete("zz-dangling"),
+            Foreach(None),
+            Delete("ann"),
+            Delete("test"),
+            Foreach(Some((2, 2))),
+            List,
+        ]
     }
 
     fn script() -> Vec<Step> {
@@ -769,6 +839,82 @@ mod repository_tags {
         Names(Vec<String>),
         Done,
         Failed(c_int, c_int, String),
+        /// A tag object written: its id and raw content, as C reads it from the side's
+        /// object database.
+        Object(String, Vec<u8>),
+        /// A walk: every tag seen (full name and id), what it returned, and, when that
+        /// was not 0, the error left.
+        Walk(Vec<(String, String)>, c_int, Option<(c_int, String)>),
+    }
+
+    /// The tag object `id` names in `repo`, as an outcome.
+    fn object(repo: *mut ffi::git_repository, id: &ffi::git_oid) -> Outcome {
+        let mut odb = ptr::null_mut();
+        let mut object = ptr::null_mut();
+        // SAFETY: writable slots, the live repository and a live id; the object's data
+        // is copied at once, then the object and the odb are released once.
+        unsafe {
+            assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
+            assert_eq!(ffi::git_odb_read(&mut object, odb, id), 0);
+            assert_eq!(ffi::git_odb_object_type(object), ffi::GIT_OBJECT_TAG);
+            let data = std::slice::from_raw_parts(
+                ffi::git_odb_object_data(object).cast::<u8>(),
+                ffi::git_odb_object_size(object),
+            )
+            .to_vec();
+            ffi::git_odb_object_free(object);
+            ffi::git_odb_free(odb);
+            Outcome::Object(hex(id), data)
+        }
+    }
+
+    /// What `git_tag_foreach`'s C callback collects, and when it breaks.
+    struct Collect {
+        seen: Vec<(String, String)>,
+        stop: Option<(usize, c_int)>,
+    }
+
+    unsafe extern "C" fn collect(
+        name: *const std::ffi::c_char,
+        id: *mut ffi::git_oid,
+        payload: *mut std::ffi::c_void,
+    ) -> c_int {
+        // SAFETY: libgit2 passes the walk's `Collect`, a NUL-terminated name and a live
+        // id, all for the call.
+        let collect = unsafe { &mut *payload.cast::<Collect>() };
+        // SAFETY: as above.
+        let name = unsafe { CStr::from_ptr(name) }.to_str().unwrap().to_owned();
+        // SAFETY: as above.
+        collect.seen.push((name, hex(unsafe { &*id })));
+        match collect.stop {
+            Some((at, code)) if collect.seen.len() == at + 1 => code,
+            _ => 0,
+        }
+    }
+
+    /// C's signature for `tagger`, over `strings`, which must outlive it.
+    fn c_signature(tagger: Tagger, strings: &(CString, CString)) -> ffi::git_signature {
+        let Tagger::View(_, _, seconds, offset) = tagger else {
+            unreachable!("a parsed tagger is the tag's own")
+        };
+        ffi::git_signature {
+            name: strings.0.as_ptr().cast_mut(),
+            email: strings.1.as_ptr().cast_mut(),
+            when: ffi::git_time {
+                time: seconds,
+                offset,
+                sign: if offset < 0 { b'-' } else { b'+' } as std::ffi::c_char,
+            },
+        }
+    }
+
+    fn tagger_strings(tagger: Tagger) -> (CString, CString) {
+        match tagger {
+            Tagger::View(name, email, ..) => {
+                (CString::new(name).unwrap(), CString::new(email).unwrap())
+            }
+            Tagger::Parsed => (CString::default(), CString::default()),
+        }
     }
 
     fn hex(id: &ffi::git_oid) -> String {
@@ -780,6 +926,19 @@ mod repository_tags {
             .to_str()
             .unwrap()
             .to_owned()
+    }
+
+    fn raw_id(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable id and a NUL-terminated hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    fn object_of(repo: *mut ffi::git_repository, id: &ffi::git_oid) -> Outcome {
+        object(repo, id)
     }
 
     fn c_failed(rc: c_int) -> Outcome {
@@ -893,8 +1052,96 @@ mod repository_tags {
             }
         }
 
+        /// `git_tag_create` (with `force`) or `git_tag_annotation_create` (without) of
+        /// `name` at `object`, which it releases after.
+        fn annotated(
+            &self,
+            name: &str,
+            object: *mut ffi::git_object,
+            tagger: Tagger,
+            message: &str,
+            force: Option<bool>,
+        ) -> Outcome {
+            let (name, message) = (CString::new(name).unwrap(), CString::new(message).unwrap());
+            let strings = tagger_strings(tagger);
+            let mut tag = ptr::null_mut();
+            let signature = match tagger {
+                Tagger::View(..) => c_signature(tagger, &strings),
+                Tagger::Parsed => {
+                    let id = raw_id(TAG);
+                    // SAFETY: a writable slot, the live repository and a live id; the tag
+                    // is released below, after its tagger was copied out.
+                    unsafe {
+                        assert_eq!(ffi::git_tag_lookup(&mut tag, self.repo, &id), 0);
+                        *ffi::git_tag_tagger(tag)
+                    }
+                }
+            };
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id, the live repository, NUL-terminated strings and a
+            // live object, released once after; the signature's strings are `strings`
+            // or the live tag's, both outliving the call.
+            let rc = unsafe {
+                let rc = match force {
+                    Some(force) => ffi::git_tag_create(
+                        &mut id,
+                        self.repo,
+                        name.as_ptr(),
+                        object,
+                        &signature,
+                        message.as_ptr(),
+                        c_int::from(force),
+                    ),
+                    None => ffi::git_tag_annotation_create(
+                        &mut id,
+                        self.repo,
+                        name.as_ptr(),
+                        object,
+                        &signature,
+                        message.as_ptr(),
+                    ),
+                };
+                ffi::git_object_free(object);
+                ffi::git_tag_free(tag);
+                rc
+            };
+            if rc < 0 {
+                c_failed(rc)
+            } else {
+                object_of(self.repo, &id)
+            }
+        }
+
+        fn walk(&self, stop: Option<(usize, c_int)>) -> Outcome {
+            let mut collected = Collect {
+                seen: Vec::new(),
+                stop,
+            };
+            // SAFETY: the live repository; `collect` reads the payload it is given, the
+            // live `Collect`, for the walk only.
+            let rc = unsafe {
+                ffi::git_tag_foreach(self.repo, Some(collect), (&raw mut collected).cast())
+            };
+            let error = (rc != 0).then(c_last);
+            Outcome::Walk(collected.seen, rc, error)
+        }
+
         fn run(&mut self, step: &Step) -> Outcome {
             match step {
+                Step::Annotated(name, target, tagger, message, force) => {
+                    let object = Self::lookup(self.repo, target);
+                    self.annotated(name, object, *tagger, message, Some(*force))
+                }
+                Step::Annotation(name, target, tagger, message) => {
+                    let object = Self::lookup(self.repo, target);
+                    self.annotated(name, object, *tagger, message, None)
+                }
+                Step::ForeignAnnotated(name, force) => {
+                    let object = Self::lookup(self.other, COMMIT);
+                    self.annotated(name, object, TAGGER, "foreign\n", *force)
+                }
+                Step::Foreach(stop) => self.walk(*stop),
+                Step::Dangle(_) => unreachable!("written by the test"),
                 Step::List => self.list(None),
                 Step::Match(pattern) => self.list(Some(pattern)),
                 Step::Lightweight(name, target, force) => {
@@ -970,7 +1217,96 @@ mod repository_tags {
             Ok(id) => Outcome::Id(id.as_ref().to_hex_string().unwrap()),
             Err(e) => rust_failed(&e),
         };
+        let tagged = |result: Result<Oid, RepositoryError>| match result {
+            Ok(id) => {
+                let raw = ffi::git_oid {
+                    type_: id.as_ref().raw_kind(),
+                    id: id.as_ref().id(),
+                };
+                object_of(repo.as_c_ptr(), &raw)
+            }
+            Err(e) => rust_failed(&e),
+        };
+        let write = |name: &str, object: ObjectArc<'_>, tagger: Tagger, message: &str, force| {
+            let (name, message) = (CString::new(name).unwrap(), CString::new(message).unwrap());
+            let strings = tagger_strings(tagger);
+            let tag;
+            let view;
+            let signature = match tagger {
+                Tagger::View(_, _, seconds, offset) => {
+                    view = SignatureView::new(&strings.0, &strings.1, Time::new(seconds, offset));
+                    view.as_ref()
+                }
+                Tagger::Parsed => {
+                    let id = Oid::from_string(&CString::new(TAG).unwrap(), OidType::Sha1).unwrap();
+                    tag = Tag::lookup(repo.as_ref(), id.as_ref()).unwrap();
+                    tag.as_ref().tagger().unwrap()
+                }
+            };
+            tagged(match force {
+                Some(force) => create(
+                    repo.as_ref(),
+                    &name,
+                    object.as_ref(),
+                    signature,
+                    &message,
+                    force,
+                ),
+                None => {
+                    create_annotation(repo.as_ref(), &name, object.as_ref(), signature, &message)
+                }
+            })
+        };
         match step {
+            Step::Annotated(name, target, tagger, message, force) => write(
+                name,
+                rust_lookup(repo, target),
+                *tagger,
+                message,
+                Some(*force),
+            ),
+            Step::Annotation(name, target, tagger, message) => {
+                write(name, rust_lookup(repo, target), *tagger, message, None)
+            }
+            Step::ForeignAnnotated(name, force) => write(
+                name,
+                rust_lookup(other, COMMIT),
+                TAGGER,
+                "foreign\n",
+                *force,
+            ),
+            Step::Foreach(stop) => {
+                let mut seen = Vec::new();
+                let mut f = |name: &CStr, id: OidRef<'_>| {
+                    seen.push((
+                        name.to_str().unwrap().to_owned(),
+                        id.to_hex_string().unwrap(),
+                    ));
+                    match stop {
+                        Some((at, code)) if seen.len() == at + 1 => {
+                            ControlFlow::Break(NonZero::new(*code).unwrap())
+                        }
+                        _ => ControlFlow::Continue(()),
+                    }
+                };
+                let mut callback = ForeachCallback::new(&mut f);
+                let result = foreach(repo.as_ref(), &mut callback);
+                drop(callback);
+                let (rc, error) = match result {
+                    Ok(ControlFlow::Continue(())) => (0, None),
+                    Ok(ControlFlow::Break(code)) => {
+                        let e = last();
+                        let message = e.message().to_string_lossy().into_owned();
+                        (code.get(), Some((e.raw_class(), message)))
+                    }
+                    Err(e) => (
+                        e.raw_code(),
+                        Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                    ),
+                };
+                Outcome::Walk(seen, rc, error)
+            }
+            Step::Dangle(_) => unreachable!("written by the test"),
             Step::List => rust_list(list(repo.as_ref())),
             Step::Match(pattern) => {
                 rust_list(list_match(repo.as_ref(), &CString::new(*pattern).unwrap()))
@@ -1074,6 +1410,196 @@ mod repository_tags {
         });
     }
 
+    /// [`create`], [`create_annotation`] and [`foreach`] against `git_tag_create`,
+    /// `git_tag_annotation_create` and `git_tag_foreach`: annotated tags over every kind
+    /// of target, with taggers over borrowed strings and one borrowed from a parsed tag,
+    /// again without and with `force`, under names the tag rules or the reference rules
+    /// refuse, with a target of another repository; tag objects alone, under any name;
+    /// and walks running to the end, breaking with codes of either sign at their first,
+    /// middle and past their last tag, and failing on a dangling symbolic reference.
+    /// After every step the sides compare the outcome (the tag object written, as its id
+    /// and raw content, the tags walked and the code and error a walk returned, or the
+    /// code, error class and message) and every tag's name and target.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn annotated_scripts_match_c() {
+        isolated(
+            concat!(module_path!(), "::annotated_scripts_match_c"),
+            false,
+            || {
+                init();
+                let (c_box, rust_box) = (Sandbox::new("ann-c"), Sandbox::new("ann-rust"));
+                let mut c = CSide::open(&c_box.c_path());
+                let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
+                let rust_other = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+                let (mut failures, mut walks) = (0, 0);
+                for (i, step) in annotated_script().iter().enumerate() {
+                    if let Step::Dangle(name) = step {
+                        for sandbox in [&c_box, &rust_box] {
+                            let path = sandbox.0.join("refs/tags").join(name);
+                            std::fs::write(path, "ref: refs/heads/nope\n").unwrap();
+                        }
+                        continue;
+                    }
+                    let c_seen = c.run(step);
+                    let rust_seen = rust_run(&rust_repo, &rust_other, step);
+                    assert_eq!(rust_seen, c_seen, "step {i}: {step:?}");
+                    failures += usize::from(matches!(c_seen, Outcome::Failed(..)));
+                    walks += usize::from(matches!(c_seen, Outcome::Walk(_, rc, _) if rc != 0));
+                    if !matches!(step, Step::Foreach(..))
+                        || matches!(c_seen, Outcome::Walk(_, 0, _))
+                    {
+                        assert_eq!(
+                            tags(rust_repo.as_c_ptr()),
+                            tags(c.repo),
+                            "after step {i}: {step:?}"
+                        );
+                    }
+                }
+                assert!(failures >= 6 && walks >= 6, "{failures} {walks}");
+            },
+        );
+    }
+
+    /// A tag object written into a repository without an object database (one without
+    /// a git directory, its target from another) fails as libgit2 fails it, on both
+    /// sides; [`create`] refuses the foreign target first, as libgit2 does.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn annotations_without_an_object_database_match_c() {
+        init();
+        let other = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: a writable slot.
+        assert_eq!(unsafe { ffi::git_repository_new(&mut c_repo) }, 0);
+        let rust_repo = Repository::new().unwrap();
+        let strings = tagger_strings(TAGGER);
+        let signature = c_signature(TAGGER, &strings);
+        let Tagger::View(_, _, seconds, offset) = TAGGER else {
+            unreachable!()
+        };
+        let view = SignatureView::new(&strings.0, &strings.1, Time::new(seconds, offset));
+        for force in [None, Some(false), Some(true)] {
+            let object = CSide::lookup(other.as_c_ptr(), COMMIT);
+            let mut id = ffi::git_oid::default();
+            // SAFETY: a writable id, the live pathless repository, NUL-terminated
+            // strings, a live signature over `strings`, and a live object of another
+            // repository, released once after.
+            let rc = unsafe {
+                let rc = match force {
+                    None => ffi::git_tag_annotation_create(
+                        &mut id,
+                        c_repo,
+                        c"t".as_ptr(),
+                        object,
+                        &signature,
+                        c"m\n".as_ptr(),
+                    ),
+                    Some(force) => ffi::git_tag_create(
+                        &mut id,
+                        c_repo,
+                        c"t".as_ptr(),
+                        object,
+                        &signature,
+                        c"m\n".as_ptr(),
+                        c_int::from(force),
+                    ),
+                };
+                ffi::git_object_free(object);
+                rc
+            };
+            assert!(rc < 0);
+            let c_seen = c_failed(rc);
+            let target = rust_lookup(&other, COMMIT);
+            let result = match force {
+                None => create_annotation(
+                    rust_repo.as_ref(),
+                    c"t",
+                    target.as_ref(),
+                    view.as_ref(),
+                    c"m\n",
+                ),
+                Some(force) => create(
+                    rust_repo.as_ref(),
+                    c"t",
+                    target.as_ref(),
+                    view.as_ref(),
+                    c"m\n",
+                    force,
+                ),
+            };
+            assert_eq!(rust_failed(&result.unwrap_err()), c_seen, "{force:?}");
+        }
+        // SAFETY: the raw repository is released once; nothing of it is held.
+        unsafe { ffi::git_repository_free(c_repo) };
+    }
+
+    /// A tag object the object database fails to store (its loose fan-out directory is
+    /// a regular file, which stops root as well) fails both writers alike, and
+    /// [`create`] then writes no reference.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unwritable_objects_match_c() {
+        init();
+        let scratch = Sandbox::new("unwritable-scratch");
+        let scratch_repo = Repository::open(&scratch.c_path()).unwrap();
+        let other = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
+        let used = |hex: &str| Path::new(TESTREPO).join("objects").join(&hex[..2]).exists();
+        // A message whose tag object lands in a fan-out the repository does not use.
+        const MESSAGES: [&str; 16] = [
+            "blocked 0\n",
+            "blocked 1\n",
+            "blocked 2\n",
+            "blocked 3\n",
+            "blocked 4\n",
+            "blocked 5\n",
+            "blocked 6\n",
+            "blocked 7\n",
+            "blocked 8\n",
+            "blocked 9\n",
+            "blocked a\n",
+            "blocked b\n",
+            "blocked c\n",
+            "blocked d\n",
+            "blocked e\n",
+            "blocked f\n",
+        ];
+        let (message, blocked) = MESSAGES
+            .into_iter()
+            .map(|message| {
+                let step = Step::Annotation("blocked", COMMIT, TAGGER, message);
+                let Outcome::Object(hex, _) = rust_run(&scratch_repo, &other, &step) else {
+                    panic!("{step:?}")
+                };
+                (message, hex)
+            })
+            .find(|(_, hex)| !used(hex))
+            .unwrap();
+        let (c_box, rust_box) = (
+            Sandbox::new("unwritable-c"),
+            Sandbox::new("unwritable-rust"),
+        );
+        for sandbox in [&c_box, &rust_box] {
+            let fanout = sandbox.0.join("objects").join(&blocked[..2]);
+            std::fs::write(fanout, b"not a directory").unwrap();
+        }
+        let mut c = CSide::open(&c_box.c_path());
+        let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
+        for step in [
+            Step::Annotation("blocked", COMMIT, TAGGER, message),
+            Step::Annotated("blocked", COMMIT, TAGGER, message, false),
+            Step::Annotated("blocked", COMMIT, TAGGER, message, true),
+        ] {
+            let c_seen = c.run(&step);
+            assert!(
+                matches!(c_seen, Outcome::Failed(..)),
+                "{step:?}: {c_seen:?}"
+            );
+            assert_eq!(rust_run(&rust_repo, &other, &step), c_seen, "{step:?}");
+            assert_eq!(tags(rust_repo.as_c_ptr()), tags(c.repo), "{step:?}");
+        }
+    }
+
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
     /// Runs `body` alone in a child process: writing a reference reads the time through
@@ -1139,5 +1665,367 @@ mod repository_tags {
                 }
             },
         );
+    }
+}
+
+mod tag_accessors {
+    //! Equivalence of the tag's getters and lookups ([`TagRef::id`], `owner`, `name`,
+    //! `message`, `tagger`, `target_id`, `target_kind`, `target`, `peel`) with
+    //! `git_tag_id`, `git_tag_owner`, `git_tag_name`, `git_tag_message`,
+    //! `git_tag_tagger`, `git_tag_target_id`, `git_tag_target_type`, `git_tag_target`
+    //! and `git_tag_peel`.
+    //!
+    //! Both sides open one copy of `testrepo.git` on their own, holding its five tags and
+    //! tags written raw beside them: one whose target is missing, one whose recorded
+    //! type is not its target's, one whose message holds a NUL, one without a message
+    //! after its tagger, one with a malformed zone and one with an empty tagger name,
+    //! a chain of tags ending in a blob, and one whose name holds spaces. Each side
+    //! runs one script, in order: every tag is looked up, read, its target and peel
+    //! taken and read, and then, with the tag released, the target and peel read again;
+    //! a second pass reads every tag again from the cache, through a copy whose original
+    //! is released first. After every step the sides compare every getter's value, as
+    //! bytes, the owner (each side's own repository), and the target and peel (their id
+    //! and type, or the code, error class and message).
+    //!
+    //! [`TagRef::id`]: libgit2::libgit2::object::tag::TagRef::id
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::object::ObjectArc;
+    use libgit2::libgit2::object::tag::{Tag, TagRef};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryError, RepositoryRef};
+
+    use super::{c_last, init};
+
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+    /// Every tag of `testrepo.git`.
+    const TAGS: [&str; 5] = [
+        "b25fa35b38051e4ae45d4222e795f9df2e43f1d1",
+        "7b4384978d2493e851f9cca7858815fac9b10980",
+        "849a5e34a26815e821f865b8479f5815a47af0fe",
+        "4a23e2e65ad4e31c4c9db7dc746650bfad082679",
+        "521d87c1ec3aef9824daf6d96cc0ae3710766d91",
+    ];
+    const COMMIT: &str = "e90810b8df3e80c413d903f631643c716887138d";
+    const BLOB: &str = "1385f264afb75a56a5bec74243be9b367ba4ca08";
+    const MISSING: &str = "dededededededededededededededededededede";
+
+    /// Raw tag contents written beside `testrepo.git`'s tags; `{blob}` and `{tag}`
+    /// name the chain's blob and its first tag.
+    fn odd_tags() -> Vec<Vec<u8>> {
+        let tagger = "tagger T <t@example.com> 1700000000 +0130\n";
+        vec![
+            format!("object {MISSING}\ntype commit\ntag missing\n{tagger}\nm\n").into_bytes(),
+            format!("object {COMMIT}\ntype blob\ntag mistyped\n{tagger}\nm\n").into_bytes(),
+            format!("object {COMMIT}\ntype commit\ntag nul\n{tagger}\nbefore\0after\n")
+                .into_bytes(),
+            format!("object {COMMIT}\ntype commit\ntag bare\n{tagger}").into_bytes(),
+            format!("object {COMMIT}\ntype commit\ntag zone\ntagger Z <z@z> 5 +ab12\n\nz\n")
+                .into_bytes(),
+            format!("object {COMMIT}\ntype commit\ntag anon\ntagger  <> 7 -0700\n\n").into_bytes(),
+            format!("object {COMMIT}\ntype commit\ntag na me\n{tagger}\nspaced\n").into_bytes(),
+        ]
+    }
+
+    fn hex(id: *const ffi::git_oid) -> String {
+        let mut out = [0u8; 65];
+        // SAFETY: a live id, formatted into 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A private copy of `testrepo.git` holding [`odd_tags`] and a chain of tags of a
+    /// blob, removed on drop; `ids` are every tag's, `testrepo.git`'s first.
+    struct Sandbox {
+        path: PathBuf,
+        ids: Vec<String>,
+    }
+
+    impl Sandbox {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-tag-accessors-equiv-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            copy_dir(Path::new(TESTREPO), &path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let mut repo = ptr::null_mut();
+            let mut odb = ptr::null_mut();
+            // SAFETY: writable slots and a NUL-terminated path; each object is written
+            // from a live buffer of its length; the odb and repository are released once.
+            let ids = unsafe {
+                assert_eq!(ffi::git_repository_open(&mut repo, c_path.as_ptr()), 0);
+                assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
+                let write = |data: &[u8]| {
+                    let mut id = ffi::git_oid::default();
+                    let rc = ffi::git_odb_write(
+                        &mut id,
+                        odb,
+                        data.as_ptr().cast(),
+                        data.len(),
+                        ffi::GIT_OBJECT_TAG,
+                    );
+                    assert_eq!(rc, 0);
+                    hex(&id)
+                };
+                let mut ids: Vec<String> = TAGS.iter().map(|&t| t.to_owned()).collect();
+                ids.extend(odd_tags().iter().map(|data| write(data)));
+                let tagger = "tagger C <c@example.com> 1 +0000\n";
+                let first = write(
+                    format!("object {BLOB}\ntype blob\ntag chain0\n{tagger}\none\n").as_bytes(),
+                );
+                let second = write(
+                    format!("object {first}\ntype tag\ntag chain1\n{tagger}\ntwo\n").as_bytes(),
+                );
+                ids.extend([first, second]);
+                ffi::git_odb_free(odb);
+                ffi::git_repository_free(repo);
+                ids
+            };
+            Self { path, ids }
+        }
+
+        fn c_path(&self) -> CString {
+            CString::new(self.path.to_str().unwrap()).unwrap()
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// An object a lookup gave, as its id and type, or the failure.
+    type Looked = Result<(String, ffi::git_object_t), (c_int, c_int, String)>;
+
+    /// The tagger: name and email (bytes, or `None` for NULL), seconds, offset, sign.
+    type Tagger = (Option<Vec<u8>>, Option<Vec<u8>>, i64, i32, u8);
+
+    /// What every getter of one tag reads.
+    #[derive(Debug, PartialEq, Eq)]
+    struct View {
+        id: String,
+        owned_by_its_repository: bool,
+        name: Vec<u8>,
+        message: Option<Vec<u8>>,
+        tagger: Option<Tagger>,
+        target_id: String,
+        target_kind: ffi::git_object_t,
+        target: Looked,
+        peeled: Looked,
+    }
+
+    /// C's view of `object`, released after; or the failure `rc` left.
+    fn c_looked(rc: c_int, object: *mut ffi::git_object) -> Looked {
+        if rc < 0 {
+            let (class, message) = c_last();
+            return Err((rc, class, message));
+        }
+        // SAFETY: a live object the caller hands over, read, then released once.
+        unsafe {
+            let seen = (
+                hex(ffi::git_object_id(object)),
+                ffi::git_object_type(object),
+            );
+            ffi::git_object_free(object);
+            Ok(seen)
+        }
+    }
+
+    fn bytes(s: *const std::ffi::c_char) -> Option<Vec<u8>> {
+        // SAFETY: NULL or a NUL-terminated string live for the copy.
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) }.to_bytes().to_vec())
+    }
+
+    /// C's view of a live tag of `repo`.
+    fn c_view(repo: *mut ffi::git_repository, tag: *mut ffi::git_tag) -> View {
+        // SAFETY: a live tag of the live repository; every string and id read is the
+        // tag's, copied at once; the target and peel are released by `c_looked`.
+        unsafe {
+            let tagger = ffi::git_tag_tagger(tag);
+            let tagger = (!tagger.is_null()).then(|| {
+                let t = &*tagger;
+                (
+                    bytes(t.name),
+                    bytes(t.email),
+                    t.when.time,
+                    t.when.offset,
+                    t.when.sign as u8,
+                )
+            });
+            let mut target = ptr::null_mut();
+            let rc = ffi::git_tag_target(&mut target, tag);
+            let target = c_looked(rc, target);
+            let mut peeled = ptr::null_mut();
+            let rc = ffi::git_tag_peel(&mut peeled, tag);
+            let peeled = c_looked(rc, peeled);
+            View {
+                id: hex(ffi::git_tag_id(tag)),
+                owned_by_its_repository: ffi::git_tag_owner(tag) == repo,
+                name: bytes(ffi::git_tag_name(tag)).unwrap(),
+                message: bytes(ffi::git_tag_message(tag)),
+                tagger,
+                target_id: hex(ffi::git_tag_target_id(tag)),
+                target_kind: ffi::git_tag_target_type(tag),
+                target,
+                peeled,
+            }
+        }
+    }
+
+    fn rust_looked(result: Result<ObjectArc<'_>, RepositoryError>) -> Looked {
+        match result {
+            Ok(object) => Ok((
+                object.as_ref().id().to_hex_string().unwrap(),
+                object.as_ref().kind().raw(),
+            )),
+            Err(e) => Err((
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            )),
+        }
+    }
+
+    /// Rust's view of a tag; the owner is compared with `repo` by the address of its
+    /// path, which each repository allocates for itself.
+    fn rust_view(repo: RepositoryRef<'_>, tag: TagRef<'_, '_>) -> View {
+        let tagger = tag.tagger().map(|t| {
+            let when = t.when();
+            (
+                t.name().map(|s| s.to_bytes().to_vec()),
+                t.email().map(|s| s.to_bytes().to_vec()),
+                when.seconds(),
+                when.offset_minutes(),
+                when.sign(),
+            )
+        });
+        View {
+            id: tag.id().to_hex_string().unwrap(),
+            owned_by_its_repository: tag.owner().path().map(CStr::as_ptr)
+                == repo.path().map(CStr::as_ptr),
+            name: tag.name().to_bytes().to_vec(),
+            message: tag.message().map(|m| m.to_bytes().to_vec()),
+            tagger,
+            target_id: tag.target_id().to_hex_string().unwrap(),
+            target_kind: tag.target_kind().raw(),
+            target: rust_looked(tag.target()),
+            peeled: rust_looked(tag.peel()),
+        }
+    }
+
+    fn raw_id(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable id and a NUL-terminated hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_match_c() {
+        init();
+        let sandbox = Sandbox::new();
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_open(&mut c_repo, sandbox.c_path().as_ptr()) };
+        assert_eq!(rc, 0);
+        let rust_repo = Repository::open(&sandbox.c_path()).unwrap();
+        let r = rust_repo.as_ref();
+        let mut kinds = std::collections::HashSet::new();
+        for pass in 0..2 {
+            for (i, hex_id) in sandbox.ids.iter().enumerate() {
+                let raw = raw_id(hex_id);
+                let mut c_tag = ptr::null_mut();
+                // SAFETY: a writable slot, the live repository and a live id of its type.
+                assert_eq!(unsafe { ffi::git_tag_lookup(&mut c_tag, c_repo, &raw) }, 0);
+                let id = Oid::from_string(&CString::new(hex_id.as_str()).unwrap(), OidType::Sha1)
+                    .unwrap();
+                let mut rust_tag = Tag::lookup(r, id.as_ref()).unwrap();
+                if pass == 1 {
+                    // Read through a copy whose original is released first.
+                    let mut copy = ptr::null_mut();
+                    // SAFETY: a live tag this side holds, copied, then released once.
+                    unsafe {
+                        assert_eq!(ffi::git_tag_dup(&mut copy, c_tag), 0);
+                        ffi::git_tag_free(c_tag);
+                    }
+                    c_tag = copy;
+                    let copy = rust_tag.as_ref().to_tag();
+                    drop(std::mem::replace(&mut rust_tag, copy));
+                }
+                let c_seen = c_view(c_repo, c_tag);
+                let rust_seen = rust_view(r, rust_tag.as_ref());
+                assert_eq!(rust_seen, c_seen, "pass {pass}, tag {i}: {hex_id}");
+                assert!(c_seen.owned_by_its_repository);
+                kinds.insert((
+                    c_seen.target.is_ok(),
+                    c_seen.tagger.is_some(),
+                    c_seen.message.is_some(),
+                ));
+
+                // The target and peel outlive the tag they came from.
+                let mut c_target = ptr::null_mut();
+                let mut c_peeled = ptr::null_mut();
+                // SAFETY: writable slots and a live tag, released once after; a failure's
+                // error is read at once, before the next call replaces it.
+                let (c_target, c_peeled) = unsafe {
+                    let rc = ffi::git_tag_target(&mut c_target, c_tag);
+                    let target = (rc < 0).then(|| c_looked(rc, ptr::null_mut()));
+                    let rc = ffi::git_tag_peel(&mut c_peeled, c_tag);
+                    let peeled = (rc < 0).then(|| c_looked(rc, ptr::null_mut()));
+                    ffi::git_tag_free(c_tag);
+                    (
+                        target.unwrap_or_else(|| c_looked(0, c_target)),
+                        peeled.unwrap_or_else(|| c_looked(0, c_peeled)),
+                    )
+                };
+                let rust_target = rust_tag.as_ref().target();
+                let rust_peeled = rust_tag.as_ref().peel();
+                drop(rust_tag);
+                assert_eq!(
+                    rust_looked(rust_target),
+                    c_target,
+                    "pass {pass}, target of tag {i}"
+                );
+                assert_eq!(
+                    rust_looked(rust_peeled),
+                    c_peeled,
+                    "pass {pass}, peel of tag {i}"
+                );
+            }
+        }
+        // Found and missing targets, with and without a tagger and a message.
+        assert!(kinds.len() >= 4, "{kinds:?}");
+        // SAFETY: the raw repository is released once; nothing of it is held.
+        unsafe { ffi::git_repository_free(c_repo) };
     }
 }
