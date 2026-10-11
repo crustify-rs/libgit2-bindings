@@ -41,6 +41,7 @@ mod sys_path;
 mod sys_repository;
 mod tag;
 mod trace;
+mod transaction;
 mod tree;
 mod types;
 mod worktree;

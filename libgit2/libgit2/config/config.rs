@@ -738,3 +738,76 @@ mod unit_tests {
         assert!(ConfigLevel::APP < ConfigLevel::from_raw(42));
     }
 }
+
+/// How a configuration mapping recognizes a value. Integer mappings parse the
+/// input directly; boolean and string mappings return the entry's mapped value.
+/// Unknown C values are rejected instead of constructing an invalid Rust enum.
+///
+/// Wraps: git_configmap_t
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum MapType {
+    False,
+    True,
+    Int32,
+    String,
+}
+
+impl MapType {
+    pub const ALL: [Self; 4] = [Self::False, Self::True, Self::Int32, Self::String];
+
+    pub const fn raw(self) -> ffi::git_configmap_t {
+        match self {
+            Self::False => ffi::GIT_CONFIGMAP_FALSE,
+            Self::True => ffi::GIT_CONFIGMAP_TRUE,
+            Self::Int32 => ffi::GIT_CONFIGMAP_INT32,
+            Self::String => ffi::GIT_CONFIGMAP_STRING,
+        }
+    }
+
+    pub const fn from_raw(raw: ffi::git_configmap_t) -> Option<Self> {
+        match raw {
+            ffi::GIT_CONFIGMAP_FALSE => Some(Self::False),
+            ffi::GIT_CONFIGMAP_TRUE => Some(Self::True),
+            ffi::GIT_CONFIGMAP_INT32 => Some(Self::Int32),
+            ffi::GIT_CONFIGMAP_STRING => Some(Self::String),
+            _ => None,
+        }
+    }
+}
+
+impl From<MapType> for ffi::git_configmap_t {
+    fn from(value: MapType) -> Self {
+        value.raw()
+    }
+}
+
+impl<'a, 'r> ConfigMut<'a, 'r> {
+    /// Locks the writer backend and retains this exclusive borrow until the
+    /// transaction drops. No writer (including an empty or read-only config)
+    /// reports a C error. Dropping aborts. The owner does not expose a mutable
+    /// config handle: that would permit recursively locking the same C backend.
+    ///
+    /// Wraps: git_config_lock
+    pub fn lock(
+        self,
+    ) -> Result<crate::libgit2::refs::transaction::ConfigTransaction<'a, 'r>, ErrorBuf> {
+        crate::libgit2::refs::transaction::ConfigTransaction::lock(self)
+    }
+}
+
+#[cfg(test)]
+mod map_type_unit_tests {
+    use super::MapType;
+
+    #[test]
+    fn checked_mapping_modes() {
+        for mode in MapType::ALL {
+            assert_eq!(MapType::from_raw(mode.raw()), Some(mode));
+            assert_eq!(crate::ffi::git_configmap_t::from(mode), mode.raw());
+        }
+        assert_eq!(MapType::from_raw(4), None);
+        assert_eq!(MapType::from_raw(crate::ffi::git_configmap_t::MAX), None);
+        assert_ne!(MapType::False, MapType::True);
+        assert_eq!(format!("{:?}", MapType::Int32), "Int32");
+    }
+}

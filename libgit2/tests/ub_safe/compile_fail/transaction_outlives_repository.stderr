@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `repo` because it is borrowed
+ --> tests/ub_safe/compile_fail/transaction_outlives_repository.rs:6:10
+  |
+4 |     let repo = Repository::open(c".").unwrap();
+  |         ---- binding `repo` declared here
+5 |     let tx = Transaction::new(repo.as_ref()).unwrap();
+  |                               ---- borrow of `repo` occurs here
+6 |     drop(repo);
+  |          ^^^^ move out of `repo` occurs here
+7 |     drop(tx);
+  |          -- borrow later used here

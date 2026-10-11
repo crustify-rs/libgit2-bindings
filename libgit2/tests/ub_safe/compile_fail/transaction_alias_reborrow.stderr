@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `exclusive` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/transaction_alias_reborrow.rs:8:18
+  |
+7 |     let shared = exclusive.as_ref();
+  |                  --------- immutable borrow occurs here
+8 |     let _alias = exclusive.as_mut();
+  |                  ^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+9 |     println!("{shared:?}");
+  |                ------ immutable borrow later used here
