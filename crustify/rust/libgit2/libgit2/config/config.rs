@@ -1389,7 +1389,9 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
     /// the filter instead skips valueless entries and cleans up failed regexes.
     /// Empty values remain distinct and are matched normally. This corrects
     /// undefined C behavior without changing matching of non-null values.
-    /// C's existing outer-allocation-failure leak without a regex remains.
+    /// C's name-selection constructor runs either way, so its leak of the inner
+    /// iterator when its own allocation fails (`config.c:1139`) remains, with or
+    /// without a regex.
     ///
     /// Wraps: git_config_multivar_iterator_new
     pub fn multivar_iterator(
@@ -3498,5 +3500,162 @@ mod unit_tests {
             readonly_delete_error(c"a.\xff%s").as_c_str(),
             c"cannot delete 'a.\xff%s': the configuration is read-only"
         );
+    }
+
+    /// The iterator constructors and `advance_entry`, homed with them here.
+    mod iterators {
+        use super::*;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        /// Constructors fail cleanly when libgit2's allocator refuses: the all
+        /// iterator's (and glob's) only allocation, and the multivar name copy
+        /// after C has built both iterators. C's leak when the multivar shell
+        /// itself is refused (`config.c:1139`, its second allocation) is skipped.
+        #[test]
+        #[cfg_attr(miri, ignore = "installs a libgit2 allocator")]
+        fn constructors_report_allocation_failure() {
+            isolated(
+                concat!(module_path!(), "::constructors_report_allocation_failure"),
+                || {
+                    install_refusing();
+                    let config = Config::new().unwrap();
+                    // Warm the thread's error state before limiting allocations.
+                    let missing = config.as_ref().multivar_iterator(c"invalid", None);
+                    assert_eq!(missing.unwrap_err().raw_code(), ffi::GIT_EINVALIDSPEC);
+                    type Build =
+                        for<'a> fn(ConfigRef<'a, 'static>) -> Result<IteratorBox<'a>, ConfigError>;
+                    let cases: [(usize, Build); 6] = [
+                        (0, |c| c.iterator()),
+                        (0, |c| c.iterator_matching(None)),
+                        (0, |c| c.iterator_matching(Some(c"^a"))),
+                        (0, |c| c.multivar_iterator(c"a.b", None)),
+                        (2, |c| c.multivar_iterator(c"a.b", None)),
+                        (2, |c| c.multivar_iterator(c"a.b", Some(c"^a"))),
+                    ];
+                    for (granted, build) in cases {
+                        ALLOWED_ALLOCATIONS.store(granted, SeqCst);
+                        let result = build(config.as_ref());
+                        ALLOWED_ALLOCATIONS.store(usize::MAX, SeqCst);
+                        let error = result.unwrap_err();
+                        assert_eq!(error.code(), Some(ErrorCode::Generic));
+                        assert_eq!(error.class(), Some(ErrorClass::NoMemory));
+                        let mut iter = build(config.as_ref()).unwrap();
+                        assert!(iter.as_mut().advance_entry().unwrap().is_none());
+                    }
+                },
+            );
+        }
+
+        /// A Rust-owned iterator allocation whose `next` replays `script`: 0
+        /// lends `entry`, anything else is returned as the status, without
+        /// writing the output. A failure sets its own thread error first.
+        #[repr(C)]
+        struct Scripted {
+            base: ffi::git_config_iterator,
+            entry: ffi::git_config_backend_entry,
+            script: &'static [c_int],
+            calls: usize,
+            releases: Rc<Cell<usize>>,
+        }
+
+        impl Scripted {
+            unsafe extern "C" fn next(
+                out: *mut *mut ffi::git_config_backend_entry,
+                p: *mut ffi::git_config_iterator,
+            ) -> c_int {
+                let p = p.cast::<Self>();
+                // SAFETY: this callback belongs only to Scripted allocations, with
+                // the base at offset zero; C gives exclusive access for the call
+                // and out is a writable slot. Only by-value fields are read.
+                unsafe {
+                    let calls = addr_of_mut!((*p).calls);
+                    let n = calls.read();
+                    calls.write(n + 1);
+                    let status = addr_of!((*p).script)
+                        .read()
+                        .get(n)
+                        .copied()
+                        .unwrap_or(ffi::GIT_ITEROVER);
+                    match status {
+                        0 => out.write(addr_of_mut!((*p).entry)),
+                        ffi::GIT_ITEROVER => {}
+                        _ => set(ErrorClass::Config, c"scripted failure"),
+                    }
+                    status
+                }
+            }
+
+            unsafe extern "C" fn free(p: *mut ffi::git_config_iterator) {
+                // SAFETY: adoption transfers exactly this Box, base at offset zero;
+                // dispatch runs once, after every lent entry's borrow has ended.
+                let value = unsafe { Box::from_raw(p.cast::<Self>()) };
+                value.releases.set(value.releases.get() + 1);
+            }
+
+            fn adopt(script: &'static [c_int], releases: Rc<Cell<usize>>) -> IteratorBox<'static> {
+                let value = Box::new(Self {
+                    base: ffi::git_config_iterator {
+                        backend: ptr::null_mut(),
+                        flags: 0,
+                        next: Some(Self::next),
+                        free: Some(Self::free),
+                    },
+                    entry: ffi::git_config_backend_entry {
+                        entry: ffi::git_config_entry {
+                            name: c"scripted.key".as_ptr(),
+                            value: ptr::null(),
+                            backend_type: c"scripted".as_ptr(),
+                            origin_path: ptr::null(),
+                            include_depth: 0,
+                            level: ffi::GIT_CONFIG_LEVEL_APP,
+                        },
+                        free: None, // Lent only, never acquired or released.
+                    },
+                    script,
+                    calls: 0,
+                    releases,
+                });
+                // SAFETY: one initialized, uniquely owned enclosing Box whose free
+                // callback matches; static strings, and no config dependency.
+                unsafe { IteratorBox::from_c(Box::into_raw(value).cast()) }.unwrap()
+            }
+        }
+
+        /// `git_config_next` dispatches the allocation's own callback and lends
+        /// the public entry without acquiring it. Failures keep their code and
+        /// thread error, a positive status is reported as `GIT_ERROR`, and the
+        /// iterator stays usable after either and after the end. The allocation
+        /// is released once, by its own callback.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls git_config_next and iterator_free")]
+        fn advance_entry_dispatches_statuses_and_lends() {
+            let _ = Config::new().unwrap(); // Pins the runtime for error reporting.
+            let releases = Rc::new(Cell::new(0));
+            let script = &[0, -7, 3, ffi::GIT_ITEROVER, 0];
+            let mut owner = Scripted::adopt(script, releases.clone());
+            {
+                let mut m = owner.as_mut();
+                let entry = m.advance_entry().unwrap().unwrap();
+                assert_eq!(entry.name(), Some(c"scripted.key"));
+                assert_eq!(entry.value(), None);
+                assert_eq!(entry.backend_type(), Some(c"scripted"));
+                assert_eq!(entry.level(), ConfigLevel::APP);
+                let error = m.advance_entry().unwrap_err();
+                assert_eq!(error.raw_code(), -7);
+                assert_eq!(error.class(), Some(ErrorClass::Config));
+                assert_eq!(error.message(), c"scripted failure");
+                let error = m.advance_entry().unwrap_err();
+                assert_eq!(error.code(), Some(ErrorCode::Generic));
+                assert_eq!(error.message(), c"scripted failure");
+                assert!(m.advance_entry().unwrap().is_none());
+                assert!(m.advance_entry().unwrap().is_some());
+                assert!(m.advance_entry().unwrap().is_none());
+                assert!(m.advance_entry().unwrap().is_none());
+            }
+            assert_eq!(releases.get(), 0);
+            drop(owner);
+            assert_eq!(releases.get(), 1);
+        }
     }
 }

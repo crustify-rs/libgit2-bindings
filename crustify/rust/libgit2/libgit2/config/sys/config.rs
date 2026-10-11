@@ -722,7 +722,6 @@ impl<'a, 'c> IteratorMut<'a, 'c> {
     /// Advances the allocation's inline callback. `None` is C's ITEROVER; other
     /// errors preserve the code and copied thread-local error. A subsequent call
     /// after an error is allowed (C can proceed to a different backend).
-    ///
     pub fn advance(&mut self) -> Result<Option<BackendEntryRef<'_>>, ConfigError> {
         IteratorNext.call(self)
     }
@@ -1775,27 +1774,6 @@ mod unit_tests {
             std::fs::remove_file(file).unwrap();
         }
 
-        /// The public-entry gateway also dispatches allocation-specific callbacks
-        /// for an adopted Rust fixture, without acquiring the lent entry.
-        #[test]
-        #[cfg_attr(miri, ignore = "calls git_config_next and iterator_free")]
-        fn iterator_public_entry_dispatch_and_release() {
-            let releases = Rc::new(Cell::new(0));
-            let mut owner = owned(releases.clone(), None);
-            {
-                let mut m = owner.as_mut();
-                let entry = m.advance_entry().unwrap().unwrap();
-                assert_eq!(entry.name(), Some(c"fixture.key"));
-                assert_eq!(entry.value(), None);
-                assert_eq!(entry.backend_type(), Some(c"fixture"));
-                assert!(m.advance_entry().unwrap().is_none());
-                assert!(m.advance_entry().unwrap().is_none());
-            }
-            assert_eq!(releases.get(), 0);
-            drop(owner);
-            assert_eq!(releases.get(), 1);
-        }
-
         #[test]
         #[cfg_attr(miri, ignore = "Drop dispatch calls C")]
         fn iterator_owned_release_and_reentry() {
@@ -1815,130 +1793,6 @@ mod unit_tests {
             assert_eq!(releases.get(), 3);
             // SAFETY: NULL adoption never creates an owner or calls its destructor.
             assert!(unsafe { IteratorBox::from_c(ptr::null_mut()) }.is_none());
-        }
-
-        /// Constructors fail cleanly when libgit2's allocator refuses: the all
-        /// iterator's (and glob's) only allocation, and the multivar name copy
-        /// after C has built both iterators. C's leak when the multivar shell
-        /// itself is refused (`config.c:1139`, its second allocation) is skipped.
-        mod allocation_failures {
-            use super::*;
-            use crate::libgit2::config::config::{Config, ConfigRef};
-            use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
-            use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-            use core::ffi::c_void;
-            use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-
-            const CHILD: &str = "CRUSTIFY_UNIT_ITERATOR_OOM_CHILD";
-            static ALLOWED: AtomicUsize = AtomicUsize::new(usize::MAX);
-
-            fn refuse() -> bool {
-                let mut remaining = ALLOWED.load(SeqCst);
-                loop {
-                    match remaining {
-                        usize::MAX => return false,
-                        0 => return true,
-                        n => match ALLOWED.compare_exchange(n, n - 1, SeqCst, SeqCst) {
-                            Ok(_) => return false,
-                            Err(current) => remaining = current,
-                        },
-                    }
-                }
-            }
-
-            // SAFETY: libc's allocator, declared with its C signatures.
-            unsafe extern "C" {
-                fn malloc(n: usize) -> *mut c_void;
-                fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
-                fn free(p: *mut c_void);
-            }
-
-            /// libc's allocator, granting `ALLOWED` more allocations.
-            struct Counting;
-
-            // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
-            unsafe impl Alloc for Counting {
-                fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
-                    if refuse() {
-                        return None;
-                    }
-                    // SAFETY: plain libc allocation.
-                    NonNull::new(unsafe { malloc(len) }.cast())
-                }
-                unsafe fn realloc(
-                    p: Option<NonNull<u8>>,
-                    len: usize,
-                    _: Option<&CStr>,
-                    _: i32,
-                ) -> Option<NonNull<u8>> {
-                    if refuse() {
-                        return None;
-                    }
-                    let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
-                    // SAFETY: NULL or a live libc block the caller gives up on success.
-                    NonNull::new(unsafe { realloc(p, len) }.cast())
-                }
-                unsafe fn free(p: NonNull<u8>) {
-                    // SAFETY: a live libc block the caller gives up.
-                    unsafe { free(p.as_ptr().cast()) }
-                }
-            }
-
-            #[test]
-            #[cfg_attr(miri, ignore = "installs a libgit2 allocator")]
-            fn constructors_report_allocation_failure() {
-                let path = concat!(module_path!(), "::constructors_report_allocation_failure");
-                let name = path.split_once("::").map_or(path, |(_, rest)| rest);
-                if std::env::var_os(CHILD).is_none() {
-                    // A fresh process, so the allocator is set before libgit2 starts.
-                    let out = std::process::Command::new(std::env::current_exe().unwrap())
-                        .args([name, "--exact", "--test-threads=1", "--nocapture"])
-                        .env(CHILD, "1")
-                        .output()
-                        .unwrap();
-                    let stdout = String::from_utf8_lossy(&out.stdout);
-                    assert!(
-                        out.status.success() && stdout.contains("1 passed"),
-                        "{stdout}\n{}",
-                        String::from_utf8_lossy(&out.stderr)
-                    );
-                    return;
-                }
-                let allocator = Allocator::new::<Counting>();
-                // SAFETY: `Allocator` is transparent over a fully set `git_allocator`;
-                // libgit2 copies it before anything is allocated.
-                let rc = unsafe {
-                    ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_ALLOCATOR as core::ffi::c_int,
-                        allocator.as_ref().as_ptr(),
-                    )
-                };
-                assert_eq!(rc, 0);
-                let config = Config::new().unwrap();
-                // Warm the thread's error state before limiting allocations.
-                let missing = config.as_ref().multivar_iterator(c"invalid", None);
-                assert_eq!(missing.unwrap_err().raw_code(), ffi::GIT_EINVALIDSPEC);
-                type Build =
-                    for<'a> fn(ConfigRef<'a, 'static>) -> Result<IteratorBox<'a>, ConfigError>;
-                let cases: [(usize, Build); 6] = [
-                    (0, |c| c.iterator()),
-                    (0, |c| c.iterator_matching(None)),
-                    (0, |c| c.iterator_matching(Some(c"^a"))),
-                    (0, |c| c.multivar_iterator(c"a.b", None)),
-                    (2, |c| c.multivar_iterator(c"a.b", None)),
-                    (2, |c| c.multivar_iterator(c"a.b", Some(c"^a"))),
-                ];
-                for (granted, build) in cases {
-                    ALLOWED.store(granted, SeqCst);
-                    let result = build(config.as_ref());
-                    ALLOWED.store(usize::MAX, SeqCst);
-                    let error = result.unwrap_err();
-                    assert_eq!(error.code(), Some(ErrorCode::Generic));
-                    assert_eq!(error.class(), Some(ErrorClass::NoMemory));
-                    let mut iter = build(config.as_ref()).unwrap();
-                    assert!(iter.as_mut().advance().unwrap().is_none());
-                }
-            }
         }
     }
 }

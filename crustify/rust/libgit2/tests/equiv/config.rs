@@ -2928,6 +2928,7 @@ mod iterator_entries {
     use super::*;
     use libgit2::libgit2::config::config::EntryRef;
     use libgit2::libgit2::config::sys::config::IteratorBox;
+    use libgit2::libgit2::repository::repository::Repository;
 
     type Row = (
         Option<CString>,
@@ -3068,5 +3069,305 @@ mod iterator_entries {
         assert_eq!(compare(rust, raw), 0); // Refresh failure, then exhaustion.
         drop((rust_cfg, raw_cfg));
         std::fs::remove_file(file).unwrap();
+    }
+
+    /// One step's observation: the entry lent, the end, or the failure's code,
+    /// class and message.
+    type Step = Result<Option<Row>, (c_int, c_int, String)>;
+
+    fn rust_step(iter: &mut IteratorBox<'_>) -> Step {
+        let mut m = iter.as_mut();
+        match m.advance_entry() {
+            Ok(entry) => Ok(entry.map(observe)),
+            Err(e) => Err((
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            )),
+        }
+    }
+
+    fn raw_step(raw: *mut ffi::git_config_iterator) -> Step {
+        let mut out = ptr::null_mut();
+        // SAFETY: exclusive live raw iterator and a writable slot; no entry of
+        // an earlier step is read after this advance.
+        let rc = unsafe { ffi::git_config_next(&mut out, raw) };
+        let string = |p: *const std::ffi::c_char| {
+            // SAFETY: a lent entry's non-NULL strings are immutable and
+            // NUL-terminated until the next raw advance; copied immediately.
+            (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) }.to_owned())
+        };
+        match rc {
+            0 => {
+                // SAFETY: success lent a live entry; read by value, no reference.
+                let e = unsafe { out.read() };
+                Ok(Some((
+                    string(e.name),
+                    string(e.value),
+                    string(e.backend_type),
+                    string(e.origin_path),
+                    e.include_depth,
+                    e.level,
+                )))
+            }
+            ffi::GIT_ITEROVER => Ok(None),
+            rc => {
+                let (class, message) = c_error();
+                Err((rc, class, message))
+            }
+        }
+    }
+
+    /// `git_config_new` plus `files` added in order, built through C alone.
+    fn raw_config(files: &[(&CStr, ConfigLevel)]) -> *mut ffi::git_config {
+        let mut config = ptr::null_mut();
+        // SAFETY: writable slot; success returns the only reference.
+        assert_eq!(unsafe { ffi::git_config_new(&mut config) }, 0);
+        for (path, level) in files {
+            // SAFETY: live config; NUL-terminated path copied; no repository.
+            let rc = unsafe {
+                ffi::git_config_add_file_ondisk(config, path.as_ptr(), level.raw(), ptr::null(), 0)
+            };
+            assert_eq!(rc, 0);
+        }
+        config
+    }
+
+    /// Three priorities, one with an include, iterated by several iterators of
+    /// each side at once: every pair advances in turn, so one config serves
+    /// interleaved advancement, and each step is compared, through exhaustion
+    /// and one more advance. Then a level view of a repository's config, whose
+    /// view shares the repository's backend.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_across_levels_interleaved_match_c() {
+        init();
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-equiv-config-{}-public-levels",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, body: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            CString::new(path.to_str().unwrap()).unwrap()
+        };
+        let system = write("system", b"[a]\nx = system\n[b]\nonly = sys\n");
+        let global = write("global", b"[a]\nx = global\nflag\n");
+        let local = write(
+            "local",
+            b"[a]\nx = local\n[include]\npath = included\n[b \"Sub\"]\nKey = mixed\n",
+        );
+        write("included", b"[a]\nx = included\n[b]\nnested = deep\n");
+        let files = [
+            (system.as_c_str(), ConfigLevel::SYSTEM),
+            (global.as_c_str(), ConfigLevel::GLOBAL),
+            (local.as_c_str(), ConfigLevel::LOCAL),
+        ];
+        let mut rust_cfg = Config::new().unwrap();
+        for (path, level) in files {
+            rust_cfg
+                .as_mut()
+                .add_file(path, level, None, false)
+                .unwrap();
+        }
+        let raw_cfg = raw_config(&files);
+
+        let mut raws = [ptr::null_mut(); 4];
+        // SAFETY: live independent config, writable slots; the regexes are
+        // borrowed for construction. No a.x value is missing, so C's own
+        // value filter never reaches its strlen(NULL).
+        unsafe {
+            assert_eq!(ffi::git_config_iterator_new(&mut raws[0], raw_cfg), 0);
+            let glob = c"^b\\.".as_ptr();
+            assert_eq!(
+                ffi::git_config_iterator_glob_new(&mut raws[1], raw_cfg, glob),
+                0
+            );
+            let (name, value) = (c"A.X".as_ptr(), c"l".as_ptr());
+            assert_eq!(
+                ffi::git_config_multivar_iterator_new(&mut raws[2], raw_cfg, name, value),
+                0
+            );
+            let name = c"b.Sub.key".as_ptr();
+            assert_eq!(
+                ffi::git_config_multivar_iterator_new(&mut raws[3], raw_cfg, name, ptr::null()),
+                0
+            );
+        }
+        let mut rusts = [
+            rust_cfg.as_ref().iterator().unwrap(),
+            rust_cfg.as_ref().iterator_matching(Some(c"^b\\.")).unwrap(),
+            rust_cfg
+                .as_ref()
+                .multivar_iterator(c"A.X", Some(c"l"))
+                .unwrap(),
+            rust_cfg
+                .as_ref()
+                .multivar_iterator(c"b.Sub.key", None)
+                .unwrap(),
+        ];
+        let mut steps = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let mut done = [false; 4];
+        while !done.iter().all(|&d| d) {
+            for i in 0..4 {
+                let (raw, rust) = (raw_step(raws[i]), rust_step(&mut rusts[i]));
+                assert_eq!(rust, raw, "iterator {i}, step {}", steps[i].len());
+                if raw == Ok(None) {
+                    if done[i] {
+                        continue;
+                    }
+                    done[i] = true;
+                }
+                steps[i].push(raw);
+            }
+        }
+        let entries: Vec<_> = steps
+            .iter()
+            .map(|s| s.iter().filter(|s| matches!(s, Ok(Some(_)))).count())
+            .collect();
+        // All: nine entries, include.path and the included pair (depth 1)
+        // among them; b.*: three; a.x matching "l": global, local and
+        // included; the normalized name keeps its subsection's case.
+        assert_eq!(entries, [9, 3, 3, 1]);
+        let rows: Vec<_> = steps[0].iter().flatten().flatten().collect();
+        assert!(
+            rows.iter()
+                .any(|r| r.1.as_deref() == Some(c"included") && r.4 == 1)
+        );
+        assert!(rows.iter().any(|r| r.0.as_deref() == Some(c"b.Sub.key")));
+        for (rust, raw) in rusts.into_iter().zip(raws) {
+            // SAFETY: each raw iterator is released once, before its config.
+            unsafe { ffi::git_config_iterator_free(raw) };
+            drop(rust);
+        }
+        // SAFETY: the C side's only reference, released once.
+        unsafe { ffi::git_config_free(raw_cfg) };
+        drop(rust_cfg);
+
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo.git\0"
+        );
+        let path = CStr::from_bytes_with_nul(path.as_bytes()).unwrap();
+        let rust_repo = Repository::open(path).unwrap();
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: writable slot; NUL-terminated path read during the call.
+        let rc = unsafe {
+            ffi::git_repository_open_ext(
+                &mut c_repo,
+                path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let (mut c_cfg, mut c_view, mut raw) = (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+        // SAFETY: live repository and writable slots; the view upgrades the
+        // repository config's local backend into a fresh config.
+        unsafe {
+            assert_eq!(ffi::git_repository_config(&mut c_cfg, c_repo), 0);
+            let level = ffi::GIT_CONFIG_LEVEL_LOCAL;
+            assert_eq!(ffi::git_config_open_level(&mut c_view, c_cfg, level), 0);
+            assert_eq!(ffi::git_config_iterator_new(&mut raw, c_view), 0);
+        }
+        let rust_cfg = rust_repo.as_ref().config().unwrap();
+        let rust_view = rust_cfg.as_ref().open_level(ConfigLevel::LOCAL).unwrap();
+        assert!(compare(rust_view.as_ref().iterator().unwrap(), raw) > 0);
+        drop(rust_view);
+        drop(rust_cfg);
+        drop(rust_repo);
+        // SAFETY: each C reference is released once, the repository last.
+        unsafe {
+            ffi::git_config_free(c_view);
+            ffi::git_config_free(c_cfg);
+            ffi::git_repository_free(c_repo);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Constructor failures leave the same code, class and message on both
+    /// sides: invalid key-regexes and invalid multivar names (normalized first,
+    /// before any value regex). An empty config's iterators end at once. A
+    /// valid name with an invalid value regex is compared in
+    /// `sys_config::iterators::multivar_regex_errors_match_c` (C leaks there).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_constructor_failures_and_empty_configs_match_c() {
+        init();
+        let rust_cfg = Config::new().unwrap();
+        let raw_cfg = raw_config(&[]);
+        let record = |rc: c_int, raw: *mut ffi::git_config_iterator| {
+            let failure = (rc < 0).then(c_error);
+            (rc, failure, raw.is_null())
+        };
+        let rust_record = |result: Result<IteratorBox<'_>, ConfigError>| match result {
+            Ok(mut iter) => {
+                assert_eq!(rust_step(&mut iter), Ok(None));
+                (0, None, false)
+            }
+            Err(e) => (
+                e.raw_code(),
+                Some((e.raw_class(), e.message().to_string_lossy().into_owned())),
+                true,
+            ),
+        };
+        for regexp in [c"[", c"(", c"a{2,1}", c"\\", c""] {
+            let mut raw = ptr::null_mut();
+            // SAFETY: live config, writable slot; regex read during the call.
+            let rc =
+                unsafe { ffi::git_config_iterator_glob_new(&mut raw, raw_cfg, regexp.as_ptr()) };
+            let expected = record(rc, raw);
+            if rc == 0 {
+                assert_eq!(raw_step(raw), Ok(None));
+                // SAFETY: the only owner, released once.
+                unsafe { ffi::git_config_iterator_free(raw) };
+            }
+            let actual = rust_record(rust_cfg.as_ref().iterator_matching(Some(regexp)));
+            assert_eq!(actual, expected, "{regexp:?}");
+        }
+        for (name, regexp) in [
+            (c"invalid", None),
+            (c"a.", None),
+            (c".b", None),
+            (c"", None),
+            (c"a b.c", None),
+            (c"invalid", Some(c"[")),
+            (c"a.b", None),
+        ] {
+            let mut raw = ptr::null_mut();
+            // SAFETY: live config, writable slot; inputs read during the call;
+            // every failing name fails before C compiles a value regex.
+            let rc = unsafe {
+                ffi::git_config_multivar_iterator_new(
+                    &mut raw,
+                    raw_cfg,
+                    name.as_ptr(),
+                    regexp.map_or(ptr::null(), CStr::as_ptr),
+                )
+            };
+            let expected = record(rc, raw);
+            if rc == 0 {
+                assert_eq!(raw_step(raw), Ok(None));
+                // SAFETY: the only owner, released once.
+                unsafe { ffi::git_config_iterator_free(raw) };
+            }
+            let actual = rust_record(rust_cfg.as_ref().multivar_iterator(name, regexp));
+            assert_eq!(actual, expected, "{name:?} {regexp:?}");
+        }
+        let mut raw = ptr::null_mut();
+        // SAFETY: live config and writable slot.
+        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg) };
+        assert_eq!(rc, 0);
+        let mut rust = rust_cfg.as_ref().iterator().unwrap();
+        for _ in 0..2 {
+            assert_eq!(rust_step(&mut rust), raw_step(raw));
+        }
+        // SAFETY: each C object released once, the iterator first.
+        unsafe {
+            ffi::git_config_iterator_free(raw);
+            ffi::git_config_free(raw_cfg);
+        }
     }
 }
