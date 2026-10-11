@@ -422,3 +422,6 @@ git_config_foreach
 # config wave 3 batch 1: safe synchronous enumeration
 git_config_foreach_match
 git_config_get_multivar_foreach
+# config wave 3 batch 0: iterator construction
+git_config_iterator_new
+git_config_iterator_glob_new

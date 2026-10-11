@@ -88,3 +88,6 @@ git_config_foreach_cb
 
 # config wave 2 batch 0: backend entries
 git_config_backend_entry
+
+# config wave 3 batch 0: iterator layout
+git_config_iterator

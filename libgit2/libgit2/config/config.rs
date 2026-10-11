@@ -1390,36 +1390,17 @@ impl ConfigRef<'_, '_> {
     /// above every backend holding `name`: C's lookup stops there. An invalid
     /// name fails first, as in C.
     fn reread_through(&self, name: &CStr) -> Result<Option<ConfigError>, ConfigError> {
-        let mut iter = ptr::null_mut();
-        // SAFETY: the live handle keeps the config and its repository alive for
-        // the iteration; name is NUL-terminated and copied; no regexp; iter is
-        // a writable slot that C fills only on success.
-        let rc = unsafe {
-            ffi::git_config_multivar_iterator_new(
-                &mut iter,
-                self.as_ptr(),
-                name.as_ptr(),
-                ptr::null(),
-            )
-        };
-        if rc < 0 {
-            return Err(ConfigError::from_libgit2(rc));
-        }
+        let mut iter = self.multivar_iterator(name, None)?;
         let mut failure = None;
         // Built-in backends fail only while opening their iterator, after which
         // libgit2 moves on to the next one, so this ends after every backend.
         loop {
-            let mut entry = ptr::null_mut();
-            // SAFETY: live iterator and writable slot; C forms the entry only on
-            // success, and the borrowed entry is not kept past this call.
-            match unsafe { ffi::git_config_next(&mut entry, iter) } {
-                0 => failure = None,
-                ffi::GIT_ITEROVER => break,
-                rc => failure = Some(ConfigError::from_libgit2(rc)),
+            match iter.as_mut().advance() {
+                Ok(Some(_)) => failure = None,
+                Ok(None) => break,
+                Err(error) => failure = Some(error),
             }
         }
-        // SAFETY: releases the iterator once; no entry it lent is used.
-        unsafe { ffi::git_config_iterator_free(iter) };
         Ok(failure)
     }
 }
