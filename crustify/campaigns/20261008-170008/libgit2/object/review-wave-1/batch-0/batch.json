@@ -1,0 +1,95 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_blob",
+      "defined_in": "src/libgit2/blob.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_filter_options",
+      "defined_in": "include/git2/blob.h",
+      "kind": "type",
+      "field_anchors": [
+        "flags",
+        "version",
+        "reserved",
+        "attr_commit_id"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_commit",
+      "defined_in": "src/libgit2/commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_ext_options",
+      "defined_in": "include/git2/commit.h",
+      "kind": "type",
+      "field_anchors": [
+        "payload",
+        "version",
+        "sign",
+        "extra_headers_len",
+        "extra_headers",
+        "message_encoding",
+        "update_ref"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_message_trailer_array",
+      "defined_in": "include/git2/message.h",
+      "kind": "type",
+      "field_anchors": [
+        "count",
+        "_trailer_block",
+        "trailers"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/message.rs"
+    },
+    {
+      "name": "git_object_id_options",
+      "defined_in": "include/git2/object.h",
+      "kind": "type",
+      "field_anchors": [
+        "version",
+        "oid_type",
+        "object_type",
+        "filters"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/object.rs"
+    },
+    {
+      "name": "git_tag",
+      "defined_in": "src/libgit2/tag.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tree",
+      "defined_in": "src/libgit2/tree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_update",
+      "defined_in": "include/git2/tree.h",
+      "kind": "type",
+      "field_anchors": [
+        "action",
+        "id",
+        "path",
+        "filemode"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    }
+  ]
+}
