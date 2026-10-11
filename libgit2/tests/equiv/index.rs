@@ -1047,6 +1047,10 @@ mod matched_path_callback {
         let safe = seeded();
         for (patterns, codes) in [
             (vec![c"missing"], vec![i32::MIN]),
+            // No usable pattern: every entry is seen, without a pattern.
+            (vec![c"", c""], vec![1, i32::MAX, 1, 1]),
+            (vec![c"#a", c"\nb", c"\r\nb"], vec![1, 1, 1, 1]),
+            (vec![c"#a", c"c"], vec![1]),
             (vec![c"*"], vec![0, i32::MAX, -987]),
             (vec![c"b", c"dir/*"], vec![1, 0]),
             (vec![], vec![i32::MIN]),

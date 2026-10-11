@@ -34,8 +34,8 @@ use crate::libgit2::diff::diff::{DiffDeltaRef, DiffRef};
 use crate::libgit2::index::index::IndexMut;
 use crate::libgit2::object::tree::TreeRef;
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryMut};
-use crate::libgit2::util::errors::{ErrorBuf, last};
-use crate::libgit2::util::sys::errors::runtime_pinned;
+use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
+use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
 define_ctype!(
     /// A compiled, C-owned pathspec, reached only through owners and handles.
@@ -110,9 +110,16 @@ impl Pathspec {
     /// borrowed [`StrArrayView`](crate::libgit2::core::strarray::StrArrayView) or an
     /// owned string array can provide the handle. Reports C's error on failure.
     ///
+    /// An array mixing empty and non-empty patterns is refused, with a
+    /// `GIT_ERROR_INVALID` error, before libgit2 sees it: libgit2 would read past the
+    /// end of each empty one (`parse_optimized_patterns`, `src/libgit2/attr_file.c`).
+    ///
     /// Wraps: git_pathspec_new
     pub fn new(patterns: StrArrayRef<'_>) -> Result<PathspecBox, ErrorBuf> {
         if !runtime_pinned() {
+            return Err(last());
+        }
+        if !patterns_are_parsable(patterns) {
             return Err(last());
         }
         let mut out = ptr::null_mut();
@@ -128,6 +135,22 @@ impl Pathspec {
         // refcount 1, released exactly once by the paired `git_pathspec_free` policy.
         unsafe { PathspecBox::from_c(out) }.ok_or_else(last)
     }
+}
+
+/// Whether libgit2 can parse `patterns` as a pathspec, setting a `GIT_ERROR_INVALID`
+/// error when it cannot. Once one pattern is not empty, libgit2 parses every one, and
+/// reads the byte after an empty pattern's terminator (`parse_optimized_patterns`,
+/// `src/libgit2/attr_file.c`), which is undefined behaviour. An empty or all-empty
+/// array is never parsed. Every wrapper handing libgit2 a pathspec array checks it.
+pub(crate) fn patterns_are_parsable(patterns: StrArrayRef<'_>) -> bool {
+    let mixed = patterns.iter().any(CStr::is_empty) && patterns.iter().any(|p| !p.is_empty());
+    if mixed {
+        set(
+            ErrorClass::Invalid,
+            c"invalid pathspec: an empty pattern beside a non-empty one",
+        );
+    }
+    !mixed
 }
 
 /// Combinable path-matching options. Unknown bits can be retained for forward
@@ -588,6 +611,31 @@ mod unit_tests {
         assert_eq!(list.as_ref().failed_entry(0), Some(c"missing/*"));
         // Dropping the list releases the last pathspec reference with its storage.
         drop(list);
+    }
+
+    /// Only an empty pattern beside a non-empty one is refused, before libgit2 parses
+    /// the array, with an error naming the defect; the error is cleared otherwise.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mixed_empty_patterns_are_refused_before_libgit2() {
+        for patterns in [
+            &[c"a", c""][..],
+            &[c"", c"src/*"][..],
+            &[c"#x", c"", c"!"][..],
+        ] {
+            let view = StrArrayView::new(patterns);
+            let error = Pathspec::new(view.as_ref()).err().unwrap();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(
+                error.message(),
+                c"invalid pathspec: an empty pattern beside a non-empty one"
+            );
+        }
+        for patterns in [&[][..], &[c""][..], &[c"", c""][..], &[c"a", c"#x"][..]] {
+            let view = StrArrayView::new(patterns);
+            assert!(patterns_are_parsable(view.as_ref()));
+            assert!(Pathspec::new(view.as_ref()).is_ok());
+        }
     }
 
     // Allocation fault injection lives in a fresh process: no other Rust test can
