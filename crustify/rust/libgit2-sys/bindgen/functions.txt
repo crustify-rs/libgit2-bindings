@@ -458,3 +458,12 @@ git_index_iterator_next
 git_index_conflict_iterator_new
 git_index_conflict_iterator_free
 git_index_conflict_next
+# Diff lifecycle and borrowed delta projection
+git_diff_from_buffer
+git_diff_from_buffer_ext
+git_diff_get_delta
+git_diff_index_to_workdir
+git_diff_tree_to_workdir
+git_diff_tree_to_workdir_with_index
+git_diff_index_to_index
+git_diff_options_init
