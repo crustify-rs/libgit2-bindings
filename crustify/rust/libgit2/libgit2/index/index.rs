@@ -59,8 +59,12 @@ use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CNew, CZeroable, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::core::types::FileMode;
-use crate::libgit2::oid::oid::{OidMut, OidRef, OidType};
+use crate::libgit2::index::pathspec::patterns_are_parsable;
+use crate::libgit2::object::object::id_fits;
+use crate::libgit2::oid::oid::{Oid, OidMut, OidRef, OidType};
+use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 
@@ -893,6 +897,408 @@ impl Stage {
     /// Value accepted by C's stage-matching APIs.
     pub const fn raw(self) -> ffi::git_index_stage_t {
         self as ffi::git_index_stage_t
+    }
+}
+
+/// The longest name a tree entry stores whole.
+const TREE_NAME_MAX: usize = u16::MAX as usize;
+
+/// `Ok` for a routine that returned `rc` successfully, its failure otherwise; a
+/// positive code is a failure too (see [`IndexMut::read`]).
+fn status(rc: c_int) -> Result<(), RepositoryError> {
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(RepositoryError::from_libgit2(rc))
+    }
+}
+
+impl IndexRef<'_> {
+    /// Refuses, before libgit2 writes the index's entries as trees of `repo`, an entry it
+    /// would mishandle: one whose id it would look up in `repo` though the id is of
+    /// another type (libgit2 formats the loose object's path from the id's own size,
+    /// overflowing the path buffer, as `id_fits` describes), and one whose path has a
+    /// component longer than a tree entry's 65535-byte name (libgit2 truncates the
+    /// name's length and reports success for a tree that does not parse; see
+    /// `TreeBuilderMut::insert_entry`).
+    ///
+    /// An index with conflicts is not refused: libgit2 fails it with `GIT_EUNMERGED`
+    /// before it reads any entry.
+    fn tree_writable(&self, repo: RepositoryRef<'_>) -> Result<(), RepositoryError> {
+        let ptr = self.as_ptr().cast_mut();
+        // SAFETY: a live index, only read; the count is a vector length.
+        let count = unsafe { ffi::git_index_entrycount(ptr) };
+        let mut entries = Vec::with_capacity(count);
+        for position in 0..count {
+            // SAFETY: the handle keeps the index live, used on this thread only; the routine
+            // sorts the entry vector and returns a live entry within the count. Nothing
+            // removes or replaces entries until this function returns.
+            let entry = unsafe { ffi::git_index_get_byindex(ptr, position) };
+            // SAFETY: `entry` is within the count, so a live entry of the index.
+            if unsafe { ffi::git_index_entry_stage(entry) } != 0 {
+                return Ok(());
+            }
+            entries.push(entry);
+        }
+        for entry in entries {
+            // SAFETY: each entry is live (see above); its fields are projected, read, and
+            // its path is the index's NUL-terminated copy, unchanged meanwhile.
+            let (mode, path, id) = unsafe {
+                (
+                    ptr::addr_of!((*entry).mode).read(),
+                    CStr::from_ptr(ptr::addr_of!((*entry).path).read()),
+                    OidRef::from_ptr(ptr::addr_of!((*entry).id).cast_mut()),
+                )
+            };
+            let id = id.expect("an entry's id is inline");
+            if path
+                .to_bytes()
+                .split(|&b| b == b'/')
+                .any(|c| c.len() > TREE_NAME_MAX)
+            {
+                set(ErrorClass::Invalid, c"tree entry path too long");
+                return Err(RepositoryError::from_libgit2(-1));
+            }
+            if mode != ffi::GIT_FILEMODE_COMMIT && !id.is_zero() {
+                id_fits(repo, id)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> IndexRef<'a> {
+    /// The path of the index file backing the index, as it was opened; `None` for an
+    /// in-memory index ([`Index::new`]).
+    ///
+    /// The path is the index's own copy, which libgit2 sets when the index is built
+    /// and frees with it, so it lives as long as this handle's borrow of the owner:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::index::index::Index;
+    ///
+    /// let index = Index::open(c"/tmp/index").unwrap();
+    /// let path = index.as_ref().path();
+    /// drop(index);
+    /// let _ = path;
+    /// ```
+    ///
+    /// Wraps: git_index_path
+    pub fn path(&self) -> Option<&'a CStr> {
+        // SAFETY: the handle keeps the index live for `'a`; the routine reads the path
+        // field, NULL or a NUL-terminated string the index owns until it is freed.
+        let path = unsafe { ffi::git_index_path(self.as_ptr()) };
+        // SAFETY: a non-NULL path is that string, never changed or freed before the
+        // index, which outlives `'a`.
+        (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) })
+    }
+
+    /// The version the index is written in: 2, 3 or 4. An index starts at 2 and takes
+    /// the version of each index file it reads.
+    ///
+    /// Wraps: git_index_version
+    pub fn version(&self) -> u32 {
+        // SAFETY: a live index; the routine only reads its version field, despite its
+        // non-const parameter.
+        unsafe { ffi::git_index_version(self.as_ptr().cast_mut()) }
+    }
+
+    /// Writes the index to its file atomically, through a `.lock` file renamed over
+    /// it; the index is clean afterwards.
+    ///
+    /// Before it writes, an index a repository with a working directory owns has the
+    /// size of each entry whose timestamp is as recent as the index file's reset to 0
+    /// ("racily clean" entries), so the next status looks at their contents again.
+    /// Writing also sorts the entries and resolve-undo records, and marks entries
+    /// needing the extended flags; it adds and removes none, so it takes the shared
+    /// handle, as a repository's shared index ([`IndexArc`]) needs: the index is used
+    /// on this thread only, and nothing an [`IndexRef`] lends is freed.
+    ///
+    /// Fails, with libgit2's error, for an in-memory index ("the index is in-memory
+    /// only", code `-1`), when the lock file exists ([`ErrorCode::Locked`]) and when
+    /// the file cannot be written.
+    ///
+    /// [`ErrorCode::Locked`]: crate::libgit2::util::errors::ErrorCode::Locked
+    ///
+    /// Wraps: git_index_write
+    pub fn write(&self) -> Result<(), RepositoryError> {
+        // SAFETY: a live index used on this thread only: libgit2 counts a reference for
+        // the call, writes the file and the index's bookkeeping (stamp, checksum, dirty
+        // flag), sorts its vectors and resets entry sizes in place, and frees no entry.
+        status(unsafe { ffi::git_index_write(self.as_ptr().cast_mut()) })
+    }
+
+    /// Writes the index's entries as trees in the object database of the repository
+    /// that owns the index, and returns the root tree's id; as
+    /// [`write_tree_to`](Self::write_tree_to) the owner.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index no repository
+    /// owns: every index built by [`Index::new`] or [`Index::open`] (a repository's
+    /// own, which [`RepositoryRef::index`] lends as an [`IndexArc`], has an owner).
+    ///
+    /// [`RepositoryRef::index`]: crate::libgit2::repository::repository::RepositoryRef::index
+    ///
+    /// Wraps: git_index_write_tree
+    pub fn write_tree(&self) -> Result<Oid, RepositoryError> {
+        // SAFETY: a live index; the routine reads the repository the index's count
+        // names as its owner, NULL or a live repository (libgit2 clears it when the
+        // repository is freed), and keeps nothing.
+        let owner = unsafe { ffi::git_index_owner(self.as_ptr()) };
+        // SAFETY: a non-NULL owner is live for this call, used on this thread only.
+        if let Some(repo) = unsafe { RepositoryRef::from_ptr(owner) } {
+            self.tree_writable(repo)?;
+        }
+        let mut id = Oid::zeroed();
+        // SAFETY: `out` addresses `id`; a live index used on this thread only, whose
+        // owner (if any) libgit2 writes the trees to, checked above for the ids it
+        // looks up and the names it stores. libgit2 sorts the entries, replaces the
+        // private tree cache and frees no entry, so the shared handle suffices.
+        let rc = unsafe {
+            ffi::git_index_write_tree(id.as_mut().as_mut_ptr(), self.as_ptr().cast_mut())
+        };
+        status(rc).map(|()| id)
+    }
+
+    /// Writes the index's entries as trees in `repo`'s object database, and returns
+    /// the root tree's id. The index caches the trees it wrote (its tree cache), so a
+    /// later write with no change in between returns the same id without writing.
+    ///
+    /// Fails with [`ErrorCode::Unmerged`] when the index has conflicts, and with
+    /// libgit2's error when an entry is not a valid tree entry (an invalid mode or
+    /// name, a zero id, an object `repo` does not have, of the type the mode wants)
+    /// or a tree cannot be written.
+    ///
+    /// Refused, with a `GIT_ERROR_INVALID` error (code `-1`), before libgit2 sees it:
+    /// an index with an entry whose id libgit2 would look up in `repo` (any mode but a
+    /// submodule's, a non-zero id) though it is not of `repo`'s object id type, which
+    /// overflows libgit2's path buffer; and one with a path component longer than
+    /// 65535 bytes ("tree entry path too long"), which libgit2 would store truncated in
+    /// a tree it reports as written. These refusals precede libgit2's own checks of the
+    /// other entries.
+    ///
+    /// [`ErrorCode::Unmerged`]: crate::libgit2::util::errors::ErrorCode::Unmerged
+    ///
+    /// Wraps: git_index_write_tree_to
+    pub fn write_tree_to(&self, repo: RepositoryRef<'_>) -> Result<Oid, RepositoryError> {
+        self.tree_writable(repo)?;
+        let mut id = Oid::zeroed();
+        // SAFETY: `out` addresses `id`; a live index used on this thread only, as in
+        // `write_tree`; `repo` a live repository, used on this thread only, whose object
+        // database libgit2 writes through this shared handle, as `RepositoryRef`
+        // allows, with the ids it looks up and the names it stores checked above.
+        let rc = unsafe {
+            ffi::git_index_write_tree_to(
+                id.as_mut().as_mut_ptr(),
+                self.as_ptr().cast_mut(),
+                repo.as_ptr().cast_mut(),
+            )
+        };
+        status(rc).map(|()| id)
+    }
+}
+
+impl IndexMut<'_> {
+    /// Rereads the index from its file. With `force`, the index is always replaced by
+    /// the file's contents, discarding unwritten changes, and cleared when there is no
+    /// file; without it, the file is read only when its checksum differs from the one
+    /// the index last read or wrote, and a missing file leaves the index as it is.
+    /// The index is clean afterwards.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error, for an in-memory index ("the index is
+    /// in-memory only", code `-1`), when the file cannot be read or is not a valid
+    /// index; a failed parse leaves the index cleared.
+    ///
+    /// libgit2 can return a positive code (`1`) on one failure, when the file it found
+    /// is gone before it reads the timestamp; it is reported as [`ErrorCode::Generic`].
+    ///
+    /// [`ErrorCode::Generic`]: crate::libgit2::util::errors::ErrorCode::Generic
+    ///
+    /// Wraps: git_index_read
+    pub fn read(&mut self, force: bool) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle excludes every borrow of the index's entries,
+        // which the read may free; the path is the index's own.
+        status(unsafe { ffi::git_index_read(self.as_mut_ptr(), c_int::from(force)) })
+    }
+
+    /// Sets the version the index is written in: 2, 3 or 4. Writing version 2 may
+    /// still produce a version 3 file, when an entry needs the extended flags.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error ("invalid version number", code `-1`), for
+    /// another version, leaving the index's unchanged.
+    ///
+    /// Wraps: git_index_set_version
+    pub fn set_version(&mut self, version: u32) -> Result<(), RepositoryError> {
+        // SAFETY: a live index, written through the exclusive handle.
+        status(unsafe { ffi::git_index_set_version(self.as_mut_ptr(), version) })
+    }
+
+    /// Sets how the index treats the filesystem: case-insensitive paths, untrusted
+    /// executable bits, no symbolic links. A change of case sensitivity re-sorts the
+    /// entries and resolve-undo records, and changes how paths are looked up.
+    ///
+    /// [`CapabilitySetting::FromOwner`] reads `core.ignorecase`, `core.filemode` and
+    /// `core.symlinks` from the repository owning the index, leaving each capability
+    /// whose setting it cannot read as it was. It fails, with a `GIT_ERROR_INDEX` error
+    /// (code `-1`), for an index no repository owns, leaving the capabilities
+    /// unchanged; an index reached through this exclusive handle has no owner, since
+    /// a repository's index is shared ([`IndexArc`]).
+    ///
+    /// Wraps: git_index_set_caps
+    pub fn set_caps(&mut self, caps: CapabilitySetting) -> Result<(), RepositoryError> {
+        // SAFETY: a live index, written through the exclusive handle, which excludes
+        // any borrow of the entries the re-sort reorders; the value is three named bits
+        // or the FROM_OWNER command.
+        status(unsafe { ffi::git_index_set_caps(self.as_mut_ptr(), caps.to_raw()) })
+    }
+
+    /// Removes the entry at `path` at `stage`, or at the first stage found for
+    /// [`Stage::Any`], freeing it.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] (and a `GIT_ERROR_INDEX` error) when there is
+    /// no such entry.
+    ///
+    /// [`ErrorCode::NotFound`]: crate::libgit2::util::errors::ErrorCode::NotFound
+    ///
+    /// Wraps: git_index_remove
+    pub fn remove(&mut self, path: &CStr, stage: Stage) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle excludes every borrow of the entry freed; `path`
+        // is NUL-terminated, read for the call; the stage is a named one (-1..=3).
+        status(unsafe { ffi::git_index_remove(self.as_mut_ptr(), path.as_ptr(), stage.raw()) })
+    }
+
+    /// Removes the stage-0 entry at `path`, then resolves a conflict at `path` by
+    /// moving its stage 1-3 entries to the resolve-undo records. Neither missing is an
+    /// error.
+    ///
+    /// Wraps: git_index_remove_bypath
+    pub fn remove_bypath(&mut self, path: &CStr) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle excludes every borrow of the entries freed or
+        // moved; `path` is a non-NULL NUL-terminated string, read for the call.
+        status(unsafe { ffi::git_index_remove_bypath(self.as_mut_ptr(), path.as_ptr()) })
+    }
+
+    /// Removes every entry at `stage` under the directory `dir` (`dir` and a `/`,
+    /// which is added when missing; the empty `dir` is the whole index).
+    ///
+    /// [`Stage::Any`] is refused, with a `GIT_ERROR_INVALID` error (code `-1`), before
+    /// libgit2 sees it: libgit2 compares each entry's stage with `-1` literally, so
+    /// it would remove nothing and report success.
+    ///
+    /// Wraps: git_index_remove_directory
+    pub fn remove_directory(&mut self, dir: &CStr, stage: Stage) -> Result<(), RepositoryError> {
+        if stage == Stage::Any {
+            set(
+                ErrorClass::Invalid,
+                c"cannot remove a directory at any stage: give a concrete stage",
+            );
+            return Err(RepositoryError::from_libgit2(-1));
+        }
+        // SAFETY: the exclusive handle excludes every borrow of the entries freed; `dir`
+        // is NUL-terminated, copied for the call; the stage is a concrete one (0..=3).
+        status(unsafe {
+            ffi::git_index_remove_directory(self.as_mut_ptr(), dir.as_ptr(), stage.raw())
+        })
+    }
+
+    /// Removes the entries matching `pathspec` (all of them for an empty one), at any
+    /// stage, each through [`remove_bypath`](Self::remove_bypath): a conflicted path's
+    /// stages move to the resolve-undo records.
+    ///
+    /// `callback`, if any, sees each matching path and the pattern it matched before
+    /// the entry goes ([`MatchedPathCallback`] describes its results); a negative
+    /// result stops the scan, and is returned as the error's code
+    /// ([`raw_code`](RepositoryError::raw_code)), with libgit2's generic message when
+    /// the callback set no error. A panic stops the scan as `GIT_EUSER` and resumes
+    /// once libgit2 returned.
+    ///
+    /// The callback cannot reach the index while it runs: libgit2 lends it the
+    /// entry's own path, freed at once by a change of the index, and this handle is
+    /// borrowed exclusively for the scan.
+    ///
+    /// ```compile_fail,E0499
+    /// use std::ffi::CStr;
+    /// use libgit2::libgit2::core::strarray::StrArrayView;
+    /// use libgit2::libgit2::index::index::{Index, MatchedPathCallback, MatchedPathResult};
+    ///
+    /// let mut index = Index::new().unwrap();
+    /// let mut handle = index.as_mut();
+    /// let mut f = |path: &CStr, _: Option<&CStr>| {
+    ///     let _ = handle.remove_bypath(path);
+    ///     MatchedPathResult::SKIP
+    /// };
+    /// let mut callback = MatchedPathCallback::new(&mut f);
+    /// let _ = index.as_mut().remove_all(StrArrayView::default().as_ref(), Some(&mut callback));
+    /// ```
+    ///
+    /// A pathspec mixing empty and non-empty patterns is refused, with a
+    /// `GIT_ERROR_INVALID` error (code `-1`), before libgit2 sees it, as
+    /// [`Pathspec::new`](crate::libgit2::index::pathspec::Pathspec::new) refuses it.
+    ///
+    /// Wraps: git_index_remove_all
+    pub fn remove_all(
+        &mut self,
+        pathspec: StrArrayRef<'_>,
+        callback: Option<&mut MatchedPathCallback<'_>>,
+    ) -> Result<(), RepositoryError> {
+        if !patterns_are_parsable(pathspec) {
+            return Err(RepositoryError::from_libgit2(-1));
+        }
+        let index = self.as_mut_ptr();
+        let rc = match callback {
+            Some(callback) => callback.scan_with(|cb, payload| {
+                // SAFETY: the exclusive handle keeps the index live and unreachable from
+                // the callback, so the entry path lent to it stays put; `pathspec` is a
+                // live parsable array, read for the call; the trampoline and payload
+                // come from `scan_with`, used synchronously on this thread.
+                unsafe { ffi::git_index_remove_all(index, pathspec.as_ptr(), cb, payload) }
+            }),
+            // SAFETY: as above, without a callback.
+            None => unsafe {
+                ffi::git_index_remove_all(index, pathspec.as_ptr(), None, ptr::null_mut())
+            },
+        };
+        status(rc)
+    }
+
+    /// Updates the entries matching `pathspec` (all of them for an empty one) from the
+    /// working directory of the repository owning the index: a changed file is added
+    /// again (its blob written), a deleted one removed as by
+    /// [`remove_bypath`](Self::remove_bypath).
+    ///
+    /// `callback` works as for [`remove_all`](Self::remove_all); libgit2 lends it the
+    /// path of the working-directory change, which the scan's diff owns.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index no repository
+    /// owns, before the callback runs. An index reached through this exclusive handle
+    /// has no owner, since a repository's index is shared ([`IndexArc`]).
+    ///
+    /// A pathspec mixing empty and non-empty patterns is refused as
+    /// [`remove_all`](Self::remove_all) refuses it.
+    ///
+    /// Wraps: git_index_update_all
+    pub fn update_all(
+        &mut self,
+        pathspec: StrArrayRef<'_>,
+        callback: Option<&mut MatchedPathCallback<'_>>,
+    ) -> Result<(), RepositoryError> {
+        if !patterns_are_parsable(pathspec) {
+            return Err(RepositoryError::from_libgit2(-1));
+        }
+        let index = self.as_mut_ptr();
+        let rc = match callback {
+            Some(callback) => callback.scan_with(|cb, payload| {
+                // SAFETY: the exclusive handle keeps the index live and unreachable from
+                // the callback; `pathspec` is a live parsable array, read for the call;
+                // the trampoline and payload come from `scan_with`, used synchronously
+                // on this thread.
+                unsafe { ffi::git_index_update_all(index, pathspec.as_ptr(), cb, payload) }
+            }),
+            // SAFETY: as above, without a callback.
+            None => unsafe {
+                ffi::git_index_update_all(index, pathspec.as_ptr(), None, ptr::null_mut())
+            },
+        };
+        status(rc)
     }
 }
 
@@ -2224,6 +2630,197 @@ mod unit_tests {
             "child `{name}` failed:\n{stdout}\n{}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    /// The routines of `git2/index.h` that read, write and remove entries, beside the
+    /// refusals the wrappers make before libgit2 sees an argument.
+    mod edits {
+        use super::*;
+        use crate::libgit2::core::strarray::StrArrayView;
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use crate::libgit2::util::errors::ErrorCode;
+
+        /// A regular-file entry at `path` and `stage`, of id type `kind` with first byte
+        /// `byte` (0 for the zero id), added raw: `git_index_add` is a later batch.
+        fn add(index: &mut IndexMut<'_>, path: &CStr, stage: u16, kind: u8, byte: u8, mode: u32) {
+            let mut entry = ffi::git_index_entry {
+                mode,
+                path: path.as_ptr(),
+                flags: stage << 12, // GIT_INDEX_ENTRY_STAGESHIFT
+                ..Default::default()
+            };
+            entry.id.type_ = kind;
+            entry.id.id[0] = byte;
+            // SAFETY: a live index, exclusively borrowed with no entry borrow; C copies
+            // the initialised entry and its NUL-terminated path.
+            assert_eq!(unsafe { ffi::git_index_add(index.as_mut_ptr(), &entry) }, 0);
+        }
+
+        fn paths(index: IndexRef<'_>) -> Vec<(CString, i32)> {
+            let ptr = index.as_ptr().cast_mut();
+            // SAFETY: a live index, only read; each path is copied before the next call.
+            unsafe {
+                (0..ffi::git_index_entrycount(ptr))
+                    .map(|i| {
+                        let e = ffi::git_index_get_byindex(ptr, i);
+                        (
+                            CStr::from_ptr((*e).path).to_owned(),
+                            ffi::git_index_entry_stage(e),
+                        )
+                    })
+                    .collect()
+            }
+        }
+
+        fn scratch_repo(tag: &str) -> (std::path::PathBuf, RepositoryBox) {
+            let dir = std::env::temp_dir()
+                .join(format!("crustify-index-edits-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = CString::new(dir.to_str().unwrap()).unwrap();
+            (dir, Repository::init(&path, true).unwrap())
+        }
+
+        #[test]
+        fn status_reports_positive_codes_as_generic() {
+            assert!(status(0).is_ok());
+            if cfg!(miri) {
+                return;
+            }
+            assert_eq!(status(1).unwrap_err().code(), Some(ErrorCode::Generic));
+            assert_eq!(status(-3).unwrap_err().code(), Some(ErrorCode::NotFound));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn mixed_empty_pathspecs_are_refused_before_the_scan() {
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), c"a", 0, 1, 1, 0o100644);
+            let patterns = StrArrayView::new(&[c"", c"a"]);
+            let mut calls = 0;
+            let mut f = |_: &CStr, _: Option<&CStr>| {
+                calls += 1;
+                MatchedPathResult::APPLY
+            };
+            let mut callback = MatchedPathCallback::new(&mut f);
+            let removed = index
+                .as_mut()
+                .remove_all(patterns.as_ref(), Some(&mut callback));
+            let updated = index
+                .as_mut()
+                .update_all(patterns.as_ref(), Some(&mut callback));
+            drop(callback);
+            for error in [removed.unwrap_err(), updated.unwrap_err()] {
+                assert_eq!(error.class(), Some(ErrorClass::Invalid));
+                assert_eq!(error.raw_code(), -1);
+            }
+            assert_eq!(calls, 0);
+            assert_eq!(paths(index.as_ref()), [(c"a".to_owned(), 0)]);
+        }
+
+        /// libgit2 would remove nothing and succeed: `Stage::Any` is refused instead.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn removing_a_directory_at_any_stage_is_refused() {
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), c"dir/a", 0, 1, 1, 0o100644);
+            let error = index
+                .as_mut()
+                .remove_directory(c"dir", Stage::Any)
+                .unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(paths(index.as_ref()), [(c"dir/a".to_owned(), 0)]);
+            let (raw, any) = (index.as_c_ptr(), Stage::Any.raw());
+            // SAFETY: a live index; the stage is C's wildcard, which it compares literally.
+            let rc = unsafe { ffi::git_index_remove_directory(raw, c"dir".as_ptr(), any) };
+            assert_eq!(rc, 0);
+            assert_eq!(paths(index.as_ref()), [(c"dir/a".to_owned(), 0)]);
+            index
+                .as_mut()
+                .remove_directory(c"dir", Stage::Normal)
+                .unwrap();
+            assert!(paths(index.as_ref()).is_empty());
+        }
+
+        /// Ids libgit2 would look up in a repository of another id type, and names too
+        /// long for a tree entry, are refused before any tree is written; a conflicted
+        /// index is left to libgit2's `GIT_EUNMERGED`, and submodule and zero ids are not
+        /// looked up.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn tree_writes_refuse_foreign_ids_and_long_names() {
+            let (dir, repo) = scratch_repo("refusals");
+            let sha256 = OidType::Sha256.raw() as u8;
+            let sha1 = OidType::Sha1.raw() as u8;
+
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), c"a", 0, sha256, 1, 0o100644);
+            let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            assert_eq!(
+                error.message(),
+                c"specified object ID type does not match repository object ID type"
+            );
+
+            let mut index = Index::new().unwrap();
+            add(
+                &mut index.as_mut(),
+                c"sub",
+                0,
+                sha256,
+                1,
+                ffi::GIT_FILEMODE_COMMIT,
+            );
+            add(&mut index.as_mut(), c"zero", 0, sha256, 0, 0o100644);
+            let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
+            // libgit2's own refusal of the zero id, after no lookup.
+            assert_eq!(error.class(), Some(ErrorClass::Tree));
+
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), c"a", 1, sha256, 1, 0o100644);
+            add(&mut index.as_mut(), c"a", 2, sha256, 2, 0o100644);
+            let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
+            assert_eq!(error.code(), Some(ErrorCode::Unmerged));
+
+            let long = CString::new(format!("dir/{}", "n".repeat(TREE_NAME_MAX + 1))).unwrap();
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), &long, 0, sha1, 1, 0o100644);
+            let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
+            assert_eq!(error.message(), c"tree entry path too long");
+            let just = CString::new("n".repeat(TREE_NAME_MAX)).unwrap();
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), &just, 0, sha1, 1, 0o100644);
+            let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
+            // Not refused: libgit2 looks the (missing) object up.
+            assert_eq!(error.class(), Some(ErrorClass::Tree));
+            drop(repo);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        /// The repository owning an index is checked as `write_tree_to`'s argument is.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn owner_tree_writes_refuse_foreign_ids() {
+            let (dir, repo) = scratch_repo("owner");
+            let mut built = Index::with_oid_type(OidType::Sha256).unwrap();
+            add(
+                &mut built.as_mut(),
+                c"a",
+                0,
+                OidType::Sha256.raw() as u8,
+                1,
+                0o100644,
+            );
+            let shared: IndexArc = built.into();
+            let mut repo = repo;
+            repo.as_mut().set_index(Some(&shared));
+            let error = shared.as_ref().write_tree().unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
+            // Once the repository is gone, the index has no owner to write to.
+            drop(repo);
+            let error = shared.as_ref().write_tree().unwrap_err();
+            assert_eq!(error.class(), Some(ErrorClass::Index));
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// The policy's constructor hands out a fresh index, which `from_raw` adopts and

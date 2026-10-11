@@ -12,17 +12,18 @@
 //! a same-path add replaces it, on remove, clear, reload, and when the index is
 //! released. The public API only lends const entries.
 
-use core::ffi::CStr;
+use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::ptr::{self, NonNull, addr_of};
 
 use ffibox::{CSlice, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::core::types::FileMode;
 use crate::libgit2::index::index::{IndexMut, IndexRef};
 use crate::libgit2::oid::oid::{Oid, OidRef};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
-use crate::libgit2::util::sys::errors::set;
+use crate::libgit2::util::sys::errors::{clear, set};
 
 define_ctype!(
     /// A rename-conflict record owned by an index. Obtain its read-only handle with
@@ -119,6 +120,17 @@ pub struct ReucSide<'a> {
     pub mode: u32,
     /// The side's blob id, borrowed from the record.
     pub id: OidRef<'a>,
+}
+
+impl<'a> ReucSide<'a> {
+    /// A side of mode `mode`, one of the modes libgit2 names, and id `id`, as
+    /// [`IndexMut::add_reuc`] takes it.
+    pub fn new(mode: FileMode, id: OidRef<'a>) -> Self {
+        Self {
+            mode: mode.raw(),
+            id,
+        }
+    }
 }
 
 impl<'a> ReucEntryRef<'a> {
@@ -351,9 +363,119 @@ impl IndexMut<'_> {
     }
 }
 
+/// The mode `git_index_reuc_add` takes for one side: 0 for an absent side. C stores
+/// it in an `unsigned int`, so the wrapping cast keeps every `u32` as given.
+fn reuc_mode(side: Option<ReucSide<'_>>) -> c_int {
+    side.map_or(0, |side| side.mode as c_int)
+}
+
+impl IndexRef<'_> {
+    /// Number of resolve-undo (REUC) records currently held by the index: the stages
+    /// of conflicts resolved since the index was read.
+    ///
+    /// Wraps: git_index_reuc_entrycount
+    pub fn reuc_entry_count(&self) -> usize {
+        // SAFETY: the index is live; this C routine only reads its vector length
+        // despite its non-const parameter, and returns no retained borrow.
+        unsafe { ffi::git_index_reuc_entrycount(self.as_ptr().cast_mut()) }
+    }
+}
+
+impl IndexMut<'_> {
+    /// Records how the conflict at `path` was before it was resolved: the mode and id
+    /// of its ancestor, our and their side, each `None` when the path was absent on
+    /// that side. A record for `path` already there is replaced (and freed).
+    ///
+    /// The path and ids are copied; none is looked up. Any non-zero mode is stored as
+    /// given, so the sides a [`ReucEntryRef`] lends add back unchanged; a side whose
+    /// mode is 0 is recorded as absent, without its id. Empty and non-UTF-8 paths are
+    /// kept as given.
+    ///
+    /// Fails, with libgit2's error, only when it runs out of memory.
+    ///
+    /// Wraps: git_index_reuc_add
+    pub fn add_reuc(
+        &mut self,
+        path: &CStr,
+        ancestor: Option<ReucSide<'_>>,
+        ours: Option<ReucSide<'_>>,
+        theirs: Option<ReucSide<'_>>,
+    ) -> Result<(), ErrorBuf> {
+        let id = |side: Option<ReucSide<'_>>| side.map_or(ptr::null(), |side| side.id.as_ptr());
+        // SAFETY: the exclusive handle excludes every borrow of the record replaced;
+        // `path` is NUL-terminated and each id live or NULL with mode 0 (never read);
+        // C copies them before returning and frees the new record on failure.
+        let rc = unsafe {
+            ffi::git_index_reuc_add(
+                self.as_mut_ptr(),
+                path.as_ptr(),
+                reuc_mode(ancestor),
+                id(ancestor),
+                reuc_mode(ours),
+                id(ours),
+                reuc_mode(theirs),
+                id(theirs),
+            )
+        };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+
+    /// The position of the resolve-undo record for `path`, in the order the index
+    /// keeps them (by path, case-insensitively when the index ignores case); `None`
+    /// when there is none. Positions hold until the records next change.
+    ///
+    /// Requires exclusive index access because C sorts the REUC vector lazily.
+    ///
+    /// Wraps: git_index_reuc_find
+    pub fn find_reuc(&mut self, path: &CStr) -> Option<usize> {
+        let mut position = 0;
+        let index = self.as_mut_ptr();
+        // SAFETY: `at_pos` is a writable slot; the exclusive borrow permits the sort,
+        // and `path` is NUL-terminated, read for the call.
+        let rc = unsafe { ffi::git_index_reuc_find(&mut position, index, path.as_ptr()) };
+        (rc == 0).then_some(position)
+    }
+
+    /// Removes and frees the resolve-undo record at `position`.
+    ///
+    /// Fails for a position past the last record. libgit2 then returns
+    /// `GIT_ENOTFOUND` without an error of its own; the error is a `GIT_ERROR_INDEX`
+    /// one describing the position.
+    ///
+    /// Wraps: git_index_reuc_remove
+    pub fn remove_reuc(&mut self, position: usize) -> Result<(), ErrorBuf> {
+        clear();
+        // SAFETY: the exclusive handle excludes every borrow of the record freed; C
+        // bounds-checks the position before removing anything.
+        let rc = unsafe { ffi::git_index_reuc_remove(self.as_mut_ptr(), position) };
+        if rc >= 0 {
+            return Ok(());
+        }
+        if last().class() == Some(ErrorClass::None) {
+            set(
+                ErrorClass::Index,
+                c"no resolve-undo record at that position",
+            );
+        }
+        Err(last())
+    }
+
+    /// Destroy all resolve-undo records, leaving the index reusable. Existing record
+    /// borrows must end before this call.
+    ///
+    /// Wraps: git_index_reuc_clear
+    pub fn clear_reuc(&mut self) -> Result<(), ErrorBuf> {
+        // SAFETY: exclusive access excludes every borrowed REUC record; C frees the
+        // owned records and resets the vector, retaining the index itself.
+        let rc = unsafe { ffi::git_index_reuc_clear(self.as_mut_ptr()) };
+        if rc < 0 { Err(last()) } else { Ok(()) }
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+    use ffibox::CZeroable;
 
     #[test]
     fn layout_and_nullable_projection() {
@@ -479,5 +601,47 @@ mod unit_tests {
         assert_eq!(view.ids().get(1).unwrap().id()[0], 2);
         // SAFETY: null pointers adopt as no handle.
         assert!(unsafe { ReucEntryRef::from_ptr(ptr::null_mut()) }.is_none());
+    }
+
+    #[test]
+    fn absent_and_unreadable_reuc_sides() {
+        let id = Oid::zeroed();
+        let side = |mode| Some(ReucSide::new(mode, id.as_ref()));
+        assert_eq!(reuc_mode(None), 0);
+        assert_eq!(reuc_mode(side(FileMode::Unreadable)), 0);
+        assert_eq!(reuc_mode(side(FileMode::Commit)), 0o160000);
+        assert_eq!(reuc_mode(side(FileMode::BlobExecutable)), 0o100755);
+        let any = ReucSide {
+            mode: u32::MAX,
+            id: id.as_ref(),
+        };
+        assert_eq!(reuc_mode(Some(any)), -1);
+    }
+
+    /// libgit2 returns `GIT_ENOTFOUND` without an error for a position past the end,
+    /// leaving whatever error the thread had: the wrapper describes it instead.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn out_of_range_reuc_removal_is_described() {
+        let mut index = crate::libgit2::index::index::Index::new().unwrap();
+        set(ErrorClass::Odb, c"a stale error");
+        // SAFETY: a live index with no records; C bounds-checks the position.
+        let rc = unsafe { ffi::git_index_reuc_remove(index.as_c_ptr(), 0) };
+        assert_eq!(rc, ffi::GIT_ENOTFOUND);
+        assert_eq!(last().message(), c"a stale error");
+        let error = index.as_mut().remove_reuc(0).unwrap_err();
+        assert_eq!(error.class(), Some(ErrorClass::Index));
+        assert_eq!(error.message(), c"no resolve-undo record at that position");
+        let id = Oid::zeroed();
+        let blob = ReucSide::new(FileMode::Blob, id.as_ref());
+        index
+            .as_mut()
+            .add_reuc(c"p", Some(blob), None, None)
+            .unwrap();
+        let error = index.as_mut().remove_reuc(usize::MAX).unwrap_err();
+        assert_eq!(error.class(), Some(ErrorClass::Index));
+        assert_eq!(index.as_ref().reuc_entry_count(), 1);
+        index.as_mut().remove_reuc(0).unwrap();
+        assert_eq!(index.as_ref().reuc_entry_count(), 0);
     }
 }

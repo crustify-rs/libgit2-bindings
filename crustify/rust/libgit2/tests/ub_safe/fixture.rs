@@ -958,8 +958,10 @@ pub mod index {
     use std::ffi::{CStr, CString, c_int};
 
     use libgit2::ffi;
-    use libgit2::libgit2::index::index::{IndexArc, IndexBox};
+    use libgit2::libgit2::index::index::{Capabilities, IndexArc, IndexBox, IndexRef};
+    use libgit2::libgit2::index::sys::index::ReucSide;
     use libgit2::libgit2::oid::oid::Oid;
+    use libgit2::libgit2::repository::repository::RepositoryError;
 
     use super::{CHILD, TempRepo};
 
@@ -992,20 +994,27 @@ pub mod index {
         );
     }
 
-    /// Either index owner, by its C pointer.
+    /// Either index owner, by its C pointer or its shared handle.
     pub trait Owner {
         fn c_ptr(&self) -> *mut ffi::git_index;
+        fn handle(&self) -> IndexRef<'_>;
     }
 
     impl Owner for IndexBox {
         fn c_ptr(&self) -> *mut ffi::git_index {
             self.as_c_ptr()
         }
+        fn handle(&self) -> IndexRef<'_> {
+            self.as_ref()
+        }
     }
 
     impl Owner for IndexArc {
         fn c_ptr(&self) -> *mut ffi::git_index {
             self.as_c_ptr()
+        }
+        fn handle(&self) -> IndexRef<'_> {
+            self.as_ref()
         }
     }
 
@@ -1026,13 +1035,9 @@ pub mod index {
         unsafe { ffi::git_index_entrycount(index.c_ptr()) }
     }
 
-    /// `git_index_path`, copied out.
+    /// `IndexRef::path`, copied out.
     pub fn path(index: &impl Owner) -> Option<CString> {
-        // SAFETY: a live index, only read.
-        let path = unsafe { ffi::git_index_path(index.c_ptr()) };
-        // SAFETY: NULL or the index's own NUL-terminated path, copied before any other
-        // call.
-        (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) }.to_owned())
+        index.handle().path().map(CStr::to_owned)
     }
 
     /// Whether `git_index_owner` names a repository.
@@ -1052,10 +1057,29 @@ pub mod index {
         add_flagged(index, path, ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD as u16)
     }
 
-    /// `git_index_set_version`; the status.
+    /// `git_index_add` of an entry at `path` and `stage`, of id type `kind` with first id
+    /// byte `byte`, and of mode `mode`; asserts it is added.
+    pub fn add_staged(index: &impl Owner, path: &CStr, stage: u16, kind: u8, byte: u8, mode: u32) {
+        let mut entry = ffi::git_index_entry {
+            mode,
+            path: path.as_ptr(),
+            flags: stage << 12, // GIT_INDEX_ENTRY_STAGESHIFT
+            ..Default::default()
+        };
+        entry.id.type_ = kind;
+        entry.id.id[0] = byte;
+        // SAFETY: a live index with no entry borrowed; `entry` and its path are read and
+        // copied for the call.
+        assert_eq!(unsafe { ffi::git_index_add(index.c_ptr(), &entry) }, 0);
+    }
+
+    /// `IndexMut::set_version`; the status.
     pub fn set_version(index: &mut IndexBox, version: u32) -> c_int {
-        // SAFETY: the box's live index, borrowed exclusively.
-        unsafe { ffi::git_index_set_version(index.as_c_ptr(), version) }
+        status(index.as_mut().set_version(version))
+    }
+
+    fn status(result: Result<(), RepositoryError>) -> c_int {
+        result.map_or_else(|e| e.raw_code(), |()| 0)
     }
 
     fn add_flagged(index: &mut IndexBox, path: &CStr, flags_extended: u16) -> c_int {
@@ -1072,54 +1096,44 @@ pub mod index {
         unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }
     }
 
-    /// `git_index_write`; the status.
+    /// `IndexRef::write`; the status.
     pub fn write(index: &mut IndexBox) -> c_int {
-        // SAFETY: the box's live index, borrowed exclusively.
-        unsafe { ffi::git_index_write(index.as_c_ptr()) }
+        status(index.as_ref().write())
     }
 
-    /// `git_index_reuc_add`, replacing any record for `path`; the status. Stands in
-    /// for the safe REUC add until the index symbol batch lands it.
+    /// `IndexMut::add_reuc`, replacing any record for `path`; the status (`-1`, the
+    /// only failure, for an error). A side whose mode is 0 is absent.
     pub fn add_reuc(index: &mut IndexBox, path: &CStr, modes: [c_int; 3], ids: [&Oid; 3]) -> c_int {
-        let ids = ids.map(|id| std::ptr::from_ref(id).cast::<ffi::git_oid>());
-        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live
-        // across the replacement free; `path` and each `Oid` (transparent over
-        // `git_oid`) are read and copied for the call.
-        unsafe {
-            ffi::git_index_reuc_add(
-                index.as_c_ptr(),
-                path.as_ptr(),
-                modes[0],
-                ids[0],
-                modes[1],
-                ids[1],
-                modes[2],
-                ids[2],
-            )
-        }
+        let side = |i: usize| {
+            (modes[i] != 0).then(|| ReucSide {
+                mode: modes[i] as u32,
+                id: ids[i].as_ref(),
+            })
+        };
+        let added = index.as_mut().add_reuc(path, side(0), side(1), side(2));
+        added.map_or(-1, |()| 0)
     }
 
-    /// `git_index_reuc_remove`; the status. A stand-in, as [`add_reuc`].
+    /// `IndexMut::remove_reuc`; the status: its only failure, a position out of range,
+    /// is `GIT_ENOTFOUND`.
     pub fn remove_reuc(index: &mut IndexBox, position: usize) -> c_int {
-        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live.
-        unsafe { ffi::git_index_reuc_remove(index.as_c_ptr(), position) }
+        let removed = index.as_mut().remove_reuc(position);
+        removed.map_or(ffi::GIT_ENOTFOUND, |()| 0)
     }
 
-    /// `git_index_reuc_clear`; the status. A stand-in, as [`add_reuc`].
+    /// `IndexMut::clear_reuc`; the status.
     pub fn clear_reuc(index: &mut IndexBox) -> c_int {
-        // SAFETY: the box's live index, borrowed exclusively, so no REUC handle is live.
-        unsafe { ffi::git_index_reuc_clear(index.as_c_ptr()) }
+        index.as_mut().clear_reuc().map_or(-1, |()| 0)
     }
 
-    /// `git_index_set_caps` with ignore-case on or off; the status.
+    /// `IndexMut::set_caps` with ignore-case on or off; the status.
     pub fn set_ignore_case(index: &mut IndexBox, on: bool) -> c_int {
         let caps = if on {
-            ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE as c_int
+            Capabilities::IGNORE_CASE
         } else {
-            0
+            Capabilities::empty()
         };
-        // SAFETY: the box's live index, borrowed exclusively; C re-sorts its vectors.
-        unsafe { ffi::git_index_set_caps(index.as_c_ptr(), caps) }
+        status(index.as_mut().set_caps(caps.into()))
     }
 }
 

@@ -16,6 +16,8 @@ use crate::fixture::index::{
 };
 use crate::fixture::{TempRepo, isolated};
 
+mod edits;
+
 /// A scratch directory for one test, removed on drop.
 struct Scratch(PathBuf);
 

@@ -117,10 +117,17 @@ git_index_open
 git_index_open_ext
 git_index_owner
 git_index_path
+git_index_read
 git_index_read_tree
+git_index_remove
+git_index_remove_bypath
+git_index_remove_directory
+git_index_reuc_find
 git_index_set_version
+git_index_version
 git_index_write
 git_index_write_tree
+git_index_write_tree_to
 git_libgit2_buildinfo
 git_libgit2_feature_backend
 git_libgit2_features

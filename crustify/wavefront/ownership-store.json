@@ -12206,6 +12206,730 @@
    ]
   },
   {
+   "name": "git_index_path",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only: returns the index_file_path field."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "index_file_path, set at construction (git_index_open) and freed only by index_free; NULL for an in-memory index. Never changed for the index's lifetime."
+    }
+   }
+  },
+  {
+   "name": "git_index_read",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Clears and reparses entries/extensions (frees entries; deferred while readers>0), resets the tree cache, stamp and dirty flag. Positive return (1) when the filestamp check fails (precedence bug: updated = check < 0)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_remove",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Removes and frees one entry (deferred to index->deleted while readers>0); stage -1 matches any stage."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Transient key, read for the call; not NULL-checked by C."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_remove_all",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional git_index_matched_path_cb, called synchronously per matching entry with entry->path and the matched pattern (NULL when no pattern parsed); >0 skips, <0 stops and is returned. Never retained."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "index_apply_to_all: sorts entries, then remove_bypath per match, freeing entries; the callback is lent entry->path, freed at once if the callback mutates the index."
+     }
+    },
+    {
+     "name": "pathspec",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:pathspec"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Transient git_strarray parsed by git_pathspec__init (copied); NULL or empty matches all. An empty pattern beside a non-empty one is over-read (parse_optimized_patterns)."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque, passed through to the callback synchronously; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_remove_bypath",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Removes the stage-0 entry and moves conflict stages to REUC (git_index__conflict_to_reuc); frees entries."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Transient key, read for the call; asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_remove_directory",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "dir",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:dir"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into a git_str with a trailing slash for the call."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Removes and frees every entry under dir/ at the given stage; stage is compared literally, so -1 removes nothing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_reuc_add",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "ancestor_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Copied (git_oid_cpy) only when ancestor_mode > 0, else ignored and may be NULL; asserted non-NULL when the mode is positive. Not looked up."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Inserts a new REUC record (sorted); a record with the same path is replaced and freed (index_reuc_on_dup)."
+     }
+    },
+    {
+     "name": "our_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:our_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "As ancestor_oid, for our_mode."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Copied into the new record (reuc_entry_alloc); asserted non-NULL."
+     }
+    },
+    {
+     "name": "their_oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:their_oid"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "As ancestor_oid, for their_mode."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_reuc_clear",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Frees every REUC record and empties the vector; the index stays usable."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_reuc_entrycount",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads the REUC vector length only, despite the non-const parameter."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_reuc_find",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "at_pos",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:at_pos"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Out slot written with the found or insertion position (git__bsearch); optional."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_vector_bsearch2 sorts the REUC vector lazily before searching."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Transient key, read for the call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_reuc_remove",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Removes and frees the record at position; out of range returns GIT_ENOTFOUND without setting an error (dirty is set either way)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_set_caps",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes the capability flags; an ignore_case change re-sorts entries and REUC. FROM_OWNER reads the owning repository's config, failing without an owner."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_set_version",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes the version field after checking 2..=4."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_update_all",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional git_index_matched_path_cb, called synchronously per matching workdir delta with the diff-owned delta path and the matched pattern; >0 skips, <0 stops and is returned. Never retained."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Requires an owning repository (else error before the scan); diffs index to workdir and add_bypath/remove_bypath per delta, writing blobs and freeing entries. The callback is lent the diff-owned delta path."
+     }
+    },
+    {
+     "name": "pathspec",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:pathspec"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "As in git_index_remove_all (parsed after the owner check)."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque, passed through to the callback synchronously; never retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_version",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads the version field only, despite the non-const parameter."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_write",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes the file through a lock; counts a reference for the call. Sorts entries/REUC, sets extended flags, resets racily-clean entries' file_size (owner with workdir only), stamp/checksum/dirty. Frees no entry."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_write_tree",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Requires an owner (else -1). git_tree__write_index: EUNMERGED on conflicts, sorts (ignore_case toggled for the write), replaces the tree cache; frees no entry. Entry ids are looked up in the owner's odb via check_entry: an id of another type than the repository's overflows the loose path buffer."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out id, written on success; asserted non-NULL."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_write_tree_to",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "As git_index_write_tree, writing to repo instead of the owner."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out id, written on success; asserted non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Trees written to its odb and entry ids looked up there (git_object__is_valid); an entry id of another oid type overflows the loose backend's path buffer. Not retained."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_reuc_get_byindex",
    "defined_in": "src/libgit2/index.c",
    "ptr_args": [

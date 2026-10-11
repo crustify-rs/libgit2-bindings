@@ -970,6 +970,8 @@ fn scalar_capabilities_from_owner() {
     }
 }
 
+mod edits;
+
 mod matched_path_callback {
     use super::*;
     use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
