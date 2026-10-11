@@ -56,6 +56,7 @@
 //! `git_config_set_string` to clear the owner's cache, racing a release of that
 //! repository on another thread.
 
+use core::ffi::CStr;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
@@ -320,6 +321,88 @@ const _: () = assert!(
         && size_of::<Option<ConfigBox<'static>>>() == size_of::<*mut ffi::git_config>()
 );
 
+/// Parses a configuration boolean. A missing value (`None`) means true; an
+/// empty string means false. The words `true`, `yes`, `on`, `false`, `no`, and
+/// `off` are case-insensitive. Otherwise the value must parse as a signed
+/// 32-bit configuration integer, with zero meaning false and nonzero true.
+///
+/// Borrows the input only for this call and returns an owned scalar or error.
+/// Pins libgit2's runtime before calling C, including on error paths.
+///
+/// ```compile_fail,E0308
+/// use libgit2::libgit2::config::config::parse_bool;
+/// // Only NUL-terminated strings can cross the C boundary.
+/// parse_bool(Some("true"));
+/// ```
+///
+/// Wraps: git_config_parse_bool
+pub fn parse_bool(value: Option<&CStr>) -> Result<bool, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut out = 0;
+    // SAFETY: `out` is one writable, aligned scalar; `value` is NULL or a live
+    // NUL-terminated string borrowed read-only for this call. C retains neither
+    // pointer. The pinned runtime keeps error reporting's TLS key live.
+    let rc = unsafe {
+        let value = value.map_or(ptr::null(), CStr::as_ptr);
+        ffi::git_config_parse_bool(&mut out, value)
+    };
+    if rc < 0 { Err(last()) } else { Ok(out != 0) }
+}
+
+/// Parses a signed 32-bit configuration integer, rejecting values outside its
+/// range. Uses [`parse_int64`]'s syntax, including binary multiplier suffixes.
+/// `None` and empty strings are errors.
+///
+/// Borrows the input only for this call and returns an owned scalar or error.
+/// Pins libgit2's runtime before calling C, including on error paths.
+///
+/// Wraps: git_config_parse_int32
+pub fn parse_int32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut out = 0;
+    // SAFETY: `out` is one writable, aligned i32; `value` is NULL or a live
+    // NUL-terminated string borrowed read-only for this call. C retains neither
+    // pointer. The pinned runtime keeps error reporting's TLS key live.
+    let rc = unsafe {
+        let value = value.map_or(ptr::null(), CStr::as_ptr);
+        ffi::git_config_parse_int32(&mut out, value)
+    };
+    if rc < 0 { Err(last()) } else { Ok(out) }
+}
+
+/// Parses a signed 64-bit configuration integer: optional leading whitespace
+/// and sign, decimal digits (octal with a leading `0`, hexadecimal with `0x`),
+/// and an optional case-insensitive `k`, `m`, or `g` suffix multiplying by
+/// 1024, 1048576, or 1073741824. Trailing characters and overflow are errors.
+/// `None` and empty strings are errors.
+///
+/// Borrows the input only for this call and returns an owned scalar or error.
+/// Pins libgit2's runtime before calling C, including on error paths.
+/// libgit2 fails on extra characters after a recognized suffix (e.g. `1kb`)
+/// without setting a new error; the returned error then copies the previous
+/// thread-local error, or "no error" if none existed. Success also leaves the
+/// previous error state untouched.
+///
+/// Wraps: git_config_parse_int64
+pub fn parse_int64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
+    if !runtime_pinned() {
+        return Err(last());
+    }
+    let mut out = 0;
+    // SAFETY: `out` is one writable, aligned i64; `value` is NULL or a live
+    // NUL-terminated string borrowed read-only for this call. C retains neither
+    // pointer. The pinned runtime keeps error reporting's TLS key live.
+    let rc = unsafe {
+        let value = value.map_or(ptr::null(), CStr::as_ptr);
+        ffi::git_config_parse_int64(&mut out, value)
+    };
+    if rc < 0 { Err(last()) } else { Ok(out) }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
@@ -580,6 +663,11 @@ mod unit_tests {
                 assert!(!runtime_pinned(), "libgit2 could not initialise");
                 assert_eq!(error.class(), Some(ErrorClass::Invalid));
                 assert_eq!(error.message(), c"library has not been initialized");
+                // Every parser refuses even otherwise-valid inputs without calling
+                // C when the runtime cannot be pinned.
+                assert_eq!(parse_bool(None).unwrap_err(), error);
+                assert_eq!(parse_int32(Some(c"1")).unwrap_err(), error);
+                assert_eq!(parse_int64(Some(c"1")).unwrap_err(), error);
             },
         );
     }
