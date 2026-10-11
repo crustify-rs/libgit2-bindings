@@ -1,5 +1,7 @@
-//! Public safe memory-options surface: initialization, replacement, copies and
-//! exclusive reborrows. The lifetime/aliasing failures are compile-fail doctests.
+//! Public safe surface of `sys/config.h`: memory-options initialization,
+//! replacement, copies and exclusive reborrows; backend entries' retained storage
+//! and release; iterators' construction, lending, filtering and release points.
+//! The lifetime/aliasing failures are compile-fail doctests.
 #![forbid(unsafe_code)]
 
 use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
@@ -394,6 +396,61 @@ mod iterators {
         );
         drop(iter);
         drop(config);
+        std::fs::remove_file(file).unwrap();
+    }
+
+    /// The Rust-owned filter's lifecycle: released before, during and after
+    /// iteration (its inner C iterator and compiled regex still live), over a
+    /// config without backends, and after a failed compile whose name was valid.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
+    fn filtered_iterator_release_points() {
+        let file =
+            std::env::temp_dir().join(format!("crustify-filtered-release-{}", std::process::id()));
+        std::fs::write(&file, b"[a]\nx = one\nx\nx = two\n[b]\nx = one\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let config = Config::open(&path).unwrap();
+        let filtered = |regex: &std::ffi::CStr| {
+            config
+                .as_ref()
+                .multivar_iterator(c"a.x", Some(regex))
+                .unwrap()
+        };
+        drop(filtered(c"o"));
+        let mut mid = filtered(c"o");
+        let policy = mid.as_ref().release_policy();
+        assert_eq!(
+            mid.as_mut().advance().unwrap().unwrap().entry().value(),
+            Some(c"one")
+        );
+        policy.release(mid);
+        let mut done = filtered(c"o");
+        let mut m = done.as_mut();
+        let values: Vec<_> = std::iter::from_fn(|| {
+            m.advance()
+                .unwrap()
+                .map(|e| e.entry().value().unwrap().to_owned())
+        })
+        .collect();
+        assert_eq!(values, [c"one".to_owned(), c"two".to_owned()]);
+        assert!(m.advance().unwrap().is_none());
+        drop(done);
+        let empty = Config::new().unwrap();
+        let mut none = empty
+            .as_ref()
+            .multivar_iterator(c"a.x", Some(c".*"))
+            .unwrap();
+        assert!(none.as_mut().advance().unwrap().is_none());
+        assert!(none.as_mut().advance().unwrap().is_none());
+        drop(none);
+        for _ in 0..4 {
+            let error = config
+                .as_ref()
+                .multivar_iterator(c"a.x", Some(c"("))
+                .unwrap_err();
+            assert_eq!(error.message(), c"missing closing parenthesis");
+        }
+        drop((config, empty));
         std::fs::remove_file(file).unwrap();
     }
 }

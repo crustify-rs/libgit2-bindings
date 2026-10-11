@@ -341,8 +341,10 @@ mod backend_entries {
 
 mod iterators {
     use super::*;
-    use libgit2::libgit2::config::config::{Config, EntryRef};
+    use libgit2::libgit2::config::config::{Config, ConfigLevel, EntryRef};
     use libgit2::libgit2::config::sys::config::IteratorBox;
+    use libgit2::libgit2::util::errors::last;
+    use libgit2::libgit2::util::sys::errors::clear;
     use std::ptr;
 
     type Row = (
@@ -523,5 +525,212 @@ mod iterators {
         assert!(raw.is_null());
         drop((rust_config, raw_config));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    type Step = Result<Option<Row>, (i32, i32, Vec<u8>)>;
+
+    fn rust_step(iter: &mut IteratorBox<'_>) -> Step {
+        match iter.as_mut().advance() {
+            Ok(entry) => Ok(entry.map(|e| observe(e.entry()))),
+            Err(e) => Err((e.raw_code(), e.raw_class(), e.message().to_bytes().to_vec())),
+        }
+    }
+
+    fn raw_step(raw: *mut ffi::git_config_iterator) -> Step {
+        let mut out = ptr::null_mut();
+        // SAFETY: exclusive live raw iterator and a writable slot; no earlier
+        // raw entry is used after this advance.
+        match unsafe { ffi::git_config_next(&mut out, raw) } {
+            // SAFETY: success lent a live entry; it is copied before the next step.
+            0 => Ok(Some(unsafe { observe_raw(out) })),
+            ffi::GIT_ITEROVER => Ok(None),
+            rc => {
+                let e = last();
+                Err((rc, e.raw_class(), e.message().to_bytes().to_vec()))
+            }
+        }
+    }
+
+    /// The regex-filtered multivar iterator (Rust-side PCRE2 filter over C's
+    /// name selection) against C's own regex multivar iterator, step by step:
+    /// entries from the lower backend, a higher backend whose file became
+    /// unparsable before its lazy refresh, retries after the failure and after
+    /// exhaustion, and the error each side leaves. No valueless entry carries
+    /// the key, so the C reference never reaches its strlen(NULL).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
+    fn filtered_multivar_steps_match_c() {
+        let dir =
+            std::env::temp_dir().join(format!("crustify-filtered-equiv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let global = dir.join("global");
+        let local = dir.join("local");
+        std::fs::write(&global, b"[a]\nx = one\nx = two\nx = three\ny\n").unwrap();
+        std::fs::write(&local, b"[a]\nx = tw\xff\n").unwrap();
+        let open = || {
+            let path = CString::new(local.to_str().unwrap()).unwrap();
+            let mut config = Config::open(&path).unwrap();
+            let path = CString::new(global.to_str().unwrap()).unwrap();
+            config
+                .as_mut()
+                .add_file(&path, ConfigLevel::GLOBAL, None, false)
+                .unwrap();
+            config
+        };
+        let (rust_config, raw_config) = (open(), open());
+        let regex = c"^t";
+        let mut rust = rust_config
+            .as_ref()
+            .multivar_iterator(c"A.X", Some(regex))
+            .unwrap();
+        let mut raw = ptr::null_mut();
+        // SAFETY: live independent config; name and regex are copied; success
+        // writes a sole owner, released below.
+        let rc = unsafe {
+            ffi::git_config_multivar_iterator_new(
+                &mut raw,
+                raw_config.as_c_ptr(),
+                c"A.X".as_ptr(),
+                regex.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let mut steps = vec![];
+        for step in 0..6 {
+            if step == 2 {
+                // The local backend is opened (and refreshed) only once the
+                // global one is exhausted.
+                std::fs::write(&local, b"[unterminated\n").unwrap();
+            }
+            clear();
+            let r = rust_step(&mut rust);
+            let rust_error = last();
+            clear();
+            let c = raw_step(raw);
+            let raw_error = last();
+            assert_eq!(r, c, "step {step}");
+            assert_eq!(
+                (rust_error.raw_class(), rust_error.message()),
+                (raw_error.raw_class(), raw_error.message()),
+                "step {step}"
+            );
+            steps.push(r);
+        }
+        let values: Vec<_> = steps[..2]
+            .iter()
+            .map(|s| s.as_ref().unwrap().as_ref().unwrap().1.clone().unwrap())
+            .collect();
+        assert_eq!(values, [b"two".to_vec(), b"three".to_vec()]);
+        assert!(matches!(&steps[2], Err((-1, class, _)) if *class == ffi::GIT_ERROR_CONFIG as i32));
+        assert!(steps[3..].iter().all(|s| *s == Ok(None)));
+        // SAFETY: releases the uniquely owned raw iterator once.
+        unsafe { ffi::git_config_iterator_free(raw) };
+        drop(rust);
+        // A fresh pair sees the repaired file, through both backends.
+        std::fs::write(&local, b"[a]\nx = tw\xff\n[b]\nx = top\n").unwrap();
+        let mut rust = rust_config
+            .as_ref()
+            .multivar_iterator(c"a.x", Some(regex))
+            .unwrap();
+        let mut raw = ptr::null_mut();
+        // SAFETY: as above.
+        let rc = unsafe {
+            ffi::git_config_multivar_iterator_new(
+                &mut raw,
+                raw_config.as_c_ptr(),
+                c"a.x".as_ptr(),
+                regex.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0);
+        let mut count = 0;
+        loop {
+            let (r, c) = (rust_step(&mut rust), raw_step(raw));
+            assert_eq!(r, c);
+            match r {
+                Ok(Some(_)) => count += 1,
+                _ => break,
+            }
+        }
+        assert_eq!(count, 3);
+        // SAFETY: as above.
+        unsafe { ffi::git_config_iterator_free(raw) };
+        drop(rust);
+        drop((rust_config, raw_config));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    const REGEX_CHILD: &str = "CRUSTIFY_EQUIV_FILTER_REGEX_CHILD";
+
+    /// Rust compiles a multivar regex with PCRE2 itself; its failure must read as
+    /// C's: code, class and PCRE2's message, after C's name check. C leaks the
+    /// normalized name on this path, so the comparison runs in a child process
+    /// with LeakSanitizer off; the Rust side's cleanliness is checked by the
+    /// `ub_safe` suite.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
+    fn multivar_regex_errors_match_c() {
+        const NAME: &str = "sys_config::iterators::multivar_regex_errors_match_c";
+        if std::env::var_os(REGEX_CHILD).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([NAME, "--exact", "--test-threads=1", "--nocapture"])
+                .env(REGEX_CHILD, "1")
+                .env("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let config = Config::new().unwrap();
+        let seed = |class: i32| {
+            // SAFETY: runtime pinned by the config; the message is copied.
+            unsafe { ffi::git_error_set_str(class, c"seed".as_ptr()) };
+        };
+        for (name, regex) in [
+            (c"a.b", c"["),
+            (c"a.b", c"("),
+            (c"a.b", c"a{2,1}"),
+            (c"a.b", c"\\"),
+            (c"a.b", c"*"),
+            (c"a.b", c"(?<n>a)(?<n>b)"),
+            (c"a.b", c"\xff("),
+            (c"invalid", c"["),
+            (c"a.", c"("),
+        ] {
+            for class in [ffi::GIT_ERROR_OS as i32, 4242] {
+                seed(class);
+                let r = config
+                    .as_ref()
+                    .multivar_iterator(name, Some(regex))
+                    .unwrap_err();
+                let r = (r.raw_code(), r.raw_class(), r.message().to_owned());
+                let rust_error = last();
+                seed(class);
+                let mut raw = ptr::null_mut();
+                // SAFETY: live config, NUL-terminated name and regex, writable
+                // slot that C leaves untouched on failure.
+                let rc = unsafe {
+                    ffi::git_config_multivar_iterator_new(
+                        &mut raw,
+                        config.as_c_ptr(),
+                        name.as_ptr(),
+                        regex.as_ptr(),
+                    )
+                };
+                assert!(raw.is_null());
+                let e = last();
+                assert_eq!(
+                    r,
+                    (rc, e.raw_class(), e.message().to_owned()),
+                    "{name:?} {regex:?}"
+                );
+                assert_eq!(rust_error, e);
+            }
+        }
     }
 }
