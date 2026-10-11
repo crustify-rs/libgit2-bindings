@@ -2475,3 +2475,278 @@ mod mapping_callbacks {
         }
     }
 }
+
+mod enumeration {
+    use super::*;
+    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::sys::errors::{clear, set};
+    use std::ffi::c_void;
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+
+    #[derive(Debug, PartialEq)]
+    struct Fields {
+        name: Option<CString>,
+        value: Option<CString>,
+        level: i32,
+        depth: u32,
+        backend: Option<CString>,
+        origin: bool,
+    }
+    #[derive(Default)]
+    struct Payload {
+        entries: Vec<Fields>,
+        stop: i32,
+        stopped: Option<i32>,
+    }
+    /// # Safety
+    /// C must supply a live immutable entry and an exclusive live Payload for
+    /// this synchronous call, with immutable NUL-terminated non-NULL strings.
+    unsafe extern "C" fn collect(entry: *const ffi::git_config_entry, payload: *mut c_void) -> i32 {
+        // SAFETY: C lends an immutable initialized entry for this synchronous call.
+        let entry = unsafe { entry.read() };
+        let string = |p: *const std::ffi::c_char| {
+            if p.is_null() {
+                None
+            } else {
+                // SAFETY: every non-NULL entry string is immutable and NUL-terminated
+                // for the callback; only owned copies survive the invocation.
+                Some(unsafe { CStr::from_ptr(p) }.to_owned())
+            }
+        };
+        // SAFETY: the caller passes an exclusive live Payload, never retained by C.
+        let p = unsafe { &mut *payload.cast::<Payload>() };
+        p.entries.push(Fields {
+            name: string(entry.name),
+            value: string(entry.value),
+            level: entry.level,
+            depth: entry.include_depth,
+            backend: string(entry.backend_type),
+            origin: !entry.origin_path.is_null(),
+        });
+        if p.stop != 0 {
+            p.stopped = Some(p.stop);
+        }
+        p.stop
+    }
+    fn fields(e: EntryRef<'_>) -> Fields {
+        Fields {
+            name: e.name().map(CStr::to_owned),
+            value: e.value().map(CStr::to_owned),
+            level: e.level().raw(),
+            depth: e.include_depth(),
+            backend: e.backend_type().map(CStr::to_owned),
+            origin: e.origin_path().is_some(),
+        }
+    }
+    fn c_open(path: &CStr) -> ConfigBox<'static> {
+        let mut out = ptr::null_mut();
+        // SAFETY: writable result slot, immutable NUL path; success constructs one
+        // sole config reference, without any borrowed repository.
+        let rc = unsafe { ffi::git_config_open_ondisk(&mut out, path.as_ptr()) };
+        assert_eq!(rc, 0);
+        // SAFETY: successful C constructor transfers a sole initialized reference,
+        // paired with ConfigFree, and no repository borrow is involved.
+        unsafe { ConfigBox::from_c(out) }.unwrap()
+    }
+    fn error_record(e: &libgit2::libgit2::util::errors::ErrorBuf) -> (c_int, String) {
+        // Each side owns its own backend files; only those fixture paths differ.
+        (
+            e.raw_class(),
+            e.message()
+                .to_string_lossy()
+                .replace("-enumeration-c-", "-enumeration-side-")
+                .replace("-enumeration-r-", "-enumeration-side-"),
+        )
+    }
+
+    // Compare return/error state after every walk. Capture callback stops separately
+    // because C conflates GIT_ITEROVER returned by a callback with normal exhaustion.
+    fn compare(c: &ConfigBox<'_>, r: &ConfigBox<'_>, mode: u8, arg: &CStr, stop: i32) {
+        clear();
+        set(ErrorClass::Odb, c"earlier error");
+        let mut p = Payload {
+            stop,
+            ..Payload::default()
+        };
+        // SAFETY: independent live reference config; immutable NUL arguments; the
+        // payload is exclusive throughout synchronous C callbacks; C retains nothing.
+        let rc = unsafe {
+            match mode {
+                0 => ffi::git_config_foreach(
+                    c.as_c_ptr(),
+                    Some(collect),
+                    ptr::from_mut(&mut p).cast(),
+                ),
+                1 => ffi::git_config_foreach_match(
+                    c.as_c_ptr(),
+                    arg.as_ptr(),
+                    Some(collect),
+                    ptr::from_mut(&mut p).cast(),
+                ),
+                _ => ffi::git_config_get_multivar_foreach(
+                    c.as_c_ptr(),
+                    arg.as_ptr(),
+                    ptr::null(),
+                    Some(collect),
+                    ptr::from_mut(&mut p).cast(),
+                ),
+            }
+        };
+        let c_last = last();
+        clear();
+        set(ErrorClass::Odb, c"earlier error");
+        let mut observed = Vec::new();
+        let mut visit = |e: EntryRef<'_>| {
+            observed.push(fields(e));
+            NonZero::new(stop).map_or(ControlFlow::Continue(()), ControlFlow::Break)
+        };
+        let mut cb = ForeachCallback::new(&mut visit);
+        let result = match mode {
+            0 => r.as_ref().foreach(&mut cb),
+            1 => r.as_ref().foreach_match(Some(arg), &mut cb),
+            _ => r.as_ref().foreach_multivar(arg, &mut cb),
+        };
+        let r_last = last();
+        let r_stop = cb.stopped().map(NonZero::get);
+        let r_rc = match result {
+            Ok(ControlFlow::Continue(())) => 0,
+            Ok(ControlFlow::Break(code)) if code.get() == ffi::GIT_ITEROVER => 0,
+            Ok(ControlFlow::Break(code)) => code.get(),
+            Err(e) => {
+                assert_eq!(error_record(e.error()), error_record(&c_last));
+                e.raw_code()
+            }
+        };
+        drop(cb);
+        assert_eq!(
+            (r_rc, r_stop, observed, error_record(&r_last)),
+            (rc, p.stopped, p.entries, error_record(&c_last)),
+            "mode {mode}, arg {arg:?}, stop {stop}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_sequences_match_c_callbacks_errors_and_priority() {
+        init();
+        let paths: Vec<_> = ["c-low", "r-low", "c-high", "r-high"]
+            .map(|side| scratch("enumeration", side))
+            .into();
+        let text = b"[A]\n m = one\n m = two\n flag\n empty =\n bytes = \xff\n[A \"SubCase\"]\n Key = upper\n";
+        for path in &paths {
+            std::fs::write(path, text).unwrap();
+        }
+        let names: Vec<_> = paths
+            .iter()
+            .map(|p| CString::new(p.to_str().unwrap()).unwrap())
+            .collect();
+        let c = c_open(&names[0]);
+        let mut r = Config::open(&names[1]).unwrap();
+        for phase in 0..3 {
+            for (mode, arg) in [
+                (0, c""),
+                (1, c""),
+                (1, c"^a\\.m$"),
+                (1, c"SubCase"),
+                (1, c"subcase"),
+                (1, c"["),
+                (2, c"A.M"),
+                (2, c"a.flag"),
+                (2, c"missing.key"),
+                (2, c"invalid"),
+            ] {
+                for stop in [0, 23, -47, ffi::GIT_EUSER, ffi::GIT_ITEROVER] {
+                    compare(&c, &r, mode, arg, stop);
+                }
+            }
+            if phase == 0 {
+                // SAFETY: live C config and immutable NUL file path; C copies it,
+                // without a repository borrow. No callback or entry is active.
+                let rc = unsafe {
+                    ffi::git_config_add_file_ondisk(
+                        c.as_c_ptr(),
+                        names[2].as_ptr(),
+                        ffi::GIT_CONFIG_LEVEL_APP,
+                        ptr::null(),
+                        0,
+                    )
+                };
+                assert_eq!(rc, 0);
+                r.as_mut()
+                    .add_file(&names[3], ConfigLevel::APP, None, false)
+                    .unwrap();
+            } else if phase == 1 {
+                // Independent mutable state transitions, followed by the same walks.
+                // SAFETY: sole live C config, immutable strings, no active entry borrow.
+                let rc = unsafe {
+                    ffi::git_config_set_string(c.as_c_ptr(), c"a.new".as_ptr(), c"new".as_ptr())
+                };
+                assert_eq!(rc, 0);
+                r.as_mut().set_string(c"a.new", c"new").unwrap();
+                // Exercise refresh-error propagation without C's defective entry getter.
+                for path in &paths[..2] {
+                    std::fs::write(path, b"[broken\nlonger malformed configuration contents\n")
+                        .unwrap();
+                }
+            }
+        }
+        // Both configs/backends are released by the proven common policy after use.
+        drop(c);
+        drop(r);
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_refresh_errors_and_recovery_match_c() {
+        init();
+        for mode in 0..3 {
+            let paths = [
+                scratch("enumeration", &format!("c-refresh-{mode}")),
+                scratch("enumeration", &format!("r-refresh-{mode}")),
+            ];
+            for path in &paths {
+                std::fs::write(path, b"[a]\n m = old\n").unwrap();
+            }
+            let names = paths
+                .each_ref()
+                .map(|p| CString::new(p.to_str().unwrap()).unwrap());
+            let c = c_open(&names[0]);
+            let r = Config::open(&names[1]).unwrap();
+            for text in [
+                b"[broken\na longer invalid backend file\n".as_slice(),
+                b"[a]\n m = repaired value longer than the invalid backend contents\n".as_slice(),
+            ] {
+                for path in &paths {
+                    std::fs::write(path, text).unwrap();
+                }
+                compare(&c, &r, mode, c"a.m", 0);
+            }
+            drop(c);
+            drop(r);
+            for path in paths {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_empty_configs_match_c() {
+        init();
+        let mut out = ptr::null_mut();
+        // SAFETY: writable result slot receives one fresh empty config.
+        assert_eq!(unsafe { ffi::git_config_new(&mut out) }, 0);
+        // SAFETY: the successful constructor transfers a sole reference, without
+        // any repository borrow, paired with ConfigFree on drop.
+        let c = unsafe { ConfigBox::from_c(out) }.unwrap();
+        let r = Config::new().unwrap();
+        for (mode, arg) in [(0, c""), (1, c""), (1, c"["), (2, c"a.m"), (2, c"invalid")] {
+            compare(&c, &r, mode, arg, 0);
+        }
+    }
+}

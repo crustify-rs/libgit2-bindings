@@ -1499,6 +1499,148 @@ pub fn lookup_map_value(maps: &[ConfigMap<'_>], value: Option<&CStr>) -> Result<
     }
 }
 
+impl ConfigRef<'_, '_> {
+    /// Visits every entry, including duplicates, in increasing backend priority.
+    /// Entries and their strings are borrowed only for each callback invocation.
+    /// A callback stop is distinct from a backend error, even for negative codes
+    /// or `GIT_ITEROVER` (which C otherwise converts to success).
+    /// Panics resume after C has released its iterator; the callback can be reused.
+    /// Independent nested reads are permitted; mutation and dropping the config
+    /// remain excluded by this handle's borrow.
+    ///
+    /// Entry borrows cannot escape a walk:
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{Config, EntryRef, ForeachCallback};
+    /// use std::ops::ControlFlow;
+    /// let config = Config::new().unwrap();
+    /// let mut kept = None;
+    /// let mut f = |entry: EntryRef<'_>| {
+    ///     kept = Some(entry);
+    ///     ControlFlow::Continue(())
+    /// };
+    /// config.as_ref().foreach(&mut ForeachCallback::new(&mut f)).unwrap();
+    /// ```
+    ///
+    /// A callback cannot drop or mutate the configuration being walked:
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{Config, EntryRef, ForeachCallback};
+    /// use std::ops::ControlFlow;
+    /// let mut config = Config::new().unwrap();
+    /// let view = config.as_ref();
+    /// let mut f = |_: EntryRef<'_>| {
+    ///     config.as_mut().set_bool(c"a.b", true).unwrap();
+    ///     ControlFlow::Continue(())
+    /// };
+    /// view.foreach(&mut ForeachCallback::new(&mut f)).unwrap();
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::{Config, EntryRef, ForeachCallback};
+    /// use std::ops::ControlFlow;
+    /// let mut config = Some(Config::new().unwrap());
+    /// let view = config.as_ref().unwrap().as_ref();
+    /// let mut f = |_: EntryRef<'_>| {
+    ///     drop(config.take());
+    ///     ControlFlow::Continue(())
+    /// };
+    /// view.foreach(&mut ForeachCallback::new(&mut f)).unwrap();
+    /// ```
+    ///
+    /// As with C enumeration, file backends copy their entry lists. libgit2's
+    /// previously documented list-copy allocation-failure defects also apply here.
+    ///
+    /// Wraps: git_config_foreach
+    pub fn foreach(
+        &self,
+        callback: &mut ForeachCallback<'_>,
+    ) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+        let rc = callback.walk_with(|cb, payload| {
+            // SAFETY: the handle keeps the config/repository live; C calls cb
+            // synchronously with immutable iterator-owned entries and the exclusive
+            // payload supplied by walk_with. C retains nothing and frees its iterator.
+            unsafe { ffi::git_config_foreach(self.as_ptr(), cb, payload) }
+        });
+        foreach_result(rc, callback)
+    }
+
+    /// Visits entries whose normalized **names** match the case-sensitive C regex.
+    /// `None` visits every entry; an empty pattern matches every name. Section and
+    /// variable names are lower-case, but subsection case is preserved.
+    /// No matches is success. Callback stops, panics and list-copy limitations are
+    /// handled as in [`foreach`](Self::foreach).
+    ///
+    /// Wraps: git_config_foreach_match
+    pub fn foreach_match(
+        &self,
+        regexp: Option<&CStr>,
+        callback: &mut ForeachCallback<'_>,
+    ) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+        let rc = callback.walk_with(|cb, payload| {
+            // SAFETY: live config/repository and optional immutable NUL pattern;
+            // synchronous exclusive callback payload, immutable borrowed entries.
+            // C compiles/disposes its regex and frees its iterator before returning.
+            unsafe {
+                ffi::git_config_foreach_match(
+                    self.as_ptr(),
+                    regexp.map_or(ptr::null(), CStr::as_ptr),
+                    cb,
+                    payload,
+                )
+            }
+        });
+        foreach_result(rc, callback)
+    }
+
+    /// Visits all values of the normalized key, across increasing backend priority.
+    /// A missing key is `NotFound`, unlike the successful empty `foreach` walk.
+    /// Valueless settings arrive as `EntryRef::value() == None`, distinct from `""`.
+    /// Callback stops, panics and list-copy limitations are as in `foreach`.
+    ///
+    /// C's optional value-regex parameter is deliberately not exposed: it calls
+    /// `strlen(NULL)` for a valueless setting, and its constructor leaks the
+    /// normalized key on invalid regexes. Filter `entry.value()` in the callback
+    /// instead, preserving the distinction between absent and empty values.
+    ///
+    /// Wraps: git_config_get_multivar_foreach
+    pub fn foreach_multivar(
+        &self,
+        name: &CStr,
+        callback: &mut ForeachCallback<'_>,
+    ) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+        let rc = callback.walk_with(|cb, payload| {
+            // SAFETY: live config/repository and immutable NUL key; NULL disables
+            // C's unsafe value-regex path. The exclusive callback payload and
+            // iterator-owned entries are borrowed synchronously and never retained.
+            // C releases its iterator and copied key before returning.
+            unsafe {
+                ffi::git_config_get_multivar_foreach(
+                    self.as_ptr(),
+                    name.as_ptr(),
+                    ptr::null(),
+                    cb,
+                    payload,
+                )
+            }
+        });
+        foreach_result(rc, callback)
+    }
+}
+
+/// C folds a callback's GIT_ITEROVER into success, so consult the callback state
+/// first. Never mistake a callback's negative stop for a backend error.
+fn foreach_result(
+    rc: c_int,
+    callback: &ForeachCallback<'_>,
+) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+    if let Some(code) = callback.stopped() {
+        Ok(ControlFlow::Break(code))
+    } else if rc != 0 {
+        Err(ConfigError::from_libgit2(rc))
+    } else {
+        Ok(ControlFlow::Continue(()))
+    }
+}
+
 type ForeachFn<'f> = dyn for<'e> FnMut(EntryRef<'e>) -> ControlFlow<NonZero<c_int>> + 'f;
 
 /// A synchronous enumeration callback borrowing each entry only for its call.
@@ -2044,6 +2186,69 @@ mod unit_tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_initial_allocation_failure_is_reported() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::enumeration_initial_allocation_failure_is_reported"
+            ),
+            || {
+                install_refusing();
+                let config = Config::new().unwrap();
+                // Allocate the thread's error state before refusing C allocations.
+                assert_eq!(get(config.as_ref(), c"a.b"), Err(ErrorCode::NotFound.raw()));
+                let mut f = |_: EntryRef<'_>| ControlFlow::Continue(());
+                let mut cb = ForeachCallback::new(&mut f);
+                REFUSING.store(true, SeqCst);
+                let results = [
+                    config.as_ref().foreach(&mut cb),
+                    config.as_ref().foreach_match(Some(c".*"), &mut cb),
+                    config.as_ref().foreach_multivar(c"a.b", &mut cb),
+                ];
+                REFUSING.store(false, SeqCst);
+                for result in results {
+                    assert_eq!(result.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                }
+                assert_eq!(cb.stopped(), None);
+                assert_eq!(
+                    config.as_ref().foreach(&mut cb).unwrap(),
+                    ControlFlow::Continue(())
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn enumeration_result_preserves_stops_even_when_c_erases_iterover() {
+        let mut f = |_: EntryRef<'_>| ControlFlow::Continue(());
+        let mut callback = ForeachCallback::new(&mut f);
+        assert_eq!(
+            foreach_result(0, &callback).unwrap(),
+            ControlFlow::Continue(())
+        );
+        for raw in [
+            ffi::GIT_ITEROVER,
+            ffi::GIT_EUSER,
+            -1,
+            1,
+            c_int::MIN,
+            c_int::MAX,
+        ] {
+            let code = NonZero::new(raw).unwrap();
+            callback.stopped = Some(code);
+            assert_eq!(
+                foreach_result(0, &callback).unwrap(),
+                ControlFlow::Break(code)
+            );
+            assert_eq!(
+                foreach_result(raw, &callback).unwrap(),
+                ControlFlow::Break(code)
+            );
+        }
+    }
+
+    #[test]
     fn callback_trampoline_stops_panics_nulls_and_reuses() {
         let mut raw = ffi::git_config_entry {
             name: c"a.b".as_ptr(),
@@ -2108,16 +2313,9 @@ mod unit_tests {
             ControlFlow::Continue(())
         };
         let mut callback = ForeachCallback::new(&mut f);
-        let walk = |callback: &mut ForeachCallback<'_>| {
-            callback.walk_with(|cb, payload| {
-                // SAFETY: live config and callback payload exclusive for this
-                // synchronous walk; C owns iterator entries and frees its iterator
-                // before returning; no callback pointer or entry borrow escapes.
-                unsafe { ffi::git_config_foreach(config.as_ref().as_ptr(), cb, payload) }
-            })
-        };
+        let walk = |callback: &mut ForeachCallback<'_>| config.as_ref().foreach(callback);
         assert!(panic::catch_unwind(AssertUnwindSafe(|| walk(&mut callback))).is_err());
-        assert_eq!(walk(&mut callback), 0);
+        assert_eq!(walk(&mut callback).unwrap(), ControlFlow::Continue(()));
         assert_eq!(callback.stopped(), None);
         drop(callback);
         assert_eq!(count, 3);

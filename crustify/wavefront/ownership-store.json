@@ -7264,6 +7264,63 @@
    ]
   },
   {
+   "name": "git_config_foreach",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required callable, invoked synchronously with iterator-owned immutable entries borrowed for each invocation; nonzero stops. No retention or ownership transfer."
+     }
+    },
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only config retained by caller for synchronous walk; iterator borrows config, releases its own entry lists before return. Repository borrow must remain live."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque nullable caller payload forwarded synchronously only; known Rust type ForeachCallback carries an exclusively borrowed closure and panic/stop state. Never retained or freed."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_config_foreach_cb",
    "defined_in": null,
    "ptr_args": [
@@ -7299,6 +7356,78 @@
       "nullable": true,
       "mutable": true,
       "note": "Opaque caller-owned payload forwarded unchanged, never retained or freed. Known C instances point to ints or refspec context; Rust trampoline uses exclusive ForeachCallback state synchronously, no concurrent/reentrant call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_foreach_match",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required callable, invoked synchronously with iterator-owned immutable entries borrowed for each invocation; nonzero stops. No retention or ownership transfer."
+     }
+    },
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only config retained by caller for synchronous walk; iterator borrows config, releases its own entry lists before return. Repository borrow must remain live."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque nullable caller payload forwarded synchronously only; known Rust type ForeachCallback carries an exclusively borrowed closure and panic/stop state. Never retained or freed."
+     }
+    },
+    {
+     "name": "regexp",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:regexp"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional NUL regex, compiled into iterator-owned regex and disposed after walk. foreach_match filters names; multivar filters values, dereferencing NULL valueless entries. Invalid multivar regex leaks normalized name; safe wrapper omits that parameter."
      }
     }
    ]
@@ -7632,6 +7761,93 @@
       "nullable": false,
       "mutable": true,
       "note": "Writable scalar; expose only successful output."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_get_multivar_foreach",
+   "defined_in": "src/libgit2/config.c",
+   "ptr_args": [
+    {
+     "name": "cb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:cb"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required callable, invoked synchronously with iterator-owned immutable entries borrowed for each invocation; nonzero stops. No retention or ownership transfer."
+     }
+    },
+    {
+     "name": "config",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:config"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only config retained by caller for synchronous walk; iterator borrows config, releases its own entry lists before return. Repository borrow must remain live."
+     }
+    },
+    {
+     "name": "name",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:name"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Required NUL key; normalized into iterator-owned copied string; copy freed on ordinary completion/errors."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:payload"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Opaque nullable caller payload forwarded synchronously only; known Rust type ForeachCallback carries an exclusively borrowed closure and panic/stop state. Never retained or freed."
+     }
+    },
+    {
+     "name": "regexp",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:regexp"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional NUL regex, compiled into iterator-owned regex and disposed after walk. foreach_match filters names; multivar filters values, dereferencing NULL valueless entries. Invalid multivar regex leaks normalized name; safe wrapper omits that parameter."
      }
     }
    ]
