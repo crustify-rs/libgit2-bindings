@@ -1577,34 +1577,88 @@ impl ConfigRef<'_, '_> {
     /// Valueless settings arrive as `EntryRef::value() == None`, distinct from `""`.
     /// Callback stops, panics and list-copy limitations are as in `foreach`.
     ///
-    /// C's optional value-regex parameter is deliberately not exposed: it calls
-    /// `strlen(NULL)` for a valueless setting, and its constructor leaks the
-    /// normalized key on invalid regexes. Filter `entry.value()` in the callback
-    /// instead, preserving the distinction between absent and empty values.
+    /// `regexp` keeps only values matching the case-sensitive C regex (`None`
+    /// keeps all); no matching value is `NotFound`, an invalid pattern
+    /// `InvalidSpec`. C's own value filter calls `strlen(NULL)` for a valueless
+    /// setting and leaks the normalized key on invalid patterns, so a filtered
+    /// walk is composed as C composes it, over the same iterator with
+    /// [`multivar_iterator`](Self::multivar_iterator)'s PCRE2 value filter: it
+    /// skips valueless settings and leaks nothing, and otherwise matches, calls
+    /// back and reports errors as C does.
     ///
     /// Wraps: git_config_get_multivar_foreach
     pub fn foreach_multivar(
         &self,
         name: &CStr,
+        regexp: Option<&CStr>,
         callback: &mut ForeachCallback<'_>,
     ) -> Result<ControlFlow<NonZero<c_int>>, ConfigError> {
+        let Some(regexp) = regexp else {
+            let rc = callback.walk_with(|cb, payload| {
+                // SAFETY: live config/repository and immutable NUL key; NULL disables
+                // C's unsafe value-regex path. The exclusive callback payload and
+                // iterator-owned entries are borrowed synchronously and never retained.
+                // C releases its iterator and copied key before returning.
+                unsafe {
+                    ffi::git_config_get_multivar_foreach(
+                        self.as_ptr(),
+                        name.as_ptr(),
+                        ptr::null(),
+                        cb,
+                        payload,
+                    )
+                }
+            });
+            return foreach_result(rc, callback);
+        };
         let rc = callback.walk_with(|cb, payload| {
-            // SAFETY: live config/repository and immutable NUL key; NULL disables
-            // C's unsafe value-regex path. The exclusive callback payload and
-            // iterator-owned entries are borrowed synchronously and never retained.
-            // C releases its iterator and copied key before returning.
-            unsafe {
-                ffi::git_config_get_multivar_foreach(
-                    self.as_ptr(),
-                    name.as_ptr(),
-                    ptr::null(),
-                    cb,
-                    payload,
-                )
+            let cb = cb.expect("the trampoline is always set");
+            let mut iter = match self.multivar_iterator(name, Some(regexp)) {
+                Ok(iter) => iter,
+                // The thread's error is still the constructor's, as in C.
+                Err(error) => return error.raw_code(),
+            };
+            let mut found = false;
+            let rc = loop {
+                match iter.as_mut().advance() {
+                    Ok(Some(entry)) => {
+                        found = true;
+                        // SAFETY: the iterator pins this immutable entry until the
+                        // next advance; payload is the exclusive handle walk_with
+                        // lends for this synchronous call. Neither is retained.
+                        let rc = unsafe { cb(entry.entry().as_ptr(), payload) };
+                        if rc != 0 {
+                            break after_callback(rc, "git_config_get_multivar_foreach");
+                        }
+                    }
+                    Ok(None) => break 0,
+                    // The thread's error is still the failing backend's.
+                    Err(error) => break error.raw_code(),
+                }
+            };
+            drop(iter);
+            if !found && rc == 0 {
+                // C's `config_error_notfound`, quoting the caller's spelling.
+                let message = [b"config value '", name.to_bytes(), b"' was not found"].concat();
+                let message = CString::new(message).expect("a C string has no inner NUL");
+                set(ErrorClass::Config, &message);
+                return ErrorCode::NotFound.raw();
             }
+            rc
         });
         foreach_result(rc, callback)
     }
+}
+
+/// `git_error_set_after_callback` for a walk composed in Rust: a nonzero stop
+/// leaves "<action> callback returned <rc>" unless the thread has an error.
+fn after_callback(rc: c_int, action: &str) -> c_int {
+    if last().class() == Some(ErrorClass::None) {
+        let message = CString::new(format!("{action} callback returned {rc}"))
+            .expect("the action has no inner NUL");
+        set(ErrorClass::Callback, &message);
+    }
+    rc
 }
 
 /// C folds a callback's GIT_ITEROVER into success, so consult the callback state
@@ -2185,7 +2239,10 @@ mod unit_tests {
                 let results = [
                     config.as_ref().foreach(&mut cb),
                     config.as_ref().foreach_match(Some(c".*"), &mut cb),
-                    config.as_ref().foreach_multivar(c"a.b", &mut cb),
+                    config.as_ref().foreach_multivar(c"a.b", None, &mut cb),
+                    config
+                        .as_ref()
+                        .foreach_multivar(c"a.b", Some(c"."), &mut cb),
                 ];
                 REFUSING.store(false, SeqCst);
                 for result in results {

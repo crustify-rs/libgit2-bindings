@@ -1276,7 +1276,7 @@ mod enumeration {
             calls += 1;
             // Reentry is into a distinct callback/iterator, never the active closure.
             assert_eq!(
-                view.foreach_multivar(c"A.M", &mut nested).unwrap(),
+                view.foreach_multivar(c"A.M", None, &mut nested).unwrap(),
                 ControlFlow::Continue(())
             );
             assert!(e.name().is_some());
@@ -1323,7 +1323,10 @@ mod enumeration {
                 ControlFlow::Break(code)
             );
             assert_eq!(
-                shared.as_ref().foreach_multivar(c"a.m", &mut cb).unwrap(),
+                shared
+                    .as_ref()
+                    .foreach_multivar(c"a.m", None, &mut cb)
+                    .unwrap(),
                 ControlFlow::Break(code)
             );
             assert_eq!(
@@ -1359,7 +1362,7 @@ mod enumeration {
         assert_eq!(
             shared
                 .as_ref()
-                .foreach_multivar(c"a.flag", &mut ForeachCallback::new(&mut visit))
+                .foreach_multivar(c"a.flag", None, &mut ForeachCallback::new(&mut visit))
                 .unwrap(),
             ControlFlow::Continue(())
         );
@@ -1390,7 +1393,7 @@ mod enumeration {
             let walk = |cb: &mut ForeachCallback<'_>| match mode {
                 0 => config.as_ref().foreach(cb),
                 1 => config.as_ref().foreach_match(Some(c".*"), cb),
-                _ => config.as_ref().foreach_multivar(c"a.m", cb),
+                _ => config.as_ref().foreach_multivar(c"a.m", None, cb),
             };
             assert!(catch_unwind(AssertUnwindSafe(|| walk(&mut cb))).is_err());
             assert_eq!(cb.stopped().unwrap().get(), ErrorCode::User.raw());
@@ -1425,7 +1428,7 @@ mod enumeration {
         assert_eq!(
             empty
                 .as_ref()
-                .foreach_multivar(c"a.m", &mut cb)
+                .foreach_multivar(c"a.m", None, &mut cb)
                 .unwrap_err()
                 .code(),
             Some(ErrorCode::NotFound)
@@ -1433,7 +1436,7 @@ mod enumeration {
         assert!(
             empty
                 .as_ref()
-                .foreach_multivar(c"invalid", &mut cb)
+                .foreach_multivar(c"invalid", None, &mut cb)
                 .is_err()
         );
         drop(cb);
@@ -1450,7 +1453,7 @@ mod enumeration {
             let walk = |cb: &mut ForeachCallback<'_>| match mode {
                 0 => config.as_ref().foreach(cb),
                 1 => config.as_ref().foreach_match(Some(c".*"), cb),
-                _ => config.as_ref().foreach_multivar(c"a.m", cb),
+                _ => config.as_ref().foreach_multivar(c"a.m", None, cb),
             };
             assert!(walk(&mut cb).is_err());
             assert_eq!(cb.stopped(), None);
@@ -1463,5 +1466,299 @@ mod enumeration {
             drop(config);
             std::fs::remove_file(path.to_str().unwrap()).unwrap();
         }
+    }
+
+    fn filter_input(tag: &str) -> (std::ffi::CString, ConfigBox<'static>) {
+        let path = scratch(tag);
+        std::fs::write(
+            path.to_str().unwrap(),
+            b"[A]\n m = one\n m\n m = two\n m =\n flag\n",
+        )
+        .unwrap();
+        let config = Config::open(&path).unwrap();
+        (path, config)
+    }
+
+    /// C's value filter calls strlen(NULL) on a valueless setting; the wrapper's
+    /// skips it. Invalid patterns release everything (LSan), and stops, panics and
+    /// nested filtered walks leave the callback reusable.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_value_filter_skips_valueless_and_cleans_up() {
+        let (path, config) = filter_input("enumeration-filter");
+        let walk = |name: &CStr, regexp: &CStr| {
+            let mut values = Vec::new();
+            let mut f = |e: EntryRef<'_>| {
+                values.push(e.value().map(CStr::to_owned));
+                ControlFlow::Continue(())
+            };
+            let result = config
+                .as_ref()
+                .foreach_multivar(name, Some(regexp), &mut ForeachCallback::new(&mut f))
+                .map_err(|e| e.code());
+            (result, values)
+        };
+        let some = |v: &CStr| Some(v.to_owned());
+        for regexp in [c"", c".", c"^$"] {
+            assert_eq!(
+                walk(c"a.flag", regexp),
+                (Err(Some(ErrorCode::NotFound)), vec![])
+            );
+        }
+        assert_eq!(
+            walk(c"a.m", c""),
+            (
+                Ok(ControlFlow::Continue(())),
+                vec![some(c"one"), some(c"two"), some(c"")]
+            )
+        );
+        assert_eq!(
+            walk(c"A.M", c"^$"),
+            (Ok(ControlFlow::Continue(())), vec![some(c"")])
+        );
+        assert_eq!(
+            walk(c"a.m", c"^t"),
+            (Ok(ControlFlow::Continue(())), vec![some(c"two")])
+        );
+        for name in [c"a.m", c"a.flag", c"missing.key"] {
+            let (result, values) = walk(name, c"[");
+            assert_eq!(
+                (result, values),
+                (Err(Some(ErrorCode::InvalidSpec)), vec![])
+            );
+        }
+        assert_eq!(
+            walk(c"invalid", c"["),
+            (Err(Some(ErrorCode::InvalidSpec)), vec![])
+        );
+
+        let shared = ConfigArc::from(config);
+        for code in [
+            1,
+            -1,
+            ErrorCode::User.raw(),
+            ffi_iterover(),
+            i32::MIN,
+            i32::MAX,
+        ] {
+            let code = NonZero::new(code).unwrap();
+            let mut stop = |_: EntryRef<'_>| ControlFlow::Break(code);
+            let mut cb = ForeachCallback::new(&mut stop);
+            assert_eq!(
+                shared
+                    .as_ref()
+                    .foreach_multivar(c"a.m", Some(c"o"), &mut cb)
+                    .unwrap(),
+                ControlFlow::Break(code)
+            );
+            assert_eq!(
+                shared
+                    .as_ref()
+                    .foreach_multivar(c"a.m", Some(c"zzz"), &mut cb)
+                    .unwrap_err()
+                    .code(),
+                Some(ErrorCode::NotFound)
+            );
+            assert_eq!(cb.stopped(), None);
+            // A failed construction also forgets the previous walk's stop.
+            let stopped = shared
+                .as_ref()
+                .foreach_multivar(c"a.m", Some(c"o"), &mut cb);
+            assert_eq!(stopped.unwrap(), ControlFlow::Break(code));
+            let invalid = shared
+                .as_ref()
+                .foreach_multivar(c"a.m", Some(c"["), &mut cb);
+            assert_eq!(invalid.unwrap_err().code(), Some(ErrorCode::InvalidSpec));
+            assert_eq!(cb.stopped(), None);
+        }
+
+        let mut first = true;
+        let mut calls = 0;
+        let mut f = |_: EntryRef<'_>| {
+            calls += 1;
+            if std::mem::take(&mut first) {
+                panic!("filtered enumeration panic");
+            }
+            ControlFlow::Continue(())
+        };
+        let mut cb = ForeachCallback::new(&mut f);
+        let view = shared.as_ref();
+        let filtered = |cb: &mut ForeachCallback<'_>| view.foreach_multivar(c"a.m", Some(c""), cb);
+        assert!(catch_unwind(AssertUnwindSafe(|| filtered(&mut cb))).is_err());
+        assert_eq!(cb.stopped().unwrap().get(), ErrorCode::User.raw());
+        assert_eq!(filtered(&mut cb).unwrap(), ControlFlow::Continue(()));
+        drop(cb);
+        assert_eq!(calls, 4);
+
+        let mut inner_values = Vec::new();
+        let mut inner = |e: EntryRef<'_>| {
+            inner_values.push(e.value().map(CStr::to_owned));
+            ControlFlow::Continue(())
+        };
+        let mut nested = ForeachCallback::new(&mut inner);
+        let mut outer = |e: EntryRef<'_>| {
+            let before = e.value().map(CStr::to_owned);
+            assert_eq!(
+                view.foreach_multivar(c"a.m", Some(c"^o"), &mut nested)
+                    .unwrap(),
+                ControlFlow::Continue(())
+            );
+            // The outer entry stays pinned across the nested walk's refresh.
+            assert_eq!(e.value().map(CStr::to_owned), before);
+            ControlFlow::Continue(())
+        };
+        assert_eq!(
+            view.foreach_multivar(c"a.m", Some(c"."), &mut ForeachCallback::new(&mut outer))
+                .unwrap(),
+            ControlFlow::Continue(())
+        );
+        drop(nested);
+        assert_eq!(inner_values, [some(c"one"), some(c"one")]);
+        drop(shared);
+        std::fs::remove_file(path.to_str().unwrap()).unwrap();
+    }
+
+    /// A repository's config (whose file backends evaluate `includeIf` through the
+    /// repository on every reparse), its level view and snapshots: the callback moves
+    /// HEAD and rewrites the file, so a nested walk reparses under the outer entry.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_repository_level_and_snapshot_configs() {
+        use std::ffi::CString;
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-ub-config-enumeration-repo-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = CString::new(dir.to_str().unwrap()).unwrap();
+        let repo = Repository::init(&path, false).unwrap();
+        let config_path = dir.join(".git/config");
+        let base = std::fs::read(&config_path).unwrap();
+        let mut text = base.clone();
+        text.extend_from_slice(
+            b"[includeIf \"onbranch:main\"]\n path = on-main\n\
+              [includeIf \"onbranch:other\"]\n path = on-other\n[a]\n m = local\n",
+        );
+        std::fs::write(&config_path, &text).unwrap();
+        std::fs::write(dir.join(".git/on-main"), b"[a]\n m = main\n").unwrap();
+        std::fs::write(dir.join(".git/on-other"), b"[a]\n m = other-branch\n").unwrap();
+        repo.as_ref().set_head(c"refs/heads/main").unwrap();
+        // Moving HEAD may have parsed the file already; reparse it on main.
+        text.extend_from_slice(b"# on main\n");
+        std::fs::write(&config_path, &text).unwrap();
+
+        let config = repo.as_ref().config().unwrap();
+        let mut inner_values = Vec::new();
+        let mut inner = |e: EntryRef<'_>| {
+            inner_values.push((e.value().map(CStr::to_owned), e.include_depth()));
+            ControlFlow::Continue(())
+        };
+        let mut nested = ForeachCallback::new(&mut inner);
+        let mut outer_values = Vec::new();
+        let mut outer = |e: EntryRef<'_>| {
+            let value = e.value().map(CStr::to_owned);
+            repo.as_ref().set_head(c"refs/heads/other").unwrap();
+            text.extend_from_slice(b"# grow the file so its stamp changes\n");
+            std::fs::write(&config_path, &text).unwrap();
+            assert!(
+                config
+                    .as_ref()
+                    .foreach_multivar(c"a.m", None, &mut nested)
+                    .unwrap()
+                    .is_continue()
+            );
+            assert_eq!(e.value().map(CStr::to_owned), value);
+            outer_values.push((value, e.include_depth()));
+            ControlFlow::Continue(())
+        };
+        assert!(
+            config
+                .as_ref()
+                .foreach_match(Some(c"^a\\.m$"), &mut ForeachCallback::new(&mut outer))
+                .unwrap()
+                .is_continue()
+        );
+        drop(outer);
+        drop(nested);
+        let some = |v: &CStr| Some(v.to_owned());
+        assert_eq!(outer_values, [(some(c"main"), 1), (some(c"local"), 0)]);
+        // Each nested walk reparsed under the moved HEAD.
+        assert_eq!(
+            &inner_values[..2],
+            [(some(c"other-branch"), 1), (some(c"local"), 0)]
+        );
+
+        let level = config.as_ref().open_level(ConfigLevel::LOCAL).unwrap();
+        let snapshot = level.as_ref().snapshot().unwrap();
+        let repo_snapshot = repo.as_ref().config_snapshot().unwrap();
+        for view in [level.as_ref(), snapshot.as_ref(), repo_snapshot.as_ref()] {
+            let mut values = Vec::new();
+            let mut f = |e: EntryRef<'_>| {
+                values.push(e.value().map(CStr::to_owned));
+                ControlFlow::Continue(())
+            };
+            let mut cb = ForeachCallback::new(&mut f);
+            assert!(view.foreach(&mut cb).unwrap().is_continue());
+            assert!(
+                view.foreach_multivar(c"a.m", Some(c"^o"), &mut cb)
+                    .unwrap()
+                    .is_continue()
+            );
+            drop(cb);
+            assert!(values.contains(&some(c"other-branch")));
+        }
+        drop(level);
+        drop(config);
+        drop(snapshot);
+        drop(repo_snapshot);
+        drop(repo);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Independent configs walk concurrently (TSan): every walk's iterator, regex and
+    /// error state is the calling thread's own.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_independent_configs_walk_on_threads() {
+        let barrier = Barrier::new(4);
+        thread::scope(|s| {
+            for worker in 0..4 {
+                let barrier = &barrier;
+                s.spawn(move || {
+                    let (path, config) = filter_input(&format!("enumeration-thread-{worker}"));
+                    let mut calls = 0;
+                    let mut f = |_: EntryRef<'_>| {
+                        calls += 1;
+                        ControlFlow::Continue(())
+                    };
+                    let mut cb = ForeachCallback::new(&mut f);
+                    barrier.wait();
+                    for _ in 0..8 {
+                        let view = config.as_ref();
+                        assert!(view.foreach(&mut cb).unwrap().is_continue());
+                        assert!(
+                            view.foreach_match(Some(c"^a\\."), &mut cb)
+                                .unwrap()
+                                .is_continue()
+                        );
+                        assert!(
+                            view.foreach_multivar(c"a.m", None, &mut cb)
+                                .unwrap()
+                                .is_continue()
+                        );
+                        assert!(
+                            view.foreach_multivar(c"a.m", Some(c"o"), &mut cb)
+                                .unwrap()
+                                .is_continue()
+                        );
+                        assert!(view.foreach_match(Some(c"["), &mut cb).is_err());
+                    }
+                    drop(cb);
+                    assert_eq!(calls, 8 * (5 + 5 + 4 + 2));
+                    drop(config);
+                    std::fs::remove_file(path.to_str().unwrap()).unwrap();
+                });
+            }
+        });
     }
 }

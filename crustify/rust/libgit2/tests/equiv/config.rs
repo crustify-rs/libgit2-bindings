@@ -2563,9 +2563,38 @@ mod enumeration {
 
     // Compare return/error state after every walk. Capture callback stops separately
     // because C conflates GIT_ITEROVER returned by a callback with normal exhaustion.
-    fn compare(c: &ConfigBox<'_>, r: &ConfigBox<'_>, mode: u8, arg: &CStr, stop: i32) {
+    // `regexp` is mode 2's value filter.
+    fn compare(
+        c: &ConfigBox<'_>,
+        r: &ConfigBox<'_>,
+        mode: u8,
+        arg: &CStr,
+        regexp: Option<&CStr>,
+        stop: i32,
+    ) {
+        // With an earlier error, and without one: a stop then reports itself.
+        for seeded in [true, false] {
+            compare_seeded(c, r, mode, arg, regexp, stop, seeded);
+        }
+    }
+
+    fn seed(seeded: bool) {
         clear();
-        set(ErrorClass::Odb, c"earlier error");
+        if seeded {
+            set(ErrorClass::Odb, c"earlier error");
+        }
+    }
+
+    fn compare_seeded(
+        c: &ConfigBox<'_>,
+        r: &ConfigBox<'_>,
+        mode: u8,
+        arg: &CStr,
+        regexp: Option<&CStr>,
+        stop: i32,
+        seeded: bool,
+    ) {
+        seed(seeded);
         let mut p = Payload {
             stop,
             ..Payload::default()
@@ -2588,15 +2617,14 @@ mod enumeration {
                 _ => ffi::git_config_get_multivar_foreach(
                     c.as_c_ptr(),
                     arg.as_ptr(),
-                    ptr::null(),
+                    regexp.map_or(ptr::null(), CStr::as_ptr),
                     Some(collect),
                     ptr::from_mut(&mut p).cast(),
                 ),
             }
         };
         let c_last = last();
-        clear();
-        set(ErrorClass::Odb, c"earlier error");
+        seed(seeded);
         let mut observed = Vec::new();
         let mut visit = |e: EntryRef<'_>| {
             observed.push(fields(e));
@@ -2606,7 +2634,7 @@ mod enumeration {
         let result = match mode {
             0 => r.as_ref().foreach(&mut cb),
             1 => r.as_ref().foreach_match(Some(arg), &mut cb),
-            _ => r.as_ref().foreach_multivar(arg, &mut cb),
+            _ => r.as_ref().foreach_multivar(arg, regexp, &mut cb),
         };
         let r_last = last();
         let r_stop = cb.stopped().map(NonZero::get);
@@ -2623,7 +2651,7 @@ mod enumeration {
         assert_eq!(
             (r_rc, r_stop, observed, error_record(&r_last)),
             (rc, p.stopped, p.entries, error_record(&c_last)),
-            "mode {mode}, arg {arg:?}, stop {stop}"
+            "mode {mode}, arg {arg:?}, regexp {regexp:?}, stop {stop}, seeded {seeded}"
         );
     }
 
@@ -2658,7 +2686,7 @@ mod enumeration {
                 (2, c"invalid"),
             ] {
                 for stop in [0, 23, -47, ffi::GIT_EUSER, ffi::GIT_ITEROVER] {
-                    compare(&c, &r, mode, arg, stop);
+                    compare(&c, &r, mode, arg, None, stop);
                 }
             }
             if phase == 0 {
@@ -2724,13 +2752,158 @@ mod enumeration {
                 for path in &paths {
                     std::fs::write(path, text).unwrap();
                 }
-                compare(&c, &r, mode, c"a.m", 0);
+                compare(&c, &r, mode, c"a.m", None, 0);
             }
             drop(c);
             drop(r);
             for path in paths {
                 std::fs::remove_file(path).unwrap();
             }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_value_filters_match_c() {
+        init();
+        // C's own value filter calls strlen(NULL) on a valueless value of the walked
+        // name, so the C reference never filters a.flag; see ub_safe for that case.
+        let low = b"[A]\n m = one\n m = two\n m =\n m = \xff\n flag\n[A \"Sub\"]\n m = sub\n";
+        let high = b"[a]\n m = three\n other = x\n";
+        let paths: Vec<_> = [
+            "c-filter-low",
+            "r-filter-low",
+            "c-filter-high",
+            "r-filter-high",
+        ]
+        .map(|side| scratch("enumeration", side))
+        .into();
+        for (path, text) in paths.iter().zip([low.as_slice(), low, high, high]) {
+            std::fs::write(path, text).unwrap();
+        }
+        let names: Vec<_> = paths
+            .iter()
+            .map(|p| CString::new(p.to_str().unwrap()).unwrap())
+            .collect();
+        let c = c_open(&names[0]);
+        let mut r = Config::open(&names[1]).unwrap();
+        // An invalid pattern for a valid name leaks in C: see the test below.
+        let walks: [(&CStr, &CStr); 11] = [
+            (c"a.m", c"^t"),
+            (c"A.M", c"o"),
+            (c"a.m", c"^$"),
+            (c"a.m", c""),
+            (c"a.m", c"\xff"),
+            (c"a.m", c"nomatch"),
+            (c"invalid", c"["),
+            (c"missing.key", c"."),
+            (c"a.Sub.m", c"sub"),
+            (c"a.sub.m", c"sub"),
+            (c"a.other", c"(*UTF)x"),
+        ];
+        for phase in 0..4 {
+            for (name, regexp) in walks {
+                for stop in [0, 23, -47, ffi::GIT_EUSER, ffi::GIT_ITEROVER] {
+                    compare(&c, &r, 2, name, Some(regexp), stop);
+                }
+            }
+            match phase {
+                0 => {
+                    // SAFETY: live C config and immutable NUL file path; C copies it,
+                    // without a repository borrow. No callback or entry is active.
+                    let rc = unsafe {
+                        ffi::git_config_add_file_ondisk(
+                            c.as_c_ptr(),
+                            names[2].as_ptr(),
+                            ffi::GIT_CONFIG_LEVEL_APP,
+                            ptr::null(),
+                            0,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    r.as_mut()
+                        .add_file(&names[3], ConfigLevel::APP, None, false)
+                        .unwrap();
+                }
+                1 => {
+                    // SAFETY: sole live C config, immutable strings, no active entry.
+                    let rc = unsafe {
+                        ffi::git_config_set_multivar(
+                            c.as_c_ptr(),
+                            c"a.m".as_ptr(),
+                            c"^three$".as_ptr(),
+                            c"tri".as_ptr(),
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    r.as_mut().set_multivar(c"a.m", c"^three$", c"tri").unwrap();
+                }
+                2 => {
+                    for path in &paths[..2] {
+                        std::fs::write(path, b"[broken\nlonger malformed configuration contents\n")
+                            .unwrap();
+                    }
+                }
+                _ => {}
+            }
+        }
+        drop(c);
+        drop(r);
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    /// C's reference leaks the normalized name when a valid name's value pattern
+    /// fails to compile (`config.c:1159`), so this comparison runs in a child without
+    /// leak detection. The wrapper's own leak freedom is ub_safe's (LSan) to check.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn enumeration_invalid_value_filters_match_c() {
+        const CHILD: &str = "CRUSTIFY_EQUIV_CONFIG_INVALID_FILTER";
+        let name = "config::enumeration::enumeration_invalid_value_filters_match_c";
+        if std::env::var_os(CHILD).is_none() {
+            let inherited = std::env::var("ASAN_OPTIONS").unwrap_or_default();
+            let separator = if inherited.is_empty() { "" } else { ":" };
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([name, "--exact", "--test-threads=1", "--nocapture"])
+                .env(CHILD, "1")
+                .env(
+                    "ASAN_OPTIONS",
+                    format!("{inherited}{separator}detect_leaks=0"),
+                )
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success() && stdout.contains("1 passed"),
+                "child `{name}` failed:\n{stdout}\n{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        init();
+        let paths = [
+            scratch("enumeration", "c-invalid-filter"),
+            scratch("enumeration", "r-invalid-filter"),
+        ];
+        for path in &paths {
+            std::fs::write(path, b"[a]\n m = one\n").unwrap();
+        }
+        let names = paths
+            .each_ref()
+            .map(|p| CString::new(p.to_str().unwrap()).unwrap());
+        let c = c_open(&names[0]);
+        let r = Config::open(&names[1]).unwrap();
+        for (name, regexp) in [(c"a.m", c"["), (c"A.M", c"(?<"), (c"missing.key", c"*")] {
+            for stop in [0, 23] {
+                compare(&c, &r, 2, name, Some(regexp), stop);
+            }
+        }
+        drop(c);
+        drop(r);
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
         }
     }
 
@@ -2746,7 +2919,7 @@ mod enumeration {
         let c = unsafe { ConfigBox::from_c(out) }.unwrap();
         let r = Config::new().unwrap();
         for (mode, arg) in [(0, c""), (1, c""), (1, c"["), (2, c"a.m"), (2, c"invalid")] {
-            compare(&c, &r, mode, arg, 0);
+            compare(&c, &r, mode, arg, None, 0);
         }
     }
 }
