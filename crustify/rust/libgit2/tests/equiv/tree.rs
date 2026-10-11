@@ -3529,3 +3529,555 @@ mod tree_object {
         }
     }
 }
+
+mod tree_updates {
+    //! Equivalence of [`Tree::create_updated`] with `git_tree_create_updated`.
+    //!
+    //! Each side works on a copy of `testrepo.git` of its own and runs one script of
+    //! update sets, each applied to no tree, to commit `763d71a`'s tree (`README`, `ab/`
+    //! three levels deep, two more blobs), or to the tree the previous step wrote:
+    //! upserts of new, nested and replaced entries of every mode, removals of leaves,
+    //! of whole subtrees and of the last entries of trees (which drops them), unsorted
+    //! sets, and every refusal the routine and its tree builders make (duplicate paths,
+    //! D/F conflicts, replacements of a type with another, missing removals, invalid
+    //! names, modes and ids, missing objects). After every step the sides compare the
+    //! id written, or the code, error class and message, and, for a written tree, its
+    //! every entry, recursively, as C reads each side's repository.
+    //!
+    //! Documented divergences, outside these comparisons, held by `tree.rs`'s unit
+    //! tests: a baseline of another id type than the repository's and an upsert of an
+    //! id of another type that libgit2 would look up are refused before C, which would
+    //! format them out of bounds; an upsert path component of more than 65535 bytes is
+    //! refused before C, which writes it into a corrupt tree.
+
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::object::tree::{Tree, TreeUpdate, UpdateAction};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    use super::{init, last_error};
+
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+    /// Commit `763d71a`'s tree.
+    const BASE: &str = "ae90f12eea699729ed24555e40b9fd669da12a12";
+    /// `ab/`, a tree of `BASE`.
+    const AB: &str = "f1425cef211cc08caa31e7b545ffb232acb098c3";
+    /// `BASE`'s `README`, and another blob.
+    const README: &str = "1385f264afb75a56a5bec74243be9b367ba4ca08";
+    const OTHER: &str = "a8233120f6ad708f843d861ce2b7228ec4e3dec6";
+    const COMMIT: &str = "763d71aadf09a7951596c9746c024e7eece7c7af";
+    const MISSING: &str = "dededededededededededededededededededede";
+    const ZERO: &str = "0000000000000000000000000000000000000000";
+
+    /// The tree a step updates.
+    #[derive(Clone, Copy, Debug)]
+    enum Base {
+        None,
+        Tree(&'static str),
+        /// The tree the previous step wrote.
+        Previous,
+    }
+
+    /// One update: its action, path, id (hex) and mode.
+    type Update = (UpdateAction, &'static str, &'static str, FileMode);
+
+    fn up(path: &'static str, id: &'static str, mode: FileMode) -> Update {
+        (UpdateAction::Upsert, path, id, mode)
+    }
+
+    fn rm(path: &'static str) -> Update {
+        (UpdateAction::Remove, path, ZERO, FileMode::Unreadable)
+    }
+
+    fn script() -> Vec<(Base, Vec<Update>)> {
+        use FileMode::*;
+        let base = Base::Tree(BASE);
+        vec![
+            (Base::None, vec![]),
+            (base, vec![]),
+            (base, vec![up("README2", README, Blob)]),
+            (base, vec![up("README", OTHER, Blob)]),
+            (base, vec![up("README", README, BlobExecutable)]),
+            (base, vec![up("a/b/c.txt", README, Blob)]),
+            (
+                base,
+                vec![
+                    up("ab/de/fgh/new.txt", OTHER, BlobExecutable),
+                    up("ab/c/link", OTHER, Link),
+                ],
+            ),
+            (base, vec![rm("README")]),
+            (base, vec![rm("ab/de/fgh/1.txt")]),
+            (
+                base,
+                vec![
+                    rm("ab/c/3.txt"),
+                    rm("ab/4.txt"),
+                    rm("ab/de/2.txt"),
+                    rm("ab/de/fgh/1.txt"),
+                ],
+            ),
+            (base, vec![rm("ab")]),
+            (base, vec![rm("missing.txt")]),
+            (base, vec![rm("ab/zz/missing")]),
+            (base, vec![up("x", OTHER, Blob), up("x", README, Blob)]),
+            (base, vec![rm("x"), up("x", README, Blob)]),
+            (base, vec![up("README/x", OTHER, Blob)]),
+            (base, vec![up("ab/4.txt/x", OTHER, Blob)]),
+            (base, vec![rm("README"), up("README/x", OTHER, Blob)]),
+            (base, vec![up("ab", OTHER, Blob)]),
+            (base, vec![up("ab/de", OTHER, Blob)]),
+            (base, vec![up("README", AB, Tree)]),
+            (base, vec![up("new", MISSING, Blob)]),
+            (base, vec![up("new", ZERO, Blob)]),
+            (base, vec![up("new", AB, Blob)]),
+            (base, vec![up("new", OTHER, Tree)]),
+            (base, vec![up("README", OTHER, Unreadable)]),
+            (base, vec![up(".git", OTHER, Blob)]),
+            (base, vec![up("a//b", OTHER, Blob)]),
+            (base, vec![up("../x", OTHER, Blob)]),
+            (base, vec![up("/lead", OTHER, Blob)]),
+            (base, vec![up("dir/", OTHER, Blob)]),
+            (base, vec![up("dir/./x", OTHER, Blob)]),
+            (base, vec![up("sub", MISSING, Commit)]),
+            (base, vec![up("deps/sub", COMMIT, Commit)]),
+            (
+                base,
+                vec![up("tree", AB, Tree), up("tree2/inner", AB, Tree)],
+            ),
+            (
+                base,
+                vec![
+                    up("z/1", README, Blob),
+                    up("a/1", OTHER, Blob),
+                    rm("README"),
+                    up("m/n/o", README, Link),
+                    up("ab/c/9", OTHER, Blob),
+                    rm("ab/de/2.txt"),
+                    up("ab/de/fgh/0", README, Blob),
+                    up("a/0", README, Blob),
+                ],
+            ),
+            (Base::None, vec![up("deep/a/b/c/d/e/f.txt", OTHER, Blob)]),
+            (Base::None, vec![rm("x")]),
+            (
+                Base::Tree(AB),
+                vec![up("c/3.txt", OTHER, Blob), rm("4.txt")],
+            ),
+            // A sequence, each step over the tree the one before wrote.
+            (
+                base,
+                vec![up("seq/a", README, Blob), up("seq/b", OTHER, Blob)],
+            ),
+            (Base::Previous, vec![rm("seq/a")]),
+            (Base::Previous, vec![up("seq/b", README, BlobExecutable)]),
+            (Base::Previous, vec![rm("seq/a")]),
+            (Base::Previous, vec![rm("seq/b")]),
+            (Base::Previous, vec![up("README", OTHER, Blob), rm("ab")]),
+        ]
+    }
+
+    /// One entry of a written tree, as C reads it: path, raw mode and id.
+    type Entry = (String, u32, String);
+
+    /// What a step gave.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Outcome {
+        Written(String, Vec<Entry>),
+        Failed(c_int, c_int, String),
+    }
+
+    fn hex(id: *const ffi::git_oid) -> String {
+        let mut out = [0u8; 65];
+        // SAFETY: a live id, formatted into 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn raw_id(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable id and a NUL-terminated hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    /// Every entry of the tree `id` in `repo`, recursively, as C reads them.
+    fn entries(repo: *mut ffi::git_repository, id: &ffi::git_oid, prefix: &str) -> Vec<Entry> {
+        let mut tree = ptr::null_mut();
+        // SAFETY: a writable slot, a live repository and id; the tree is read, then
+        // released once.
+        unsafe {
+            assert_eq!(
+                ffi::git_tree_lookup(&mut tree, repo, id),
+                0,
+                "{:?}",
+                last_error()
+            );
+            let mut out = Vec::new();
+            for i in 0..ffi::git_tree_entrycount(tree) {
+                let entry = ffi::git_tree_entry_byindex(tree, i);
+                let name = CStr::from_ptr(ffi::git_tree_entry_name(entry));
+                let path = format!("{prefix}{}", name.to_str().unwrap());
+                let mode = ffi::git_tree_entry_filemode_raw(entry);
+                let entry_id = *ffi::git_tree_entry_id(entry);
+                out.push((path.clone(), mode, hex(&entry_id)));
+                if mode == ffi::GIT_FILEMODE_TREE {
+                    out.extend(entries(repo, &entry_id, &format!("{path}/")));
+                }
+            }
+            ffi::git_tree_free(tree);
+            out
+        }
+    }
+
+    fn written(repo: *mut ffi::git_repository, id: &ffi::git_oid) -> Outcome {
+        Outcome::Written(hex(id), entries(repo, id, ""))
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).unwrap();
+            }
+        }
+    }
+
+    /// A private copy of `testrepo.git`, removed on drop.
+    struct Sandbox(PathBuf);
+
+    impl Sandbox {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "crustify-tree-update-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            copy_dir(Path::new(TESTREPO), &path);
+            Self(path)
+        }
+
+        fn c_path(&self) -> CString {
+            CString::new(self.0.to_str().unwrap()).unwrap()
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// `git_tree_create_updated` over `base` (looked up, then released) and `updates`.
+    fn c_step(
+        repo: *mut ffi::git_repository,
+        base: Option<&ffi::git_oid>,
+        updates: &[Update],
+    ) -> (Outcome, Option<ffi::git_oid>) {
+        let paths: Vec<CString> = updates.iter().map(|u| CString::new(u.1).unwrap()).collect();
+        let raw: Vec<ffi::git_tree_update> = updates
+            .iter()
+            .zip(&paths)
+            .map(|(&(action, _, id, mode), path)| ffi::git_tree_update {
+                action: action.raw(),
+                id: raw_id(id),
+                filemode: mode.raw(),
+                path: path.as_ptr(),
+            })
+            .collect();
+        let mut tree = ptr::null_mut();
+        if let Some(base) = base {
+            // SAFETY: a writable slot, a live repository and id.
+            assert_eq!(unsafe { ffi::git_tree_lookup(&mut tree, repo, base) }, 0);
+        }
+        let mut out = ffi::git_oid::default();
+        // SAFETY: a writable id; a live repository; NULL or a live tree, released once
+        // after; a live array of `raw.len()` updates whose paths outlive the call.
+        let rc = unsafe {
+            let rc = ffi::git_tree_create_updated(&mut out, repo, tree, raw.len(), raw.as_ptr());
+            ffi::git_tree_free(tree);
+            rc
+        };
+        if rc < 0 {
+            let (class, message) = last_error();
+            return (Outcome::Failed(rc, class, message), None);
+        }
+        (written(repo, &out), Some(out))
+    }
+
+    /// [`Tree::create_updated`] over `base` and `updates`.
+    fn rust_step(
+        repo: &RepositoryBox,
+        base: Option<&Oid>,
+        updates: &[Update],
+    ) -> (Outcome, Option<Oid>) {
+        let ids: Vec<Oid> = updates
+            .iter()
+            .map(|u| Oid::from_string(&CString::new(u.2).unwrap(), OidType::Sha1).unwrap())
+            .collect();
+        let paths: Vec<CString> = updates.iter().map(|u| CString::new(u.1).unwrap()).collect();
+        let built: Vec<TreeUpdate<'_>> = updates
+            .iter()
+            .zip(&paths)
+            .zip(&ids)
+            .map(|((&(action, _, _, mode), path), id)| {
+                let mut update = TreeUpdate::upsert(path, id.as_ref(), mode);
+                update.as_mut().set_action(action);
+                update
+            })
+            .collect();
+        let tree = base.map(|id| Tree::lookup(repo.as_ref(), id.as_ref()).unwrap());
+        let result = Tree::create_updated(repo.as_ref(), tree.as_ref().map(|t| t.as_ref()), &built);
+        drop(tree);
+        match result {
+            Ok(id) => {
+                let raw = ffi::git_oid {
+                    type_: id.as_ref().raw_kind(),
+                    id: id.as_ref().id(),
+                };
+                (written(repo.as_c_ptr(), &raw), Some(id))
+            }
+            Err(e) => (
+                Outcome::Failed(
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                ),
+                None,
+            ),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn scripts_match_c() {
+        init();
+        let (c_box, rust_box) = (Sandbox::new("c"), Sandbox::new("rust"));
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_box.c_path().as_ptr()) };
+        assert_eq!(rc, 0);
+        let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
+        let (mut c_previous, mut rust_previous) = (None, None);
+        let (mut failures, mut writes) = (0, 0);
+        for (i, (base, updates)) in script().iter().enumerate() {
+            let (c_base, rust_base) = match base {
+                Base::None => (None, None),
+                Base::Tree(hex) => (
+                    Some(raw_id(hex)),
+                    Some(Oid::from_string(&CString::new(*hex).unwrap(), OidType::Sha1).unwrap()),
+                ),
+                Base::Previous => (c_previous, rust_previous),
+            };
+            let (c_seen, c_out) = c_step(c_repo, c_base.as_ref(), updates);
+            let (rust_seen, rust_out) = rust_step(&rust_repo, rust_base.as_ref(), updates);
+            assert_eq!(rust_seen, c_seen, "step {i}: {base:?} {updates:?}");
+            match c_seen {
+                Outcome::Failed(..) => failures += 1,
+                Outcome::Written(..) => writes += 1,
+            }
+            if c_out.is_some() {
+                (c_previous, rust_previous) = (c_out, rust_out);
+            }
+        }
+        assert!(failures > 15 && writes > 15, "{failures} {writes}");
+        // SAFETY: the raw repository is released once; nothing of it is held.
+        unsafe { ffi::git_repository_free(c_repo) };
+    }
+
+    /// Makes the loose fan-out directory `hex` would be written under a regular file,
+    /// so that writing that object fails (permissions do not stop root); `false` when
+    /// the directory already holds objects, which the test then avoids.
+    fn block(sandbox: &Sandbox, hex: &str) -> bool {
+        let dir = sandbox.0.join("objects").join(&hex[..2]);
+        if dir.exists() {
+            return false;
+        }
+        std::fs::write(dir, b"not a directory").unwrap();
+        true
+    }
+
+    /// The tree a write fails to store, the root or a subtree, fails both sides alike,
+    /// with what the step built released (LSan).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn unwritable_objects_match_c() {
+        init();
+        let scratch = Sandbox::new("unwritable-scratch");
+        let scratch_repo = Repository::open(&scratch.c_path()).unwrap();
+        // The subtree `a` of a lone `a/<name>`, and the root of a lone `<name>`, under
+        // a name whose tree lands in a fan-out the repository does not use yet.
+        let mut cases: Vec<(&'static str, Vec<Update>, String)> = Vec::new();
+        const SUBTREE_PATHS: [&str; 8] = [
+            "a/f0", "a/f1", "a/f2", "a/f3", "a/f4", "a/f5", "a/f6", "a/f7",
+        ];
+        const ROOT_PATHS: [&str; 8] = ["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"];
+        for (leaf, candidates) in [(false, SUBTREE_PATHS), (true, ROOT_PATHS)] {
+            for path in candidates {
+                let updates = vec![up(path, README, FileMode::Blob)];
+                let (Outcome::Written(root, entries), _) = rust_step(&scratch_repo, None, &updates)
+                else {
+                    panic!("{path}")
+                };
+                let blocked = if leaf { root } else { entries[0].2.clone() };
+                let fanout = scratch.0.join("objects").join(&blocked[..2]);
+                let fresh = !Path::new(TESTREPO)
+                    .join("objects")
+                    .join(&blocked[..2])
+                    .exists();
+                if fresh && fanout.is_dir() {
+                    cases.push((path, updates, blocked));
+                    break;
+                }
+            }
+        }
+        assert_eq!(cases.len(), 2);
+        for (path, updates, blocked) in cases {
+            let (c_box, rust_box) = (
+                Sandbox::new("unwritable-c"),
+                Sandbox::new("unwritable-rust"),
+            );
+            assert!(block(&c_box, &blocked) && block(&rust_box, &blocked));
+            let mut c_repo = ptr::null_mut();
+            // SAFETY: a writable slot and a NUL-terminated path.
+            let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_box.c_path().as_ptr()) };
+            assert_eq!(rc, 0);
+            let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
+            // The message names the side's own fan-out directory.
+            let anonymous = |outcome: Outcome, sandbox: &Sandbox| match outcome {
+                Outcome::Failed(rc, class, message) => {
+                    let message = message.replace(sandbox.0.to_str().unwrap(), "<repo>");
+                    Outcome::Failed(rc, class, message)
+                }
+                written => written,
+            };
+            let c_seen = anonymous(c_step(c_repo, None, &updates).0, &c_box);
+            let rust_seen = anonymous(rust_step(&rust_repo, None, &updates).0, &rust_box);
+            assert!(matches!(c_seen, Outcome::Failed(..)), "{path}: {c_seen:?}");
+            assert_eq!(rust_seen, c_seen, "{path}");
+            drop(rust_repo);
+            // SAFETY: the raw repository is released once; nothing of it is held.
+            unsafe { ffi::git_repository_free(c_repo) };
+        }
+    }
+
+    /// A baseline of another repository of the same id type: its entries are copied,
+    /// and the subtrees an update descends into are looked up in the repository given,
+    /// which lacks them.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn baselines_of_other_repositories_match_c() {
+        init();
+        let root = std::env::temp_dir().join(format!(
+            "crustify-tree-update-equiv-{}-foreign-base",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let open_empty = |side: &str| {
+            let path = CString::new(root.join(side).to_str().unwrap()).unwrap();
+            drop(Repository::init(&path, true).unwrap());
+            path
+        };
+        let (c_path, rust_path) = (open_empty("c"), open_empty("rust"));
+        let mut c_repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_path.as_ptr()) };
+        assert_eq!(rc, 0);
+        let rust_repo = Repository::open(&rust_path).unwrap();
+        let mut c_other = ptr::null_mut();
+        let other_path = CString::new(TESTREPO).unwrap();
+        // SAFETY: a writable slot and a NUL-terminated path.
+        let rc = unsafe { ffi::git_repository_open(&mut c_other, other_path.as_ptr()) };
+        assert_eq!(rc, 0);
+        let rust_other = Repository::open(&other_path).unwrap();
+        let base = raw_id(BASE);
+        let rust_base = Oid::from_string(&CString::new(BASE).unwrap(), OidType::Sha1).unwrap();
+        for updates in [
+            vec![up("ab/c/new", README, FileMode::Commit)],
+            vec![rm("README")],
+            vec![up("sub", MISSING, FileMode::Commit)],
+            vec![],
+        ] {
+            let mut c_tree = ptr::null_mut();
+            // SAFETY: a writable slot, the live other repository and a live id.
+            let rc = unsafe { ffi::git_tree_lookup(&mut c_tree, c_other, &base) };
+            assert_eq!(rc, 0);
+            let paths: Vec<CString> = updates.iter().map(|u| CString::new(u.1).unwrap()).collect();
+            let raw: Vec<ffi::git_tree_update> = updates
+                .iter()
+                .zip(&paths)
+                .map(|(&(action, _, id, mode), path)| ffi::git_tree_update {
+                    action: action.raw(),
+                    id: raw_id(id),
+                    filemode: mode.raw(),
+                    path: path.as_ptr(),
+                })
+                .collect();
+            let mut out = ffi::git_oid::default();
+            // SAFETY: a writable id, the live repository, a live tree of another live
+            // repository, released once after, and a live array whose paths outlive it.
+            let rc = unsafe {
+                let rc =
+                    ffi::git_tree_create_updated(&mut out, c_repo, c_tree, raw.len(), raw.as_ptr());
+                ffi::git_tree_free(c_tree);
+                rc
+            };
+            let c_seen = if rc < 0 {
+                let (class, message) = last_error();
+                Outcome::Failed(rc, class, message)
+            } else {
+                Outcome::Written(hex(&out), Vec::new())
+            };
+            let tree = Tree::lookup(rust_other.as_ref(), rust_base.as_ref()).unwrap();
+            let ids: Vec<Oid> = updates
+                .iter()
+                .map(|u| Oid::from_string(&CString::new(u.2).unwrap(), OidType::Sha1).unwrap())
+                .collect();
+            let built: Vec<TreeUpdate<'_>> = updates
+                .iter()
+                .zip(&paths)
+                .zip(&ids)
+                .map(|((&(action, _, _, mode), path), id)| {
+                    let mut update = TreeUpdate::upsert(path, id.as_ref(), mode);
+                    update.as_mut().set_action(action);
+                    update
+                })
+                .collect();
+            let result = Tree::create_updated(rust_repo.as_ref(), Some(tree.as_ref()), &built);
+            let rust_seen = match result {
+                Ok(id) => Outcome::Written(id.as_ref().to_hex_string().unwrap(), Vec::new()),
+                Err(e) => Outcome::Failed(
+                    e.raw_code(),
+                    e.raw_class(),
+                    e.message().to_string_lossy().into_owned(),
+                ),
+            };
+            assert_eq!(rust_seen, c_seen, "{updates:?}");
+        }
+        drop((rust_repo, rust_other));
+        // SAFETY: both raw repositories are released once; nothing of them is held.
+        unsafe {
+            ffi::git_repository_free(c_repo);
+            ffi::git_repository_free(c_other);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

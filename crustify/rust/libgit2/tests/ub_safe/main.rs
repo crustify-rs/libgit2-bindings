@@ -30,6 +30,7 @@ mod oidarray;
 mod refdb;
 mod refs;
 mod repository;
+mod signature;
 mod strarray;
 mod sys_alloc;
 mod sys_commit;

@@ -25,6 +25,14 @@
 //! was looked up through, whose cache it shares and which looking up its target reaches,
 //! and is neither `Send` nor `Sync`, as an object is.
 //!
+//! The shared handle reads what the parse recorded, each borrowed in place for as long
+//! as the handle: the tag's [`id`](TagRef::id), [`name`](TagRef::name),
+//! [`tagger`](TagRef::tagger) and [`message`](TagRef::message) (either may be missing),
+//! and its target's [`id`](TagRef::target_id) and [`type`](TagRef::target_kind). Its
+//! [`owner`](TagRef::owner) is the repository handle it was looked up through, and
+//! [`target`](TagRef::target) and [`peel`](TagRef::peel) look the target, or the end
+//! of a chain of tags, up in that repository.
+//!
 //! A tag is an object, and an object of type tag is a tag: [`TagRef::as_object`] views
 //! a tag as its object, [`TagRef::from_object`] views an object of type tag as a tag,
 //! and [`Tag::from_object`] and [`Tag::into_object`] hand one counted reference from one
@@ -35,15 +43,18 @@
 //!
 //! A tag is a reference under `refs/tags/`: a lightweight tag points at any object
 //! ([`create_lightweight`]), an annotated one at a tag object that records its target,
-//! name, tagger and message ([`create_from_buffer`] writes one from its raw content).
-//! [`delete`] removes the reference, and [`list`] and [`list_match`] list the tags'
-//! names. Each goes through the repository's reference database (and, to create, its
-//! object database), shared counted objects that libgit2 loads on first use, so each
+//! name, tagger and message ([`create`] writes one from those, [`create_from_buffer`]
+//! from its raw content, and [`create_annotation`] writes the object alone).
+//! [`delete`] removes the reference, [`list`] and [`list_match`] list the tags'
+//! names, and [`foreach`] walks the tags' references and ids. Each goes through the
+//! repository's reference database (and, to create, its object database), shared
+//! counted objects that libgit2 loads on first use, so each
 //! takes the repository's shared handle; a repository without a git directory reaches
 //! the files backend of its [`refdb`](RepositoryRef::refdb), which resolves
 //! `refs/tags/` against the current directory unless a reference database was
 //! installed. A [`ForeachCallback`] is the closure `git_tag_foreach` calls with each
-//! tag.
+//! tag. The annotated tag writers take the tagger as a [`SignatureRef`], which they
+//! refuse without its name or its email: libgit2 prints both with `%s`.
 //!
 //! Two C defects shape the wrappers:
 //!
@@ -78,7 +89,7 @@ use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, CZeroable};
 
 use crate::ffi;
 use crate::libgit2::core::strarray::{StrArray, StrArrayVal};
-use crate::libgit2::core::types::ObjectType;
+use crate::libgit2::core::types::{ObjectType, SignatureRef};
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, content_is_valid, id_fits};
 use crate::libgit2::odb::odb::OdbArc;
 use crate::libgit2::oid::oid::{Oid, OidRef};
@@ -462,6 +473,201 @@ const _: () = assert!(
         && size_of::<Option<TagArc<'static>>>() == size_of::<*mut ffi::git_tag>()
 );
 
+impl<'a, 'r> TagRef<'a, 'r> {
+    /// The tag object's id, of its repository's id type: the id it was looked up by, or
+    /// the full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it
+    /// in the tag, which writes it once, when it is parsed.
+    ///
+    /// Wraps: git_tag_id
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live tag for `'a`; `git_tag_id` is
+        // `git_object_id` behind a cast, which only reads it and returns the address of
+        // the id cached in it (`&obj->cached.oid`).
+        let id = unsafe { ffi::git_tag_id(self.as_ptr()) };
+        // SAFETY: the id is part of the tag, so it is non-NULL and lives as long as the
+        // tag, past `'a`; nothing writes it once the tag is cached or returned.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a live tag has an id")
+    }
+
+    /// The repository the tag was looked up in, borrowed for `'r`, as the shared handle
+    /// it was looked up through, as [`ObjectRef::owner`] gives it for the tag's object.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::tag::Tag;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let tag = Tag::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let owner = tag.as_ref().owner();
+    /// drop(repo);
+    /// let _ = owner.path();
+    /// ```
+    ///
+    /// Wraps: git_tag_owner
+    pub fn owner(&self) -> RepositoryRef<'r> {
+        // SAFETY: the handle addresses a live tag for `'a`; `git_tag_owner` is
+        // `git_object_owner` behind a cast, which only reads it.
+        let repo = unsafe { ffi::git_tag_owner(self.as_ptr()) };
+        // SAFETY: `obj->repo` is the repository the tag was looked up in, stored without
+        // a count and never cleared. A `Tag<'r>` is only built from a
+        // `RepositoryRef<'r>` (`lookup`, `lookup_prefix`) or from an `Object<'r>` of
+        // type tag, itself built that way, so that repository is live and shared, not
+        // exclusively borrowed, for `'r`, on this thread: the handle returned is the one
+        // the tag was looked up through.
+        unsafe { RepositoryRef::from_ptr(repo) }.expect("a tag always has a repository")
+    }
+
+    /// The tag's name, as its `tag` header records it (`v1.0`, not `refs/tags/v1.0`),
+    /// up to its first NUL. Borrowed in place for as long as the handle: the parse
+    /// copies it into the tag, which frees it with itself, so it outlives no owner:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::tag::Tag;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let tag = Tag::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let name = tag.as_ref().name();
+    /// drop(tag);
+    /// let _ = name;
+    /// ```
+    ///
+    /// Wraps: git_tag_name
+    pub fn name(&self) -> &'a CStr {
+        // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
+        let name = unsafe { ffi::git_tag_name(self.as_ptr()) };
+        assert!(!name.is_null(), "a parsed tag always has a name");
+        // SAFETY: a NUL-terminated copy the tag owns, written by the parse before the
+        // tag was handed out and freed with it, so live and unchanged for `'a`.
+        unsafe { CStr::from_ptr(name) }
+    }
+
+    /// The tag's message: everything past the blank line ending its header, up to its
+    /// first NUL; `None` when the content ends with the header. Borrowed in place for
+    /// as long as the handle.
+    ///
+    /// Wraps: git_tag_message
+    pub fn message(&self) -> Option<&'a CStr> {
+        // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
+        let message = unsafe { ffi::git_tag_message(self.as_ptr()) };
+        // SAFETY: NULL, or a NUL-terminated copy the tag owns, written by the parse
+        // before the tag was handed out and freed with it, so live and unchanged for
+        // `'a`.
+        (!message.is_null()).then(|| unsafe { CStr::from_ptr(message) })
+    }
+
+    /// Who made the tag, and when, as its `tagger` header records it; `None` for a tag
+    /// without one (git once wrote such tags). Borrowed in place for as long as the
+    /// handle.
+    ///
+    /// The tagger's name or email reads as `None` only where libgit2 ran out of memory
+    /// copying it while it parsed the tag (see [`SignatureRef::name`]).
+    /// [`to_signature`](SignatureRef::to_signature) copies the tagger to keep it past
+    /// the tag:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::tag::Tag;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let tag = Tag::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let tagger = tag.as_ref().tagger();
+    /// drop(tag);
+    /// let _ = tagger;
+    /// ```
+    ///
+    /// Wraps: git_tag_tagger
+    pub fn tagger(&self) -> Option<SignatureRef<'a>> {
+        // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
+        let tagger = unsafe { ffi::git_tag_tagger(self.as_ptr()) };
+        // SAFETY: NULL, or the signature the tag owns, which the parse filled before the
+        // tag was handed out and which is freed with it: live and unchanged for `'a`.
+        // Its name and email are each NULL (the parse ran out of memory) or a
+        // NUL-terminated copy it owns, as the handles' invariant requires.
+        unsafe { SignatureRef::from_ptr(tagger.cast_mut()) }
+    }
+
+    /// The id of the object the tag points at, as its `object` header records it, of
+    /// the repository's id type. Borrowed in place for as long as the handle.
+    ///
+    /// Wraps: git_tag_target_id
+    pub fn target_id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live tag for `'a`; libgit2 only reads it and
+        // returns the address of its `target` member.
+        let id = unsafe { ffi::git_tag_target_id(self.as_ptr()) };
+        // SAFETY: a member of the tag, written by the parse before the tag was handed
+        // out, so non-NULL, live and unchanged for `'a`.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a live tag has a target id")
+    }
+
+    /// The type of the object the tag points at, as its `type` header records it.
+    ///
+    /// Wraps: git_tag_target_type
+    pub fn target_kind(&self) -> ObjectType {
+        // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
+        let raw = unsafe { ffi::git_tag_target_type(self.as_ptr()) };
+        // The parse fails unless the header names one of the four types.
+        ObjectType::from_raw(raw).expect("a parsed tag records a named target type")
+    }
+
+    /// The object the tag points at, looked up in the tag's repository by
+    /// [`target_id`](Self::target_id) as of type [`target_kind`](Self::target_kind):
+    /// one more counted reference of the repository's cache, or a fresh parse, living
+    /// no longer than the repository's borrow `'r`, as the tag does.
+    ///
+    /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup)
+    /// does: with [`ErrorCode::NotFound`] when the object database lacks the target or
+    /// holds it with another type than the tag records (class `GIT_ERROR_INVALID`, "the
+    /// requested type does not match the type in the ODB"), and with libgit2's error
+    /// when it cannot be read or parsed. The id needs no check: libgit2 parsed it with
+    /// the repository's id type.
+    ///
+    /// Wraps: git_tag_target
+    pub fn target(&self) -> Result<ObjectArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
+        // live tag for `'a`, whose repository, borrowed for `'r`, is live and used on
+        // this thread only, as `RepositoryRef` allows: libgit2 looks the target up
+        // through it, filling its cache, and only reads the tag, whose target id is of
+        // the repository's type (the parse read it so).
+        let rc = unsafe { ffi::git_tag_target(&mut out, self.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: on success `out` holds one counted reference to a live object of the
+        // same repository, borrowed for `'r`, given to the result and released by
+        // `git_object_free`.
+        let object = unsafe { ObjectArc::from_c(out) };
+        Ok(object.expect("a lookup succeeded without an object"))
+    }
+
+    /// The first object of the tag's chain that is no tag: its target, or, for a tag
+    /// of a tag, that tag's target, and so on. [`ObjectRef::peel`] of the tag's object
+    /// with `None`; the result lives no longer than the repository's borrow `'r`.
+    ///
+    /// Fails, as that peel does, with libgit2's error when a target cannot be read
+    /// from the object database or is not of the type its tag records.
+    ///
+    /// Wraps: git_tag_peel
+    pub fn peel(&self) -> Result<ObjectArc<'r>, RepositoryError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `target`: `out` is a writable slot, the handle addresses a live
+        // tag whose repository is live for `'r` and used on this thread only, where
+        // libgit2 looks each target up (`git_object_peel` with `GIT_OBJECT_ANY`).
+        let rc = unsafe { ffi::git_tag_peel(&mut out, self.as_ptr()) };
+        if rc < 0 {
+            return Err(RepositoryError::from_libgit2(rc));
+        }
+        // SAFETY: as in `target`: one counted reference to a live object of the
+        // repository, given to the result.
+        let object = unsafe { ObjectArc::from_c(out) };
+        Ok(object.expect("a peel succeeded without an object"))
+    }
+}
+
 /// Creates the annotated tag whose tag object's raw content is `buffer`: writes the
 /// object into `repo`'s object database, and points `refs/tags/<name>` at it, `<name>`
 /// being the name the content records. Returns the tag object's id.
@@ -662,6 +868,119 @@ pub fn create_lightweight(
     Ok(id)
 }
 
+/// Creates the annotated tag `name`: writes a tag object recording `target`, `name`,
+/// `tagger` and `message` into `repo`'s object database, and points `refs/tags/<name>`
+/// at it. Returns the tag object's id.
+///
+/// The object is written as `object <id>`, `type <type>`, `tag <name>` and `tagger
+/// <name> <<email>> <seconds> <zone>` lines, a blank line, then `message` as it is:
+/// libgit2 checks none of them, so a name, tagger or message holding a newline in the
+/// wrong place makes an object git cannot parse back (see
+/// [`SignatureView`](crate::libgit2::core::types::SignatureView)).
+///
+/// Refuses, with `-1`, a target looked up in another repository
+/// (`GIT_ERROR_INVALID`, "the given target does not belong to this repository"), and a
+/// name starting with `-` or equal to `HEAD` (`GIT_ERROR_TAG`, "'…' is not a valid tag
+/// name"). Fails with [`ErrorCode::Exists`] (`GIT_ERROR_TAG`, "tag already exists")
+/// when the reference exists and `force` is not set; `force` replaces it. The tag
+/// object is written before the reference, and stays when the reference cannot be
+/// written. Fails with `-1` and
+/// `GIT_ERROR_OBJECT` ("failed to create tag annotation") when the object cannot be
+/// written, and with libgit2's error when `refs/tags/<name>` is not a valid reference
+/// name, or the reference cannot be read or written.
+///
+/// A tagger without its name or its email (which only a signature libgit2 parsed out
+/// of memory can be) is refused before libgit2 runs, with `-1` and a
+/// `GIT_ERROR_INVALID` error: libgit2 would print the missing string through `%s`.
+///
+/// Wraps: git_tag_create
+pub fn create(
+    repo: RepositoryRef<'_>,
+    name: &CStr,
+    target: ObjectRef<'_, '_>,
+    tagger: SignatureRef<'_>,
+    message: &CStr,
+    force: bool,
+) -> Result<Oid, RepositoryError> {
+    printable(tagger)?;
+    let mut id = Oid::zeroed();
+    // SAFETY: a writable id; a live repository on this thread, whose databases libgit2
+    // loads and writes through this shared handle; NUL-terminated strings read for the
+    // call; a live object, compared with `repo` by owner before its id and type are
+    // read, never retained; a tagger with both strings (checked above), only read.
+    let rc = unsafe {
+        ffi::git_tag_create(
+            id.as_mut().as_mut_ptr(),
+            repo.as_ptr().cast_mut(),
+            name.as_ptr(),
+            target.as_ptr(),
+            tagger.as_ptr(),
+            message.as_ptr(),
+            c_int::from(force),
+        )
+    };
+    if rc < 0 {
+        return Err(RepositoryError::from_libgit2(rc));
+    }
+    Ok(id)
+}
+
+/// Writes the tag object [`create`] would write for `name`, `target`, `tagger` and
+/// `message` into `repo`'s object database, without creating, checking or reading any
+/// reference, and returns its id.
+///
+/// Unlike [`create`], nothing is checked but the tagger: any name is written, and a
+/// target of another repository is recorded by its id and type, which `repo` may lack
+/// (or, for another object id type, which its id type cannot name). Fails with `-1`
+/// and `GIT_ERROR_OBJECT` ("failed to create tag annotation") when the object cannot
+/// be written or the object database loaded, and refuses a tagger without its name or
+/// its email as [`create`] does.
+///
+/// Wraps: git_tag_annotation_create
+pub fn create_annotation(
+    repo: RepositoryRef<'_>,
+    name: &CStr,
+    target: ObjectRef<'_, '_>,
+    tagger: SignatureRef<'_>,
+    message: &CStr,
+) -> Result<Oid, RepositoryError> {
+    printable(tagger)?;
+    let mut id = Oid::zeroed();
+    // SAFETY: `id` is a writable id; `repo` a live repository on this thread, whose
+    // object database libgit2 loads and writes through this shared handle; `name` and
+    // `message` NUL-terminated strings read for the call; `target` a live object of a
+    // live repository, whose id and type alone libgit2 reads, never retaining it;
+    // `tagger` a live signature whose name and email are NUL-terminated (checked
+    // above), only read.
+    let rc = unsafe {
+        ffi::git_tag_annotation_create(
+            id.as_mut().as_mut_ptr(),
+            repo.as_ptr().cast_mut(),
+            name.as_ptr(),
+            target.as_ptr(),
+            tagger.as_ptr(),
+            message.as_ptr(),
+        )
+    };
+    if rc < 0 {
+        return Err(RepositoryError::from_libgit2(rc));
+    }
+    Ok(id)
+}
+
+/// `Ok` when libgit2 can write `tagger` (`git_signature__writebuf` prints its name and
+/// email with `%s`); otherwise a `GIT_ERROR_INVALID` failure.
+fn printable(tagger: SignatureRef<'_>) -> Result<(), RepositoryError> {
+    if tagger.name().is_some() && tagger.email().is_some() {
+        return Ok(());
+    }
+    set(
+        ErrorClass::Invalid,
+        c"failed to create tag annotation - the tagger lacks its name or email",
+    );
+    Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()))
+}
+
 /// Deletes the tag `name`: removes the reference `refs/tags/<name>`, and its reflog.
 /// The object it points at stays.
 ///
@@ -729,6 +1048,46 @@ fn listed(
         return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
     }
     Ok(names)
+}
+
+/// Calls `callback` with the full reference name (`refs/tags/v1.0`) of each of `repo`'s
+/// tags and the id it resolves to: a tag object's for an annotated tag, the target's
+/// for a lightweight one, in the order the reference database lists its references.
+///
+/// Returns [`ControlFlow::Continue`] once every tag was visited, and
+/// [`ControlFlow::Break`] with the code the closure stopped the walk with; libgit2
+/// then leaves a `GIT_ERROR_CALLBACK` error ("git_tag_foreach callback returned …") on
+/// the thread, unless the closure set one. A panic in the closure stops the walk and
+/// resumes here.
+///
+/// Fails with libgit2's error when the references cannot be listed, or a tag's
+/// reference cannot be resolved to an id (a symbolic reference under `refs/tags/`
+/// whose target is missing: [`ErrorCode::NotFound`]); the tags before it were visited.
+///
+/// The closure may use the repository, as libgit2 reads each reference afresh: a tag
+/// it deletes before the walk reaches it fails the walk as not found.
+///
+/// Wraps: git_tag_foreach
+pub fn foreach(
+    repo: RepositoryRef<'_>,
+    callback: &mut ForeachCallback<'_>,
+) -> Result<ControlFlow<NonZero<c_int>>, RepositoryError> {
+    let rc = callback.walk_with(|cb, payload| {
+        // SAFETY: `repo` is a live repository on this thread, whose reference database
+        // libgit2 loads and reads through this shared handle; `cb` is the callback's
+        // trampoline and `payload` the callback, which `walk_with` lends for the walk
+        // alone, and libgit2 calls it on this thread only, before returning.
+        unsafe { ffi::git_tag_foreach(repo.as_ptr().cast_mut(), cb, payload) }
+    });
+    if let Some(code) = callback.stopped {
+        // libgit2 stops at the first non-zero answer, and returns it.
+        debug_assert_eq!(rc, code.get());
+        return Ok(ControlFlow::Break(code));
+    }
+    if rc != 0 {
+        return Err(RepositoryError::from_libgit2(rc));
+    }
+    Ok(ControlFlow::Continue(()))
 }
 
 /// The closure a [`ForeachCallback`] calls: one tag's reference name and id, lent for
@@ -818,6 +1177,9 @@ type ForeachFn<'f> = dyn FnMut(&CStr, OidRef<'_>) -> ControlFlow<NonZero<c_int>>
 /// Handwritten
 pub struct ForeachCallback<'f> {
     f: &'f mut ForeachFn<'f>,
+    /// The code the closure stopped the last walk with: what it broke with, or
+    /// `GIT_EUSER` for a panic. Tells the closure's codes from libgit2's own errors.
+    stopped: Option<NonZero<c_int>>,
     /// A panic the closure raised inside a C walk, resumed once the walk returns.
     panic: Option<Box<dyn Any + Send + 'static>>,
 }
@@ -829,7 +1191,11 @@ impl<'f> ForeachCallback<'f> {
     where
         F: FnMut(&CStr, OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f,
     {
-        Self { f, panic: None }
+        Self {
+            f,
+            stopped: None,
+            panic: None,
+        }
     }
 
     /// Calls the callback with `name` and `id`, through the trampoline libgit2 calls,
@@ -856,6 +1222,7 @@ impl<'f> ForeachCallback<'f> {
         &mut self,
         walk: impl FnOnce(ffi::git_tag_foreach_cb, *mut c_void) -> R,
     ) -> R {
+        self.stopped = None;
         let result = walk(Some(foreach_with), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
             panic::resume_unwind(panic);
@@ -867,6 +1234,7 @@ impl<'f> ForeachCallback<'f> {
 impl fmt::Debug for ForeachCallback<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ForeachCallback")
+            .field("stopped", &self.stopped)
             .field("panicked", &self.panic.is_some())
             .finish_non_exhaustive()
     }
@@ -902,14 +1270,16 @@ unsafe extern "C" fn foreach_with(
     let Some(id) = (unsafe { OidRef::from_ptr(id) }) else {
         return ErrorCode::User.raw();
     };
-    match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(name, id))) {
-        Ok(ControlFlow::Continue(())) => 0,
-        Ok(ControlFlow::Break(code)) => code.get(),
+    let code = match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(name, id))) {
+        Ok(ControlFlow::Continue(())) => return 0,
+        Ok(ControlFlow::Break(code)) => code,
         Err(panic) => {
             callback.panic = Some(panic);
-            ErrorCode::User.raw()
+            NonZero::new(ErrorCode::User.raw()).expect("GIT_EUSER is not 0")
         }
-    }
+    };
+    callback.stopped = Some(code);
+    code.get()
 }
 
 #[cfg(test)]
@@ -944,6 +1314,9 @@ mod unit_tests {
 
     static REFUSING: AtomicBool = AtomicBool::new(false);
     static ALLOWED: AtomicIsize = AtomicIsize::new(0);
+    /// Whether only the request `ALLOWED` counts down to is refused, the later ones
+    /// granted again.
+    static ONE_SHOT: AtomicBool = AtomicBool::new(false);
 
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
@@ -952,9 +1325,17 @@ mod unit_tests {
     }
 
     /// Whether the next request is refused: while `REFUSING` is set, after `ALLOWED`
-    /// more requests.
+    /// more requests; with `ONE_SHOT`, that request alone.
     fn refuse() -> bool {
-        REFUSING.load(SeqCst) && ALLOWED.fetch_sub(1, SeqCst) <= 0
+        if !REFUSING.load(SeqCst) {
+            return false;
+        }
+        let left = ALLOWED.fetch_sub(1, SeqCst);
+        if ONE_SHOT.load(SeqCst) {
+            left == 0
+        } else {
+            left <= 0
+        }
     }
 
     /// libc's allocator, refusing requests per [`refuse`].
@@ -1373,7 +1754,7 @@ mod unit_tests {
         assert_eq!(walk(repo.as_ref(), &mut callback), 0);
         assert_eq!(
             format!("{callback:?}"),
-            "ForeachCallback { panicked: false, .. }"
+            "ForeachCallback { stopped: None, panicked: false, .. }"
         );
         drop(callback);
         seen.sort();
@@ -1437,10 +1818,202 @@ mod unit_tests {
         assert_eq!(rc, user);
         assert_eq!(
             format!("{callback:?}"),
-            "ForeachCallback { panicked: true, .. }"
+            "ForeachCallback { stopped: None, panicked: true, .. }"
         );
         drop(callback);
         assert!(!called);
+    }
+
+    /// A tagger without its name or its email (what libgit2's parser leaves when it runs
+    /// out of memory) never reaches `git_signature__writebuf`, which would print the
+    /// NULL through `%s`: both writers refuse it before C, writing neither an object nor
+    /// a reference.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn incomplete_taggers_never_reach_libgit2() {
+        use crate::libgit2::object::object::Object;
+        use crate::libgit2::oid::oid::OidType;
+        let sandbox = Sandbox::new("incomplete-tagger");
+        let repo = sandbox.open();
+        let id = Oid::from_string(&CString::new(COMMIT).unwrap(), OidType::Sha1).unwrap();
+        let target = Object::lookup(repo.as_ref(), id.as_ref(), None).unwrap();
+        let objects = || {
+            std::fs::read_dir(sandbox.0.join("objects"))
+                .unwrap()
+                .map(|dir| dir.unwrap().path())
+                .filter(|dir| dir.is_dir())
+                .map(|dir| std::fs::read_dir(dir).unwrap().count())
+                .sum::<usize>()
+        };
+        let before = objects();
+        let name = c"T".as_ptr().cast_mut();
+        let email = c"t@example.com".as_ptr().cast_mut();
+        for (name, email) in [
+            (ptr::null_mut(), email),
+            (name, ptr::null_mut()),
+            (ptr::null_mut(), ptr::null_mut()),
+        ] {
+            let mut raw = ffi::git_signature {
+                name,
+                email,
+                when: ffi::git_time {
+                    time: 1,
+                    offset: 0,
+                    sign: b'+' as c_char,
+                },
+            };
+            // SAFETY: a live local signature whose strings are NULL or literals, only
+            // read while the handle lives.
+            let tagger = unsafe { SignatureRef::from_ptr(&mut raw) }.unwrap();
+            for result in [
+                create(repo.as_ref(), c"bad", target.as_ref(), tagger, c"m\n", true),
+                create_annotation(repo.as_ref(), c"bad", target.as_ref(), tagger, c"m\n"),
+            ] {
+                let e = result.unwrap_err();
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                assert_eq!(
+                    e.message(),
+                    c"failed to create tag annotation - the tagger lacks its name or email"
+                );
+            }
+        }
+        assert_eq!(objects(), before);
+        assert!(!sandbox.0.join("refs/tags/bad").exists());
+    }
+
+    /// `foreach` tells the closure's breaks, whatever their sign, from libgit2's
+    /// failures, through the code the trampoline records; a walk resets it, and a
+    /// panic resumes with it set to `GIT_EUSER`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn foreach_tells_breaks_from_failures() {
+        let sandbox = Sandbox::new("foreach-breaks");
+        let repo = sandbox.open();
+        for code in [-1, 42, i32::MIN, ErrorCode::NotFound.raw()] {
+            let mut calls = 0;
+            let mut stop = |_: &CStr, _: OidRef<'_>| {
+                calls += 1;
+                ControlFlow::Break(NonZero::new(code).unwrap())
+            };
+            let mut callback = ForeachCallback::new(&mut stop);
+            let flow = foreach(repo.as_ref(), &mut callback).unwrap();
+            assert_eq!(flow, ControlFlow::Break(NonZero::new(code).unwrap()));
+            assert_eq!(callback.stopped, NonZero::new(code));
+            drop(callback);
+            assert_eq!(calls, 1);
+        }
+
+        let mut seen = 0;
+        let mut count = |_: &CStr, _: OidRef<'_>| {
+            seen += 1;
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut count);
+        callback.stopped = NonZero::new(5);
+        assert_eq!(
+            foreach(repo.as_ref(), &mut callback),
+            Ok(ControlFlow::Continue(()))
+        );
+        assert_eq!(callback.stopped, None);
+        drop(callback);
+        assert_eq!(seen, 7);
+
+        // A dangling symbolic reference fails the walk after the tags before it.
+        std::fs::write(
+            sandbox.0.join("refs/tags/zz-dangling"),
+            "ref: refs/heads/nope\n",
+        )
+        .unwrap();
+        let mut seen = 0;
+        let mut count = |_: &CStr, _: OidRef<'_>| {
+            seen += 1;
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut count);
+        let e = foreach(repo.as_ref(), &mut callback).unwrap_err();
+        drop(callback);
+        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+        assert_eq!(e.message(), c"reference 'refs/heads/nope' not found");
+        assert_eq!(seen, 7);
+
+        let mut boom =
+            |_: &CStr, _: OidRef<'_>| -> ControlFlow<NonZero<c_int>> { panic!("foreach panicked") };
+        let mut callback = ForeachCallback::new(&mut boom);
+        let caught =
+            std::panic::catch_unwind(AssertUnwindSafe(|| foreach(repo.as_ref(), &mut callback)));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"foreach panicked")
+        );
+        assert_eq!(callback.stopped, NonZero::new(ErrorCode::User.raw()));
+        assert!(callback.panic.is_none());
+    }
+
+    /// libgit2's tag parser keeps a tag whose tagger's name or email it ran out of memory
+    /// copying, and reports success: `tagger` lends that signature with the string
+    /// missing, and both writers refuse it as their tagger before libgit2 would print
+    /// the NULL. Each lookup refuses one allocation, at each position in turn; libgit2
+    /// leaks on some of those failures (in its object database and cache), so the child
+    /// runs with LeakSanitizer off.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn taggers_lost_to_out_of_memory_are_refused() {
+        isolated_tolerating_leaks(
+            concat!(
+                module_path!(),
+                "::taggers_lost_to_out_of_memory_are_refused"
+            ),
+            || {
+                use crate::libgit2::object::object::Object;
+                use crate::libgit2::oid::oid::OidType;
+                install_countdown();
+                set(ErrorClass::Invalid, c"error state allocated");
+                let sandbox = Sandbox::new("oom-tagger");
+                let tag_id = Oid::from_string(&CString::new(TAG).unwrap(), OidType::Sha1).unwrap();
+                let commit =
+                    Oid::from_string(&CString::new(COMMIT).unwrap(), OidType::Sha1).unwrap();
+                let (mut lost_name, mut lost_email) = (false, false);
+                ONE_SHOT.store(true, SeqCst);
+                for k in 0..10_000 {
+                    let repo = sandbox.open();
+                    ALLOWED.store(k, SeqCst);
+                    REFUSING.store(true, SeqCst);
+                    let tag = Tag::lookup(repo.as_ref(), tag_id.as_ref());
+                    REFUSING.store(false, SeqCst);
+                    let Ok(tag) = tag else { continue };
+                    let tagger = tag.as_ref().tagger().expect("the tag has a tagger");
+                    let (name, email) = (tagger.name(), tagger.email());
+                    if name.is_some() && email.is_some() {
+                        if ALLOWED.load(SeqCst) >= 0 {
+                            // Every allocation of the lookup was granted: the sweep is over.
+                            break;
+                        }
+                        continue;
+                    }
+                    lost_name |= name.is_none();
+                    lost_email |= email.is_none();
+                    let target = Object::lookup(repo.as_ref(), commit.as_ref(), None).unwrap();
+                    for result in [
+                        create(
+                            repo.as_ref(),
+                            c"lost",
+                            target.as_ref(),
+                            tagger,
+                            c"m\n",
+                            true,
+                        ),
+                        create_annotation(repo.as_ref(), c"lost", target.as_ref(), tagger, c"m\n"),
+                    ] {
+                        let e = result.unwrap_err();
+                        assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+                    }
+                    assert!(tagger.to_signature().is_err());
+                }
+                ONE_SHOT.store(false, SeqCst);
+                assert!(lost_name && lost_email);
+                assert!(!sandbox.0.join("refs/tags/lost").exists());
+            },
+        );
     }
 
     /// `git_tag`'s owner, handles, lifecycle policy and conversions.

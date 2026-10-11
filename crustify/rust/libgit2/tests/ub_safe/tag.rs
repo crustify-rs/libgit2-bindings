@@ -117,6 +117,16 @@ mod tag_object {
     //! A tag cannot outlive its repository, nor a handle its owner, and no owner lends an
     //! exclusive handle (`compile_fail/` and doctests). Every test calls libgit2, so Miri
     //! skips them all.
+    //!
+    //! The getters (`id`, `name`, `message`, `tagger`, `target_id`, `target_kind`) lend
+    //! what the tag holds for as long as the handle's borrow: the tests read every getter
+    //! of every tag while other owners of the same tag come and go, and after the cache
+    //! evicted it, as long as one owner remains (ASan); none outlives the last owner
+    //! (doctests). A tagger is `Send` and `Sync` while the tag is not: threads read one
+    //! tag's tagger at once while the tag's owner stays on its thread (TSan). `target`
+    //! and `peel` hand out owners of their own that outlive the tag (ASan, LSan), looked
+    //! up through the repository the tag keeps, across Rust reborrows of it (BSan), as
+    //! `owner` hands that repository back.
 
     use std::ffi::CString;
     use std::thread;
@@ -166,6 +176,121 @@ mod tag_object {
     fn assert_failed(result: Result<TagArc<'_>, RepositoryError>, code: i32, class: ErrorClass) {
         let e = result.unwrap_err();
         assert_eq!((e.raw_code(), e.class()), (code, Some(class)), "{e:?}");
+    }
+
+    /// What [`read`] reads: id, name, message length, tagger string lengths and time,
+    /// target id.
+    type Read = (String, Vec<u8>, Option<usize>, Option<(usize, i64)>, String);
+
+    /// Every getter's value, read through an owner while the others are dropped.
+    fn read(tag: TagRef<'_, '_>) -> Read {
+        let tagger = tag.tagger().map(|t| {
+            let len =
+                t.name().map_or(0, |n| n.count_bytes()) + t.email().map_or(0, |e| e.count_bytes());
+            (len, t.when().seconds())
+        });
+        let _ = tag.target_kind();
+        (
+            tag.id().to_hex_string().unwrap(),
+            tag.name().to_bytes().to_vec(),
+            tag.message().map(|m| m.count_bytes()),
+            tagger,
+            tag.target_id().to_hex_string().unwrap(),
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_lend_what_the_last_owner_keeps() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        for hex_id in TAGS {
+            let first = Tag::lookup(r, id(hex_id).as_ref()).unwrap();
+            let expected = read(first.as_ref());
+            let second = first.clone();
+            let name = second.as_ref().name();
+            let message = second.as_ref().message();
+            let tagger = second.as_ref().tagger();
+            let target_id = second.as_ref().target_id();
+            let tag_id = second.as_ref().id();
+            drop(first);
+            let as_object = Tag::into_object(second.clone());
+            assert_eq!(name.to_bytes(), expected.1);
+            assert_eq!(message.map(|m| m.count_bytes()), expected.2);
+            assert_eq!(tagger.map(|t| t.when().seconds()), expected.3.map(|t| t.1));
+            assert_eq!(target_id.to_hex_string().unwrap(), expected.4);
+            assert_eq!(tag_id.to_hex_string().unwrap(), hex_id);
+            drop(as_object);
+            assert_eq!(read(second.as_ref()), expected);
+        }
+    }
+
+    /// With the cache emptied of the tag, the getters read the tag the owner keeps.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_survive_cache_eviction() {
+        isolated(
+            concat!(module_path!(), "::getters_survive_cache_eviction"),
+            || {
+                let repo = open_testrepo();
+                let tag = Tag::lookup(repo.as_ref(), id(TAGS[0]).as_ref()).unwrap();
+                let expected = read(tag.as_ref());
+                set_cache_max_size(1);
+                for hex_id in TAGS.iter().cycle().take(64) {
+                    drop(Tag::lookup(repo.as_ref(), id(hex_id).as_ref()).unwrap());
+                }
+                assert_eq!(read(tag.as_ref()), expected);
+            },
+        );
+    }
+
+    /// `target` and `peel` hand out owners of their own, which outlive the tag; they
+    /// look the target up through the tag's repository, reborrowed meanwhile, which
+    /// `owner` hands back.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn targets_and_peels_outlive_their_tag() {
+        let repo = open_testrepo();
+        let mut kept: Vec<ObjectArc<'_>> = Vec::new();
+        for hex_id in TAGS {
+            let tag = Tag::lookup(repo.as_ref(), id(hex_id).as_ref()).unwrap();
+            let owner = tag.as_ref().owner();
+            assert_eq!(owner.path(), repo.as_ref().path());
+            let target = tag.as_ref().target().unwrap();
+            let peeled = owner.path().map(|_| tag.as_ref().peel().unwrap()).unwrap();
+            assert_eq!(object_view(&target).1, tag.as_ref().target_kind().raw());
+            drop(tag);
+            assert_ne!(object_view(&peeled).1, ffi::GIT_OBJECT_TAG);
+            kept.extend([target, peeled]);
+        }
+        let views: Vec<_> = kept.iter().map(object_view).collect();
+        kept.reverse();
+        drop(kept);
+        assert_eq!(views.len(), 2 * TAGS.len());
+    }
+
+    /// A tagger is `Send` and `Sync`: threads read one tag's tagger, and its strings, at
+    /// once, while the tag's owner stays on the main thread.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn taggers_are_read_from_many_threads() {
+        let repo = open_testrepo();
+        let tag = Tag::lookup(repo.as_ref(), id(TAGS[0]).as_ref()).unwrap();
+        let tagger = tag.as_ref().tagger().unwrap();
+        let expected = tagger.to_signature().unwrap();
+        thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(move || {
+                    for _ in 0..64 {
+                        assert_eq!(tagger.name(), Some(c"Vicent Marti"));
+                        assert_eq!(tagger.email(), Some(c"tanoku@gmail.com"));
+                        assert_eq!(tagger.when().seconds(), 1281578440);
+                    }
+                });
+            }
+        });
+        assert_eq!(tagger, expected.as_ref());
+        drop(tag);
     }
 
     #[test]
@@ -527,6 +652,18 @@ mod repository_tags {
     //!
     //! A callback's name and id cannot outlive the call, nor the callback cross threads
     //! (doctests); a panicking closure resumes after the call.
+    //!
+    //! Then `create`, `create_annotation` and `foreach` (`git_tag_create`,
+    //! `git_tag_annotation_create`, `git_tag_foreach`). A tagger reaches libgit2 as a
+    //! borrowed `const git_signature *` it only prints: a view over strings the test
+    //! rewrites and frees right after, an owned signature, and the tagger of a tag that
+    //! is released after the call (ASan, BSan); names and messages up to a megabyte sit
+    //! in exact-length buffers. `foreach` lends the closure each name and id for its
+    //! call; the closure breaks with codes of either sign, panics, re-enters `foreach`
+    //! with a callback of its own, and writes the reference database during the walk
+    //! (deleting and creating tags), which libgit2 tolerates, failing the walk when a
+    //! tag it was about to visit is gone. Walks run on threads at once, each over a
+    //! repository of its own (TSan); tests that write references run in a child.
 
     use std::ffi::{CStr, CString, c_int};
     use std::num::NonZero;
@@ -534,12 +671,14 @@ mod repository_tags {
     use std::path::{Path, PathBuf};
     use std::thread;
 
+    use libgit2::libgit2::core::types::{Signature, SignatureView, Time};
     use libgit2::libgit2::object::object::{Object, ObjectArc};
     use libgit2::libgit2::object::tag::{
-        ForeachCallback, create_from_buffer, create_lightweight, delete, list, list_match,
+        ForeachCallback, Tag, create, create_annotation, create_from_buffer, create_lightweight,
+        delete, foreach, list, list_match,
     };
     use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     use crate::fixture::index::isolated_tolerating_leaks;
@@ -758,7 +897,7 @@ mod repository_tags {
         assert!(caught.is_err());
         assert_eq!(
             format!("{callback:?}"),
-            "ForeachCallback { panicked: false, .. }"
+            "ForeachCallback { stopped: Some(-7), panicked: false, .. }"
         );
     }
 
@@ -804,6 +943,219 @@ mod repository_tags {
                 }
                 assert_eq!(list(sandbox.repo().as_ref()).unwrap().as_ref().len(), 7);
             }
+        });
+    }
+
+    /// Every tag's full name, as one walk sees them.
+    fn walked(repo: RepositoryRef<'_>) -> Vec<CString> {
+        let mut names = Vec::new();
+        let mut f = |name: &CStr, _: OidRef<'_>| {
+            names.push(name.to_owned());
+            ControlFlow::Continue(())
+        };
+        let mut callback = ForeachCallback::new(&mut f);
+        assert_eq!(foreach(repo, &mut callback), Ok(ControlFlow::Continue(())));
+        drop(callback);
+        names
+    }
+
+    /// Annotated tags and tag objects, with taggers of every form, names and messages of
+    /// many lengths; every argument is rewritten or released after its call. In a child:
+    /// writing a reference reads the time through glibc's `tzset`.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn annotated_tags_borrow_their_arguments_for_the_call() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::annotated_tags_borrow_their_arguments_for_the_call"
+            ),
+            || {
+                let sandbox = Sandbox::new("annotated");
+                let repo = sandbox.repo();
+                let target = commit(repo);
+                let owned = Signature::new(c"Owned", c"owned@example.com", 1, -60).unwrap();
+                for (i, len) in [0usize, 1, 40, 4096, 1 << 20].into_iter().enumerate() {
+                    let name = CString::new(format!("a{i}-{}", "n".repeat(len.min(200)))).unwrap();
+                    let message = CString::new("m".repeat(len)).unwrap();
+                    let (who, mail) = (
+                        CString::new("w".repeat(len + 1)).unwrap(),
+                        CString::new(format!("{}@example.com", "e".repeat(len))).unwrap(),
+                    );
+                    let view = SignatureView::new(&who, &mail, Time::new(i as i64, 0));
+                    let id = create(
+                        repo.as_ref(),
+                        &name,
+                        target.as_ref(),
+                        view.as_ref(),
+                        &message,
+                        false,
+                    )
+                    .unwrap();
+                    let again = create_annotation(
+                        repo.as_ref(),
+                        &name,
+                        target.as_ref(),
+                        view.as_ref(),
+                        &message,
+                    )
+                    .unwrap();
+                    assert_eq!(id, again);
+                    scribble(who);
+                    scribble(mail);
+                    let e = create(
+                        repo.as_ref(),
+                        &name,
+                        target.as_ref(),
+                        owned.as_ref(),
+                        &message,
+                        false,
+                    )
+                    .unwrap_err();
+                    assert_eq!(e.code(), Some(ErrorCode::Exists));
+                    let replaced = create(
+                        repo.as_ref(),
+                        &name,
+                        target.as_ref(),
+                        owned.as_ref(),
+                        &message,
+                        true,
+                    )
+                    .unwrap();
+                    scribble(name);
+                    scribble(message);
+                    let tag = Tag::lookup(repo.as_ref(), replaced.as_ref()).unwrap();
+                    assert_eq!(tag.as_ref().message().map(CStr::count_bytes), Some(len));
+                    assert_eq!(tag.as_ref().tagger().unwrap(), owned.as_ref());
+                }
+                // A tagger borrowed from a tag released right after the call.
+                let parsed = Tag::lookup(
+                    repo.as_ref(),
+                    Oid::from_string(c"b25fa35b38051e4ae45d4222e795f9df2e43f1d1", OidType::Sha1)
+                        .unwrap()
+                        .as_ref(),
+                )
+                .unwrap();
+                let id = create(
+                    repo.as_ref(),
+                    c"parsed",
+                    parsed.as_ref().as_object(),
+                    parsed.as_ref().tagger().unwrap(),
+                    c"of a tag\n",
+                    false,
+                )
+                .unwrap();
+                drop(parsed);
+                let tag = Tag::lookup(repo.as_ref(), id.as_ref()).unwrap();
+                assert_eq!(tag.as_ref().tagger().unwrap().name(), Some(c"Vicent Marti"));
+                assert_eq!(walked(repo.as_ref()).len(), 13);
+            },
+        );
+    }
+
+    /// The closure breaks with codes of either sign, panics, re-enters `foreach`, and
+    /// deletes and creates tags during the walk. In a child, which writes references.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walks_lend_names_and_ids_and_survive_their_closure() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::walks_lend_names_and_ids_and_survive_their_closure"
+            ),
+            || {
+                let sandbox = Sandbox::new("walks");
+                let repo = sandbox.repo();
+                let r = repo.as_ref();
+                assert_eq!(walked(r).len(), 7);
+                for code in [1, -1, c_int::MAX, c_int::MIN, ErrorCode::User.raw()] {
+                    let mut calls = 0;
+                    let mut f = |_: &CStr, _: OidRef<'_>| {
+                        calls += 1;
+                        ControlFlow::Break(NonZero::new(code).unwrap())
+                    };
+                    let mut callback = ForeachCallback::new(&mut f);
+                    let flow = foreach(r, &mut callback).unwrap();
+                    drop(callback);
+                    assert_eq!(flow, ControlFlow::Break(NonZero::new(code).unwrap()));
+                    assert_eq!(calls, 1);
+                }
+
+                // Re-entered: each tag walks every tag again.
+                let mut nested = 0;
+                let mut outer = |_: &CStr, _: OidRef<'_>| {
+                    nested += walked(r).len();
+                    ControlFlow::Continue(())
+                };
+                let mut callback = ForeachCallback::new(&mut outer);
+                assert_eq!(foreach(r, &mut callback), Ok(ControlFlow::Continue(())));
+                drop(callback);
+                assert_eq!(nested, 49);
+
+                // A panic resumes after the walk, which leaves nothing behind.
+                let mut boom =
+                    |_: &CStr, _: OidRef<'_>| -> ControlFlow<NonZero<c_int>> { panic!("boom") };
+                let mut callback = ForeachCallback::new(&mut boom);
+                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    foreach(r, &mut callback)
+                }));
+                assert!(caught.is_err());
+                drop(callback);
+
+                // Writes during the walk: the first call deletes every later tag and
+                // creates new ones; libgit2 fails the walk at the first tag it misses.
+                let target = commit(repo);
+                let mut first = true;
+                let mut seen = 0;
+                let mut writer = |name: &CStr, id: OidRef<'_>| {
+                    seen += 1;
+                    let _ = id.to_oid();
+                    if std::mem::take(&mut first) {
+                        for other in walked(r) {
+                            if other.as_c_str() != name {
+                                let short = &other.to_bytes()["refs/tags/".len()..];
+                                delete(r, &CString::new(short).unwrap()).unwrap();
+                            }
+                        }
+                        create_lightweight(r, c"zz-new", target.as_ref(), false).unwrap();
+                    }
+                    ControlFlow::Continue(())
+                };
+                let mut callback = ForeachCallback::new(&mut writer);
+                let result = foreach(r, &mut callback);
+                drop(callback);
+                assert!(seen >= 1);
+                if let Err(e) = result {
+                    assert_eq!(e.code(), Some(ErrorCode::NotFound));
+                }
+                assert_eq!(walked(r).len(), 2);
+            },
+        );
+    }
+
+    /// Threads walk at once, each over a repository of its own, the first walks of a
+    /// fresh process racing to initialise libgit2.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn walks_on_threads() {
+        isolated(concat!(module_path!(), "::walks_on_threads"), || {
+            let sandboxes: Vec<Sandbox> = (0..4)
+                .map(|i| Sandbox::new(&format!("walk-thread-{i}")))
+                .collect();
+            let paths: Vec<CString> = sandboxes
+                .iter()
+                .map(|s| CString::new(s.path.to_str().unwrap()).unwrap())
+                .collect();
+            thread::scope(|s| {
+                for path in &paths {
+                    s.spawn(move || {
+                        let repo = Repository::open(path).unwrap();
+                        for _ in 0..8 {
+                            assert_eq!(walked(repo.as_ref()).len(), 7);
+                        }
+                    });
+                }
+            });
         });
     }
 }
