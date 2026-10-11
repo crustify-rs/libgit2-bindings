@@ -97,7 +97,7 @@ fn memory_options_cross_threads() {
 
 mod backend_entries {
     use libgit2::libgit2::config::config::Config;
-    use libgit2::libgit2::config::sys::config::BackendEntry;
+    use libgit2::libgit2::config::sys::config::{BackendEntry, BackendEntryArc};
     use std::ffi::CString;
 
     #[test]
@@ -156,5 +156,46 @@ mod backend_entries {
         policy.release(second);
         drop((flag, empty, nested, changed));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// `Debug` reads every string through the retained list, after the config,
+    /// its files and a sibling owner are gone.
+    #[test]
+    #[cfg_attr(miri, ignore = "acquisition and release call libgit2")]
+    fn backend_entry_debug_reads_retained_storage() {
+        let dir = std::env::temp_dir().join(format!(
+            "crustify-backend-entry-debug-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("config");
+        std::fs::write(&file, b"[a]\nkey = value\n[include]\npath = extra\n").unwrap();
+        std::fs::write(dir.join("extra"), b"[a]\nnested\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let config = Config::open(&path).unwrap();
+        let mut entries: Vec<BackendEntryArc> = [c"a.key", c"a.nested"]
+            .into_iter()
+            .map(|key| BackendEntry::from_entry(config.as_ref().entry(key).unwrap()))
+            .collect();
+        drop(config);
+        std::fs::remove_dir_all(dir).unwrap();
+        let printed: Vec<String> = entries
+            .iter()
+            .map(|e| format!("{:?}", e.as_ref()))
+            .collect();
+        let origin = format!("{:?}", Some(path.as_c_str()));
+        assert_eq!(
+            printed[0],
+            format!(
+                "BackendEntry {{ entry: Entry {{ name: Some(\"a.key\"), value: Some(\"value\"), \
+                 backend_type: Some(\"file\"), origin_path: {origin}, level: ConfigLevel(5), \
+                 include_depth: 0 }}, .. }}"
+            )
+        );
+        assert!(printed[1].contains("name: Some(\"a.nested\"), value: None"));
+        assert!(printed[1].ends_with("include_depth: 1 }, .. }"));
+        let last = entries.pop().unwrap();
+        drop(entries);
+        assert_eq!(format!("{:?}", last.as_ref()), printed[1]);
     }
 }
