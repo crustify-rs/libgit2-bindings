@@ -1,0 +1,23 @@
+/target/src/libgit2/config.c:811:16: runtime error: member access within null pointer of type 'git_config_backend_entry' (aka 'struct git_config_backend_entry')
+    #0 0x7ee16776ba12 in get_entry /target/src/libgit2/config.c:811:16
+    #1 0x5e7d6510db1a in <libgit2::libgit2::config::config::ConfigRef>::entry /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/config/wave-1/batch-0/crustify/rust/libgit2/libgit2/config/config.rs:1347:27
+    #2 0x5e7d6510a0c1 in entry_lookup_forms_member_of_unwritten_backend_entry::main /target/crustify/.worktrees/crustify/review-batches/20261008-170008/libgit2/config/wave-1/batch-0/crustify/reviews/20261008-170008/libgit2/config/wave-1/batch-0/ub_safe/entry-lookup-forms-member-of-unwritten-backend-entry/src/main.rs:29:34
+    #3 0x5e7d6510ba3a in <fn() as core::ops::function::FnOnce<()>>::call_once <toolchain>/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+    #4 0x5e7d6510ab7d in std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()> <toolchain>/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+    #5 0x5e7d6510b0a0 in std::rt::lang_start::<()>::{closure#0} <toolchain>/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+    #6 0x5e7d65138937 in <&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe as core::ops::function::FnOnce<()>>::call_once /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/core/src/ops/function.rs:287:21
+    #7 0x5e7d65138937 in std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:573:43
+    #8 0x5e7d65138937 in std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:541:19
+    #9 0x5e7d65138937 in std::panic::catch_unwind::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panic.rs:359:14
+    #10 0x5e7d65138937 in std::rt::lang_start_internal::{closure#0} /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/rt.rs:175:24
+    #11 0x5e7d65138937 in std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:573:43
+    #12 0x5e7d65138937 in std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:541:19
+    #13 0x5e7d65138937 in std::panic::catch_unwind::<std::rt::lang_start_internal::{closure#0}, isize> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panic.rs:359:14
+    #14 0x5e7d65138937 in std::rt::lang_start_internal /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/rt.rs:171:5
+    #15 0x5e7d6510b00f in std::rt::lang_start::<()> <toolchain>/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+    #16 0x5e7d6510a53d in main (<target>/x86_64-unknown-linux-gnu/debug/entry-lookup-forms-member-of-unwritten-backend-entry+0x12153d) (BuildId: 648067b7097c9f7b7db2e31958273624228ad0d7)
+    #17 0x7ee1672701c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #18 0x7ee16727028a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #19 0x5e7d65040024 in _start (<target>/x86_64-unknown-linux-gnu/debug/entry-lookup-forms-member-of-unwritten-backend-entry+0x57024) (BuildId: 648067b7097c9f7b7db2e31958273624228ad0d7)
+
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior /target/src/libgit2/config.c:811:16 
