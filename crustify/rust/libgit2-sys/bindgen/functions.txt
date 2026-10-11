@@ -436,3 +436,8 @@ git_config_backend_foreach_match
 # index wave 0 batch 1: capability equivalence tests
 git_index_caps
 git_index_set_caps
+
+# index wave 0 batch 8: callback C-callsite regression coverage
+git_index_add_all
+git_index_remove_all
+git_index_update_all

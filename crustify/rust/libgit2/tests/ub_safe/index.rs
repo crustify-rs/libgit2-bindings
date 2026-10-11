@@ -520,3 +520,68 @@ fn scalar_options_threads() {
     let handle = std::thread::spawn(move || (flags, caps, setting));
     assert_eq!(handle.join().unwrap(), (flags, caps, setting));
 }
+
+mod matched_path_callback {
+    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
+    use std::ffi::{CStr, CString};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn borrowed_strings_payload_reborrows_and_nested_callbacks() {
+        let mut copies = Vec::new();
+        let mut inner_fn = |path: &CStr, pattern: Option<&CStr>| {
+            copies.push((path.to_owned(), pattern.map(CStr::to_owned)));
+            MatchedPathResult::SKIP
+        };
+        let mut inner = MatchedPathCallback::new(&mut inner_fn);
+        let mut outer_fn = |path: &CStr, pattern: Option<&CStr>| inner.call(path, pattern);
+        let mut outer = MatchedPathCallback::new(&mut outer_fn);
+        for i in 0..32 {
+            let path = CString::new(vec![b'a', 0xff, b'0' + i % 10]).unwrap();
+            let pattern = CString::new(b"*\xfe".to_vec()).unwrap();
+            assert_eq!(outer.call(&path, Some(&pattern)), MatchedPathResult::SKIP);
+            assert_eq!(outer.call(c"", None), MatchedPathResult::SKIP);
+            assert_eq!(outer.stopped(), None);
+        }
+        drop(outer);
+        drop(outer_fn);
+        drop(inner);
+        drop(inner_fn);
+        assert_eq!(copies.len(), 64);
+        assert_eq!(copies[0].0.to_bytes(), b"a\xff0");
+        assert_eq!(copies[0].1.as_ref().unwrap().to_bytes(), b"*\xfe");
+        assert_eq!(copies[1], (c"".to_owned(), None));
+    }
+
+    #[test]
+    fn arbitrary_codes_and_reuse_after_abort() {
+        for code in [i32::MIN, -12345, -7, -1, 0, 1, 256, i32::MAX] {
+            let mut f = |_: &CStr, _: Option<&CStr>| MatchedPathResult::from_code(code);
+            let mut callback = MatchedPathCallback::new(&mut f);
+            for pattern in [None, Some(c""), Some(c"*.rs")] {
+                assert_eq!(callback.call(c"file.rs", pattern).code(), code);
+                assert_eq!(callback.stopped(), (code < 0).then_some(code));
+            }
+        }
+    }
+
+    #[test]
+    fn panic_is_resumed_and_callback_can_be_reused() {
+        let mut first = true;
+        let mut f = |_: &CStr, _: Option<&CStr>| {
+            if std::mem::take(&mut first) {
+                std::panic::panic_any(String::from("matched-path panic"));
+            }
+            MatchedPathResult::APPLY
+        };
+        let mut callback = MatchedPathCallback::new(&mut f);
+        let panic = catch_unwind(AssertUnwindSafe(|| callback.call(c"file", None))).unwrap_err();
+        assert_eq!(
+            panic.downcast_ref::<String>().unwrap(),
+            "matched-path panic"
+        );
+        assert_eq!(callback.stopped(), Some(MatchedPathResult::ABORT.code()));
+        assert_eq!(callback.call(c"file", Some(c"*")), MatchedPathResult::APPLY);
+        assert_eq!(callback.stopped(), None);
+    }
+}

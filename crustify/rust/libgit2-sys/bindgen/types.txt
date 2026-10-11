@@ -98,3 +98,6 @@ git_config_backend
 # index wave 0 batch 1: scalar options and capabilities
 git_index_add_option_t
 git_index_capability_t
+
+# index wave 0 batch 8: synchronous matched-path callback
+git_index_matched_path_cb

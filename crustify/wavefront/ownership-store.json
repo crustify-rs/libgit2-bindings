@@ -10203,6 +10203,59 @@
    ]
   },
   {
+   "name": "git_index_matched_path_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "apply_each_file borrows delta->old_file.path; index_apply_to_all borrows entry->path. Non-null NUL string, immutable during callback only; diff/index release later. No transfer or retention."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "git_pathspec__match initializes match to NULL for an empty pathspec, otherwise lends the parsed pattern. Read-only NUL string valid during callback; git_pathspec__clear releases it after the synchronous scan."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg2"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Caller-selected opaque cookie, forwarded verbatim and never dereferenced, freed or retained by C. Stack foreach_diff_data temporarily stores it. Safe Rust binds a non-null exclusive closure handle, callable only synchronously on the caller thread; NULL is valid for C callbacks not using payload."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_index_new",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {

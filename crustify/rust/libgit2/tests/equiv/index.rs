@@ -969,3 +969,138 @@ fn scalar_capabilities_from_owner() {
         }
     }
 }
+
+mod matched_path_callback {
+    use super::*;
+    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
+    use std::ffi::{c_char, c_void};
+
+    #[derive(Default, Debug, PartialEq)]
+    struct Recorder {
+        codes: Vec<c_int>,
+        seen: Vec<(CString, Option<CString>)>,
+    }
+
+    impl Recorder {
+        fn call(&mut self, path: &CStr, pattern: Option<&CStr>) -> c_int {
+            let code = self.codes.get(self.seen.len()).copied().unwrap_or(0);
+            self.seen
+                .push((path.to_owned(), pattern.map(CStr::to_owned)));
+            code
+        }
+    }
+
+    unsafe extern "C" fn reference(
+        path: *const c_char,
+        pattern: *const c_char,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: remove_all supplies immutable live NUL strings (pattern nullable),
+        // and the harness supplies an exclusively borrowed Recorder for the scan.
+        unsafe {
+            let path = CStr::from_ptr(path);
+            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
+            (&mut *payload.cast::<Recorder>()).call(path, pattern)
+        }
+    }
+
+    /// The integration harness lends C's strings to the public callable API.
+    /// Production add/remove/update wrappers will use the crate-private scan seam.
+    unsafe extern "C" fn public_api(
+        path: *const c_char,
+        pattern: *const c_char,
+        payload: *mut c_void,
+    ) -> c_int {
+        // SAFETY: same C string contract as reference; the harness instead supplies
+        // a live exclusive MatchedPathCallback, never retained or reentered.
+        unsafe {
+            let path = CStr::from_ptr(path);
+            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
+            (&mut *payload.cast::<MatchedPathCallback<'_>>())
+                .call(path, pattern)
+                .code()
+        }
+    }
+
+    /// Safe construction; raw additions stand in for the not-yet-wrapped index_add.
+    fn seeded() -> IndexBox {
+        let index = Index::new().unwrap();
+        for path in [c"a", c"b", c"c", c"dir/non-utf8-\xff"] {
+            let mut entry = ffi::git_index_entry {
+                mode: 0o100644,
+                path: path.as_ptr(),
+                ..Default::default()
+            };
+            entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+            entry.id.id[0] = 1;
+            // SAFETY: the fresh index is exclusively held and C copies this entry
+            // and its immutable NUL path before returning.
+            assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+        }
+        index
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn c_scan_matches_public_callback_results_arguments_and_mutations() {
+        let raw = seeded();
+        let safe = seeded();
+        for (patterns, codes) in [
+            (vec![c"missing"], vec![i32::MIN]),
+            (vec![c"*"], vec![0, i32::MAX, -987]),
+            (vec![c"b", c"dir/*"], vec![1, 0]),
+            (vec![], vec![i32::MIN]),
+            (vec![], vec![0, 0]),
+        ] {
+            let mut patterns: Vec<_> = patterns
+                .into_iter()
+                .map(|p| p.as_ptr().cast_mut())
+                .collect();
+            let paths = ffi::git_strarray {
+                strings: patterns.as_mut_ptr(),
+                count: patterns.len(),
+            };
+            let mut expected = Recorder {
+                codes: codes.clone(),
+                ..Default::default()
+            };
+            clear();
+            // SAFETY: live exclusively used index, borrowed pathspec and recorder;
+            // reference has the matching payload type and retains nothing.
+            let c_rc = unsafe {
+                ffi::git_index_remove_all(
+                    raw.as_c_ptr(),
+                    &paths,
+                    Some(reference),
+                    ptr::from_mut(&mut expected).cast(),
+                )
+            };
+            let c_error = (c_rc < 0).then(c_last);
+            let mut actual = Recorder {
+                codes,
+                ..Default::default()
+            };
+            let mut f = |path: &CStr, pattern: Option<&CStr>| {
+                MatchedPathResult::from_code(actual.call(path, pattern))
+            };
+            let mut callback = MatchedPathCallback::new(&mut f);
+            clear();
+            // SAFETY: as above, public_api's payload is a live exclusive callback;
+            // its closure merely records the arguments and returns a typed code.
+            let rust_rc = unsafe {
+                ffi::git_index_remove_all(
+                    safe.as_c_ptr(),
+                    &paths,
+                    Some(public_api),
+                    ptr::from_mut(&mut callback).cast(),
+                )
+            };
+            let rust_error = (rust_rc < 0).then(c_last);
+            assert_eq!(c_rc, rust_rc);
+            assert_eq!(c_error, rust_error);
+            assert_eq!(state(raw.as_c_ptr()), state(safe.as_c_ptr()));
+            drop(callback);
+            assert_eq!(expected, actual);
+        }
+    }
+}
