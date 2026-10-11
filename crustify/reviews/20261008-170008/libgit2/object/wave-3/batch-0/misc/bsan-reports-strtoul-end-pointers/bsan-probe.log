@@ -1,0 +1,26 @@
+$ GIT_COMMITTER_NAME=C GIT_COMMITTER_EMAIL=c@x GIT_COMMITTER_DATE='2005-04-07T22:13:13-0700' BSAN_OPTIONS=stacktrace_max_len=5 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run
+error: Undefined Behavior: an access of size 1b at offset 0xfffffef00003b944 is out of bounds for alloc784 of size 190b.
+   --> /target/src/util/date.c:347:10
+    |
+347 | switch (*end) {
+    |         ^
+
+stack backtrace:
+0: match_digit
+      at /target/src/util/date.c:347:10
+1: user_from_env
+      at /target/src/libgit2/signature.c:264:16
+2: git_signature_default_from_env
+      at /target/src/libgit2/signature.c:305:18
+3: <libgit2::libgit2::core::types::Signature>::default_committer_from_env
+      at /target/crustify/rust/libgit2/libgit2/object/signature.rs:164:13
+4: envdate_probe::main
+      at /tmp/crustify-ow3rb0/envdate-probe/src/main.rs:11:13
+
+note: stack trace was truncated after 5 frames; set stacktrace_max_len (e.g. BSAN_OPTIONS=stacktrace_max_len=32) to capture more.
+exit status: 1
+
+$ GIT_COMMITTER_NAME=C GIT_COMMITTER_EMAIL=c@x GIT_COMMITTER_DATE='1700000000 -0130' BSAN_OPTIONS=stacktrace_max_len=5 LD_LIBRARY_PATH=crustify/builds/bsan cargo bsan run
+Some("C") 1700000000
+exit status: 0
+

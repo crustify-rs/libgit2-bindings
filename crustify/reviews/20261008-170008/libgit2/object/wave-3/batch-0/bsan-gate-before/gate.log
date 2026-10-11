@@ -1,0 +1,15 @@
+build start Sun Oct 11 03:08:35 UTC 2026
+build rc=0 Sun Oct 11 03:09:27 UTC 2026
+run libgit2_lib start Sun Oct 11 03:09:27 UTC 2026
+run ub_safe start Sun Oct 11 03:09:27 UTC 2026
+run libgit2_sys start Sun Oct 11 03:09:27 UTC 2026
+run equiv start Sun Oct 11 03:09:27 UTC 2026
+run ub_unsafe start Sun Oct 11 03:09:27 UTC 2026
+run libgit2_sys rc=0 Sun Oct 11 03:09:28 UTC 2026
+run libgit2_lib rc=1 Sun Oct 11 03:09:39 UTC 2026
+run ub_unsafe rc=0 Sun Oct 11 03:10:37 UTC 2026
+rerun libgit2_lib skip every_array_length start Sun Oct 11 03:21:24 UTC 2026
+run equiv rc=124 Sun Oct 11 03:49:27 UTC 2026
+run ub_safe rc=124 Sun Oct 11 03:49:27 UTC 2026
+gate done Sun Oct 11 03:49:27 UTC 2026
+rerun libgit2_lib rc=124 Sun Oct 11 04:01:24 UTC 2026

@@ -1,0 +1,43 @@
+start Sun Oct 11 03:54:33 UTC 2026
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+22 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running tests/equiv/main.rs (target/bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/513596211f61704a/out/equiv-513596211f61704a)
+
+running 1 test
+test blob::writing::writes_without_paths_match_c has been running for over 60 seconds
+test blob::writing::writes_without_paths_match_c ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 364 filtered out; finished in 2600.41s
+
+rc=0 Sun Oct 11 04:37:54 UTC 2026
