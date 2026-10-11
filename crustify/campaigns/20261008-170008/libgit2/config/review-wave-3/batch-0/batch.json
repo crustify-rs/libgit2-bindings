@@ -1,0 +1,17 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_config_iterator",
+      "defined_in": "include/git2/sys/config.h",
+      "kind": "type",
+      "field_anchors": [
+        "free",
+        "flags",
+        "next",
+        "backend"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/config/sys/config.rs"
+    }
+  ]
+}
