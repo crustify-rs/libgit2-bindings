@@ -11,14 +11,16 @@
 //! value.
 //!
 //! libgit2 has no way to stop at a parent: anything but NULL is a parent, and NULL ends
-//! the list, after which the commit is written. It also reads each id from the object
-//! database without checking that it is of the repository's id type, which the loose
-//! backend then formats out of bounds (see the
-//! [`object` module](crate::libgit2::object::object#looking-objects-up)). So once the
-//! closure panics, or returns an id of another type than the repository's, the
-//! trampoline hands libgit2 the repository's zero id, once, then NULL: strict object
-//! creation finds no such commit and the routine fails before writing anything, and the
-//! routine's wrapper reports the refusal or resumes the panic.
+//! the list, after which the commit is written (with strict object creation turned off,
+//! whatever the parents are, and the reference to update moved to it). It also reads
+//! each id from the object database without checking that it is of the repository's id
+//! type, which the loose backend then formats out of bounds (see the
+//! [`object` module](crate::libgit2::object::object#looking-objects-up)). So the walk
+//! a commit routine's wrapper runs asks the closure for every parent first, until it
+//! returns `None`, refusing an id of another type than the repository's: only once the
+//! closure gave them all does libgit2 run, through a trampoline handing out those ids,
+//! which can neither fail nor panic. A refusal or a panic of the closure ends the walk
+//! before libgit2 writes anything, whatever its options.
 
 use core::any::Any;
 use core::ffi::c_void;
@@ -37,14 +39,6 @@ use crate::libgit2::util::sys::errors::set;
 /// The closure a [`ParentCallback`] calls: the index of the parent asked for, from 0.
 type ParentFn<'f> = dyn FnMut(usize) -> Option<Oid> + 'f;
 
-/// How a walk through a [`ParentCallback`] failed.
-enum Failure {
-    /// The closure returned an id of another type than the repository's.
-    Refused,
-    /// The closure panicked; the panic resumes once the walk returns.
-    Panicked(Box<dyn Any + Send + 'static>),
-}
-
 /// A callback giving the parents of a commit being written
 /// (`git_commit_parent_callback`): `git_commit_create_from_callback` calls it with each
 /// index from 0, and takes each id it returns as the next parent, until it returns
@@ -54,9 +48,10 @@ enum Failure {
 /// value: the callback keeps it, and its `extern "C"` trampoline returns a pointer to it,
 /// valid until the next call, which libgit2 reads and copies before calling again. A
 /// panic in the closure, or an id of another type than the repository's, cannot stop
-/// libgit2 cleanly; the trampoline then fails the walk instead (see the
-/// [module docs](self#parent-callbacks)), and the panic resumes once control is back in
-/// Rust, from [`call`](Self::call) or from the wrapper that ran the walk.
+/// libgit2 cleanly, so the wrapper of a commit routine collects every parent from the
+/// closure before libgit2 runs (see the [module docs](self#parent-callbacks)). Through
+/// [`call`](Self::call), a panic does not cross the trampoline, which returns NULL, and
+/// resumes once `call` is back in Rust.
 ///
 /// ```
 /// use libgit2::libgit2::object::sys::commit::ParentCallback;
@@ -103,12 +98,8 @@ pub struct ParentCallback<'f> {
     f: &'f mut ParentFn<'f>,
     /// The id last handed out, which libgit2 copies before it calls again.
     last: Oid,
-    /// The repository's id type while a C routine walks the parents, `None` otherwise.
-    kind: Option<OidType>,
-    /// How the walk failed, if it did.
-    failure: Option<Failure>,
-    /// Whether the zero id was handed out after the failure; NULL follows it.
-    stopped: bool,
+    /// A panic the closure raised inside the trampoline, resumed once it returns.
+    panic: Option<Box<dyn Any + Send + 'static>>,
 }
 
 impl<'f> ParentCallback<'f> {
@@ -120,9 +111,7 @@ impl<'f> ParentCallback<'f> {
         Self {
             f,
             last: Oid::zeroed(),
-            kind: None,
-            failure: None,
-            stopped: false,
+            panic: None,
         }
     }
 
@@ -137,7 +126,7 @@ impl<'f> ParentCallback<'f> {
             // call: the trampoline's contract.
             unsafe { callback(idx, payload) }
         });
-        if let Some(Failure::Panicked(panic)) = self.failure.take() {
+        if let Some(panic) = self.panic.take() {
             resume_unwind(panic);
         }
         // SAFETY: the trampoline returns NULL or a pointer to `self.last`, live and
@@ -145,66 +134,51 @@ impl<'f> ParentCallback<'f> {
         unsafe { OidRef::from_ptr(id.cast_mut()) }
     }
 
-    /// Runs `walk` with the C callback and its payload, as the wrapper of the routine
-    /// that calls the callback (`git_commit_create_from_callback`) hands them to it, for
-    /// a repository whose ids are of type `kind`. The payload is this callback, which
-    /// nothing else touches until `walk` returns.
+    /// Runs `walk` with a C callback and its payload, as the wrapper of the routine that
+    /// calls the callback (`git_commit_create_from_callback`) hands them to it, for a
+    /// repository whose ids are of type `kind`.
     ///
-    /// Resumes a panic the closure raised meanwhile. When the closure returned an id of
-    /// another type than `kind`, which was never handed to libgit2, the walk fails with
-    /// libgit2's wording for the mismatch (`GIT_ERROR_INVALID`), set as the thread's
-    /// error, whatever `walk` returned.
+    /// The closure is asked for every parent first, from index 0 until it returns `None`;
+    /// a panic propagates from here, before `walk` runs. An id of another type than
+    /// `kind` ends the walk there too, with libgit2's wording for the mismatch
+    /// (`GIT_ERROR_INVALID`), set as the thread's error. Otherwise `walk` gets a
+    /// trampoline over the collected ids, which hands out each in turn, then NULL, and
+    /// can neither fail nor panic, so libgit2 writes the commit with exactly those
+    /// parents, or fails on its own.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn walk_with<R>(
         &mut self,
         kind: OidType,
         walk: impl FnOnce(ffi::git_commit_parent_callback, *mut c_void) -> R,
     ) -> Result<R, RepositoryError> {
-        self.kind = Some(kind);
-        let result = self.with_payload(walk);
-        self.kind = None;
-        match self.failure.take() {
-            None => Ok(result),
-            Some(Failure::Panicked(panic)) => resume_unwind(panic),
-            Some(Failure::Refused) => {
+        let mut parents = Vec::new();
+        while let Some(id) = (self.f)(parents.len()) {
+            if u32::from(id.as_ref().raw_kind()) != kind.raw() {
                 set(
                     ErrorClass::Invalid,
                     c"specified object ID type does not match repository object ID type",
                 );
-                Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()))
+                return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
             }
+            parents.push(id);
         }
+        let mut collected = |idx: usize| parents.get(idx).copied();
+        Ok(ParentCallback::new(&mut collected).with_payload(walk))
     }
 
-    /// Runs `walk` with the trampoline and this callback as its payload, from a clean
-    /// state.
+    /// Runs `walk` with the trampoline and this callback as its payload.
     fn with_payload<R>(
         &mut self,
         walk: impl FnOnce(ffi::git_commit_parent_callback, *mut c_void) -> R,
     ) -> R {
-        self.failure = None;
-        self.stopped = false;
         walk(Some(parent_with), ptr::from_mut(self).cast())
-    }
-
-    /// What the trampoline hands out once the walk failed: inside a C walk the
-    /// repository's zero id, once, then nothing (NULL); outside one, nothing.
-    fn stop(&mut self) -> Option<&Oid> {
-        match self.kind {
-            Some(kind) if !self.stopped => {
-                self.stopped = true;
-                self.last = Oid::zero(kind);
-                Some(&self.last)
-            }
-            _ => None,
-        }
     }
 }
 
 impl fmt::Debug for ParentCallback<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ParentCallback")
-            .field("failed", &self.failure.is_some())
+            .field("panicked", &self.panic.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -220,27 +194,18 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
     // SAFETY: per this function's contract, `payload` is a live callback borrowed for
     // the call alone.
     let callback = unsafe { &mut *payload.cast::<ParentCallback<'_>>() };
-    let id = if callback.failure.is_some() {
-        callback.stop()
-    } else {
-        match catch_unwind(AssertUnwindSafe(|| (callback.f)(idx))) {
-            Ok(None) => None,
-            Ok(Some(id)) => {
-                let fits = callback
-                    .kind
-                    .is_none_or(|kind| u32::from(id.as_ref().raw_kind()) == kind.raw());
-                if fits {
-                    callback.last = id;
-                    Some(&callback.last)
-                } else {
-                    callback.failure = Some(Failure::Refused);
-                    callback.stop()
-                }
-            }
-            Err(panic) => {
-                callback.failure = Some(Failure::Panicked(panic));
-                callback.stop()
-            }
+    if callback.panic.is_some() {
+        return ptr::null();
+    }
+    let id = match catch_unwind(AssertUnwindSafe(|| (callback.f)(idx))) {
+        Ok(None) => None,
+        Ok(Some(id)) => {
+            callback.last = id;
+            Some(&callback.last)
+        }
+        Err(panic) => {
+            callback.panic = Some(panic);
+            None
         }
     };
     id.map_or(ptr::null(), |id| id.as_ref().as_ptr())
@@ -306,7 +271,7 @@ mod unit_tests {
         assert_eq!(second, view(Some(ids[1].as_ref())));
         assert!(callback.call(2).is_none());
         assert_eq!(view(callback.call(0)), view(Some(ids[0].as_ref())));
-        assert!(format!("{callback:?}").starts_with("ParentCallback { failed: false"));
+        assert!(format!("{callback:?}").starts_with("ParentCallback { panicked: false"));
         drop(callback);
         assert_eq!(asked, [0, 1, 2, 0]);
 
@@ -334,6 +299,55 @@ mod unit_tests {
             Some(&"no parent")
         );
         assert_eq!(view(callback.call(0)), view(Some(sha1(3).as_ref())));
+    }
+
+    /// `walk_with` asks the closure for every parent before the walk runs, then lends the
+    /// walk a trampoline over them, which gives each id in turn, kept until the next
+    /// call, then NULL; a panic propagates before the walk runs (Miri runs it: the walk
+    /// here is Rust).
+    #[test]
+    fn walks_collect_every_parent_first() {
+        let ids = [sha1(1), sha1(2), sha1(3)];
+        let calls = core::cell::Cell::new(0);
+        let mut next = |i: usize| {
+            calls.set(calls.get() + 1);
+            ids.get(i).copied()
+        };
+        let mut callback = ParentCallback::new(&mut next);
+        let seen = callback
+            .walk_with(OidType::Sha1, |cb, payload| {
+                assert_eq!(calls.get(), 4);
+                let cb = cb.expect("a trampoline");
+                let mut seen = Vec::new();
+                for i in 0..8 {
+                    // SAFETY: the trampoline and payload `walk_with` lent, for this walk.
+                    let id = unsafe { cb(i, payload) };
+                    // SAFETY: NULL or the trampoline's last id, read before its next call.
+                    seen.push(view(unsafe { OidRef::from_ptr(id.cast_mut()) }));
+                }
+                seen
+            })
+            .unwrap();
+        let expected: Vec<_> = (0..8).map(|i| view(ids.get(i).map(Oid::as_ref))).collect();
+        assert_eq!(seen, expected);
+        drop(callback);
+        assert_eq!(calls.get(), 4);
+
+        let mut boom = |i: usize| -> Option<Oid> {
+            if i == 1 {
+                panic!("parent 1");
+            }
+            Some(sha1(9))
+        };
+        let mut walked = false;
+        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = ParentCallback::new(&mut boom).walk_with(OidType::Sha1, |_, _| walked = true);
+        }));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"parent 1")
+        );
+        assert!(!walked);
     }
 
     /// A bare repository with the empty tree and an identity, writing commits through
@@ -527,9 +541,9 @@ mod unit_tests {
         assert_eq!(c, merge);
     }
 
-    /// An id of another type than the repository's never reaches libgit2: the zero id
-    /// of the repository's type goes instead, which strict object creation finds
-    /// missing, so nothing is written; the walk fails with libgit2's wording.
+    /// An id of another type than the repository's never reaches libgit2: the walk ends
+    /// at it, before libgit2 runs, so nothing is written; it fails with libgit2's
+    /// wording.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn ids_of_another_type_are_refused() {
@@ -546,17 +560,17 @@ mod unit_tests {
             e.message(),
             c"specified object ID type does not match repository object ID type"
         );
-        assert!(format!("{callback:?}").contains("failed: false"));
+        assert!(format!("{callback:?}").contains("panicked: false"));
         drop(callback);
         assert_eq!(asked, [0]);
         assert_eq!(w.commits(), 0);
     }
 
-    /// A panic in the closure stops the walk the same way, and resumes once libgit2 has
-    /// returned, with nothing written.
+    /// A panic in the closure stops the walk the same way: it propagates from the walk,
+    /// before libgit2 runs, with nothing written.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn walks_resume_panics_after_c() {
+    fn walks_propagate_panics_before_c() {
         let w = Writer::new("panics");
         let mut boom = |_: usize| -> Option<Oid> { panic!("no parent") };
         let mut callback = ParentCallback::new(&mut boom);
@@ -570,16 +584,16 @@ mod unit_tests {
         assert_eq!(w.commits(), 0);
     }
 
-    /// Without strict object creation libgit2 reads no parent: the zero id goes in once,
-    /// then NULL ends the list, so the walk terminates, and still fails. Global option:
-    /// run alone in a child.
+    /// Without strict object creation libgit2 checks no parent, so a refused id or a
+    /// panic must stop the walk before libgit2 runs: nothing is written, and an unborn
+    /// branch to update stays unborn. Global option: run alone in a child.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn refusals_end_the_list_without_strict_creation() {
+    fn failed_walks_write_nothing_without_strict_creation() {
         isolated(
             concat!(
                 module_path!(),
-                "::refusals_end_the_list_without_strict_creation"
+                "::failed_walks_write_nothing_without_strict_creation"
             ),
             || {
                 assert!(runtime_pinned());
@@ -589,6 +603,7 @@ mod unit_tests {
                 };
                 assert_eq!(rc, 0);
                 let w = Writer::new("lenient");
+                let branch = c"refs/heads/main";
                 let mut asked = Vec::new();
                 let mut wide = |i: usize| {
                     asked.push(i);
@@ -597,13 +612,29 @@ mod unit_tests {
                 let mut written = None;
                 let e = ParentCallback::new(&mut wide)
                     .walk_with(OidType::Sha1, |cb, payload| {
-                        written = Some(w.create(c"lenient\n", cb, payload).unwrap());
+                        written = Some(w.create_updating(Some(branch), c"lenient\n", cb, payload));
                     })
                     .unwrap_err();
                 assert_eq!(e.class(), Some(ErrorClass::Invalid));
                 assert_eq!(asked, [0]);
-                let zero = Oid::zero(OidType::Sha1).as_ref().to_hex_string().unwrap();
-                assert_eq!(w.parents(&written.unwrap()), [zero]);
+                assert!(written.is_none(), "libgit2 ran: {written:?}");
+
+                let mut boom = |i: usize| -> Option<Oid> {
+                    assert_eq!(i, 0);
+                    panic!("no parent")
+                };
+                let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    let _ = ParentCallback::new(&mut boom)
+                        .walk_with(OidType::Sha1, |cb, payload| {
+                            w.create_updating(Some(branch), c"panicked\n", cb, payload)
+                        });
+                }));
+                assert_eq!(
+                    caught.unwrap_err().downcast_ref::<&str>(),
+                    Some(&"no parent")
+                );
+                assert_eq!(w.commits(), 0);
+                assert!(!w.dir.join("refs/heads/main").exists());
             },
         );
     }

@@ -1612,8 +1612,10 @@ const _: () = assert!(
 /// }
 /// ```
 ///
-/// Neither `Send` nor `Sync`: the signing callback's raw seam stores a payload whose
-/// thread affinity the caller alone knows.
+/// Neither `Send` nor `Sync`: the payload of the signing callback
+/// ([`set_signer`](CreateExtOptionsMut::set_signer)) is a [`SignatureCallback`] borrowed
+/// exclusively, whose closure need not be `Send`, and which libgit2 calls on the thread
+/// writing the commit.
 ///
 /// ```compile_fail,E0277
 /// use libgit2::libgit2::object::commit::CreateExtOptions;

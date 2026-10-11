@@ -864,6 +864,10 @@ mod builder {
         //! - A name of more than 65535 bytes, which libgit2 inserts while reporting
         //!   nothing and then writes as a corrupt tree, is refused in Rust (the unit test
         //!   `overlong_names_are_refused` keeps the corrected behaviour).
+        //! - An id of another type than the repository's, for a mode libgit2 looks up, is
+        //!   refused in Rust (`GIT_ERROR_INVALID`), where libgit2 formats it out of bounds
+        //!   while looking it up (`tests/ub_safe/tree.rs`,
+        //!   `routines::ids_of_another_type_are_refused_before_the_lookup`).
         //! - A closure stops a walk with `GIT_EUSER` alone, where a C callback may return
         //!   any negative value.
 

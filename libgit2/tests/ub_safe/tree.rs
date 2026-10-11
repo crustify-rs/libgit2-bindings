@@ -734,6 +734,86 @@ mod routines {
         assert!(builder.as_ref().get(c"x").is_none());
     }
 
+    /// An id of another type than the repository's never reaches libgit2's object lookup,
+    /// whose loose backend formats it into a path sized for the repository's type: a
+    /// SHA-256 id in a SHA-1 repository wrote 24 bytes past that path's buffer (ASan: a
+    /// heap buffer overflow, with the short objects path of a temporary directory), and
+    /// a SHA-1 id in a SHA-256 repository left part of it unwritten. Both insert forms
+    /// refuse it for every mode libgit2 looks up, leaving the builder as it was; a
+    /// submodule's commit, never looked up, and the mode and zero-id refusals, which
+    /// libgit2 makes first, keep libgit2's answers.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ids_of_another_type_are_refused_before_the_lookup() {
+        let temp = TempRepo::new("tree-wide");
+        let (blob, _) = objects(&temp);
+        let mut builder = TreeBuilder::new(temp.repo().as_ref()).unwrap();
+        builder
+            .as_mut()
+            .insert(c"kept", blob.as_ref(), FileMode::Blob)
+            .unwrap();
+        let wide = Oid::from_raw(&[0xab; 32], OidType::Sha256).unwrap();
+        let looked_up = [
+            FileMode::Blob,
+            FileMode::BlobExecutable,
+            FileMode::Link,
+            FileMode::Tree,
+        ];
+        for mode in looked_up {
+            for name in [c"x", c"kept"] {
+                for e in [
+                    builder.as_mut().insert(name, wide.as_ref(), mode),
+                    builder
+                        .as_mut()
+                        .insert_entry(name, wide.as_ref(), mode)
+                        .map(|_| ()),
+                ] {
+                    let e: ErrorBuf = e.unwrap_err();
+                    assert_eq!(e.class(), Some(ErrorClass::Invalid), "{mode:?}: {e:?}");
+                    assert_eq!(
+                        e.message(),
+                        c"specified object ID type does not match repository object ID type"
+                    );
+                }
+            }
+            assert_eq!(count(&builder), 1);
+            assert_eq!(mode_of(&builder, c"kept"), Some(ffi_mode(FileMode::Blob)));
+        }
+        // libgit2's earlier refusals keep their own errors.
+        let e = builder
+            .as_mut()
+            .insert(c"x", wide.as_ref(), FileMode::Unreadable)
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Tree));
+        let zero = Oid::zero(OidType::Sha256);
+        let e = builder
+            .as_mut()
+            .insert(c"x", zero.as_ref(), FileMode::Blob)
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Tree));
+        // A submodule's commit is stored unchecked, as libgit2 stores it.
+        builder
+            .as_mut()
+            .insert(c"sub", wide.as_ref(), FileMode::Commit)
+            .unwrap();
+        assert_eq!(count(&builder), 2);
+        drop(builder);
+
+        // The converse, through a SHA-256 repository's builder.
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/resources/testrepo_256.git"
+        );
+        let repo = Repository::open(&CString::new(path).unwrap()).unwrap();
+        let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
+        let e = builder
+            .as_mut()
+            .insert(c"x", blob.as_ref(), FileMode::Blob)
+            .unwrap_err();
+        assert_eq!(e.class(), Some(ErrorClass::Invalid));
+        assert_eq!(count(&builder), 0);
+    }
+
     /// Entries lent by `get` and `insert_entry` copy out into entries of their own, which
     /// outlive the builder and its repository.
     #[test]
