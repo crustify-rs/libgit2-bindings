@@ -598,3 +598,60 @@ fn stage_decoding_is_total() {
         }
     }
 }
+
+/// A snapshot holds its own counted index reference. Multiple snapshots may be
+/// freed in any order, including after their original Rust index owner is gone.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn iterator_snapshot_owners_and_reborrows() {
+    use libgit2::libgit2::index::index::{IndexIterator, IndexIteratorRef};
+
+    fn read(_: IndexIteratorRef<'_>) {}
+    for populated in [false, true] {
+        for parent_first in [false, true] {
+            let mut index = Index::new().unwrap();
+            if populated {
+                for path in [c"z", c"dir/a", c"b"] {
+                    assert_eq!(add(&mut index, path), 0);
+                }
+            }
+            let index: IndexArc = index.into();
+            let mut first = IndexIterator::new(&index).unwrap();
+            let second = IndexIterator::new(&index).unwrap();
+            let mut exclusive = first.as_mut();
+            read(exclusive.as_ref());
+            {
+                let reborrow = exclusive.as_mut();
+                read(reborrow.as_ref());
+            }
+            read(exclusive.as_ref());
+            let shared = first.as_ref();
+            read(shared);
+            read(shared);
+            if parent_first {
+                drop(index);
+                read(first.as_ref());
+                drop(first);
+                read(second.as_ref());
+                drop(second);
+            } else {
+                drop(second);
+                drop(first);
+                // The snapshots must release just their own counted references.
+                drop(IndexIterator::new(&index).unwrap());
+                drop(index);
+            }
+        }
+    }
+}
+
+#[test]
+fn entry_flags_all_storage_bits() {
+    use libgit2::libgit2::index::index::EntryFlags;
+    for bits in 0..=u16::MAX {
+        let mut flags = EntryFlags::from_bits_retain(u32::from(bits));
+        flags.insert(EntryFlags::EXTENDED);
+        flags.remove(EntryFlags::VALID);
+        std::hint::black_box(flags.bits());
+    }
+}

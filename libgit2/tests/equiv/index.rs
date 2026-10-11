@@ -1130,3 +1130,109 @@ fn stage_values_match_c() {
         assert_eq!(observed, stage.raw());
     }
 }
+
+/// Creation is the safe operation under test. `next` is an observation of the
+/// resulting C state, not another wrapper (the entry type is a later workset).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn iterator_snapshot_lifecycle_matches_c() {
+    use libgit2::libgit2::index::index::IndexIterator;
+
+    struct CIterator(*mut ffi::git_index_iterator);
+    impl Drop for CIterator {
+        fn drop(&mut self) {
+            // SAFETY: one successful raw constructor result, released once.
+            unsafe { ffi::git_index_iterator_free(self.0) }
+        }
+    }
+    fn next(iterator: *mut ffi::git_index_iterator) -> (i32, Option<(CString, u16)>) {
+        let mut entry = ptr::null();
+        // SAFETY: each caller supplies a live, exclusively advanced iterator;
+        // its retained index keeps the entry alive until copied below.
+        let rc = unsafe { ffi::git_index_iterator_next(&mut entry, iterator) };
+        let value = if rc == 0 {
+            // SAFETY: a successful next writes a live entry with a NUL path;
+            // neither is mutated or released before this copy.
+            Some(unsafe { (CStr::from_ptr((*entry).path).to_owned(), (*entry).flags) })
+        } else {
+            assert!(entry.is_null());
+            None
+        };
+        (rc, value)
+    }
+
+    init();
+    for populated in [false, true] {
+        for parent_first in [false, true] {
+            let c_index = c_open(None).1.unwrap();
+            let rust_index: IndexArc = Index::new().unwrap().into();
+            if populated {
+                for path in [c"z", c"a", c"dir/b"] {
+                    assert_eq!(add(c_index.0, path), add(rust_index.as_c_ptr(), path));
+                }
+            }
+            let mut raw = ptr::null_mut();
+            // SAFETY: writable output slot and live index; C retains a counted
+            // reference on success, settled by CIterator below.
+            assert_eq!(
+                unsafe { ffi::git_index_iterator_new(&mut raw, c_index.0) },
+                0
+            );
+            let c_iter = CIterator(raw);
+            let rust_iter = IndexIterator::new(&rust_index).unwrap();
+            assert_eq!(state(c_index.0), state(rust_index.as_c_ptr()));
+            // Adding after creation must not enter either snapshot. Replacing an
+            // existing entry exercises C's deferred deletion/readers mechanism.
+            for path in [c"new", c"a"] {
+                assert_eq!(add(c_index.0, path), add(rust_index.as_c_ptr(), path));
+            }
+            let parents = (c_index, rust_index);
+            let parents = if parent_first {
+                drop(parents);
+                None
+            } else {
+                Some(parents)
+            };
+            let expected: &[&CStr] = if populated {
+                &[c"a", c"dir/b", c"z"]
+            } else {
+                &[]
+            };
+            for name in expected {
+                let c_seen = next(c_iter.0);
+                assert_eq!(c_seen, next(rust_iter.as_c_ptr()));
+                assert_eq!(c_seen.0, 0);
+                assert_eq!(c_seen.1.unwrap().0.as_c_str(), *name);
+            }
+            for _ in 0..3 {
+                let c_seen = next(c_iter.0);
+                assert_eq!(c_seen, next(rust_iter.as_c_ptr()));
+                assert_eq!(c_seen, (ffi::GIT_ITEROVER, None));
+            }
+            drop(c_iter);
+            drop(rust_iter);
+            if let Some((c_index, rust_index)) = parents {
+                assert_eq!(state(c_index.0), state(rust_index.as_c_ptr()));
+            }
+        }
+    }
+}
+
+#[test]
+fn entry_flags_match_c_enum_and_preserve_other_fields() {
+    use libgit2::libgit2::index::index::EntryFlags;
+    assert_eq!(EntryFlags::EXTENDED.bits(), ffi::GIT_INDEX_ENTRY_EXTENDED);
+    assert_eq!(EntryFlags::VALID.bits(), ffi::GIT_INDEX_ENTRY_VALID);
+    for bits in 0..=u16::MAX {
+        let bits = u32::from(bits);
+        let mut flags = EntryFlags::from_bits_retain(bits);
+        assert_eq!(flags.bits(), bits);
+        flags.insert(EntryFlags::EXTENDED);
+        assert_eq!(flags.bits(), bits | ffi::GIT_INDEX_ENTRY_EXTENDED);
+        flags.remove(EntryFlags::VALID);
+        assert_eq!(
+            flags.bits(),
+            (bits | ffi::GIT_INDEX_ENTRY_EXTENDED) & !ffi::GIT_INDEX_ENTRY_VALID
+        );
+    }
+}
