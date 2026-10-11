@@ -662,6 +662,113 @@
    ]
   },
   {
+   "name": "git_commit_create_options",
+   "defined_in": "include/git2/commit.h",
+   "_comment_agent": "Plain options struct held by value by its caller (stack in C), initialised by GIT_COMMIT_CREATE_OPTIONS_INIT or git_commit_create_options_init (fails only on a wrong version). git_commit_create_from_stage/_from_tree memcpy it into a local; amend_from_tree reads it through const pointer; init_ext_options copies message_encoding/extra_headers/sign/payload into a git_commit_create_ext_options. allow_empty_commit (1-bit bitfield) is read only by create_from_stage/_from_tree. libgit2 never allocates, retains or frees it or anything it points at. No lifecycle beyond init.",
+   "fields": [
+    {
+     "name": "author",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's signature, read for the call; never stored or freed. NULL = git_signature_default(repo) in create_from_tree, the amended HEAD commit's author in git_commit_amend_from_tree."
+     }
+    },
+    {
+     "name": "committer",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's signature, read for the call (passed to git_commit_create_ext / git_commit__create_internal); never stored, copied into the options or freed. NULL = git_signature_default(repo) in create_from_tree and git_commit_amend_from_tree."
+     }
+    },
+    {
+     "name": "extra_headers",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's array of extra_headers_len git_commit_header values, copied by init_ext_options and read by git_commit__create_buffer_internal only when extra_headers_len != 0. Each header's field/value must be non-NULL. Never stored or freed."
+     }
+    },
+    {
+     "name": "message_encoding",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller's string, copied into the ext options and written as the 'encoding' header; never stored or freed. NULL = none. git_commit_amend_from_tree with a NULL message replaces it with the amended commit's encoding."
+     }
+    },
+    {
+     "name": "payload",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": null,
+      "note": "Opaque cookie: init_ext_options copies it into git_commit_create_ext_options.payload, which libgit2 only forwards to sign; never dereferenced, stored past the call or freed."
+     }
+    },
+    {
+     "name": "sign",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "static"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "git_commit_signature_cb, copied by init_ext_options into the ext options of create_from_tree (git_commit_create_from_stage/_from_tree) and git_commit_amend_from_tree; called once per commit before the odb write; <0 aborts. NULL = no signing."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commit_header",
    "defined_in": "include/git2/commit.h",
    "_comment_agent": "Plain borrowed pair of C strings with no lifecycle routine: no constructor, cloner, disposer or releaser exists in libgit2 (lifecycle-ops empty; the only field toucher is git_commit__create_buffer_internal, read-only). Rust holds it by value, Copy, borrowing both strings for one lifetime.",
@@ -3499,6 +3606,39 @@
       "nullable": false,
       "mutable": true,
       "note": "Overwritten whole with GIT_COMMIT_CREATE_EXT_OPTIONS_INIT when version is GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION; otherwise -1 with a GIT_ERROR_INVALID error and untouched. Touches no global on success."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_options_init",
+   "defined_in": "src/libgit2/commit.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Overwritten whole with GIT_COMMIT_CREATE_OPTIONS_INIT when version is GIT_COMMIT_CREATE_OPTIONS_VERSION; otherwise -1 with a GIT_ERROR_INVALID error and untouched. Touches no global on success."
      }
     }
    ]

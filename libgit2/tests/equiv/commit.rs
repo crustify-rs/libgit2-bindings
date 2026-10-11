@@ -1358,14 +1358,14 @@ mod create_ext_options {
     }
 
     /// The signing callback's state, one per side, reached through shared borrows.
-    struct Signer {
-        rc: Cell<c_int>,
-        calls: Cell<usize>,
+    pub(super) struct Signer {
+        pub(super) rc: Cell<c_int>,
+        pub(super) calls: Cell<usize>,
     }
 
     /// Adds a fixed `gpgsig` header through the lent builder, counts the call and
     /// returns the payload's code.
-    unsafe extern "C" fn sign(
+    pub(super) unsafe extern "C" fn sign(
         builder: *mut ffi::git_commitbuilder,
         _: *mut ffi::git_repository,
         _: *const c_char,
@@ -1399,7 +1399,10 @@ mod create_ext_options {
 
     /// The Rust side's callback: what `sign` does, through the builder's handle, over
     /// the side's `Signer`.
-    fn rust_sign(signer: &Signer, mut builder: CommitBuilderMut<'_>) -> Result<(), StreamError> {
+    pub(super) fn rust_sign(
+        signer: &Signer,
+        mut builder: CommitBuilderMut<'_>,
+    ) -> Result<(), StreamError> {
         signer.calls.set(signer.calls.get() + 1);
         builder
             .add_header(c"gpgsig", c"--sig--\nline")
@@ -1755,6 +1758,501 @@ mod create_ext_options {
         // Every signing step but the two refused before signing called its callback.
         assert_eq!(c.signer.calls.get(), 4);
         assert_eq!(rust.signer.calls.get(), 4);
+    }
+}
+
+/// Equivalence of [`CreateOptions`] with the `git_commit_create_options` C code builds:
+/// [`CreateOptions::new`] against `git_commit_create_options_init`, and a sequence of
+/// commits created on `HEAD` through `git_commit_create_from_tree` and amended through
+/// `git_commit_amend_from_tree` (their wrappers are not written yet), one side reading C
+/// structs built for each step, the other Rust values set through their setters: the
+/// empty-commit flag, the author and the committer (a fixed one, or none for the
+/// default), the encoding, the extra headers and the signing callback (the
+/// `create_ext_options` module's, adding the same header and refusing alike). The C
+/// side's signatures come from `git_signature_new`; the Rust side lends a
+/// `SignatureView` as the author and a `SignatureBox` as the committer. The Rust side
+/// builds its options afresh for each step, since they borrow the callback for as long
+/// as they live.
+///
+/// Each side owns a fresh bare repository whose configuration names the default
+/// identity, and the same two trees (the empty one, and one holding a blob). After every
+/// step the return codes, the error classes and messages, the raw commit objects, the
+/// commit `HEAD` names and the signing callback's calls are compared. The default
+/// identity is signed at the current time, which may differ between the sides: its
+/// timestamps are masked, and every commit id (in `parent` lines, and `HEAD`) is
+/// compared by its position in the side's history rather than by value.
+///
+/// Documented divergences, outside these comparisons: `git_commit_create_options_init`
+/// refuses another version than `GIT_COMMIT_CREATE_OPTIONS_VERSION` (`-1`), which
+/// [`CreateOptions::new`] never passes; and an empty run of headers is stored as NULL
+/// with a length of 0, as C code stores none.
+mod create_options {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::PathBuf;
+    use std::ptr;
+    use std::rc::Rc;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::{Signature, SignatureView, Time};
+    use libgit2::libgit2::object::commit::{
+        CommitBuilderMut, CreateOptions, Header, SignatureCallback,
+    };
+    use libgit2::libgit2::repository::repository::RepositoryRef;
+
+    use super::create_ext_options::{Signer, rust_sign, sign};
+    use super::init;
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn new_matches_c_init() {
+        let mut c = ffi::git_commit_create_options {
+            version: 0,
+            _bitfield_1: ffi::git_commit_create_options::new_bitfield_1(1),
+            message_encoding: c"x".as_ptr(),
+            extra_headers_len: 9,
+            ..Default::default()
+        };
+        // SAFETY: a writable struct and the header's version.
+        let rc = unsafe {
+            ffi::git_commit_create_options_init(&mut c, ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION)
+        };
+        assert_eq!(rc, 0);
+        let rust = CreateOptions::new();
+        let r = rust.as_ref();
+        assert_eq!(r.version(), c.version);
+        assert_eq!(r.allow_empty_commit(), c.allow_empty_commit() != 0);
+        assert_eq!(r.author().is_none(), c.author.is_null());
+        assert_eq!(r.committer().is_none(), c.committer.is_null());
+        assert_eq!(r.message_encoding().is_none(), c.message_encoding.is_null());
+        assert_eq!(r.extra_headers().len(), c.extra_headers_len);
+        assert_eq!(r.has_signer(), c.sign.is_some());
+        assert!(c.payload.is_null());
+    }
+
+    /// Which routine a step calls: create on `HEAD` with one of the side's trees, or
+    /// amend `HEAD` with one and a new message (`None` keeps the amended one's).
+    #[derive(Clone, Copy, Debug)]
+    enum Op {
+        Create(usize),
+        Amend(usize, Option<&'static CStr>),
+    }
+
+    /// One step: the routine and the options' fields; `fixed` signatures are the side's
+    /// own, `false` leaves the field unset for the default.
+    #[derive(Clone, Copy, Debug)]
+    struct Step {
+        op: Op,
+        allow_empty: bool,
+        author: bool,
+        committer: bool,
+        encoding: Option<&'static CStr>,
+        headers: &'static [(&'static CStr, &'static CStr)],
+        sign: Option<c_int>,
+    }
+
+    const BASE: Step = Step {
+        op: Op::Create(0),
+        allow_empty: false,
+        author: true,
+        committer: true,
+        encoding: None,
+        headers: &[],
+        sign: None,
+    };
+
+    fn script() -> Vec<Step> {
+        vec![
+            // The empty tree on an unborn `HEAD` changes nothing.
+            Step {
+                author: false,
+                committer: false,
+                ..BASE
+            },
+            Step {
+                allow_empty: true,
+                ..BASE
+            },
+            Step {
+                op: Op::Create(1),
+                encoding: Some(c"ISO-8859-1"),
+                headers: &[(c"x-one", c"1"), (c"x-two", c"a\nb")],
+                ..BASE
+            },
+            // The tree `HEAD` already has.
+            Step {
+                op: Op::Create(1),
+                ..BASE
+            },
+            // Allowed, with the default identity for both.
+            Step {
+                op: Op::Create(1),
+                allow_empty: true,
+                author: false,
+                committer: false,
+                ..BASE
+            },
+            // The amended commit's author, message and encoding; the given committer.
+            Step {
+                op: Op::Amend(1, None),
+                author: false,
+                ..BASE
+            },
+            Step {
+                op: Op::Amend(0, Some(c"amended\n")),
+                committer: false,
+                encoding: Some(c"ISO-8859-1"),
+                headers: &[(c"x-amend", c"")],
+                sign: Some(0),
+                ..BASE
+            },
+            // A change, refused by the signer before anything is written.
+            Step {
+                op: Op::Create(1),
+                sign: Some(-7),
+                ..BASE
+            },
+            // `GIT_PASSTHROUGH` fails the call too.
+            Step {
+                op: Op::Create(1),
+                sign: Some(-30),
+                ..BASE
+            },
+            // Without a new message the amended commit's encoding wins over the options'.
+            Step {
+                op: Op::Amend(1, None),
+                encoding: Some(c"UTF-16"),
+                sign: Some(1),
+                ..BASE
+            },
+            // Amending ignores the empty-commit check.
+            Step {
+                op: Op::Amend(1, Some(c"again\n")),
+                ..BASE
+            },
+            Step {
+                op: Op::Create(0),
+                allow_empty: true,
+                headers: &[(c"x-empty", c"")],
+                sign: Some(0),
+                ..BASE
+            },
+        ]
+    }
+
+    /// What a step gave: the code, the error class and message (or the masked raw
+    /// commit), the position of `HEAD`'s commit in the side's history, and the callback's
+    /// calls so far.
+    type Outcome = (c_int, c_int, String, Option<usize>, usize);
+
+    /// The default identity both repositories' configurations name.
+    const DEFAULT_IDENTITY: &str = "Default Identity <default@example.com>";
+
+    struct Side {
+        dir: PathBuf,
+        repo: *mut ffi::git_repository,
+        trees: [*mut ffi::git_tree; 2],
+        author: *mut ffi::git_signature,
+        committer: *mut ffi::git_signature,
+        history: Vec<String>,
+        signer: Rc<Signer>,
+    }
+
+    impl Side {
+        fn new(tag: &str) -> Self {
+            init();
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-commit-create-options-equiv-{}-{tag}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = CString::new(dir.to_str().unwrap()).unwrap();
+            let mut repo = ptr::null_mut();
+            // SAFETY: a writable slot and a NUL-terminated path; the repository is freed
+            // at once, and opened again once its configuration names the identity.
+            unsafe {
+                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
+                ffi::git_repository_free(repo);
+            }
+            let config = dir.join("config");
+            let mut text = std::fs::read_to_string(&config).unwrap();
+            text.push_str("[user]\n\tname = Default Identity\n\temail = default@example.com\n");
+            std::fs::write(&config, text).unwrap();
+            let mut trees = [ptr::null_mut(); 2];
+            let (mut builder, mut tree_id, mut blob_id, mut entry) = (
+                ptr::null_mut(),
+                ffi::git_oid::default(),
+                ffi::git_oid::default(),
+                ptr::null(),
+            );
+            let (mut author, mut committer) = (ptr::null_mut(), ptr::null_mut());
+            // SAFETY: writable slots, NUL-terminated strings and buffers of the given
+            // lengths, and the live repository; the builder is freed once, the rest when
+            // the side drops.
+            unsafe {
+                assert_eq!(ffi::git_repository_open(&mut repo, path.as_ptr()), 0);
+                for (i, tree) in trees.iter_mut().enumerate() {
+                    assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
+                    if i == 1 {
+                        let data = b"blob\n";
+                        assert_eq!(
+                            ffi::git_blob_create_from_buffer(
+                                &mut blob_id,
+                                repo,
+                                data.as_ptr().cast(),
+                                data.len()
+                            ),
+                            0
+                        );
+                        assert_eq!(
+                            ffi::git_treebuilder_insert(
+                                &mut entry,
+                                builder,
+                                c"file".as_ptr(),
+                                &blob_id,
+                                ffi::GIT_FILEMODE_BLOB
+                            ),
+                            0
+                        );
+                    }
+                    assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
+                    ffi::git_treebuilder_free(builder);
+                    assert_eq!(ffi::git_tree_lookup(tree, repo, &tree_id), 0);
+                }
+                assert_eq!(
+                    ffi::git_signature_new(
+                        &mut author,
+                        c"A U Thor".as_ptr(),
+                        c"author@example.com".as_ptr(),
+                        123456789,
+                        60
+                    ),
+                    0
+                );
+                assert_eq!(
+                    ffi::git_signature_new(
+                        &mut committer,
+                        c"Com Mitter".as_ptr(),
+                        c"committer@example.com".as_ptr(),
+                        987654321,
+                        -90
+                    ),
+                    0
+                );
+            }
+            Self {
+                dir,
+                repo,
+                trees,
+                author,
+                committer,
+                history: Vec::new(),
+                signer: Rc::new(Signer {
+                    rc: Default::default(),
+                    calls: Default::default(),
+                }),
+            }
+        }
+
+        /// The step's routine with the options at `opts`, and what it gave.
+        fn run(&mut self, step: Step, opts: *const ffi::git_commit_create_options) -> Outcome {
+            if let Some(rc) = step.sign {
+                self.signer.rc.set(rc);
+            }
+            let mut id = ffi::git_oid::default();
+            // SAFETY: the side's live objects; `opts` addresses live options whose
+            // borrows, callback and payload outlive the call; messages are NUL-terminated
+            // or NULL where the routine allows it.
+            let rc = unsafe {
+                match step.op {
+                    Op::Create(tree) => ffi::git_commit_create_from_tree(
+                        &mut id,
+                        self.repo,
+                        self.trees[tree],
+                        c"options\n".as_ptr(),
+                        opts,
+                    ),
+                    Op::Amend(tree, message) => ffi::git_commit_amend_from_tree(
+                        &mut id,
+                        self.repo,
+                        self.trees[tree],
+                        message.map_or(ptr::null(), CStr::as_ptr),
+                        opts,
+                    ),
+                }
+            };
+            let calls = self.signer.calls.get();
+            if rc < 0 {
+                // SAFETY: after a failure the thread's error is set, and copied at once.
+                let (class, message) = unsafe {
+                    let e = ffi::git_error_last();
+                    ((*e).klass, CStr::from_ptr((*e).message))
+                };
+                let message = message.to_string_lossy().into_owned();
+                return (rc, class, message, self.head(), calls);
+            }
+            let raw = self.raw(&id);
+            self.history.push(hex(&id));
+            (rc, 0, self.mask(&raw), self.head(), calls)
+        }
+
+        /// The raw text of the commit `id`.
+        fn raw(&self, id: &ffi::git_oid) -> String {
+            let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
+            // SAFETY: the commit just written is read back and copied; each object is
+            // released once.
+            unsafe {
+                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
+                assert_eq!(ffi::git_odb_read(&mut obj, odb, id), 0);
+                let data = std::slice::from_raw_parts(
+                    ffi::git_odb_object_data(obj).cast::<u8>(),
+                    ffi::git_odb_object_size(obj),
+                );
+                let raw = String::from_utf8(data.to_vec()).unwrap();
+                ffi::git_odb_object_free(obj);
+                ffi::git_odb_free(odb);
+                raw
+            }
+        }
+
+        /// `raw` with the default identity's timestamps masked and each parent named by
+        /// its position in the side's history.
+        fn mask(&self, raw: &str) -> String {
+            raw.split_inclusive('\n')
+                .map(|line| {
+                    if let Some(parent) = line.strip_prefix("parent ") {
+                        let at = self.position(parent.trim_end());
+                        format!("parent #{at:?}\n")
+                    } else if let Some(at) = line.find(DEFAULT_IDENTITY) {
+                        format!("{}<time>\n", &line[..at + DEFAULT_IDENTITY.len() + 1])
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect()
+        }
+
+        fn position(&self, hex: &str) -> Option<usize> {
+            self.history.iter().position(|h| h == hex)
+        }
+
+        /// The position of the commit `HEAD` resolves to in the side's history.
+        fn head(&self) -> Option<usize> {
+            let mut head = ptr::null_mut();
+            // SAFETY: the live repository; the reference is released once, its target
+            // copied first.
+            unsafe {
+                if ffi::git_repository_head(&mut head, self.repo) != 0 {
+                    return None;
+                }
+                let target = hex(&*ffi::git_reference_target(head));
+                ffi::git_reference_free(head);
+                self.position(&target)
+            }
+        }
+    }
+
+    impl Drop for Side {
+        fn drop(&mut self) {
+            // SAFETY: each object is released once, the repository last.
+            unsafe {
+                ffi::git_signature_free(self.author);
+                ffi::git_signature_free(self.committer);
+                for tree in self.trees {
+                    ffi::git_tree_free(tree);
+                }
+                ffi::git_repository_free(self.repo);
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn hex(id: &ffi::git_oid) -> String {
+        let mut hex = [0u8; 41];
+        // SAFETY: a buffer of `hex.len()` bytes, which libgit2 NUL-terminates.
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), id) };
+        CStr::from_bytes_until_nul(&hex)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn commits_created_and_amended_with_the_options_match_c() {
+        let script = script();
+        let (mut c, mut rust) = (Side::new("c"), Side::new("rust"));
+        let author =
+            SignatureView::new(c"A U Thor", c"author@example.com", Time::new(123456789, 60));
+        let committer =
+            Signature::new(c"Com Mitter", c"committer@example.com", 987654321, -90).unwrap();
+        // The Rust side's header runs, built before the options that borrow them.
+        let runs: Vec<Vec<Header<'static>>> = script
+            .iter()
+            .map(|step| {
+                step.headers
+                    .iter()
+                    .map(|&(f, v)| Header::new(f, v))
+                    .collect()
+            })
+            .collect();
+        let rust_signer = Rc::clone(&rust.signer);
+        let mut sign_rust = |builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| {
+            rust_sign(&rust_signer, builder)
+        };
+        for (i, (&step, run)) in script.iter().zip(&runs).enumerate() {
+            let c_headers: Vec<ffi::git_commit_header> = step
+                .headers
+                .iter()
+                .map(|&(f, v)| ffi::git_commit_header {
+                    field: f.as_ptr(),
+                    value: v.as_ptr(),
+                })
+                .collect();
+            let c_opts = ffi::git_commit_create_options {
+                version: ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION,
+                _bitfield_1: ffi::git_commit_create_options::new_bitfield_1(
+                    step.allow_empty.into(),
+                ),
+                author: if step.author { c.author } else { ptr::null() },
+                committer: if step.committer {
+                    c.committer
+                } else {
+                    ptr::null()
+                },
+                message_encoding: step.encoding.map_or(ptr::null(), CStr::as_ptr),
+                extra_headers: if c_headers.is_empty() {
+                    ptr::null()
+                } else {
+                    c_headers.as_ptr()
+                },
+                extra_headers_len: c_headers.len(),
+                sign: step.sign.map(|_| sign as _),
+                payload: if step.sign.is_some() {
+                    Rc::as_ptr(&c.signer).cast_mut().cast()
+                } else {
+                    ptr::null_mut()
+                },
+            };
+            let expected = c.run(step, &c_opts);
+
+            let mut signer = SignatureCallback::new(&mut sign_rust);
+            let mut options = CreateOptions::new();
+            let mut m = options.as_mut();
+            m.set_allow_empty_commit(step.allow_empty);
+            m.set_author(step.author.then(|| author.as_ref()));
+            m.set_committer(step.committer.then(|| committer.as_ref()));
+            m.set_message_encoding(step.encoding);
+            m.set_extra_headers(run);
+            m.set_signer(step.sign.map(|_| &mut signer));
+            let got = rust.run(step, ptr::from_ref(&options).cast());
+            signer.resume_panic();
+            assert_eq!(got, expected, "step {i}: {step:?}");
+        }
+        // Every signing step reached its callback: none fails before signing.
+        assert_eq!(c.signer.calls.get(), 5);
+        assert_eq!(rust.signer.calls.get(), 5);
+        assert_eq!((c.history.len(), rust.history.len()), (8, 8));
     }
 }
 

@@ -2,7 +2,7 @@
 //! handles and object conversions; the `CommitArray` value held by its `CommitArrayVal`
 //! owner, its handles, the commits it lends and moves in and out, and the
 //! `git_commitarray_dispose` policy; the `Header` value; and the `CreateExtOptions`
-//! value and its handles.
+//! and `CreateOptions` values and their handles.
 //!
 //! Each filled array's buffer is exactly `len` commit pointers long (libgit2 detaches
 //! a `git_vector` sized to them, `set_commits` allocates that many), so ASan flags a
@@ -913,6 +913,350 @@ mod create_ext_options {
         assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
     }
 
+}
+
+/// The commit-on-`HEAD` options: the `CreateOptions` value (`git_commit_create_options`)
+/// and its handles.
+///
+/// The options are a version, a one-bit flag, two borrowed signatures, a borrowed string,
+/// a borrowed run of headers and a callback with its payload. Their handles project each
+/// field out of a pointer — the flag through its bitfield's storage byte — and rebuild a
+/// `SignatureRef`, a `&CStr` or a run of headers from it, so these tests exercise every
+/// getter and setter on every holder Rust has for one (a local, a heap slot, an element
+/// of a run that moves when it grows), through reborrows, with signatures (borrowed views
+/// and owned boxes), strings and headers on the heap dropped right after their last read
+/// (ASan: a getter reading past them or after them). libgit2 reads the options for one
+/// call and keeps nothing: two tests hand them to `git_commit_create_from_tree` and
+/// `git_commit_amend_from_tree` (through the `create_options` fixture until those are
+/// wrapped), everything they borrow on the heap and freed right after the call (ASan,
+/// BSan: a retained pointer), one with a signer whose closure writes its own state
+/// between calls. Options that outlive their borrows, aliased handles and a signer that
+/// does not outlive the options do not compile (`compile_fail/` and the type's doctests).
+/// The options are neither `Send` nor `Sync`; each thread builds its own and commits in
+/// its own repository at once (TSan). `CreateOptions::new` fills the options through
+/// libgit2, so Miri skips every test here; the module's `unit_tests` run the same
+/// projections under Miri over options built in Rust.
+mod create_options {
+    use std::cell::Cell;
+    use std::ffi::{CStr, CString};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{
+        Signature, SignatureBox, SignatureRef, SignatureView, StreamError, Time,
+    };
+    use libgit2::libgit2::object::commit::{
+        CommitBuilderMut, CreateOptions, CreateOptionsMut, CreateOptionsRef, Header,
+        SignatureCallback,
+    };
+    use libgit2::libgit2::repository::repository::RepositoryRef;
+    use libgit2::libgit2::util::errors::ErrorCode;
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::create_options::{amend, create};
+
+    /// What the getters read: the flag, the two signatures' names, the encoding and the
+    /// headers.
+    type Fields<'o> = (
+        bool,
+        Option<&'o CStr>,
+        Option<&'o CStr>,
+        Option<&'o CStr>,
+        Vec<(&'o CStr, &'o CStr)>,
+    );
+
+    fn name<'o>(s: Option<SignatureRef<'o>>) -> Option<&'o CStr> {
+        s.map(|s| s.name().unwrap())
+    }
+
+    fn read<'o>(r: CreateOptionsRef<'_, 'o>) -> Fields<'o> {
+        let headers = r
+            .extra_headers()
+            .iter()
+            .map(|h| (h.field(), h.value()))
+            .collect();
+        (
+            r.allow_empty_commit(),
+            name(r.author()),
+            name(r.committer()),
+            r.message_encoding(),
+            headers,
+        )
+    }
+
+    fn write<'o>(
+        mut m: CreateOptionsMut<'_, 'o>,
+        allow: bool,
+        who: Option<SignatureRef<'o>>,
+        encoding: Option<&'o CStr>,
+        headers: &'o [Header<'o>],
+    ) {
+        m.set_allow_empty_commit(allow);
+        m.set_author(who);
+        m.set_committer(who);
+        m.set_message_encoding(encoding);
+        m.set_extra_headers(headers);
+    }
+
+    /// An owned signature of `name`, its strings and struct on libgit2's heap.
+    fn owned(name: &CStr) -> SignatureBox {
+        Signature::new(name, c"o@example.com", 7, 0).unwrap()
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn every_field_round_trips_on_every_holder() {
+        let strings: Vec<CString> = ["Name", "UTF-16", "x", &"y".repeat(1024)]
+            .into_iter()
+            .map(|s| CString::new(s).unwrap())
+            .collect();
+        let views: Vec<SignatureView<'_>> = strings
+            .iter()
+            .map(|s| SignatureView::new(s, s, Time::new(0, 0)))
+            .collect();
+        let boxes: Vec<SignatureBox> = strings.iter().map(|s| owned(s)).collect();
+        let headers: Vec<Header<'_>> = strings.iter().map(|s| Header::new(s, s)).collect();
+        let mut local = CreateOptions::new();
+        let mut boxed = Box::new(CreateOptions::new());
+        let mut run = vec![CreateOptions::new()];
+        for i in 0..strings.len() {
+            let allow = i % 2 == 0;
+            let who = if allow {
+                views[i].as_ref()
+            } else {
+                boxes[i].as_ref()
+            };
+            let encoding = strings.get(i + 1).map(|s| s.as_c_str());
+            let hs = &headers[i..];
+            write(local.as_mut(), allow, Some(who), encoding, hs);
+            write(
+                CreateOptions::as_mut(&mut boxed),
+                allow,
+                Some(who),
+                encoding,
+                hs,
+            );
+            // Growing the run moves its elements; each handle is taken afresh.
+            run.push(CreateOptions::new());
+            write(run[i].as_mut(), allow, Some(who), encoding, hs);
+            let expected = (
+                allow,
+                Some(strings[i].as_c_str()),
+                Some(strings[i].as_c_str()),
+                encoding,
+                hs.iter()
+                    .map(|h| (h.as_ref().field(), h.as_ref().value()))
+                    .collect::<Vec<_>>(),
+            );
+            for r in [
+                local.as_ref(),
+                CreateOptions::as_ref(&boxed),
+                run[i].as_ref(),
+            ] {
+                assert_eq!(read(r), expected);
+                assert_eq!(r.version(), 1);
+                assert!(!r.has_signer());
+                assert_eq!(r.author().unwrap(), who);
+            }
+            assert_eq!(
+                read(run[i + 1].as_ref()),
+                (false, None, None, None, Vec::new())
+            );
+        }
+        write(local.as_mut(), false, None, None, &[]);
+        assert_eq!(read(local.as_ref()), (false, None, None, None, Vec::new()));
+    }
+
+    /// Signatures, strings and headers on the heap, freed right after the options' last
+    /// use.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reads_stay_inside_heap_borrows() {
+        for len in [1, 7, 8, 15, 16, 255] {
+            let name = CString::new("n".repeat(len)).unwrap();
+            let view = SignatureView::new(&name, &name, Time::new(1, 1));
+            let signature = owned(&name);
+            let headers: Vec<Header<'_>> =
+                (0..len % 5).map(|_| Header::new(&name, &name)).collect();
+            let mut options = CreateOptions::new();
+            write(
+                options.as_mut(),
+                true,
+                Some(view.as_ref()),
+                Some(&name),
+                &headers,
+            );
+            options.as_mut().set_committer(Some(signature.as_ref()));
+            let (allow, author, committer, encoding, hs) = read(options.as_ref());
+            assert!(allow);
+            assert_eq!(author.unwrap().to_bytes().len(), len);
+            assert_eq!(committer.unwrap().to_bytes().len(), len);
+            assert_eq!(encoding.unwrap().to_bytes().len(), len);
+            assert_eq!(options.as_ref().committer().unwrap().when().seconds(), 7);
+            assert_eq!(hs.len(), len % 5);
+            assert!(format!("{options:?}").len() > 3 * len);
+            drop((headers, signature, view));
+            drop(name);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reborrows_keep_one_writer() {
+        let headers = [Header::new(c"f", c"v")];
+        let who = SignatureView::new(c"W", c"w@example.com", Time::new(0, 0));
+        let mut options = CreateOptions::default();
+        let mut m = options.as_mut();
+        {
+            let mut inner = m.as_mut();
+            inner.set_extra_headers(&headers);
+            inner.set_allow_empty_commit(true);
+            assert_eq!(inner.as_ref().extra_headers().len(), 1);
+        }
+        let shared = m.as_ref();
+        assert_eq!(read(shared).4, [(c"f", c"v")]);
+        assert!(read(shared).0);
+        m.set_author(Some(who.as_ref()));
+        assert_eq!(name(options.as_ref().author()), Some(c"W"));
+        assert_eq!(format!("{:?}", options.as_mut()), format!("{options:?}"));
+    }
+
+    /// libgit2 reads the options for the call only: the commits it writes carry the
+    /// signatures, the encoding and the headers, empty commits are refused until
+    /// allowed, an amend reads the same struct, and nothing it was given is read after
+    /// the call (every borrow is on the heap and freed right away).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn libgit2_reads_the_options_for_the_call_only() {
+        let repo = TempRepo::new("commit-create-options");
+        let author_name = CString::new("A U Thor").unwrap();
+        let author_mail = CString::new("author@example.com").unwrap();
+        let author = Box::new(SignatureView::new(
+            &author_name,
+            &author_mail,
+            Time::new(100, 60),
+        ));
+        let committer = owned(c"Committer");
+        let encoding = CString::new("ISO-8859-1").unwrap();
+        let value = CString::new("one\ntwo").unwrap();
+        let headers = vec![Header::new(c"x-a", &value), Header::new(c"x-b", c"")];
+        let mut options = CreateOptions::new();
+        write(
+            options.as_mut(),
+            false,
+            Some(SignatureView::as_ref(&author)),
+            Some(&encoding),
+            &headers,
+        );
+        options.as_mut().set_committer(Some(committer.as_ref()));
+        // The empty tree on an unborn `HEAD` changes nothing.
+        assert_eq!(create(&repo, &options), Err(ErrorCode::Generic.raw()));
+        options.as_mut().set_allow_empty_commit(true);
+        let text = create(&repo, &options).unwrap();
+        drop(headers);
+        drop((value, encoding, committer));
+        assert!(
+            text.contains(
+                "\nauthor A U Thor <author@example.com> 100 +0100\n\
+                 committer Committer <o@example.com> 7 +0000\n\
+                 encoding ISO-8859-1\nx-a one\n two\nx-b \n\nmsg\n"
+            ),
+            "{text}"
+        );
+
+        // Amending keeps the amended commit's encoding and author where unset.
+        let mut options = CreateOptions::new();
+        options
+            .as_mut()
+            .set_committer(Some(SignatureView::as_ref(&author)));
+        let text = amend(&repo, None, &options).unwrap();
+        drop(author);
+        drop((author_name, author_mail));
+        assert!(
+            text.contains(
+                "\nauthor A U Thor <author@example.com> 100 +0100\n\
+                 committer A U Thor <author@example.com> 100 +0100\n\
+                 encoding ISO-8859-1\n\nmsg\n"
+            ),
+            "{text}"
+        );
+    }
+
+    /// A signer stored in the options signs each commit created or amended with them,
+    /// its closure writing its own state between calls; a refusal fails the commit with
+    /// its code, a panic with `GIT_EUSER`, kept until resumed once the options are gone.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signers_sign_through_the_options() {
+        let repo = TempRepo::new("commit-create-options-signer");
+        let who = SignatureView::new(c"S", c"s@example.com", Time::new(5, 0));
+        let calls = Cell::new(0);
+        let mut f = |mut builder: CommitBuilderMut<'_>, _: RepositoryRef<'_>, content: &CStr| {
+            calls.set(calls.get() + 1);
+            builder
+                .add_header(c"gpgsig", c"sig")
+                .map_err(StreamError::from)?;
+            // The copy of the contents outlives the buffer the header replaced.
+            assert!(!content.to_bytes().windows(6).any(|w| w == b"gpgsig"));
+            match calls.get() {
+                3 => Err(StreamError::new(
+                    libgit2::libgit2::util::errors::ErrorClass::Callback,
+                    c"refused",
+                )
+                .with_code(ErrorCode::Ambiguous)),
+                4 => panic!("signing panicked"),
+                _ => Ok(()),
+            }
+        };
+        let mut signer = SignatureCallback::new(&mut f);
+        {
+            let mut options = CreateOptions::new();
+            let mut m = options.as_mut();
+            m.set_allow_empty_commit(true);
+            m.set_author(Some(who.as_ref()));
+            m.set_committer(Some(who.as_ref()));
+            m.set_signer(Some(&mut signer));
+            assert!(create(&repo, &options).unwrap().contains("\ngpgsig sig\n"));
+            assert!(amend(&repo, Some(c"amended\n"), &options).is_ok());
+            assert_eq!(create(&repo, &options), Err(ErrorCode::Ambiguous.raw()));
+            assert_eq!(create(&repo, &options), Err(ErrorCode::User.raw()));
+            assert_eq!(amend(&repo, None, &options), Err(ErrorCode::User.raw()));
+        }
+        let caught = catch_unwind(AssertUnwindSafe(|| signer.resume_panic()));
+        assert_eq!(
+            caught.unwrap_err().downcast_ref::<&str>(),
+            Some(&"signing panicked")
+        );
+        let mut options = CreateOptions::new();
+        options.as_mut().set_allow_empty_commit(true);
+        options.as_mut().set_author(Some(who.as_ref()));
+        options.as_mut().set_committer(Some(who.as_ref()));
+        options.as_mut().set_signer(Some(&mut signer));
+        assert!(create(&repo, &options).unwrap().contains("\ngpgsig sig\n"));
+        drop(signer);
+        assert_eq!(calls.get(), 5);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_on_many_threads() {
+        thread::scope(|s| {
+            for t in 0..4 {
+                s.spawn(move || {
+                    let repo = TempRepo::new(&format!("commit-create-options-thread-{t}"));
+                    let name = CString::new(format!("T{t}")).unwrap();
+                    let who = SignatureView::new(&name, c"t@example.com", Time::new(t, 0));
+                    let headers = [Header::new(c"x-thread", &name)];
+                    let mut options = CreateOptions::new();
+                    write(options.as_mut(), true, Some(who.as_ref()), None, &headers);
+                    for _ in 0..4 {
+                        let text = create(&repo, &options).unwrap();
+                        assert!(text.contains(&format!("\nx-thread T{t}\n")), "{text}");
+                    }
+                });
+            }
+        });
+    }
 }
 
 /// UB tests for writing and reading commit signatures: `create_with_signature` and

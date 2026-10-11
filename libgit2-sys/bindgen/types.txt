@@ -9,6 +9,7 @@ git_buildinfo_t
 git_checkout_notify_t
 git_checkout_options
 git_commit_create_ext_options
+git_commit_create_options
 git_commit_header
 git_commitarray
 git_commitbuilder

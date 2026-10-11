@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `signer` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/create_options_signer_outlives_options.rs:14:5
+   |
+13 |     options.as_mut().set_signer(Some(&mut signer));
+   |                                      ----------- first mutable borrow occurs here
+14 |     signer.resume_panic();
+   |     ^^^^^^ second mutable borrow occurs here
+15 |     let _ = options.as_ref().has_signer();
+   |             ------- first borrow later used here
