@@ -1,0 +1,628 @@
+{
+  "objective": "review",
+  "items": [
+    {
+      "name": "git_blob_dup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_filter",
+      "defined_in": "src/libgit2/blob.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_filter_options_init",
+      "defined_in": "src/libgit2/blob.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_free",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_id",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_is_binary",
+      "defined_in": "src/libgit2/blob.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_lookup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_lookup_prefix",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_owner",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_rawcontent",
+      "defined_in": "src/libgit2/blob.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_blob_rawsize",
+      "defined_in": "src/libgit2/blob.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/blob.rs"
+    },
+    {
+      "name": "git_commit_amend",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_author",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_author_with_mailmap",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_body",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_committer",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_committer_with_mailmap",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_buffer",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_cb",
+      "defined_in": "include/git2/commit.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_ext",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_ext_options_init",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_from_callback",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/sys/commit.rs"
+    },
+    {
+      "name": "git_commit_create_from_ids",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/sys/commit.rs"
+    },
+    {
+      "name": "git_commit_create_v",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_dup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_free",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_header_field",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_id",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_lookup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_lookup_prefix",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_message",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_message_encoding",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_message_raw",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_nth_gen_ancestor",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_owner",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_parent",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_parent_id",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_parentcount",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_raw_header",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_summary",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_time",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_time_offset",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_tree",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_tree_id",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_mailmap_resolve_signature",
+      "defined_in": "src/libgit2/mailmap.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/mailmap.rs"
+    },
+    {
+      "name": "git_message_trailer_array_free",
+      "defined_in": "src/libgit2/trailer.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/message.rs"
+    },
+    {
+      "name": "git_message_trailers",
+      "defined_in": "src/libgit2/trailer.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/message.rs"
+    },
+    {
+      "name": "git_object_id_from_buffer",
+      "defined_in": "src/libgit2/object.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/object.rs"
+    },
+    {
+      "name": "git_object_id_from_file",
+      "defined_in": "src/libgit2/object.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/object.rs"
+    },
+    {
+      "name": "git_object_id_options_init",
+      "defined_in": "src/libgit2/object.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/object.rs"
+    },
+    {
+      "name": "git_signature_default",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_default_from_env",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_dup",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_free",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_from_buffer",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_new",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_signature_now",
+      "defined_in": "src/libgit2/signature.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/signature.rs"
+    },
+    {
+      "name": "git_tag_annotation_create",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_create",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_dup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_foreach",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_free",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_id",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_lookup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_lookup_prefix",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_message",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_name",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_owner",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_peel",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_tagger",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_target",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_target_id",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tag_target_type",
+      "defined_in": "src/libgit2/tag.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tree_create_updated",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_dup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_entry_byid",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_entry_byindex",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_entry_byname",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_entry_bypath",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_entrycount",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_free",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_id",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_lookup",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_lookup_prefix",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_owner",
+      "defined_in": "src/libgit2/object_api.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_tree_walk",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_treebuilder_filter",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    },
+    {
+      "name": "git_treebuilder_new",
+      "defined_in": "src/libgit2/tree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    }
+  ]
+}
