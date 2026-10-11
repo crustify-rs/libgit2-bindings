@@ -513,3 +513,234 @@ fn mapping_mode_values_match_c_behavior() {
         assert!(observations[1].0 < 0);
     }
 }
+
+mod entry_and_map_types {
+    use super::*;
+    use core::ptr::addr_of;
+    use libgit2::libgit2::config::config::{ConfigLevel, ConfigMap, MapMatch};
+    use libgit2::libgit2::repository::repository::Repository;
+
+    fn bytes(p: *const core::ffi::c_char) -> Option<Vec<u8>> {
+        if p.is_null() {
+            None
+        } else {
+            // SAFETY: callers project live entry strings or their own CString
+            // borrows, NUL-terminated and immutable until this copy completes.
+            Some(unsafe { CStr::from_ptr(p) }.to_bytes().to_vec())
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_match_c_acquisition_fields_errors_and_release() {
+        let dir =
+            std::env::temp_dir().join(format!("crustify-equiv-entry-b0-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let rust_path = CString::new(dir.join("rust").to_str().unwrap()).unwrap();
+        let rust_repo = Repository::init(&rust_path, false).unwrap();
+        let body = b"[core]\nrepositoryformatversion = 0\nbare = false\n[test]\nflag\nempty =\nvalue = old\n[include]\npath = extra\n";
+        let rust_file = dir.join("rust/.git/config");
+        let c_file = dir.join("config");
+        std::fs::write(&rust_file, body).unwrap();
+        std::fs::write(&c_file, body).unwrap();
+        std::fs::write(dir.join("rust/.git/extra"), b"[test]\nnested = yes\n").unwrap();
+        std::fs::write(dir.join("extra"), b"[test]\nnested = yes\n").unwrap();
+        let rust_cfg = rust_repo.as_ref().config().unwrap();
+        let mut c_cfg = ptr::null_mut();
+        let c_path = CString::new(c_file.to_str().unwrap()).unwrap();
+        // SAFETY: writable output and initialized runtime (Repository::init
+        // pinned it); C owns this independently constructed config.
+        assert_eq!(unsafe { ffi::git_config_new(&mut c_cfg) }, 0);
+        assert_eq!(
+            // SAFETY: live config; C copies path; no repository; force is false.
+            unsafe {
+                ffi::git_config_add_file_ondisk(
+                    c_cfg,
+                    c_path.as_ptr(),
+                    ConfigLevel::LOCAL.raw(),
+                    ptr::null(),
+                    0,
+                )
+            },
+            0
+        );
+        let mut c_kept = Vec::new();
+        let mut rust_kept = Vec::new();
+        for key in [
+            c"TEST.value",
+            c"test.flag",
+            c"test.empty",
+            c"test.nested",
+            c"test.missing",
+            c"invalid",
+        ] {
+            let mut c_entry = ptr::null_mut();
+            // SAFETY: live C config, writable output slot, borrowed NUL key.
+            let rc = unsafe { ffi::git_config_get_entry(&mut c_entry, c_cfg, key.as_ptr()) };
+            let c_err = if rc < 0 { Some(last()) } else { None };
+            match rust_cfg.as_ref().entry(key) {
+                Err(e) => {
+                    assert_eq!(e.raw_code(), rc);
+                    assert_eq!(e.error(), c_err.as_ref().unwrap());
+                }
+                Ok(entry) => {
+                    assert_eq!(rc, 0);
+                    let r = entry.as_ref();
+                    // SAFETY: acquisition succeeded; entry and its strings stay
+                    // live until entry_free below; project without C references.
+                    unsafe {
+                        assert_eq!(
+                            r.name().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                            bytes(addr_of!((*c_entry).name).read())
+                        );
+                        assert_eq!(
+                            r.value().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                            bytes(addr_of!((*c_entry).value).read())
+                        );
+                        assert_eq!(
+                            r.backend_type().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                            bytes(addr_of!((*c_entry).backend_type).read())
+                        );
+                        assert_eq!(r.level().raw(), addr_of!((*c_entry).level).read());
+                        assert_eq!(r.include_depth(), addr_of!((*c_entry).include_depth).read());
+                        let c_origin = bytes(addr_of!((*c_entry).origin_path).read()).unwrap();
+                        let r_origin = r.origin_path().unwrap().to_bytes();
+                        // Independent configs have different origin prefixes.
+                        assert_eq!(
+                            Path::new(std::str::from_utf8(&c_origin).unwrap()).file_name(),
+                            Path::new(std::str::from_utf8(r_origin).unwrap()).file_name()
+                        );
+                    }
+                    c_kept.push(c_entry);
+                    rust_kept.push(entry);
+                }
+            }
+        }
+        // Refresh each independent config while old entries retain their storage.
+        std::fs::write(&c_file, b"[test]\nvalue = replacement-longer\n").unwrap();
+        std::fs::write(&rust_file, b"[core]\nrepositoryformatversion = 0\nbare = false\n[test]\nvalue = replacement-longer\n").unwrap();
+        let mut fresh = ptr::null_mut();
+        assert_eq!(
+            // SAFETY: live config, output slot and NUL key; acquires one
+            // independently releasable entry reference after refresh.
+            unsafe { ffi::git_config_get_entry(&mut fresh, c_cfg, c"test.value".as_ptr()) },
+            0
+        );
+        let fresh_rust = rust_cfg.as_ref().entry(c"test.value").unwrap();
+        // SAFETY: fresh is a successfully acquired live entry.
+        let fresh_value = unsafe { addr_of!((*fresh).value).read() };
+        assert_eq!(
+            fresh_rust.as_ref().value().unwrap().to_bytes(),
+            bytes(fresh_value).unwrap()
+        );
+        // SAFETY: release each independently owned C config/reference once;
+        // acquired entries own their storage and remain readable after this.
+        unsafe { ffi::git_config_free(c_cfg) };
+        drop(rust_cfg);
+        drop(rust_repo);
+        for (c_entry, entry) in c_kept.into_iter().zip(rust_kept) {
+            // SAFETY: the acquired entry still retains its backing storage.
+            let c_value = unsafe { addr_of!((*c_entry).value).read() };
+            assert_eq!(
+                entry
+                    .as_ref()
+                    .value()
+                    .map(CStr::to_bytes)
+                    .map(<[u8]>::to_vec),
+                bytes(c_value)
+            );
+            // SAFETY: relinquishes exactly this acquired C entry reference.
+            unsafe { ffi::git_config_entry_free(c_entry) };
+            drop(entry);
+        }
+        // SAFETY: relinquishes exactly the fresh acquired C reference.
+        unsafe { ffi::git_config_entry_free(fresh) };
+        drop(fresh_rust);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn mapping_fields_and_transitions_match_c_records() {
+        init();
+        let rust_text = CString::new("HeLLo").unwrap();
+        let c_text = CString::new("HeLLo").unwrap();
+        let mut map = ConfigMap::new(MapMatch::False, i32::MIN);
+        let mut c_map = ffi::git_configmap {
+            type_: ffi::GIT_CONFIGMAP_FALSE,
+            str_match: ptr::null(),
+            map_value: i32::MIN,
+        };
+        for (rule, input) in [
+            (MapMatch::False, c"false"),
+            (MapMatch::True, c"YES"),
+            (MapMatch::Int32, c"-2k"),
+            (MapMatch::String(&rust_text), c"hello"),
+            (MapMatch::String(c""), c""),
+        ] {
+            map.as_mut().set_match(rule);
+            map.as_mut().set_map_value(i32::MAX);
+            c_map.type_ = rule.map_type().raw();
+            c_map.map_value = i32::MAX;
+            c_map.str_match = match rule {
+                MapMatch::String(s) if s.is_empty() => c"".as_ptr(),
+                MapMatch::String(_) => c_text.as_ptr(),
+                _ => ptr::null(),
+            };
+            assert_eq!(map.as_ref().map_type().raw(), c_map.type_);
+            assert_eq!(map.as_ref().map_value(), c_map.map_value);
+            assert_eq!(
+                map.as_ref()
+                    .str_match()
+                    .map(CStr::to_bytes)
+                    .map(<[u8]>::to_vec),
+                bytes(c_map.str_match)
+            );
+            let mut c_out = 0;
+            assert_eq!(
+                // SAFETY: one initialized mapping with a valid string for String
+                // mode, independent immutable strings, exclusive scalar output;
+                // C borrows everything only for this call.
+                unsafe {
+                    ffi::git_config_lookup_map_value(
+                        &mut c_out,
+                        &raw const c_map,
+                        1,
+                        input.as_ptr(),
+                    )
+                },
+                0
+            );
+            let expected = if rule == MapMatch::Int32 {
+                libgit2::libgit2::config::config::parse_i32(Some(input)).unwrap()
+            } else {
+                map.as_ref().map_value()
+            };
+            assert_eq!(c_out, expected);
+            // Non-string modes may retain ignored borrowed strings as well.
+            if rule.map_type() != libgit2::libgit2::config::config::MapType::String {
+                map.as_mut().set_str_match(&rust_text);
+                c_map.str_match = c_text.as_ptr();
+                assert_eq!(
+                    map.as_ref().str_match().unwrap().to_bytes(),
+                    bytes(c_map.str_match).unwrap()
+                );
+                assert_eq!(
+                    // SAFETY: unchanged valid mode, new immutable borrowed NUL
+                    // string; C must ignore it while recognizing the same input.
+                    unsafe {
+                        ffi::git_config_lookup_map_value(
+                            &mut c_out,
+                            &raw const c_map,
+                            1,
+                            input.as_ptr(),
+                        )
+                    },
+                    0
+                );
+                assert_eq!(c_out, expected);
+            }
+        }
+    }
+}

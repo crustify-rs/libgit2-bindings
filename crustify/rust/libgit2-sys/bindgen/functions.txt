@@ -380,3 +380,7 @@ git_worktree_validate
 git_config_parse_bool
 git_config_parse_int32
 git_config_parse_int64
+
+# config wave 1 batch 0: entry lifecycle
+git_config_get_entry
+git_config_entry_free

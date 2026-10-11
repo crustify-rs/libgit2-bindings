@@ -59,10 +59,10 @@
 use core::ffi::{CStr, c_int};
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use std::ffi::CString;
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew};
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
@@ -613,9 +613,463 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+define_ctype!(
+    /// A C configuration entry. Its strings belong to the backend's retained
+    /// storage, not individually to this struct. Lookups can return the same
+    /// entry, so safe owners are shared and never expose mutable handles.
+    /// Iterator/callback entries are borrowed through `EntryRef`, never freed.
+    /// No public C up-ref or standalone deep-copy primitive exists.
+    /// Every non-NULL string must remain NUL-terminated and immutable for the
+    /// entry handle's lifetime; C list ownership enforces this for built-in backends.
+    /// Neither entries nor their owners assert `Send`/`Sync`: a custom backend's
+    /// release callback may be thread-bound.
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::EntryArc;
+    /// fn mutate(mut entry: EntryArc) { entry.as_mut(); }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::EntryArc;
+    /// fn escape(entry: EntryArc) {
+    ///     let name = entry.as_ref().name();
+    ///     drop(entry);
+    ///     assert!(name.is_some());
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::EntryArc;
+    /// fn send(entry: EntryArc) { std::thread::spawn(move || drop(entry)); }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use libgit2::libgit2::config::config::EntryArc;
+    /// fn clone(entry: EntryArc) { let _ = entry.clone(); }
+    /// ```
+    ///
+    /// Wraps: git_config_entry
+    Entry, EntryRef, EntryMut, ffi::git_config_entry
+);
+
+/// Calls the entry's backend-provided release callback through C. For built-in
+/// backends this releases a reference to the entire immutable entry list; it
+/// does not necessarily free the entry immediately. Never use this policy for
+/// a standalone `git_config_entry` or an iterator/callback's borrowed entry:
+/// C casts to the larger `git_config_backend_entry` to find the callback.
+///
+/// Wraps: git_config_entry_free
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EntryFree;
+impl_cdrop!(EntryFree, Entry, ffi::git_config_entry_free);
+
+/// One acquired entry reference. Not `Clone`: C publishes no entry up-ref.
+/// The backing storage stays alive independently of the config/repository.
+pub type EntryArc = CArc<Entry, EntryFree>;
+
+impl ConfigRef<'_, '_> {
+    /// Acquires an immutable entry reference, released on drop. The key is
+    /// normalized by C and borrowed only during this call. Missing keys and
+    /// invalid names retain C's error code and message.
+    ///
+    /// Wraps: git_config_get_entry
+    pub fn entry(&self, name: &CStr) -> Result<EntryArc, ConfigError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: the live config handle keeps its repository alive for this
+        // call; name is NUL-terminated; out is an exclusive writable slot.
+        // Success acquires one independently releasable entry reference.
+        let rc = unsafe { ffi::git_config_get_entry(&mut out, self.as_ptr(), name.as_ptr()) };
+        if rc < 0 {
+            return Err(ConfigError::from_libgit2(rc));
+        }
+        // SAFETY: success returned one reference paired with entry_free; other
+        // references may exist, so CArc permits only immutable access.
+        let owner = unsafe { EntryArc::from_c(out) };
+        Ok(owner.expect("successful entry lookup returned NULL"))
+    }
+}
+
+impl<'a> EntryRef<'a> {
+    /// Normalized key; built-in backends always supply it.
+    /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
+    ///
+    /// Field: git_config_entry.name
+    pub fn name(&self) -> Option<&'a CStr> {
+        // SAFETY: the live shared handle permits reading this initialized field.
+        let value = unsafe { addr_of!((*self.as_ptr()).name).read() };
+        if value.is_null() {
+            None
+        } else {
+            // SAFETY: entry storage keeps this NUL-terminated string alive and
+            // immutable for the entire handle lifetime, including across refresh.
+            Some(unsafe { CStr::from_ptr(value) })
+        }
+    }
+
+    /// None is an implicit true boolean, distinct from an empty string.
+    /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
+    ///
+    /// Field: git_config_entry.value
+    pub fn value(&self) -> Option<&'a CStr> {
+        // SAFETY: the live shared handle permits reading this initialized field.
+        let value = unsafe { addr_of!((*self.as_ptr()).value).read() };
+        if value.is_null() {
+            None
+        } else {
+            // SAFETY: entry storage keeps this NUL-terminated string alive and
+            // immutable for the entire handle lifetime, including across refresh.
+            Some(unsafe { CStr::from_ptr(value) })
+        }
+    }
+
+    /// Backend label, typically "file" or "in-memory".
+    /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
+    ///
+    /// Field: git_config_entry.backend_type
+    pub fn backend_type(&self) -> Option<&'a CStr> {
+        // SAFETY: the live shared handle permits reading this initialized field.
+        let value = unsafe { addr_of!((*self.as_ptr()).backend_type).read() };
+        if value.is_null() {
+            None
+        } else {
+            // SAFETY: entry storage keeps this NUL-terminated string alive and
+            // immutable for the entire handle lifetime, including across refresh.
+            Some(unsafe { CStr::from_ptr(value) })
+        }
+    }
+
+    /// Origin path, absent for a memory backend without an origin.
+    /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
+    ///
+    /// Field: git_config_entry.origin_path
+    pub fn origin_path(&self) -> Option<&'a CStr> {
+        // SAFETY: the live shared handle permits reading this initialized field.
+        let value = unsafe { addr_of!((*self.as_ptr()).origin_path).read() };
+        if value.is_null() {
+            None
+        } else {
+            // SAFETY: entry storage keeps this NUL-terminated string alive and
+            // immutable for the entire handle lifetime, including across refresh.
+            Some(unsafe { CStr::from_ptr(value) })
+        }
+    }
+
+    /// Field: git_config_entry.level
+    pub fn level(&self) -> ConfigLevel {
+        // SAFETY: reads an initialized scalar; ConfigLevel preserves custom values.
+        let level = unsafe { addr_of!((*self.as_ptr()).level).read() };
+        ConfigLevel::from_raw(level)
+    }
+
+    /// Field: git_config_entry.include_depth
+    pub fn include_depth(&self) -> u32 {
+        // SAFETY: reads the initialized unsigned scalar through a live handle.
+        unsafe { addr_of!((*self.as_ptr()).include_depth).read() }
+    }
+}
+
+/// A mapping's recognition rule. String mode cannot be constructed with NULL;
+/// the other modes need no string and do not interpret `map_value` identically:
+/// integer mode returns the parsed input, not the record's mapped value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MapMatch<'s> {
+    False,
+    True,
+    Int32,
+    String(&'s CStr),
+}
+
+impl MapMatch<'_> {
+    pub fn map_type(self) -> MapType {
+        match self {
+            Self::False => MapType::False,
+            Self::True => MapType::True,
+            Self::Int32 => MapType::Int32,
+            Self::String(_) => MapType::String,
+        }
+    }
+}
+
+/// Caller-owned mapping record, borrowing its optional string for `'s`.
+/// C reads it during lookup and neither retains nor frees it. No C lifecycle
+/// primitive exists: moves and clones retain only immutable Rust borrows.
+/// Mutation replaces borrowed pointers without freeing either referent.
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
+/// use std::ffi::CString;
+/// let map;
+/// { let text = CString::new("temporary").unwrap();
+///   map = ConfigMap::new(MapMatch::String(&text), 1); }
+/// assert!(map.as_ref().str_match().is_some());
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
+/// let mut map = ConfigMap::new(MapMatch::String(c"one"), 1);
+/// let mut m = map.as_mut();
+/// let view = m.as_ref().str_match();
+/// m.set_match(MapMatch::String(c"two"));
+/// assert!(view.is_some());
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::ConfigMapMut;
+/// fn shrink<'a, 's>(m: ConfigMapMut<'a, 'static>) -> ConfigMapMut<'a, 's> { m }
+/// ```
+///
+/// ```compile_fail
+/// use libgit2::libgit2::config::config::{ConfigMap, MapMatch};
+/// let map = ConfigMap::new(MapMatch::String(c"live"), 1);
+/// let text = map.as_ref().str_match();
+/// drop(map);
+/// assert!(text.is_some());
+/// ```
+///
+/// Wraps: git_configmap
+/// Handwritten
+#[repr(transparent)]
+pub struct ConfigMap<'s>(ffi::git_configmap, PhantomData<(*const (), &'s CStr)>);
+
+/// Shared mapping borrow; string views cannot outlive it.
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct ConfigMapRef<'a, 's>(CBorrowedPtr<'a, ConfigMap<'s>>);
+
+/// Exclusive mapping borrow, invariant in the stored-string lifetime.
+/// Handwritten
+#[repr(transparent)]
+pub struct ConfigMapMut<'a, 's>(ConfigMapRef<'a, 's>, PhantomData<&'a mut ConfigMap<'s>>);
+
+// SAFETY: transparent layout over git_configmap; transparent, pointer-wide
+// handles with no Drop; Mut is invariant in Self and references cover only
+// Rust-owned inline storage, never a borrowed C record.
+unsafe impl<'s> CCell for ConfigMap<'s> {
+    type C = ffi::git_configmap;
+    type Ref<'a>
+        = ConfigMapRef<'a, 's>
+    where
+        Self: 'a;
+    type Mut<'a>
+        = ConfigMapMut<'a, 's>
+    where
+        Self: 'a;
+}
+
+impl<'s> ConfigMap<'s> {
+    /// Builds a resource-free record with a valid discriminator/string pair.
+    pub fn new(rule: MapMatch<'s>, map_value: i32) -> Self {
+        Self(
+            ffi::git_configmap {
+                type_: rule.map_type().raw(),
+                str_match: match rule {
+                    MapMatch::String(s) => s.as_ptr(),
+                    _ => ptr::null(),
+                },
+                map_value,
+            },
+            PhantomData,
+        )
+    }
+
+    pub fn as_ref(&self) -> ConfigMapRef<'_, 's> {
+        // SAFETY: initialized Rust-owned record shared for the returned lifetime.
+        ConfigMapRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
+    }
+
+    pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
+        // SAFETY: exclusive Rust borrow supplies live storage and write provenance.
+        let p = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
+        ConfigMapMut(ConfigMapRef(p), PhantomData)
+    }
+}
+
+impl Clone for ConfigMap<'_> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
+}
+
+impl<'a, 's> ConfigMapRef<'a, 's> {
+    /// # Safety
+    /// NULL or a live aligned initialized record, unchanged for `'a`, with
+    /// a known mode and immutable NUL string valid for `'s` when non-NULL;
+    /// String mode requires non-NULL. `'s` must outlive `'a`.
+    #[allow(dead_code)]
+    pub(crate) unsafe fn from_ptr(raw: *const ffi::git_configmap) -> Option<Self> {
+        let p = NonNull::new(raw.cast_mut().cast::<ConfigMap<'s>>())?;
+        // SAFETY: caller proves layout, validity, liveness and string lifetimes.
+        Some(Self(unsafe { CBorrowedPtr::new(p) }))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_configmap {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Field: git_configmap.type
+    pub fn map_type(&self) -> MapType {
+        // SAFETY: live shared record; constructors/seams ensure a known mode.
+        let raw = unsafe { addr_of!((*self.as_ptr()).type_).read() };
+        MapType::from_raw(raw).expect("invalid mapping discriminator")
+    }
+
+    /// Field: git_configmap.map_value
+    pub fn map_value(&self) -> i32 {
+        // SAFETY: reads an initialized scalar through the live shared handle.
+        unsafe { addr_of!((*self.as_ptr()).map_value).read() }
+    }
+
+    /// None for ordinary non-string rules; String mode always has a string.
+    /// Raw C non-string records may also have an ignored string, preserved here.
+    ///
+    /// Field: git_configmap.str_match
+    pub fn str_match(&self) -> Option<&'a CStr> {
+        // SAFETY: the shared live handle permits reading the initialized pointer.
+        let p = unsafe { addr_of!((*self.as_ptr()).str_match).read() };
+        if p.is_null() {
+            None
+        } else {
+            // SAFETY: the record's immutable NUL string lives for 's, which
+            // outlives the handle's 'a; constructors and seams preserve this.
+            Some(unsafe { CStr::from_ptr(p) })
+        }
+    }
+
+    pub fn rule(&self) -> MapMatch<'a> {
+        match self.map_type() {
+            MapType::False => MapMatch::False,
+            MapType::True => MapMatch::True,
+            MapType::Int32 => MapMatch::Int32,
+            MapType::String => MapMatch::String(self.str_match().expect("NULL string rule")),
+        }
+    }
+}
+
+impl<'a, 's> ConfigMapMut<'a, 's> {
+    pub fn as_ref(&self) -> ConfigMapRef<'_, 's> {
+        self.0
+    }
+    pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
+        ConfigMapMut(self.0, PhantomData)
+    }
+
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_configmap {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Replaces mode and string together, preserving String's non-NULL invariant.
+    pub fn set_match(&mut self, rule: MapMatch<'s>) {
+        let p = match rule {
+            MapMatch::String(s) => s.as_ptr(),
+            _ => ptr::null(),
+        };
+        // SAFETY: exclusive live record, with no outstanding shared view;
+        // the new referent is borrowed for 's. Neither referent is owned here.
+        unsafe {
+            addr_of_mut!((*self.as_mut_ptr()).str_match).write(p);
+            addr_of_mut!((*self.as_mut_ptr()).type_).write(rule.map_type().raw());
+        }
+    }
+
+    /// Replaces the string borrow without changing the mode. Non-string modes
+    /// may store an ignored string too; `set_match` clears it for those modes.
+    /// A non-null argument preserves String mode's required string invariant.
+    pub fn set_str_match(&mut self, value: &'s CStr) {
+        // SAFETY: exclusive initialized record; the replacement immutable NUL
+        // string lives for 's. Neither the previous nor new referent is owned.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).str_match).write(value.as_ptr()) };
+    }
+
+    pub fn set_map_value(&mut self, value: i32) {
+        // SAFETY: exclusive live handle allows replacing the initialized scalar.
+        unsafe { addr_of_mut!((*self.as_mut_ptr()).map_value).write(value) };
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+
+    #[test]
+    fn mapping_layout_borrows_clone_and_seams() {
+        assert_eq!(size_of::<ConfigMap>(), size_of::<ffi::git_configmap>());
+        assert_eq!(align_of::<ConfigMap>(), align_of::<ffi::git_configmap>());
+        assert_eq!(size_of::<ConfigMapRef>(), size_of::<*const ()>());
+        assert_eq!(size_of::<ConfigMapMut>(), size_of::<*mut ()>());
+        let text = CString::new([0xff, b'x']).unwrap();
+        let mut map = ConfigMap::new(MapMatch::String(&text), i32::MIN);
+        let cloned = map.clone();
+        let mut m = map.as_mut();
+        m.as_mut().set_map_value(i32::MAX);
+        assert_eq!(m.as_ref().map_value(), i32::MAX);
+        for rule in [
+            MapMatch::False,
+            MapMatch::True,
+            MapMatch::Int32,
+            MapMatch::String(c""),
+        ] {
+            m.set_match(rule);
+            assert_eq!(m.as_ref().rule(), rule);
+            // SAFETY: the exclusive handle is frozen during this shared reborrow;
+            // initialized record and its string remain live and immutable.
+            let shared = unsafe { ConfigMapRef::from_ptr(m.as_ref().as_ptr()) }.unwrap();
+            assert_eq!(shared.rule(), rule);
+            m.set_str_match(&text);
+            assert_eq!(m.as_ref().str_match(), Some(text.as_c_str()));
+        }
+        assert_eq!(cloned.as_ref().str_match(), Some(text.as_c_str()));
+        // SAFETY: NULL is refused without forming a handle.
+        assert!(unsafe { ConfigMapRef::from_ptr(ptr::null()) }.is_none());
+    }
+
+    #[test]
+    fn entry_layout_and_borrowed_fields_without_c() {
+        assert_eq!(size_of::<Entry>(), size_of::<ffi::git_config_entry>());
+        assert_eq!(align_of::<Entry>(), align_of::<ffi::git_config_entry>());
+        assert_eq!(size_of::<EntryRef>(), size_of::<*const ()>());
+        assert_eq!(size_of::<EntryMut>(), size_of::<*mut ()>());
+        assert_eq!(size_of::<EntryArc>(), size_of::<*mut ()>());
+        assert_eq!(size_of::<Option<EntryArc>>(), size_of::<*mut ()>());
+        let mut raw = ffi::git_config_entry {
+            name: c"a.b".as_ptr(),
+            value: c"\xff".as_ptr(),
+            backend_type: c"".as_ptr(),
+            origin_path: ptr::null(),
+            include_depth: u32::MAX,
+            level: i32::MAX,
+        };
+        // SAFETY: this Rust-owned fixture has initialized fields and static NUL
+        // strings, and remains unchanged while the shared borrow lives. It is
+        // not a backend-owned entry and must never be adopted by EntryFree.
+        let entry = unsafe { EntryRef::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(entry.name(), Some(c"a.b"));
+        assert_eq!(entry.value(), Some(c"\xff"));
+        assert_eq!(entry.backend_type(), Some(c""));
+        assert_eq!(entry.origin_path(), None);
+        assert_eq!(entry.level(), ConfigLevel::from_raw(i32::MAX));
+        assert_eq!(entry.include_depth(), u32::MAX);
+        raw.name = ptr::null();
+        raw.value = ptr::null();
+        raw.backend_type = ptr::null();
+        raw.origin_path = c"origin".as_ptr();
+        // SAFETY: as above, after the earlier handle's last use.
+        let entry = unsafe { EntryRef::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(entry.name(), None);
+        assert_eq!(entry.value(), None);
+        assert_eq!(entry.backend_type(), None);
+        assert_eq!(entry.origin_path(), Some(c"origin"));
+        // SAFETY: NULL is refused before constructing a handle.
+        assert!(unsafe { EntryRef::from_ptr(ptr::null_mut()) }.is_none());
+        // SAFETY: no shared handle remains in use; this Rust-owned fixture is
+        // exclusively borrowed and strings are static. No ownership is adopted.
+        let mut exclusive = unsafe { EntryMut::from_ptr(&raw mut raw) }.unwrap();
+        assert_eq!(exclusive.as_ref().origin_path(), Some(c"origin"));
+        assert_eq!(exclusive.as_mut().as_ref().value(), None);
+
+    }
     use crate::libgit2::util::errors::ErrorCode;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{CStr, c_int, c_void};

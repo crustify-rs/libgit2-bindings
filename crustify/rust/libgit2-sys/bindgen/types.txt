@@ -78,3 +78,7 @@ git_worktree_add_options
 git_worktree_prune_options
 git_worktree_prune_t
 git_writestream
+
+# config wave 1 batch 0: entries and mapping records
+git_config_entry
+git_configmap
