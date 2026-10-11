@@ -1806,7 +1806,7 @@ mod head_and_lookups {
     };
     use libgit2::libgit2::util::errors::ErrorCode;
 
-    use crate::fixture::commit_and_config::commit_id;
+    use crate::commit::commit_id;
     use crate::fixture::head_and_lookups::Sandbox;
     use crate::fixture::isolated;
     use crate::fixture::refs::view_unattached;

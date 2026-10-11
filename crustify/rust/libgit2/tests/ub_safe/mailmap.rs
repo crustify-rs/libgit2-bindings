@@ -9,7 +9,7 @@
 //! `mailmap.file` and `mailmap.blob` settings, and a repository without paths. A
 //! mailmap keeps nothing of what built it, so it is used and dropped after its buffer
 //! and its repository. It is `Send` and `Sync`: boxes are built, shared and dropped
-//! across threads (TSan). The lookups that read it land with their own run; the
+//! across threads (TSan). The lookups are in [`lookups`] and [`signatures`]; the
 //! handles here are only reborrowed. Illegal paths (a handle outliving its box, a
 //! shared handle next to an exclusive one) are in `compile_fail/`.
 
@@ -355,6 +355,161 @@ mod lookups {
                         let (name, _) = r.resolve(c"Who", &email);
                         let expected: &CStr = if (i + t) % 20 < 16 { c"Real" } else { c"Who" };
                         assert_eq!(name, expected);
+                    }
+                });
+            }
+        });
+    }
+}
+
+/// UB tests for [`MailmapRef::resolve_signature`]
+/// (`git_mailmap_resolve_signature`).
+///
+/// A resolved signature is a fresh `git_signature` of libgit2's allocator, its strings
+/// copied from the input or the mailmap's entries: the owner releases it once (ASan:
+/// double free; LSan: leak), and it outlives both the mailmap and the input, which are
+/// on the heap and dropped first (ASan: a string still borrowed). Inputs come from
+/// every holder Rust has (an owned signature, a parsed one with a `-0000` zone, a
+/// [`SignatureView`] over heap strings freed right after the call) and resolve through
+/// entries, through no entry, and into strings libgit2 refuses (angle brackets, empty
+/// once trimmed), which leave nothing behind. A mailmap is `Sync`: signatures are
+/// resolved against one from several threads at once (TSan).
+///
+/// [`MailmapRef::resolve_signature`]: libgit2::libgit2::object::mailmap::MailmapRef::resolve_signature
+/// [`SignatureView`]: libgit2::libgit2::core::types::SignatureView
+mod signatures {
+    use std::ffi::{CStr, CString};
+    use std::thread;
+
+    use libgit2::libgit2::core::types::{Signature, SignatureBox, SignatureView, Time};
+    use libgit2::libgit2::object::mailmap::Mailmap;
+    use libgit2::libgit2::util::errors::ErrorClass;
+
+    use super::MAILMAP;
+
+    fn exact(s: &str) -> Box<CStr> {
+        CString::new(s).unwrap().into_boxed_c_str()
+    }
+
+    fn strings(sig: &SignatureBox) -> (String, String) {
+        let r = sig.as_ref();
+        let text = |s: Option<&CStr>| s.unwrap().to_str().unwrap().to_owned();
+        (text(r.name()), text(r.email()))
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn resolved_signatures_outlive_the_mailmap_and_the_input() {
+        let mailmap = Box::new(Mailmap::from_buffer(MAILMAP).unwrap());
+        let mut resolved = Vec::new();
+        let owned = Signature::new(c"nick1", c"bugs@company.xx", 1_000, 60).unwrap();
+        resolved.push(
+            (*mailmap)
+                .as_ref()
+                .resolve_signature(owned.as_ref())
+                .unwrap(),
+        );
+        let parsed = Box::new(Signature::parse(c"Who <me@company.xx> 7 -0000").unwrap());
+        resolved.push(
+            (*mailmap)
+                .as_ref()
+                .resolve_signature((*parsed).as_ref())
+                .unwrap(),
+        );
+        assert_eq!((*parsed).as_ref().when().sign(), b'-');
+        drop(parsed);
+        for i in 0..8 {
+            let (name, email) = (exact(&format!("  Name {i} ")), exact("cto@coompany.xx"));
+            let view = SignatureView::new(&name, &email, Time::new(i, -i as i32));
+            resolved.push(
+                (*mailmap)
+                    .as_ref()
+                    .resolve_signature(view.as_ref())
+                    .unwrap(),
+            );
+            // The view is done with: the strings it borrowed are freed right after.
+            drop((name, email));
+        }
+        drop(owned);
+        drop(mailmap);
+        assert_eq!(
+            strings(&resolved[0]),
+            ("Some Dude".into(), "some@dude.xx".into())
+        );
+        assert_eq!(
+            strings(&resolved[1]),
+            ("Santa Claus".into(), "santa.claus@northpole.xx".into())
+        );
+        // The sign is copied, which `git_signature_new` alone would not keep.
+        assert_eq!(resolved[1].as_ref().when().sign(), b'-');
+        for (i, sig) in resolved[2..].iter().enumerate() {
+            assert_eq!(strings(sig), (format!("Name {i}"), "cto@company.xx".into()));
+            assert_eq!(sig.as_ref().when().seconds(), i as i64);
+        }
+        let copies: Vec<_> = resolved.iter().map(Clone::clone).collect();
+        drop(resolved);
+        assert_eq!(copies.len(), 10);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_signatures_leave_nothing_behind() {
+        let mut mailmap = Mailmap::new().unwrap();
+        mailmap
+            .as_mut()
+            .add_entry(Some(c"Bad <Name>"), None, None, c"bad@example.com")
+            .unwrap();
+        mailmap
+            .as_mut()
+            .add_entry(
+                Some(c" , "),
+                Some(c"x@example.com"),
+                None,
+                c"blank@example.com",
+            )
+            .unwrap();
+        let when = Time::new(0, 0);
+        let cases: [(&CStr, &CStr); 5] = [
+            (c"A", c"bad@example.com"),
+            (c"A", c"blank@example.com"),
+            (c"<A>", c"a@example.com"),
+            (c"A", c"a@exa>mple.com"),
+            (c"  ", c"a@example.com"),
+        ];
+        for (name, email) in cases {
+            let view = SignatureView::new(name, email, when);
+            let e = mailmap
+                .as_ref()
+                .resolve_signature(view.as_ref())
+                .unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid), "{name:?} {email:?}");
+        }
+        let fine = SignatureView::new(c"A", c"a@example.com", when);
+        assert!(mailmap.as_ref().resolve_signature(fine.as_ref()).is_ok());
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_resolve_on_many_threads() {
+        let mailmap = Mailmap::from_buffer(MAILMAP).unwrap();
+        let sig = Signature::new(c"nick2", c"bugs@company.xx", 5, 0).unwrap();
+        thread::scope(|s| {
+            for t in 0..4 {
+                let (m, sig) = (mailmap.as_ref(), sig.as_ref());
+                s.spawn(move || {
+                    for i in 0..32 {
+                        let resolved = if (i + t) % 2 == 0 {
+                            m.resolve_signature(sig).unwrap()
+                        } else {
+                            let view =
+                                SignatureView::new(c"x", c"nick2@company.xx", Time::new(i, 0));
+                            m.resolve_signature(view.as_ref()).unwrap()
+                        };
+                        assert_eq!(resolved.as_ref().name(), Some(c"Other Author"));
+                        // Dropped on another thread than the one that built it.
+                        thread::scope(|inner| {
+                            inner.spawn(move || drop(resolved));
+                        });
                     }
                 });
             }

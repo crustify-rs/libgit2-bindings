@@ -24,6 +24,15 @@
 //! `git_commit_summary` and `git_commit_body` compute their result on first use and
 //! store it in the shared commit, without synchronisation.
 //!
+//! What the commit records is read through the shared handle, in place, borrowed for as
+//! long as the handle: its id, its tree's and its parents' ids ([`CommitRef::id`],
+//! [`CommitRef::tree_id`], [`CommitRef::parent_id`]), its message and headers as written
+//! ([`CommitRef::message_raw`], [`CommitRef::raw_header`]; [`CommitRef::header_field`]
+//! copies one header's value out), and its committer's time. libgit2 parses every commit
+//! it hands out in full (only the revision walker parses commits partially, into
+//! structs of its own that it never publishes), so each of these is set, the encoding
+//! alone being optional, and none is written again before the commit is freed.
+//!
 //! A commit is an object, and libgit2's casts between the two never check the type:
 //! [`CommitRef::as_object`] and [`Commit::into_object`] view or convert a commit as an
 //! object, and [`CommitRef::from_object`] and [`Commit::from_object`] take an
@@ -147,6 +156,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::ffi::CString;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use ffibox::{
@@ -436,6 +446,255 @@ impl<'a, 'r> CommitRef<'a, 'r> {
         // `git_tree_free`.
         let tree = unsafe { TreeArc::from_c(out) };
         Ok(tree.expect("a tree lookup succeeded without a tree"))
+    }
+
+    /// The commit's id: the id it was looked up by, or the full id a prefix found.
+    /// Borrowed for as long as the handle: libgit2 keeps it in the commit, which writes
+    /// it once, when it is parsed.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let commit_id = commit.as_ref().id();
+    /// drop(commit);
+    /// let _ = commit_id.raw_kind();
+    /// ```
+    ///
+    /// Wraps: git_commit_id
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads it, and
+        // returns the address of the id cached in its object (`&obj->cached.oid`).
+        let id = unsafe { ffi::git_commit_id(self.as_ptr()) };
+        // SAFETY: the id is part of the commit, so it is non-NULL and lives as long as
+        // the commit, past `'a`; nothing writes it once the commit is cached or returned.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a live commit has an id")
+    }
+
+    /// The repository the commit was looked up in, borrowed for `'r`, as the shared
+    /// handle it was looked up through, as [`ObjectRef::owner`] gives it.
+    ///
+    /// The result is that handle again, so it lets nothing happen that the commit's own
+    /// lookups do not: it outlives the commit, but not the repository's borrow.
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let owner = commit.as_ref().owner();
+    /// drop(repo);
+    /// let _ = owner.path();
+    /// ```
+    ///
+    /// Wraps: git_commit_owner
+    pub fn owner(&self) -> RepositoryRef<'r> {
+        // SAFETY: the handle addresses a live commit for `'a`, which libgit2 only reads.
+        let repo = unsafe { ffi::git_commit_owner(self.as_ptr()) };
+        // SAFETY: `object.repo`, stored uncounted and never cleared, is the repository
+        // the commit was looked up in. A `Commit<'r>` is only built from a
+        // `RepositoryRef<'r>`, from a `Commit<'r>` or `Object<'r>` of it, or adopted under
+        // a contract vouching for the same: the repository is live and shared on this
+        // thread for `'r`, and the result is the handle the commit was looked up through.
+        unsafe { RepositoryRef::from_ptr(repo) }.expect("a commit always has a repository")
+    }
+
+    /// The commit's message, as git shows it: the raw message without its leading
+    /// newlines. Borrowed in place for as long as the handle, so it cannot outlive the
+    /// commit, as no string a getter returns can:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::object::commit::Commit;
+    /// # use libgit2::libgit2::oid::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::repository::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let message = commit.as_ref().message();
+    /// drop(commit);
+    /// let _ = message.to_bytes();
+    /// ```
+    ///
+    /// Wraps: git_commit_message
+    pub fn message(&self) -> &'a CStr {
+        // SAFETY: the handle addresses a live, fully parsed commit for `'a`, whose raw
+        // message libgit2 only reads, returning a pointer into it.
+        let message = unsafe { ffi::git_commit_message(self.as_ptr()) };
+        // SAFETY: a non-NULL pointer into the commit's raw message, NUL-terminated,
+        // which libgit2 never writes after parsing it and frees only with the commit,
+        // which lives for `'a`.
+        unsafe { CStr::from_ptr(message) }
+    }
+
+    /// The commit's message exactly as the commit records it: everything after the
+    /// blank line that ends its headers (empty without one), leading newlines
+    /// included. Borrowed in place for as long as the handle.
+    ///
+    /// Wraps: git_commit_message_raw
+    pub fn message_raw(&self) -> &'a CStr {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
+        // raw message pointer.
+        let message = unsafe { ffi::git_commit_message_raw(self.as_ptr()) };
+        // SAFETY: the commit's own raw message, non-NULL in a fully parsed commit and
+        // NUL-terminated, never written after parsing and freed only with the commit,
+        // which lives for `'a`.
+        unsafe { CStr::from_ptr(message) }
+    }
+
+    /// The encoding the commit's `encoding` header names for its message, borrowed in
+    /// place for as long as the handle; `None` without that header, where git assumes
+    /// UTF-8. Only the last `encoding` header counts, and libgit2 leaks the others.
+    ///
+    /// Wraps: git_commit_message_encoding
+    pub fn message_encoding(&self) -> Option<&'a CStr> {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
+        // encoding pointer, NULL without the header.
+        let encoding = unsafe { ffi::git_commit_message_encoding(self.as_ptr()) };
+        // SAFETY: a non-NULL encoding is the commit's own NUL-terminated copy of the
+        // header's value, never written after parsing and freed only with the commit,
+        // which lives for `'a`.
+        (!encoding.is_null()).then(|| unsafe { CStr::from_ptr(encoding) })
+    }
+
+    /// The commit's headers, exactly as the commit records them: every line before the
+    /// blank line that ends them (`tree`, the `parent`s, `author`, `committer`, then
+    /// any others), each with its newline. Borrowed in place for as long as the handle.
+    ///
+    /// Wraps: git_commit_raw_header
+    pub fn raw_header(&self) -> &'a CStr {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
+        // raw header pointer.
+        let header = unsafe { ffi::git_commit_raw_header(self.as_ptr()) };
+        // SAFETY: the commit's own raw header, non-NULL in a fully parsed commit and
+        // NUL-terminated, never written after parsing and freed only with the commit,
+        // which lives for `'a`.
+        unsafe { CStr::from_ptr(header) }
+    }
+
+    /// The value of the commit's header `field`: the first header line (`tree`
+    /// included) whose name is exactly `field`, without the name and its space; each line that
+    /// continues it (a line starting with a space) adds a newline and the line without
+    /// its space, as a `gpgsig` signature spans several.
+    ///
+    /// Fails with [`ErrorCode::NotFound`] (class `GIT_ERROR_OBJECT`, "no such field
+    /// '`field`'") when no header has that name, the empty name included; and with
+    /// `GIT_ERROR_OBJECT`, "malformed header", when the header's last continuation line
+    /// does not end, or libgit2's error when it runs out of memory.
+    ///
+    /// Refuses, as a field it does not find, a `field` holding a newline, which no
+    /// header's name holds: libgit2 matches the field against the rest of the headers,
+    /// across line ends, and on such a match copies a negative length, overflowing a
+    /// pointer or requesting an allocation of nearly `usize::MAX` bytes.
+    ///
+    /// Wraps: git_commit_header_field
+    pub fn header_field(&self, field: &CStr) -> Result<BufVal, RepositoryError> {
+        if field.to_bytes().contains(&b'\n') {
+            let mut message = b"no such field '".to_vec();
+            message.extend_from_slice(field.to_bytes());
+            message.push(b'\'');
+            let message = CString::new(message).expect("a C string holds no NUL");
+            set(ErrorClass::Object, &message);
+            return failed(ErrorCode::NotFound.raw());
+        }
+        let mut out = Buf::new();
+        let buf = out.as_mut().as_mut_ptr();
+        // SAFETY: `buf` addresses the fresh, empty buffer held above, which libgit2
+        // fills (`git_buf_fromstr`) or leaves empty; the handle addresses a live, fully
+        // parsed commit for `'a`, whose raw header (newline-terminated, as the parser
+        // cuts it) libgit2 only reads; `field` is NUL-terminated, holds no newline, so
+        // every match ends within its line, and is read for the call only. The commit's
+        // allocation pinned the runtime, so errors reach live thread state.
+        let rc = unsafe { ffi::git_commit_header_field(buf, self.as_ptr(), field.as_ptr()) };
+        if rc < 0 { failed(rc) } else { Ok(out) }
+    }
+
+    /// The commit's summary: the first paragraph of its [`message`](Self::message) (up
+    /// to a blank line, or a line of whitespace alone), each run of whitespace that
+    /// holds a newline collapsed to one space and every other run kept, trailing
+    /// whitespace dropped. Empty for an empty message.
+    ///
+    /// libgit2 computes it on first use and keeps it in the commit, shared by every
+    /// owner and handle of the commit (so a commit is not `Sync`); it lives as long as
+    /// the commit, and the result is borrowed for as long as the handle.
+    ///
+    /// Fails, with libgit2's out-of-memory error, only when it cannot allocate even an
+    /// empty summary; a summary that runs out of memory part-way comes out empty.
+    ///
+    /// Wraps: git_commit_summary
+    pub fn summary(&self) -> Result<&'a CStr, ErrorBuf> {
+        // SAFETY: the handle addresses a live, fully parsed commit for `'a`. libgit2
+        // writes its `summary` field once, when NULL, through this pointer: nothing else
+        // reads or writes the commit meanwhile, since a commit and its handles stay on
+        // one thread and hold no Rust reference into it, and no earlier result is
+        // invalidated, since a summary, once set, is never replaced.
+        let summary = unsafe { ffi::git_commit_summary(self.as_ptr().cast_mut()) };
+        if summary.is_null() {
+            return Err(last());
+        }
+        // SAFETY: the NUL-terminated summary the commit now keeps, which libgit2 never
+        // replaces and frees only with the commit, which lives for `'a`.
+        Ok(unsafe { CStr::from_ptr(summary) })
+    }
+
+    /// When the commit was made, as its committer's time: seconds since the epoch.
+    ///
+    /// Wraps: git_commit_time
+    pub fn time(&self) -> i64 {
+        // SAFETY: the handle addresses a live, fully parsed commit for `'a`, whose
+        // committer libgit2 always parses (a commit without one fails to parse); the
+        // call only reads it.
+        unsafe { ffi::git_commit_time(self.as_ptr()) }
+    }
+
+    /// The timezone the commit was made in, as its committer's: minutes east of UTC.
+    ///
+    /// Wraps: git_commit_time_offset
+    pub fn time_offset(&self) -> i32 {
+        // SAFETY: as in `time`.
+        unsafe { ffi::git_commit_time_offset(self.as_ptr()) }
+    }
+
+    /// The id of the commit's tree, as the commit records it, borrowed in place for as
+    /// long as the handle. [`tree`](Self::tree) looks the tree up.
+    ///
+    /// Wraps: git_commit_tree_id
+    pub fn tree_id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 returns the
+        // address of its `tree_id` field, only reading the commit.
+        let id = unsafe { ffi::git_commit_tree_id(self.as_ptr()) };
+        // SAFETY: the id is a field of the commit, so it is non-NULL and lives as long
+        // as the commit, past `'a`; nothing writes it after the commit is parsed.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a field's address is not NULL")
+    }
+
+    /// How many parents the commit records: 0 for a root commit, 2 or more for a
+    /// merge.
+    ///
+    /// Wraps: git_commit_parentcount
+    pub fn parent_count(&self) -> u32 {
+        // SAFETY: the handle addresses a live commit for `'a`; the call only reads the
+        // size of its parent id array.
+        unsafe { ffi::git_commit_parentcount(self.as_ptr()) }
+    }
+
+    /// The id of the commit's `n`th parent, counting from 0 as
+    /// [`parent`](Self::parent) does, as the commit records it, borrowed in place for
+    /// as long as the handle; `None` when the commit has `n` parents or fewer.
+    ///
+    /// Wraps: git_commit_parent_id
+    pub fn parent_id(&self, n: u32) -> Option<OidRef<'a>> {
+        // SAFETY: the handle addresses a live commit for `'a`; libgit2 bounds-checks `n`
+        // against its parent id array (`git_array_get`) and returns NULL past it, or the
+        // address of that element, only reading the commit.
+        let id = unsafe { ffi::git_commit_parent_id(self.as_ptr(), n) };
+        // SAFETY: NULL, or an element of the commit's parent id array, which lives as
+        // long as the commit, past `'a`, and is not written after the commit is parsed.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }
     }
 }
 
@@ -4308,5 +4567,135 @@ mod unit_tests {
             "{text}"
         );
         assert_eq!(w.commits(), 2);
+    }
+
+    /// `testrepo.git`'s merge `be3563a` of `9fd738e` and `c47800c`.
+    const MERGE: &CStr = c"be3563ae3f795b2b4353bcce3a527ad0a4f7f644";
+    const MERGE_PARENTS: [&str; 2] = [
+        "9fd738e8f7967c078dceed8190330fc8648ee56a",
+        "c47800c7266a2be04c571c04d5a6614691ea99bd",
+    ];
+
+    fn oid_hex(id: OidRef<'_>) -> String {
+        id.to_hex_string().unwrap()
+    }
+
+    /// The getters over two commits whose contents `git cat-file` shows: `HEAD`
+    /// (`a65fedf`, one parent, a message of one newline) and a merge.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_read_what_the_commit_records() {
+        let repo = open_testrepo();
+        let head = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+        let h = head.as_ref();
+        assert_eq!(oid_hex(h.id()), HEAD.to_str().unwrap());
+        assert_eq!(oid_hex(h.tree_id()), TREE.to_str().unwrap());
+        assert_eq!(h.parent_count(), 1);
+        assert_eq!(oid_hex(h.parent_id(0).unwrap()), PARENT.to_str().unwrap());
+        assert!(h.parent_id(1).is_none() && h.parent_id(u32::MAX).is_none());
+        assert_eq!((h.message_raw(), h.message()), (c"\n", c""));
+        assert_eq!(h.summary(), Ok(c""));
+        assert_eq!(h.message_encoding(), None);
+        assert_eq!((h.time(), h.time_offset()), (1_312_943_626, -420));
+        let header = h.raw_header().to_str().unwrap();
+        assert!(header.starts_with("tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent "));
+        assert!(header.ends_with("1312943626 -0700\n"));
+        assert_eq!(h.owner().path(), repo.as_ref().path());
+
+        let merge = Commit::lookup(repo.as_ref(), sha1(MERGE).as_ref()).unwrap();
+        let m = merge.as_ref();
+        assert_eq!(m.parent_count(), 2);
+        let parents: Vec<_> = (0..3).map(|n| m.parent_id(n).map(oid_hex)).collect();
+        assert_eq!(
+            parents,
+            [
+                Some(MERGE_PARENTS[0].into()),
+                Some(MERGE_PARENTS[1].into()),
+                None
+            ]
+        );
+        assert_eq!(m.message(), c"Merge branch 'br2'\n");
+        assert_eq!(m.message(), m.message_raw());
+        assert_eq!(m.summary(), Ok(c"Merge branch 'br2'"));
+        let parent = m.header_field(c"parent").unwrap();
+        assert_eq!(parent.as_ref().as_bytes(), MERGE_PARENTS[0].as_bytes());
+        let tree = m.header_field(c"tree").unwrap();
+        assert_eq!(tree.as_ref().as_bytes(), oid_hex(m.tree_id()).as_bytes());
+        let missing = m.header_field(c"encoding").unwrap_err();
+        assert_eq!(missing.code(), Some(ErrorCode::NotFound));
+        assert_eq!(missing.message(), c"no such field 'encoding'");
+    }
+
+    /// libgit2 matches a header field against the rest of the header, across line
+    /// ends, and on a match past the line copies `eol - buf`, negative, as a length:
+    /// for these first two fields, UBSan's pointer overflow in `git_str_put` and
+    /// ASan's allocation of `0xffffffffffffffd0` bytes. The wrapper refuses every field
+    /// holding a newline as one it does not find, which is what libgit2 reports for
+    /// those of them it reads safely.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn header_fields_holding_a_newline_are_refused_before_c() {
+        let repo = open_testrepo();
+        let head = Commit::lookup(repo.as_ref(), sha1(HEAD).as_ref()).unwrap();
+        let fields: [&CStr; 5] = [
+            c"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent",
+            c"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent be3563ae3f795b2b4353bcce3a527ad0a4f7f644\nauthor",
+            c"\n",
+            c"parent\n",
+            c"zz\nzz",
+        ];
+        for field in fields {
+            let e = head.as_ref().header_field(field).unwrap_err();
+            assert_eq!(e.raw_code(), ErrorCode::NotFound.raw(), "{field:?}");
+            assert_eq!(e.class(), Some(ErrorClass::Object));
+            let expected = format!("no such field '{}'", field.to_str().unwrap());
+            assert_eq!(e.message().to_str().unwrap(), expected);
+            assert_eq!(last().message(), e.message());
+        }
+        // The same commit's header still reads, and a field without a newline is found.
+        let parent = head.as_ref().header_field(c"parent").unwrap();
+        assert_eq!(parent.as_ref().as_bytes(), PARENT.to_bytes());
+    }
+
+    /// The summary is computed once, into the commit, and every handle of the commit
+    /// reads that one string, which lives as long as the commit does.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn summary_is_computed_once_into_the_shared_commit() {
+        let repo = open_testrepo();
+        let merge = Commit::lookup(repo.as_ref(), sha1(MERGE).as_ref()).unwrap();
+        let copy = merge.as_ref().to_commit();
+        let first = merge.as_ref().summary().unwrap().as_ptr();
+        let second = copy.as_ref().summary().unwrap();
+        assert!(ptr::eq(first, second.as_ptr()));
+        drop(merge);
+        assert_eq!(copy.as_ref().summary(), Ok(c"Merge branch 'br2'"));
+    }
+
+    /// Out of memory: a summary whose string and empty fallback cannot be allocated
+    /// fails with libgit2's error, and is computed on a later call; a header field
+    /// fails, leaving the commit readable.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn summaries_and_header_fields_out_of_memory() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::summaries_and_header_fields_out_of_memory"
+            ),
+            || {
+                install_refusing();
+                let repo = open_testrepo();
+                let merge = Commit::lookup(repo.as_ref(), sha1(MERGE).as_ref()).unwrap();
+                REFUSING.store(true, SeqCst);
+                let summary = merge.as_ref().summary();
+                let field = merge.as_ref().header_field(c"author");
+                REFUSING.store(false, SeqCst);
+                assert_eq!(summary.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                assert_eq!(field.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                assert_eq!(merge.as_ref().summary(), Ok(c"Merge branch 'br2'"));
+                assert!(merge.as_ref().header_field(c"author").is_ok());
+            },
+        );
     }
 }
