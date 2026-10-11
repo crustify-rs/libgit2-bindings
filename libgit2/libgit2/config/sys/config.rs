@@ -709,7 +709,6 @@ impl<'a, 'c> IteratorMut<'a, 'c> {
     /// errors preserve the code and copied thread-local error. A subsequent call
     /// after an error is allowed (C can proceed to a different backend).
     ///
-    /// Wraps: git_config_next
     pub fn advance(&mut self) -> Result<Option<BackendEntryRef<'_>>, ConfigError> {
         IteratorNext.call(self)
     }
@@ -748,95 +747,10 @@ impl IteratorNext {
     }
 }
 
-impl<'a, 'r> crate::libgit2::config::config::ConfigRef<'a, 'r> {
-    /// Creates an iterator borrowing this config, without retaining a reference.
-    ///
-    /// Wraps: git_config_iterator_new
-    pub fn iterator(&self) -> Result<IteratorBox<'a>, ConfigError> {
-        let mut out = ptr::null_mut();
-        // SAFETY: this handle keeps config/repository live for 'a; writable out
-        // slot; C constructs a fresh complete allocation or cleans up failure.
-        let rc = unsafe { ffi::git_config_iterator_new(&mut out, self.as_ptr()) };
-        if rc != 0 {
-            return Err(ConfigError::from_libgit2(rc));
-        }
-        // SAFETY: success wrote a fresh all-iterator owned only by out, paired
-        // with its own free callback; it borrows the config only for 'a.
-        let iter = unsafe { IteratorBox::from_c(out) };
-        Ok(iter.expect("successful iterator constructor returned NULL"))
-    }
-
-    /// Iterates keys matching C's regex syntax; `None` means all keys. The regex
-    /// is compiled/copied during construction, not retained as a Rust borrow.
-    ///
-    /// Wraps: git_config_iterator_glob_new
-    pub fn iterator_matching(&self, regexp: Option<&CStr>) -> Result<IteratorBox<'a>, ConfigError> {
-        let mut out = ptr::null_mut();
-        // SAFETY: live config and writable out; regexp is NUL-terminated and
-        // borrowed only for the call. C frees failed regex construction.
-        let rc = unsafe {
-            ffi::git_config_iterator_glob_new(
-                &mut out,
-                self.as_ptr(),
-                regexp.map_or(ptr::null(), CStr::as_ptr),
-            )
-        };
-        if rc != 0 {
-            return Err(ConfigError::from_libgit2(rc));
-        }
-        // SAFETY: success wrote a fresh glob (or, without a regex, all) iterator
-        // owned only by out, with its own free callback, borrowing config for 'a.
-        let iter = unsafe { IteratorBox::from_c(out) };
-        Ok(iter.expect("successful iterator constructor returned NULL"))
-    }
-
-    /// Iterates all values for the normalized name, optionally regex-filtered.
-    /// Name and regexp are copied/compiled, so their inputs may die immediately.
-    ///
-    /// With a regex, C's name-selection iterator is retained but value matching
-    /// uses the same PCRE2 engine in a Rust-owned enclosing allocation. C calls
-    /// strlen(NULL) on valueless entries and leaks its name on regex failure;
-    /// the filter instead skips valueless entries and cleans up failed regexes.
-    /// Empty values remain distinct and are matched normally. This corrects
-    /// undefined C behavior without changing matching of non-null values.
-    /// C's existing outer-allocation-failure leak without a regex remains.
-    ///
-    /// Wraps: git_config_multivar_iterator_new
-    pub fn multivar_iterator(
-        &self,
-        name: &CStr,
-        regexp: Option<&CStr>,
-    ) -> Result<IteratorBox<'a>, ConfigError> {
-        let mut out = ptr::null_mut();
-        // SAFETY: live config; writable out; C copies the name and returns a
-        // fresh matching-callback allocation. No regex: valueless entries are
-        // safe here, and failed normalization releases its partial construction.
-        let rc = unsafe {
-            ffi::git_config_multivar_iterator_new(
-                &mut out,
-                self.as_ptr(),
-                name.as_ptr(),
-                ptr::null(),
-            )
-        };
-        if rc != 0 {
-            return Err(ConfigError::from_libgit2(rc));
-        }
-        // SAFETY: success wrote a fresh multivar iterator owned only by out, with
-        // its own free callback; it and its inner iterator borrow config for 'a.
-        let inner = unsafe { IteratorBox::from_c(out) }
-            .expect("successful iterator constructor returned NULL");
-        match regexp {
-            None => Ok(inner),
-            Some(regexp) => value_filter::new(inner, regexp),
-        }
-    }
-}
-
 // A narrow workaround for C's valueless multivar regex UB. The campaign builds
 // libgit2 with USE_REGEX=pcre2; these bindings link the same system PCRE2 library,
 // use the same options and preserve arbitrary pattern/value bytes (not UTF-8).
-mod value_filter {
+pub(crate) mod value_filter {
     use super::*;
     use crate::libgit2::util::errors::ErrorClass;
     use crate::libgit2::util::sys::errors::{set, set_oom};
@@ -970,7 +884,7 @@ mod value_filter {
         }
     }
 
-    pub(super) fn new<'c>(
+    pub(crate) fn new<'c>(
         inner: IteratorBox<'c>,
         pattern: &CStr,
     ) -> Result<IteratorBox<'c>, ConfigError> {
@@ -1380,6 +1294,27 @@ mod unit_tests {
             drop(iter);
             drop(config);
             std::fs::remove_file(file).unwrap();
+        }
+
+        /// The public-entry gateway also dispatches allocation-specific callbacks
+        /// for an adopted Rust fixture, without acquiring the lent entry.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls git_config_next and iterator_free")]
+        fn iterator_public_entry_dispatch_and_release() {
+            let releases = Rc::new(Cell::new(0));
+            let mut owner = owned(releases.clone(), None);
+            {
+                let mut m = owner.as_mut();
+                let entry = m.advance_entry().unwrap().unwrap();
+                assert_eq!(entry.name(), Some(c"fixture.key"));
+                assert_eq!(entry.value(), None);
+                assert_eq!(entry.backend_type(), Some(c"fixture"));
+                assert!(m.advance_entry().unwrap().is_none());
+                assert!(m.advance_entry().unwrap().is_none());
+            }
+            assert_eq!(releases.get(), 0);
+            drop(owner);
+            assert_eq!(releases.get(), 1);
         }
 
         #[test]

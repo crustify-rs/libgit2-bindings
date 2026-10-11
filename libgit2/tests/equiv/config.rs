@@ -2923,3 +2923,150 @@ mod enumeration {
         }
     }
 }
+
+mod iterator_entries {
+    use super::*;
+    use libgit2::libgit2::config::config::EntryRef;
+    use libgit2::libgit2::config::sys::config::IteratorBox;
+
+    type Row = (
+        Option<CString>,
+        Option<CString>,
+        Option<CString>,
+        Option<CString>,
+        u32,
+        i32,
+    );
+    fn observe(entry: EntryRef<'_>) -> Row {
+        (
+            entry.name().map(CStr::to_owned),
+            entry.value().map(CStr::to_owned),
+            entry.backend_type().map(CStr::to_owned),
+            entry.origin_path().map(CStr::to_owned),
+            entry.include_depth(),
+            entry.level().raw(),
+        )
+    }
+
+    fn compare(mut rust: IteratorBox<'_>, raw: *mut ffi::git_config_iterator) -> usize {
+        let mut count = 0;
+        loop {
+            let mut out = ptr::null_mut();
+            // SAFETY: complete independent live raw iterator; exclusive output
+            // slot, with no raw entry retained across this next call.
+            let rc = unsafe { ffi::git_config_next(&mut out, raw) };
+            let raw_error = (rc != 0 && rc != ffi::GIT_ITEROVER).then(last);
+            let mut m = rust.as_mut();
+            match m.advance_entry() {
+                Ok(Some(entry)) => {
+                    assert_eq!(rc, 0);
+                    // SAFETY: success initializes out to a live borrowed entry;
+                    // read pointers/scalars by value, with no reference to C layout.
+                    let e = unsafe { out.read() };
+                    let string = |p: *const std::ffi::c_char| {
+                        if p.is_null() {
+                            None
+                        } else {
+                            // SAFETY: entry strings are immutable NUL strings
+                            // pinned until the next raw advance; copy immediately.
+                            Some(unsafe { CStr::from_ptr(p) }.to_owned())
+                        }
+                    };
+                    assert_eq!(
+                        observe(entry),
+                        (
+                            string(e.name),
+                            string(e.value),
+                            string(e.backend_type),
+                            string(e.origin_path),
+                            e.include_depth,
+                            e.level
+                        )
+                    );
+                    count += 1;
+                }
+                Ok(None) => {
+                    assert_eq!(rc, ffi::GIT_ITEROVER);
+                    assert!(out.is_null(), "C leaves output untouched on ITEROVER");
+                    // SAFETY: C permits repeated advancement of an exhausted iterator.
+                    let repeated = unsafe { ffi::git_config_next(&mut out, raw) };
+                    assert_eq!(repeated, rc);
+                    assert!(m.advance_entry().unwrap().is_none());
+                    break;
+                }
+                Err(error) => {
+                    assert_eq!(error.raw_code(), rc);
+                    assert_eq!(error.error(), &raw_error.unwrap());
+                    assert!(out.is_null(), "C leaves output untouched on error");
+                }
+            }
+        }
+        // SAFETY: consumes the sole raw owner exactly once, before its config dies.
+        unsafe { ffi::git_config_iterator_free(raw) };
+        drop(rust);
+        count
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn public_entries_sequences_match_c() {
+        let file = scratch("public-iterator", "both");
+        std::fs::write(&file, b"[a]\nx = one\nx = two\nflag\nempty =\nbin = \xff\n").unwrap();
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let rust_cfg = Config::open(&path).unwrap();
+        let raw_cfg = Config::open(&path).unwrap(); // Independently allocated backend/list.
+        let mut raw = ptr::null_mut();
+        // SAFETY: live reference-side config; writable output; success gives sole owner.
+        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg.as_c_ptr()) };
+        assert_eq!(rc, 0);
+        assert_eq!(compare(rust_cfg.as_ref().iterator().unwrap(), raw), 5);
+        for regexp in [None, Some(c"^a\\.x$"), Some(c"nomatch")] {
+            // SAFETY: config remains live; regex borrowed only during construction.
+            let rc = unsafe {
+                ffi::git_config_iterator_glob_new(
+                    &mut raw,
+                    raw_cfg.as_c_ptr(),
+                    regexp.map_or(ptr::null(), CStr::as_ptr),
+                )
+            };
+            assert_eq!(rc, 0);
+            compare(rust_cfg.as_ref().iterator_matching(regexp).unwrap(), raw);
+        }
+        // A regex on a valueless entry is deliberately not sent to defective C.
+        for (key, regex, expected) in [
+            (c"A.X", None, 2),
+            (c"a.x", Some(c"two"), 1),
+            (c"a.flag", None, 1),
+            (c"a.empty", Some(c"^$"), 1),
+            (c"a.bin", Some(c"^\xff$"), 1),
+            (c"a.missing", None, 0),
+        ] {
+            // SAFETY: key/regex are NUL strings; inputs cover only defined C behavior;
+            // config remains live until compare releases the complete returned owner.
+            let rc = unsafe {
+                ffi::git_config_multivar_iterator_new(
+                    &mut raw,
+                    raw_cfg.as_c_ptr(),
+                    key.as_ptr(),
+                    regex.map_or(ptr::null(), CStr::as_ptr),
+                )
+            };
+            assert_eq!(rc, 0);
+            assert_eq!(
+                compare(
+                    rust_cfg.as_ref().multivar_iterator(key, regex).unwrap(),
+                    raw
+                ),
+                expected
+            );
+        }
+        let rust = rust_cfg.as_ref().iterator().unwrap();
+        // SAFETY: independent live config, writable output; backend opens lazily.
+        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg.as_c_ptr()) };
+        assert_eq!(rc, 0);
+        std::fs::write(&file, b"[unterminated\n").unwrap();
+        assert_eq!(compare(rust, raw), 0); // Refresh failure, then exhaustion.
+        drop((rust_cfg, raw_cfg));
+        std::fs::remove_file(file).unwrap();
+    }
+}
