@@ -642,3 +642,198 @@ mod entries {
         assert_eq!(rust_steps, c_steps);
     }
 }
+
+/// Equivalence of [`MailmapRef::resolve_signature`] with
+/// `git_mailmap_resolve_signature`.
+///
+/// Each side builds its own mailmap from libgit2's reference file and holds its own
+/// copies of a list of signatures: parsed from signature lines (zones east, west and
+/// `-0000`, whose sign `git_signature_new` alone would lose) and built over borrowed
+/// strings (C: a `git_signature` on the stack; Rust: a [`SignatureView`]), including
+/// strings libgit2 trims, strings holding angle brackets and strings that trim to
+/// nothing. Every signature is resolved, then entries are added to both mailmaps
+/// (among them a real name with angle brackets and one that trims to nothing) and every
+/// signature is resolved again. Each resolution records the resolved name, email, time,
+/// offset and sign, or the failure's code (always -1) and the error's class and message;
+/// the records are compared after each step.
+///
+/// Outside these comparisons: C also takes a NULL mailmap (resolving to the identity)
+/// and a NULL signature (success without a result), which the wrapper's arguments
+/// cannot carry, and a signature missing its name or email, which the wrapper refuses
+/// before libgit2's assertion (`mailmap.rs`'s unit tests).
+///
+/// [`MailmapRef::resolve_signature`]: libgit2::libgit2::object::mailmap::MailmapRef::resolve_signature
+/// [`SignatureView`]: libgit2::libgit2::core::types::SignatureView
+mod signatures {
+    use std::ffi::{CStr, c_char, c_int};
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::core::types::{Signature, SignatureRef, SignatureView, Time};
+    use libgit2::libgit2::object::mailmap::{Mailmap, MailmapRef};
+
+    use super::{MAILMAP, c_error, init};
+
+    /// A resolved signature `(name, email, seconds, offset, sign)`, or the failure.
+    type Resolved = Result<(Vec<u8>, Vec<u8>, i64, c_int, u8), (c_int, c_int, String)>;
+
+    const LINES: [&CStr; 6] = [
+        c"nick1 <bugs@company.xx> 1700000000 +0200",
+        c"Who <me@company.xx> 7 -0000",
+        c"Joseph <bugs@company.xx> 0 -0130",
+        c"  Spaced  <cto@coompany.xx> 1 +0000",
+        c"Brackets <a<b@x> 2 +0100",
+        c"<nick2@company.xx> 3 +0000",
+    ];
+
+    const VIEWS: [(&CStr, &CStr, i64, c_int); 7] = [
+        (c"nick2", c"bugs@company.xx", 5, 60),
+        (c"Some Name", c"untracked@company.xx", -5, -60),
+        (c"  , Trimmed ; ", c"\"me@company.xx\"", 0, 0),
+        (c"<Bad>", c"bad@x", 0, 0),
+        (c"Fine", c"x>y@z", 0, 0),
+        (c" ", c"empty@x", 0, 0),
+        (c"New", c"new@x", 9, 9),
+    ];
+
+    const ENTRIES: [(&CStr, &CStr, &CStr); 4] = [
+        (c"Real <New>", c"real@x", c"new@x"),
+        (c" ;", c"blank@x", c"bad@x"),
+        (c"Newer", c"newer@x", c"new@x"),
+        (c"Fixed", c"fixed@x", c"empty@x"),
+    ];
+
+    fn c_signatures() -> Vec<*mut ffi::git_signature> {
+        LINES
+            .iter()
+            .map(|line| {
+                let mut sig = ptr::null_mut();
+                // SAFETY: a writable slot and a NUL-terminated line.
+                let rc = unsafe { ffi::git_signature_from_buffer(&mut sig, line.as_ptr()) };
+                assert_eq!(rc, 0, "{line:?}");
+                sig
+            })
+            .collect()
+    }
+
+    fn c_views() -> Vec<ffi::git_signature> {
+        VIEWS
+            .iter()
+            .map(|&(name, email, time, offset)| ffi::git_signature {
+                name: name.as_ptr().cast_mut(),
+                email: email.as_ptr().cast_mut(),
+                when: ffi::git_time {
+                    time,
+                    offset,
+                    sign: (if offset < 0 { b'-' } else { b'+' }) as c_char,
+                },
+            })
+            .collect()
+    }
+
+    fn c_resolve(map: *const ffi::git_mailmap, sig: *const ffi::git_signature) -> Resolved {
+        let mut out = ptr::null_mut();
+        // SAFETY: a writable slot, a live mailmap and a live signature with both strings.
+        let rc = unsafe { ffi::git_mailmap_resolve_signature(&mut out, map, sig) };
+        if rc < 0 {
+            let (class, message) = c_error();
+            return Err((rc, class, message));
+        }
+        // SAFETY: on success a fresh signature, read and freed once.
+        unsafe {
+            let r = &*out;
+            let resolved = (
+                CStr::from_ptr(r.name).to_bytes().to_vec(),
+                CStr::from_ptr(r.email).to_bytes().to_vec(),
+                r.when.time,
+                r.when.offset,
+                r.when.sign as u8,
+            );
+            ffi::git_signature_free(out);
+            Ok(resolved)
+        }
+    }
+
+    fn rust_resolve(map: MailmapRef<'_>, sig: SignatureRef<'_>) -> Resolved {
+        match map.resolve_signature(sig) {
+            Ok(out) => {
+                let r = out.as_ref();
+                Ok((
+                    r.name().unwrap().to_bytes().to_vec(),
+                    r.email().unwrap().to_bytes().to_vec(),
+                    r.when().seconds(),
+                    r.when().offset_minutes(),
+                    r.when().sign(),
+                ))
+            }
+            Err(e) => Err((
+                -1,
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            )),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn resolutions_match_c_before_and_after_new_entries() {
+        init();
+        let mut c_map = ptr::null_mut();
+        // SAFETY: a writable slot and a live buffer.
+        let rc = unsafe {
+            ffi::git_mailmap_from_buffer(&mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
+        };
+        assert_eq!(rc, 0);
+        let mut rust_map = Mailmap::from_buffer(MAILMAP).unwrap();
+        let c_parsed = c_signatures();
+        let c_viewed = c_views();
+        let rust_parsed: Vec<_> = LINES.iter().map(|l| Signature::parse(l).unwrap()).collect();
+        let rust_viewed: Vec<_> = VIEWS
+            .iter()
+            .map(|&(name, email, time, offset)| {
+                SignatureView::new(name, email, Time::new(time, offset))
+            })
+            .collect();
+        let c_all = || {
+            let mut out: Vec<Resolved> = c_parsed.iter().map(|&s| c_resolve(c_map, s)).collect();
+            out.extend(c_viewed.iter().map(|s| c_resolve(c_map, s)));
+            out
+        };
+        let rust_all = |map: MailmapRef<'_>| {
+            let mut out: Vec<Resolved> = rust_parsed
+                .iter()
+                .map(|s| rust_resolve(map, s.as_ref()))
+                .collect();
+            out.extend(rust_viewed.iter().map(|s| rust_resolve(map, s.as_ref())));
+            out
+        };
+        let first = c_all();
+        assert_eq!(rust_all(rust_map.as_ref()), first, "before any entry");
+        assert!(first.iter().any(Result::is_err) && first.iter().any(Result::is_ok));
+        assert!(first.iter().any(|r| matches!(r, Ok((.., b'-')))));
+        for (i, (real_name, real_email, email)) in ENTRIES.into_iter().enumerate() {
+            // SAFETY: the live mailmap and NUL-terminated strings, `email` non-empty.
+            let rc = unsafe {
+                ffi::git_mailmap_add_entry(
+                    c_map,
+                    real_name.as_ptr(),
+                    real_email.as_ptr(),
+                    ptr::null(),
+                    email.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0);
+            rust_map
+                .as_mut()
+                .add_entry(Some(real_name), Some(real_email), None, email)
+                .unwrap();
+            assert_eq!(rust_all(rust_map.as_ref()), c_all(), "after entry {i}");
+        }
+        for sig in c_parsed {
+            // SAFETY: each parsed signature, freed once.
+            unsafe { ffi::git_signature_free(sig) };
+        }
+        // SAFETY: the C side's mailmap, freed once.
+        unsafe { ffi::git_mailmap_free(c_map) };
+    }
+}

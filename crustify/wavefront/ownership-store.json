@@ -3899,6 +3899,100 @@
    ]
   },
   {
+   "name": "git_commit_header_field",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Reads commit->raw_header only."
+     }
+    },
+    {
+     "name": "field",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:field"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Matched with git__prefixcmp against the rest of the header, NOT bounded by the line: a field containing '\\n' can match across a line end, after which git_str_put gets eol - buf < 0 as a size_t (UBSan pointer overflow at str.c:103, or an ASan allocation-size-too-big). Wrappers must refuse a field holding a newline. Empty field: ENOTFOUND."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_buf the caller holds (GIT_BUF_INIT or a buffer libgit2 filled); filled through git_buf_fromstr on success (caller releases with git_buf_dispose), left alone on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_id",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only (git_object_id on the commit's object)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:obj"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&obj->object.cached.oid: part of the commit, lives as long as it; written once when parsed. Never NULL for a non-NULL commit."
+    }
+   }
+  },
+  {
    "name": "git_commit_lookup",
    "defined_in": "src/libgit2/object_api.c",
    "lifetime": {
@@ -4039,6 +4133,117 @@
    ]
   },
   {
+   "name": "git_commit_message",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "Pointer into commit->raw_message, past its leading newlines; lives as long as the commit."
+    }
+   }
+  },
+  {
+   "name": "git_commit_message_encoding",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "commit->message_encoding: the last `encoding` header's value (earlier ones leak), NULL without one; lives as long as the commit."
+    }
+   }
+  },
+  {
+   "name": "git_commit_message_raw",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "commit->raw_message: everything after the blank line ending the headers (\"\" without one); lives as long as the commit."
+    }
+   }
+  },
+  {
    "name": "git_commit_nth_gen_ancestor",
    "defined_in": "src/libgit2/commit.c",
    "lifetime": {
@@ -4090,6 +4295,45 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_commit_owner",
+   "defined_in": "src/libgit2/object_api.c",
+   "ptr_args": [
+    {
+     "name": "obj",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:obj"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only (git_object_owner)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "other"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "obj->object.repo: the repository the commit was looked up in, stored uncounted and never cleared (git_repository_free does not clear it). Borrowed from the repository borrow the commit was looked up through, not from the commit; the caller must not free it. Never NULL for public commits (only git_object__from_raw leaves it NULL, never published). Not written by the callee."
+    }
+   }
   },
   {
    "name": "git_commit_parent",
@@ -4184,6 +4428,105 @@
    }
   },
   {
+   "name": "git_commit_parent_id",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "git_array_get(commit->parent_ids, n): the n-th element of the commit's parent id array, NULL for n >= parentcount."
+    }
+   }
+  },
+  {
+   "name": "git_commit_parentcount",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only (parent_ids size, or committer->when, which every public commit has)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_raw_header",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "commit->raw_header: the header lines, each newline-terminated; lives as long as the commit."
+    }
+   }
+  },
+  {
    "name": "git_commit_signature_cb",
    "defined_in": null,
    "ptr_args": [
@@ -4256,6 +4599,89 @@
    ]
   },
   {
+   "name": "git_commit_summary",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Writes commit->summary once, when NULL (lazily computed cache, unsynchronised): the commit must not be used by another thread meanwhile. Never replaced once set."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "commit->summary, owned by the commit and freed with it. NULL only when even git__strdup(\"\") fails (OOM error set); an OOM mid-way yields \"\"."
+    }
+   }
+  },
+  {
+   "name": "git_commit_time",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only (parent_ids size, or committer->when, which every public commit has)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_time_offset",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only (parent_ids size, or committer->when, which every public commit has)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commit_tree",
    "defined_in": "src/libgit2/commit.c",
    "lifetime": {
@@ -4307,6 +4733,45 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_commit_tree_id",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "commit",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:commit"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only; a live, fully parsed commit (every public commit is: only the revision walker parses partially, into private structs)."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:commit"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&commit->tree_id: a field of the commit, never NULL for a non-NULL commit."
+    }
+   }
   },
   {
    "name": "git_commitarray_dispose",
@@ -5605,6 +6070,76 @@
    ]
   },
   {
+   "name": "git_mailmap_resolve_signature",
+   "defined_in": "src/libgit2/mailmap.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "mailmap",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:mailmap"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read only; NULL resolves every identity to itself."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: a fresh signature from git_signature_new (strings copied, trimmed), sign copied from sig; released with git_signature_free. Untouched when sig is NULL (returns 0!) or the resolve assert fails; set to NULL when git_signature_new fails (angle brackets, empty after trim, OOM)."
+     }
+    },
+    {
+     "name": "sig",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:sig"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read only. NULL returns 0 without writing out. NULL name/email trips GIT_ASSERT (abort in debug builds, GIT_ERROR_INTERNAL otherwise)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_message_prettify",
    "defined_in": "src/libgit2/message.c",
    "ptr_args": [
@@ -5839,6 +6374,118 @@
      "note": "&obj->cached.oid: lives as long as the object; never NULL for a live object."
     }
    }
+  },
+  {
+   "name": "git_object_id_from_buffer",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:data"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "len bytes, read only (also through the filter list, as a not-owned git_str). NULL only allowed with len 0 (id_from_buffer refuses NULL with len != 0)."
+     }
+    },
+    {
+     "name": "given_opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL means defaults. Copied (object_type, oid_type, filters pointer) by normalize_options, which refuses an invalid object or oid type. The pointed-to filter list is applied (its filters' stream state written) despite the const struct pointer."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Written on success only (memset then type and hash)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_object_id_from_file",
+   "defined_in": "src/libgit2/object.c",
+   "ptr_args": [
+    {
+     "name": "given_opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL means defaults. Copied (object_type, oid_type, filters pointer) by normalize_options, which refuses an invalid object or oid type. The pointed-to filter list is applied (its filters' stream state written) despite the const struct pointer."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Written on success only."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Opened read-only (git_futils_open_ro: GIT_ENOTFOUND for a missing file), read and closed within the call; relative to the cwd."
+     }
+    }
+   ]
   },
   {
    "name": "git_object_id_options_init",

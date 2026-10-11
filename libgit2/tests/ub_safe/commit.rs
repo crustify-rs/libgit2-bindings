@@ -1,5 +1,5 @@
 //! UB tests for `git2/commit.h`: the `Commit` owner, `CommitArc<'r>`, its lookups,
-//! handles and object conversions; the `CommitArray` value held by its `CommitArrayVal`
+//! handles, getters and object conversions; the `CommitArray` value held by its `CommitArrayVal`
 //! owner, its handles, the commits it lends and moves in and out, and the
 //! `git_commitarray_dispose` policy; the `Header` value; and the `CreateExtOptions`
 //! and `CreateOptions` values and their handles.
@@ -17,12 +17,15 @@ use std::sync::Barrier;
 use std::thread;
 
 use libgit2::libgit2::config::config::Config;
-use libgit2::libgit2::object::commit::{CommitArray, CommitArrayRef, CommitArrayVal};
+use libgit2::libgit2::object::commit::{CommitArray, CommitArrayRef, CommitArrayVal, CommitRef};
 
-use crate::fixture::commit_and_config::{
-    EMPTY, MERGEDREPO, OpenRepo, TESTREPO, commit_id, commit_parents,
-};
+use crate::fixture::commit_and_config::{EMPTY, MERGEDREPO, OpenRepo, TESTREPO, commit_parents};
 use crate::fixture::isolated;
+
+/// The hex id of a commit, through [`CommitRef::id`].
+pub fn commit_id(commit: CommitRef<'_, '_>) -> String {
+    commit.id().to_hex_string().unwrap()
+}
 
 fn ids(array: CommitArrayRef<'_, '_>) -> Vec<String> {
     array.iter().map(commit_id).collect()
@@ -376,7 +379,7 @@ mod commit {
     use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
-    use crate::fixture::commit_and_config::commit_id;
+    use super::commit_id;
     use crate::fixture::isolated;
     use crate::fixture::object_and_tree_entry::{
         enable_caching, object_view, open_testrepo, set_cache_max_size,
@@ -747,6 +750,254 @@ mod commit {
             COMMITS[6]
         );
         assert!(root.as_ref().tree().is_ok());
+    }
+}
+
+/// UB tests for the getters of `CommitRef`: `id`, `owner`, `message`, `message_raw`,
+/// `message_encoding`, `raw_header`, `header_field`, `summary`, `time`, `time_offset`,
+/// `tree_id`, `parent_count` and `parent_id`.
+///
+/// Every string and id a getter returns lives inside the commit, borrowed for as long
+/// as the handle it came from: the tests read each result after every other owner of
+/// the commit, and every other commit, is gone (ASan: a getter tied to the wrong
+/// commit, or reading past a string), and, with the cache off, after the earlier
+/// lookup of the same id, a distinct commit, is freed. `summary` writes its result into
+/// the commit on first use, through a shared handle: it is read through other handles
+/// and lent array commits. A header field is a fresh buffer the caller owns, which
+/// outlives the commit and the repository (LSan: leak; ASan: double free). A field
+/// holding a newline, which libgit2 would match across line ends and copy with a
+/// negative length (UBSan: pointer overflow; ASan: an allocation of nearly
+/// `usize::MAX` bytes), is refused before C. The repository `owner` hands back is the
+/// one the commit was looked up through, which outlives the commit.
+///
+/// Results outliving their commit do not compile (the getters' doctests). Commits are
+/// neither `Send` nor `Sync`, so there is no thread test. Every test calls libgit2, so
+/// Miri skips them all.
+mod getters {
+    use std::ffi::{CStr, CString};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::{Commit, CommitArc, CommitArray};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
+
+    use crate::fixture::TempRepo;
+    use crate::fixture::isolated;
+    use crate::fixture::object_and_tree_entry::{
+        enable_caching, open_testrepo, repository, write_raw,
+    };
+
+    /// `testrepo.git`'s commits: `HEAD`, the merge, a root.
+    const HEAD: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
+    const MERGE: &str = "be3563ae3f795b2b4353bcce3a527ad0a4f7f644";
+    const ROOT: &str = "8496071c1b46c854b31185ea97743be6a8774479";
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    fn id(hex: &str) -> Oid {
+        Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap()
+    }
+
+    /// Everything the getters return of one commit, the strings still borrowed.
+    struct View<'a> {
+        id: String,
+        tree: String,
+        parents: Vec<String>,
+        message: &'a CStr,
+        raw: &'a CStr,
+        encoding: Option<&'a CStr>,
+        header: &'a CStr,
+        summary: &'a CStr,
+        time: (i64, i32),
+    }
+
+    fn view<'a>(commit: &'a CommitArc<'_>) -> View<'a> {
+        let c = commit.as_ref();
+        let count = c.parent_count();
+        let parents = (0..count)
+            .map(|n| c.parent_id(n).unwrap().to_hex_string().unwrap())
+            .collect();
+        assert!(c.parent_id(count).is_none() && c.parent_id(u32::MAX).is_none());
+        View {
+            id: c.id().to_hex_string().unwrap(),
+            tree: c.tree_id().to_hex_string().unwrap(),
+            parents,
+            message: c.message(),
+            raw: c.message_raw(),
+            encoding: c.message_encoding(),
+            header: c.raw_header(),
+            summary: c.summary().unwrap(),
+            time: (c.time(), c.time_offset()),
+        }
+    }
+
+    /// Reads every byte of a view's strings.
+    fn touch(v: &View<'_>) -> usize {
+        let strs = [v.message, v.raw, v.header, v.summary];
+        let n: usize = strs.iter().map(|s| s.to_bytes().len()).sum();
+        n + v.encoding.map_or(0, |e| e.to_bytes().len()) + v.id.len() + v.tree.len()
+    }
+
+    /// The strings of commits held by one owner each, read after every other owner,
+    /// lookup and id is gone; the summary is computed through one handle and read
+    /// through another, and through a lent array commit.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn results_borrow_from_the_commit_they_read() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        let mut held = Vec::new();
+        for hex in [HEAD, MERGE, ROOT] {
+            let mut oid = Box::new(id(hex));
+            let commit = Commit::lookup(r, Oid::as_ref(&oid)).unwrap();
+            Oid::as_mut(&mut oid).set_id([0xff; 32]);
+            drop(oid);
+            let other = commit.clone();
+            held.push(commit);
+            drop(other);
+        }
+        let views: Vec<_> = held.iter().map(view).collect();
+        assert_eq!(views[0].id, HEAD);
+        assert_eq!(views[1].parents.len(), 2);
+        assert!(views[2].parents.is_empty());
+        assert_eq!(views[1].summary, c"Merge branch 'br2'");
+        assert!(views.iter().map(touch).sum::<usize>() > 0);
+        assert_eq!(views[0].time, (1_312_943_626, -420));
+        let array = CommitArray::from_commits(held.clone()).unwrap();
+        let lent = array.as_ref().get(1).unwrap();
+        assert_eq!(lent.summary().unwrap().as_ptr(), views[1].summary.as_ptr());
+        drop(views);
+        drop(held);
+        // The array's references keep the commits, and their strings, alive.
+        let lent = array.as_ref().get(2).unwrap();
+        assert_eq!(lent.message(), c"testing\n");
+        assert_eq!(lent.summary(), Ok(c"testing"));
+    }
+
+    /// With the cache off every lookup parses a fresh commit: the results of the
+    /// second stay valid once the first is freed, and the summaries are distinct.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn results_of_fresh_commits_outlive_earlier_ones() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::results_of_fresh_commits_outlive_earlier_ones"
+            ),
+            || {
+                enable_caching(false);
+                let repo = open_testrepo();
+                let first = Commit::lookup(repo.as_ref(), id(MERGE).as_ref()).unwrap();
+                let second = Commit::lookup(repo.as_ref(), id(MERGE).as_ref()).unwrap();
+                assert!(!CommitArc::ptr_eq(&first, &second));
+                let a = first.as_ref().summary().unwrap().as_ptr();
+                let kept = view(&second);
+                assert_ne!(a, kept.summary.as_ptr());
+                drop(first);
+                assert_eq!(kept.summary, c"Merge branch 'br2'");
+                assert!(touch(&kept) > 0);
+            },
+        );
+    }
+
+    /// Header fields are fresh buffers the caller owns: they outlive the commit and
+    /// the repository. Fields holding a newline never reach C, including the two that
+    /// overflow in it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn header_fields_are_owned_and_newlines_never_reach_c() {
+        let repo = open_testrepo();
+        let commit = Commit::lookup(repo.as_ref(), id(HEAD).as_ref()).unwrap();
+        let mut fields = Vec::new();
+        for name in [c"tree", c"parent", c"author", c"committer"] {
+            fields.push(commit.as_ref().header_field(name).unwrap());
+        }
+        for name in [c"", c"tre", c"parents", c"gpgsig", c"encoding"] {
+            let e = commit.as_ref().header_field(name).unwrap_err();
+            assert_eq!(e.code(), Some(ErrorCode::NotFound), "{name:?}");
+        }
+        let overflowing: [&CStr; 3] = [
+            c"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent",
+            c"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent be3563ae3f795b2b4353bcce3a527ad0a4f7f644\nauthor",
+            c"tree 944c0f6e4dfa41595e6eb3ceecdb14f50fe18162\nparent be3563ae3f795b2b4353bcce3a527ad0a4f7f644\nauthor Scott Chacon <schacon@gmail.com> 1312943626 -0700\ncommitter",
+        ];
+        for name in overflowing {
+            let e = commit.as_ref().header_field(name).unwrap_err();
+            assert_eq!(
+                (e.code(), e.class()),
+                (Some(ErrorCode::NotFound), Some(ErrorClass::Object))
+            );
+        }
+        let owner = commit.as_ref().owner();
+        drop(commit);
+        // The owner is the repository's handle again, outliving the commit.
+        let again = Commit::lookup(owner, id(HEAD).as_ref()).unwrap();
+        assert_eq!(again.as_ref().owner().path(), repo.as_ref().path());
+        drop(again);
+        drop(repo);
+        let read: Vec<_> = fields
+            .iter()
+            .map(|f| f.as_ref().to_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(read[0], "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162");
+        assert_eq!(read[1], "be3563ae3f795b2b4353bcce3a527ad0a4f7f644");
+        assert_eq!(read[2], "Scott Chacon <schacon@gmail.com> 1312943626 -0700");
+    }
+
+    /// Hand-made commits, each in an exact-length object: an `encoding` header, a
+    /// multi-line header and a header whose last continuation line does not end, no
+    /// message at all, leading newlines and whitespace-only lines in the message.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn crafted_commits_read_in_bounds() {
+        let tmp = TempRepo::new("commit-getters");
+        let who = "A U Thor <a@example.com> 1700000000 +0130";
+        let head = format!("tree {EMPTY_TREE}\nauthor {who}\ncommitter {who}\n");
+        let cases: [(String, &CStr, Option<&CStr>, &CStr); 5] = [
+            (
+                format!("{head}encoding ISO-8859-1\n\nLatin\n"),
+                c"Latin\n",
+                Some(c"ISO-8859-1"),
+                c"Latin",
+            ),
+            (
+                format!(
+                    "{head}gpgsig -----BEGIN-----\n line\n -----END-----\nx y\n\n\n\nfirst  line\n\tcontinued\n  \nbody\n"
+                ),
+                c"first  line\n\tcontinued\n  \nbody\n",
+                None,
+                c"first  line continued",
+            ),
+            (format!("{head}foo bar\n baz"), c"", None, c""),
+            (format!("{head}\n"), c"", None, c""),
+            (format!("{head}\n \t\n  \n"), c" \t\n  \n", None, c""),
+        ];
+        let mut held = Vec::new();
+        for (raw, message, encoding, summary) in &cases {
+            let oid = write_raw(&tmp, raw.as_bytes(), ffi::GIT_OBJECT_COMMIT);
+            let commit = Commit::lookup(repository(&tmp), oid.as_ref()).unwrap();
+            let c = commit.as_ref();
+            assert_eq!(
+                (c.message(), c.message_encoding()),
+                (*message, *encoding),
+                "{raw:?}"
+            );
+            assert_eq!(c.summary(), Ok(*summary), "{raw:?}");
+            assert_eq!((c.time(), c.time_offset()), (1_700_000_000, 90));
+            assert_eq!(c.parent_count(), 0);
+            assert!(raw.as_bytes().starts_with(c.raw_header().to_bytes()));
+            held.push(commit);
+        }
+        let signed = held[1].as_ref();
+        let sig = signed.header_field(c"gpgsig").unwrap();
+        assert_eq!(
+            sig.as_ref().as_bytes(),
+            b"-----BEGIN-----\nline\n-----END-----"
+        );
+        assert_eq!(signed.header_field(c"x").unwrap().as_ref().as_bytes(), b"y");
+        let malformed = held[2].as_ref().header_field(c"foo").unwrap_err();
+        assert_eq!(malformed.message(), c"malformed header");
+        assert_eq!(held[2].as_ref().message_raw(), c"");
+        assert_eq!(held[0].as_ref().message_encoding(), Some(c"ISO-8859-1"));
     }
 }
 

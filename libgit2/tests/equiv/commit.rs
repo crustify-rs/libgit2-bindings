@@ -738,6 +738,410 @@ mod commit_owner {
     }
 }
 
+/// Equivalence of the getters of [`CommitRef`] with the C accessors they wrap:
+/// `git_commit_id`, `_owner`, `_message`, `_message_raw`, `_message_encoding`,
+/// `_raw_header`, `_header_field`, `_summary`, `_time`, `_time_offset`, `_tree_id`,
+/// `_parentcount` and `_parent_id`.
+///
+/// Each side opens its own copy of `testrepo.git` and of a fresh bare repository into
+/// which it writes the same hand-made commits through its own object database: an
+/// `encoding` header, a multi-line `gpgsig` header and a one-letter header, a header
+/// whose last continuation line does not end, no message, a message of whitespace,
+/// leading newlines and spaces, carriage returns and tabs in the first paragraph, two
+/// parents and a negative zone. Both sides look up every commit and record, through
+/// their own API, everything the getters give: ids, the owner's path, the strings, the
+/// summary, the time, every parent id up to past the last and `u32::MAX`, and the value
+/// or failure (code, class, message) of a list of header fields. The records are
+/// compared after the lookups, again once every summary has been computed (now read
+/// from the commit), and again through a copy of each commit after the original is
+/// released.
+///
+/// Documented divergence, outside these comparisons: a header field holding a newline
+/// that matches across a line end, which libgit2 copies with a negative length, is
+/// refused by the wrapper as a field it does not find; `commit.rs`'s unit tests hold
+/// it. Fields holding a newline that libgit2 reads safely (they match nothing) are
+/// compared here.
+mod getters {
+    use std::ffi::{CStr, CString, c_int};
+    use std::path::PathBuf;
+    use std::ptr;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::object::commit::{Commit, CommitArc, CommitRef};
+    use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+
+    use super::{init, open};
+
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/resources/testrepo.git"
+    );
+
+    /// Every commit of `testrepo.git`.
+    const TESTREPO_COMMITS: [&str; 15] = [
+        "d07b0f9a8c89f1d9e74dc4fce6421dec5ef8a659",
+        "258f0e2a959a364e40ed6603d5d44fbb24765b10",
+        "763d71aadf09a7951596c9746c024e7eece7c7af",
+        "a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        "e90810b8df3e80c413d903f631643c716887138d",
+        "6dcf9bf7541ee10456529833502442f385010c3d",
+        "a4a7dce85cf63874e984719f4fdd239f5145052f",
+        "be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+        "c47800c7266a2be04c571c04d5a6614691ea99bd",
+        "9fd738e8f7967c078dceed8190330fc8648ee56a",
+        "4a202b346bb0fb0db7eff3cffeb3c70babbd2045",
+        "41bc8c69075bbdb46c5c6f0566cc8cc5b46e8bd9",
+        "5001298e0c09ad9c34e4249bc5801c75e9754fa5",
+        "5b5b025afb0b4c913b4c338a42934a3863bf3644",
+        "8496071c1b46c854b31185ea97743be6a8774479",
+    ];
+
+    const FIELDS: [&CStr; 14] = [
+        c"tree",
+        c"parent",
+        c"author",
+        c"committer",
+        c"encoding",
+        c"gpgsig",
+        c"x",
+        c"foo",
+        c"",
+        c"tre",
+        c"parents",
+        c"mergetag",
+        c"zz\nzz",
+        c"\n",
+    ];
+
+    const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const ONE: &str = "1111111111111111111111111111111111111111";
+    const TWO: &str = "2222222222222222222222222222222222222222";
+
+    /// The raw contents of the hand-made commits.
+    fn crafted() -> Vec<String> {
+        let who = "A U Thor <a@example.com> 1700000000 +0130";
+        let west = "W <w@example.com> 1 -1245";
+        let head = format!("tree {EMPTY_TREE}\nauthor {who}\ncommitter {who}\n");
+        vec![
+            format!("{head}encoding ISO-8859-1\n\nLatin\n"),
+            format!(
+                "{head}gpgsig -----BEGIN-----\n line\n\n -----END-----\nx y\n\n\n\nfirst  line\n\tcontinued\n  \nbody\n"
+            ),
+            format!("{head}foo bar\n baz"),
+            format!("{head}\n"),
+            format!("{head}\n \t\n  \n"),
+            format!("{head}\n\n\n  lead\r\n\tmore \r\n\nbody\n"),
+            format!("{head}\na\r\nb\x0bc\x0cd\n\n"),
+            format!(
+                "tree {EMPTY_TREE}\nparent {ONE}\nparent {TWO}\nauthor {west}\ncommitter {west}\n\nmerge\n"
+            ),
+            head.clone(),
+        ]
+    }
+
+    /// A fresh bare repository holding the hand-made commits, written through C, and
+    /// their ids; removed on drop.
+    struct Crafted {
+        dir: PathBuf,
+        ids: Vec<String>,
+    }
+
+    impl Crafted {
+        fn new(side: &str) -> Self {
+            init();
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-commit-getters-equiv-{}-{side}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = CString::new(dir.to_str().unwrap()).unwrap();
+            let (mut repo, mut odb) = (ptr::null_mut(), ptr::null_mut());
+            let mut ids = Vec::new();
+            // SAFETY: writable slots and a NUL-terminated path; the odb and repository
+            // are released once, after the writes, each of which reads its data for the
+            // call only.
+            unsafe {
+                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
+                assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
+                for raw in crafted() {
+                    let mut id = ffi::git_oid::default();
+                    let rc = ffi::git_odb_write(
+                        &mut id,
+                        odb,
+                        raw.as_ptr().cast(),
+                        raw.len(),
+                        ffi::GIT_OBJECT_COMMIT,
+                    );
+                    assert_eq!(rc, 0);
+                    ids.push(hex(&id));
+                }
+                ffi::git_odb_free(odb);
+                ffi::git_repository_free(repo);
+            }
+            Self { dir, ids }
+        }
+
+        fn path(&self) -> CString {
+            CString::new(self.dir.to_str().unwrap()).unwrap()
+        }
+    }
+
+    impl Drop for Crafted {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn hex(id: *const ffi::git_oid) -> String {
+        let mut out = [0u8; 41];
+        // SAFETY: a live id formatted into 41 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+        CStr::from_bytes_until_nul(&out)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn rust_hex(id: OidRef<'_>) -> String {
+        id.to_hex_string().unwrap()
+    }
+
+    fn oid(hex: &str) -> ffi::git_oid {
+        let mut id = ffi::git_oid::default();
+        let hex = CString::new(hex).unwrap();
+        // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
+        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        assert_eq!(rc, 0);
+        id
+    }
+
+    type Failure = (c_int, c_int, Vec<u8>);
+
+    /// What one side observes of a commit.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Record {
+        id: String,
+        owner: Vec<u8>,
+        message: Vec<u8>,
+        raw: Vec<u8>,
+        encoding: Option<Vec<u8>>,
+        header: Vec<u8>,
+        summary: Option<Vec<u8>>,
+        time: (i64, c_int),
+        tree: String,
+        count: u32,
+        parents: Vec<Option<String>>,
+        fields: Vec<Result<Vec<u8>, Failure>>,
+    }
+
+    /// The parent indices probed: every one, one past the last, and `u32::MAX`.
+    fn probes(count: u32) -> Vec<u32> {
+        (0..=count + 1).chain([u32::MAX]).collect()
+    }
+
+    fn bytes(s: *const std::ffi::c_char) -> Vec<u8> {
+        // SAFETY: the C getters' strings are NUL-terminated and live while the commit
+        // is, which outlives this copy.
+        unsafe { CStr::from_ptr(s) }.to_bytes().to_vec()
+    }
+
+    fn c_record(commit: *mut ffi::git_commit) -> Record {
+        // SAFETY: `commit` is a live commit of a live repository, read through its
+        // accessors; each string or id is copied at once, the header buffer disposed.
+        unsafe {
+            let encoding = ffi::git_commit_message_encoding(commit);
+            let summary = ffi::git_commit_summary(commit);
+            let count = ffi::git_commit_parentcount(commit);
+            let parents = probes(count)
+                .into_iter()
+                .map(|n| {
+                    let id = ffi::git_commit_parent_id(commit, n);
+                    (!id.is_null()).then(|| hex(id))
+                })
+                .collect();
+            let fields = FIELDS
+                .iter()
+                .map(|field| {
+                    let mut buf = ffi::git_buf::default();
+                    let rc = ffi::git_commit_header_field(&mut buf, commit, field.as_ptr());
+                    let result = if rc < 0 {
+                        let e = ffi::git_error_last();
+                        Err((rc, (*e).klass, bytes((*e).message)))
+                    } else {
+                        Ok(bytes(buf.ptr))
+                    };
+                    ffi::git_buf_dispose(&mut buf);
+                    result
+                })
+                .collect();
+            Record {
+                id: hex(ffi::git_commit_id(commit)),
+                owner: bytes(ffi::git_repository_path(ffi::git_commit_owner(commit))),
+                message: bytes(ffi::git_commit_message(commit)),
+                raw: bytes(ffi::git_commit_message_raw(commit)),
+                encoding: (!encoding.is_null()).then(|| bytes(encoding)),
+                header: bytes(ffi::git_commit_raw_header(commit)),
+                summary: (!summary.is_null()).then(|| bytes(summary)),
+                time: (
+                    ffi::git_commit_time(commit),
+                    ffi::git_commit_time_offset(commit),
+                ),
+                tree: hex(ffi::git_commit_tree_id(commit)),
+                count,
+                parents,
+                fields,
+            }
+        }
+    }
+
+    fn rust_record(commit: CommitRef<'_, '_>) -> Record {
+        let count = commit.parent_count();
+        Record {
+            id: rust_hex(commit.id()),
+            owner: commit.owner().path().unwrap().to_bytes().to_vec(),
+            message: commit.message().to_bytes().to_vec(),
+            raw: commit.message_raw().to_bytes().to_vec(),
+            encoding: commit.message_encoding().map(|e| e.to_bytes().to_vec()),
+            header: commit.raw_header().to_bytes().to_vec(),
+            summary: commit.summary().ok().map(|s| s.to_bytes().to_vec()),
+            time: (commit.time(), commit.time_offset()),
+            tree: rust_hex(commit.tree_id()),
+            count,
+            parents: probes(count)
+                .into_iter()
+                .map(|n| commit.parent_id(n).map(rust_hex))
+                .collect(),
+            fields: FIELDS
+                .iter()
+                .map(|field| match commit.header_field(field) {
+                    Ok(buf) => Ok(buf.as_ref().as_bytes().to_vec()),
+                    Err(e) => Err((e.raw_code(), e.raw_class(), e.message().to_bytes().to_vec())),
+                })
+                .collect(),
+        }
+    }
+
+    /// The owner paths differ by side (each opened its own copy): compare them as the
+    /// side's own repository path.
+    fn normalized(mut record: Record, own: &[u8]) -> Record {
+        assert_eq!(record.owner, own);
+        record.owner.clear();
+        record
+    }
+
+    fn c_open(path: &CStr) -> *mut ffi::git_repository {
+        let mut repo = ptr::null_mut();
+        // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
+        let rc = unsafe {
+            ffi::git_repository_open_ext(
+                &mut repo,
+                path.as_ptr(),
+                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                ptr::null(),
+            )
+        };
+        assert_eq!(rc, 0);
+        repo
+    }
+
+    fn c_lookup(repo: *mut ffi::git_repository, hex: &str) -> *mut ffi::git_commit {
+        let mut commit = ptr::null_mut();
+        // SAFETY: a writable slot, a live repository and an id of its type.
+        let rc = unsafe { ffi::git_commit_lookup(&mut commit, repo, &oid(hex)) };
+        assert_eq!(rc, 0, "{hex}");
+        commit
+    }
+
+    fn rust_lookup<'r>(repo: &'r RepositoryBox, hex: &str) -> CommitArc<'r> {
+        let id = Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap();
+        Commit::lookup(repo.as_ref(), id.as_ref()).unwrap()
+    }
+
+    fn c_path(repo: *mut ffi::git_repository) -> Vec<u8> {
+        // SAFETY: a live repository with a git directory.
+        bytes(unsafe { ffi::git_repository_path(repo) })
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn getters_match_c_through_lookups_summaries_and_copies() {
+        init();
+        let (c_crafted, rust_crafted) = (Crafted::new("c"), Crafted::new("rust"));
+        assert_eq!(c_crafted.ids, rust_crafted.ids);
+        let c_repos = [
+            open(c"tests/resources/testrepo.git"),
+            c_open(&c_crafted.path()),
+        ];
+        let rust_repos = [
+            Repository::open(&CString::new(TESTREPO).unwrap()).unwrap(),
+            Repository::open(&rust_crafted.path()).unwrap(),
+        ];
+        let sets: [Vec<String>; 2] = [
+            TESTREPO_COMMITS.iter().map(|s| s.to_string()).collect(),
+            c_crafted.ids.clone(),
+        ];
+        for (side, ids) in sets.iter().enumerate() {
+            let c_own = c_path(c_repos[side]);
+            let rust_own = rust_repos[side]
+                .as_ref()
+                .path()
+                .unwrap()
+                .to_bytes()
+                .to_vec();
+            let c_commits: Vec<_> = ids.iter().map(|h| c_lookup(c_repos[side], h)).collect();
+            let rust_commits: Vec<_> = ids
+                .iter()
+                .map(|h| rust_lookup(&rust_repos[side], h))
+                .collect();
+            for round in 0..2 {
+                for (i, (&c, rust)) in c_commits.iter().zip(&rust_commits).enumerate() {
+                    let expected = normalized(c_record(c), &c_own);
+                    let got = normalized(rust_record(rust.as_ref()), &rust_own);
+                    assert_eq!(
+                        got, expected,
+                        "set {side}, commit {i} ({}), round {round}",
+                        ids[i]
+                    );
+                }
+            }
+            // Copies of each commit, read once the originals are released.
+            let c_copies: Vec<_> = c_commits
+                .into_iter()
+                .map(|c| {
+                    let mut copy = ptr::null_mut();
+                    // SAFETY: a writable slot and a live commit; then its reference,
+                    // released once, the copy keeping the commit.
+                    unsafe {
+                        assert_eq!(ffi::git_commit_dup(&mut copy, c), 0);
+                        ffi::git_commit_free(c);
+                    }
+                    copy
+                })
+                .collect();
+            let rust_copies: Vec<_> = rust_commits
+                .into_iter()
+                .map(|c| c.as_ref().to_commit())
+                .collect();
+            for (i, (&c, rust)) in c_copies.iter().zip(&rust_copies).enumerate() {
+                let expected = normalized(c_record(c), &c_own);
+                assert_eq!(
+                    normalized(rust_record(rust.as_ref()), &rust_own),
+                    expected,
+                    "set {side}, copy {i}"
+                );
+                // SAFETY: the copy's reference, released once.
+                unsafe { ffi::git_commit_free(c) };
+            }
+        }
+        for repo in c_repos {
+            // SAFETY: each C repository, freed once, after its commits.
+            unsafe { ffi::git_repository_free(repo) };
+        }
+    }
+}
+
 /// Equivalence of the owners a commit derives, [`CommitRef::parent`],
 /// [`CommitRef::nth_gen_ancestor`] and [`CommitRef::tree`], with `git_commit_parent`,
 /// `git_commit_nth_gen_ancestor` and `git_commit_tree`.

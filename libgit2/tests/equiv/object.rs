@@ -27,9 +27,15 @@
 //! `crlf` list, an empty list, and no list. After every step the sides compare the
 //! options' fields as C reads them (the list as present or not, each side's pointer
 //! being its own list's), and what `git_object_id_from_buffer` makes of each of a few
-//! contents through them: the code, the id, and the error class and message. Loading a
+//! contents through them: the code, the id, and the error class and message; and what
+//! [`id_from_buffer`] and [`id_from_file`] make of the same contents, as buffers and as
+//! files (with a missing path and a directory), through Rust's options, against
+//! `git_object_id_from_buffer` and `git_object_id_from_file` through C's. Loading a
 //! filter list initialises libgit2's filters unsynchronised (see `filter.rs`), so the
 //! script runs alone in a child process.
+//!
+//! [`id_from_buffer`]: libgit2::libgit2::object::object::id_from_buffer
+//! [`id_from_file`]: libgit2::libgit2::object::object::id_from_file
 
 use std::ffi::{CStr, CString, c_int};
 use std::ptr;
@@ -648,9 +654,9 @@ mod id_options {
     use libgit2::ffi;
     use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::filter::filter::{FilterList, FilterListBox};
-    use libgit2::libgit2::object::object::ObjectIdOptions;
-    use libgit2::libgit2::oid::oid::OidType;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::object::object::{ObjectIdOptions, id_from_buffer, id_from_file};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
 
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
@@ -716,6 +722,119 @@ mod id_options {
             .to_str()
             .unwrap()
             .to_owned())
+    }
+
+    /// What `git_object_id_from_file` makes of the file at `path` through `opts`, in the
+    /// shape of [`c_id`].
+    fn c_file_id(
+        opts: *const ffi::git_object_id_options,
+        path: &CStr,
+    ) -> Result<String, (c_int, c_int, String)> {
+        let mut out = ffi::git_oid::default();
+        // SAFETY: a writable id; a NUL-terminated path; live options whose list, if any,
+        // is live and used by nothing else meanwhile.
+        let rc = unsafe { ffi::git_object_id_from_file(&mut out, path.as_ptr(), opts) };
+        if rc < 0 {
+            let (class, message) = c_last();
+            return Err((rc, class, message));
+        }
+        let mut hex = [0u8; 65];
+        // SAFETY: the id libgit2 wrote; 65 writable bytes, NUL included.
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+        Ok(CStr::from_bytes_until_nul(&hex)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned())
+    }
+
+    /// A wrapper's result in the shape of [`c_id`].
+    fn outcome(result: Result<Oid, RepositoryError>) -> Result<String, (c_int, c_int, String)> {
+        match result {
+            Ok(id) => Ok(id.as_ref().to_hex_string().unwrap()),
+            Err(e) => Err((
+                e.raw_code(),
+                e.raw_class(),
+                e.message().to_string_lossy().into_owned(),
+            )),
+        }
+    }
+
+    /// The contents as files of their own, `c<i>`, then a missing path and a
+    /// directory; removed on drop.
+    struct Files {
+        dir: std::path::PathBuf,
+        paths: Vec<CString>,
+    }
+
+    impl Files {
+        fn new(side: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "crustify-id-files-equiv-{}-{side}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("directory")).unwrap();
+            let mut paths = Vec::new();
+            for (i, data) in CONTENTS.iter().enumerate() {
+                let file = dir.join(format!("c{i}"));
+                std::fs::write(&file, data).unwrap();
+                paths.push(CString::new(file.to_str().unwrap()).unwrap());
+            }
+            for name in ["missing", "directory"] {
+                paths.push(CString::new(dir.join(name).to_str().unwrap()).unwrap());
+            }
+            Self { dir, paths }
+        }
+    }
+
+    impl Drop for Files {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// C's ids of every content, from buffers then from files, through `opts`, with the
+    /// failures' messages relative to each side's own directory.
+    fn c_ids(
+        opts: *const ffi::git_object_id_options,
+        files: &Files,
+    ) -> Vec<Result<String, (c_int, c_int, String)>> {
+        let mut ids: Vec<_> = CONTENTS.iter().map(|d| c_id(opts, d)).collect();
+        ids.extend(
+            files
+                .paths
+                .iter()
+                .map(|p| relative(c_file_id(opts, p), files)),
+        );
+        ids
+    }
+
+    /// The wrappers' ids, as [`c_ids`] lists C's.
+    fn rust_ids(
+        opts: &mut ObjectIdOptions<'_>,
+        files: &Files,
+    ) -> Vec<Result<String, (c_int, c_int, String)>> {
+        let mut ids: Vec<_> = CONTENTS
+            .iter()
+            .map(|d| outcome(id_from_buffer(d, Some(opts.as_mut()))))
+            .collect();
+        ids.extend(
+            files
+                .paths
+                .iter()
+                .map(|p| relative(outcome(id_from_file(p, Some(opts.as_mut()))), files)),
+        );
+        ids
+    }
+
+    /// `result` with the side's directory dropped from a failure's message.
+    fn relative(
+        result: Result<String, (c_int, c_int, String)>,
+        files: &Files,
+    ) -> Result<String, (c_int, c_int, String)> {
+        let dir = files.dir.to_str().unwrap();
+        result.map_err(|(rc, class, message)| (rc, class, message.replace(dir, "<dir>")))
     }
 
     /// A repository with a working directory whose `.gitattributes` marks `*.txt` as text,
@@ -848,6 +967,30 @@ mod id_options {
         assert_eq!(rust.as_ref().version(), c.version);
         init();
         assert_eq!(observe(rust_raw(&rust)), observe(&c));
+        // The wrappers, through the default options and through none, against C's.
+        let (c_files, rust_files) = (Files::new("init-c"), Files::new("init-rust"));
+        let mut rust = rust;
+        let expected = c_ids(&c, &c_files);
+        assert_eq!(rust_ids(&mut rust, &rust_files), expected);
+        assert_eq!(c_ids(ptr::null(), &c_files), expected);
+        let mut none: Vec<_> = CONTENTS
+            .iter()
+            .map(|d| outcome(id_from_buffer(d, None)))
+            .collect();
+        none.extend(
+            rust_files
+                .paths
+                .iter()
+                .map(|p| relative(outcome(id_from_file(p, None)), &rust_files)),
+        );
+        assert_eq!(none, expected);
+        assert!(
+            expected[CONTENTS.len()..]
+                .iter()
+                .filter(|r| r.is_err())
+                .count()
+                == 2
+        );
     }
 
     #[test]
@@ -871,6 +1014,7 @@ mod id_options {
             };
             assert_eq!(rc, 0);
             let mut rust = ObjectIdOptions::new();
+            let (c_files, rust_files) = (Files::new("steps-c"), Files::new("steps-rust"));
             assert_eq!(observe(&c), observe(rust_raw(&rust)), "initial");
             let (mut crlf, mut empty) = (Some(rust_crlf.as_mut()), Some(rust_empty.as_mut()));
             let mut safe = Some(rust_safe.as_mut());
@@ -915,6 +1059,10 @@ mod id_options {
                 );
                 let seen = observe(&c);
                 assert_eq!(seen, observe(rust_raw(&rust)), "step {i}: {step:?}");
+                // The wrappers through Rust's options, against C through its own.
+                let wrapped = rust_ids(&mut rust, &rust_files);
+                assert_eq!(wrapped, c_ids(&c, &c_files), "step {i}: {step:?}");
+                assert_eq!(wrapped[..CONTENTS.len()], seen.1[..], "step {i}: {step:?}");
                 if let IdStep::Safe = step {
                     // The refusing list fails the CRLF content, on both sides alike.
                     let refused = (

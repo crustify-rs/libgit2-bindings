@@ -16,14 +16,15 @@
 //! [`MailmapBox`] borrows neither, and outlives both.
 //!
 //! The routines over a mailmap go on its handles: lookups ([`MailmapRef::resolve`],
-//! and `git_mailmap_resolve_signature` and the `git_commit_*_with_mailmap` pair, which
-//! their own runs add), which take a `const git_mailmap *`, on the shared [`MailmapRef`];
+//! [`MailmapRef::resolve_signature`], and the `git_commit_*_with_mailmap` pair, which
+//! their own run adds), which take a `const git_mailmap *`, on the shared [`MailmapRef`];
 //! [`MailmapMut::add_entry`], which inserts into the entry vector, on the exclusive
 //! [`MailmapMut`].
 //!
 //! A lookup returns the strings it resolves to: the ones it was given, or an entry's,
 //! which the mailmap owns until the entry is replaced or the mailmap freed. So the
 //! result borrows both the inputs and the mailmap, which cannot be written meanwhile.
+//! A resolved signature is a copy instead, which borrows neither.
 //!
 //! # Threads
 //!
@@ -43,6 +44,7 @@ use std::borrow::Cow;
 use ffibox::{CBox, CNew, define_ctype, impl_cdrop};
 
 use crate::ffi;
+use crate::libgit2::core::types::{SignatureBox, SignatureRef};
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, last};
 use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
@@ -324,6 +326,72 @@ impl<'a> MailmapRef<'a> {
         // entries' for `'a`, outliving `'s`, unchanged since nothing writes the mailmap
         // while it is shared.
         unsafe { (CStr::from_ptr(real_name), CStr::from_ptr(real_email)) }
+    }
+
+    /// The signature `signature` resolves to: a fresh copy whose name and email are
+    /// those [`resolve`](Self::resolve) gives for the signature's, at the same time
+    /// (seconds, offset and sign). The copy is the caller's alone, in libgit2's
+    /// allocator: it borrows neither the signature nor the mailmap.
+    ///
+    /// The copy is made from the resolved strings as
+    /// [`Signature::new`](crate::libgit2::core::types::Signature::new) makes one, so they
+    /// are trimmed of the bytes git drops at their ends, and it fails, with libgit2's
+    /// error, where that does: when either contains `<` or `>`, or is empty once trimmed
+    /// (a [`SignatureView`](crate::libgit2::core::types::SignatureView) or a parsed
+    /// signature may hold such strings, as may the mailmap's entries); and when libgit2
+    /// runs out of memory.
+    ///
+    /// Refuses a signature without its name or its email (one libgit2 lost to a failed
+    /// allocation while it parsed the signature) with libgit2's own error for it, class
+    /// `GIT_ERROR_INTERNAL`, "unrecoverable internal error: 'name'" (or `'email'`),
+    /// which a debug build of libgit2 aborts on instead.
+    ///
+    /// ```
+    /// # if cfg!(miri) { return; }
+    /// use libgit2::libgit2::core::types::Signature;
+    /// use libgit2::libgit2::object::mailmap::Mailmap;
+    ///
+    /// let mailmap = Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
+    /// let old = Signature::new(c"Someone", c"old@example.com", 1_700_000_000, -90).unwrap();
+    /// let real = mailmap.as_ref().resolve_signature(old.as_ref()).unwrap();
+    /// assert_eq!(real.as_ref().name(), Some(c"Real Name"));
+    /// assert_eq!(real.as_ref().email(), Some(c"real@example.com"));
+    /// assert_eq!(real.as_ref().when(), old.as_ref().when());
+    /// ```
+    ///
+    /// Wraps: git_mailmap_resolve_signature
+    pub fn resolve_signature(&self, signature: SignatureRef<'_>) -> Result<SignatureBox, ErrorBuf> {
+        if signature.name().is_none() {
+            set(
+                ErrorClass::Internal,
+                c"unrecoverable internal error: 'name'",
+            );
+            return Err(last());
+        }
+        if signature.email().is_none() {
+            set(
+                ErrorClass::Internal,
+                c"unrecoverable internal error: 'email'",
+            );
+            return Err(last());
+        }
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, which libgit2 sets to NULL or a fresh
+        // signature; the handle addresses a live mailmap for `'a`, which libgit2 only
+        // reads (see the module docs); `signature` is a live signature whose name and
+        // email are NUL-terminated strings (checked non-NULL above), only read and
+        // copied during the call. The mailmap was built after the runtime was pinned, so
+        // allocations and errors reach live state.
+        let rc = unsafe {
+            ffi::git_mailmap_resolve_signature(&mut out, self.as_ptr(), signature.as_ptr())
+        };
+        if rc < 0 {
+            return Err(last());
+        }
+        // SAFETY: on success `out` holds a fresh signature from `git_signature_new`, its
+        // strings copied, which the caller owns alone and `git_signature_free` releases,
+        // as `SignatureFree` does.
+        unsafe { SignatureBox::from_c(out) }.ok_or_else(last)
     }
 }
 
@@ -1109,5 +1177,67 @@ not an entry
             assert_eq!(rc, 0);
             (CStr::from_ptr(real_name), CStr::from_ptr(real_email))
         }
+    }
+
+    /// A signature without its name or its email (what libgit2 leaves when it loses
+    /// one to a failed allocation while parsing) is refused before libgit2's
+    /// assertion, which aborts a debug build, with the error that assertion sets
+    /// otherwise.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn signatures_missing_a_string_are_refused_before_c() {
+        let mailmap = Mailmap::from_buffer(MAILMAP).unwrap();
+        let when = ffi::git_time {
+            time: 1,
+            offset: 0,
+            sign: b'+' as c_char,
+        };
+        let cases = [
+            (
+                ptr::null_mut(),
+                c"old@example.com".as_ptr().cast_mut(),
+                c"'name'",
+            ),
+            (c"Someone".as_ptr().cast_mut(), ptr::null_mut(), c"'email'"),
+            (ptr::null_mut(), ptr::null_mut(), c"'name'"),
+        ];
+        for (name, email, what) in cases {
+            let mut raw = ffi::git_signature { name, email, when };
+            // SAFETY: `raw` is a live signature on this stack frame, outliving the
+            // handle, whose strings are NULL or static; nothing writes it meanwhile.
+            let sig = unsafe { SignatureRef::from_ptr(&mut raw) }.unwrap();
+            let e = mailmap.as_ref().resolve_signature(sig).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Internal));
+            let expected = format!("unrecoverable internal error: {}", what.to_str().unwrap());
+            assert_eq!(e.message().to_str().unwrap(), expected);
+        }
+    }
+
+    /// A resolved signature that cannot be allocated fails with libgit2's error and
+    /// leaves nothing behind (the struct's own allocation is the first refused).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn resolved_signatures_out_of_memory() {
+        isolated(
+            concat!(module_path!(), "::resolved_signatures_out_of_memory"),
+            || {
+                install_refusing();
+                let mailmap = Mailmap::from_buffer(MAILMAP).unwrap();
+                let old = crate::libgit2::core::types::Signature::new(
+                    c"Someone",
+                    c"old@example.com",
+                    1,
+                    0,
+                )
+                .unwrap();
+                GRANTS.store(0, SeqCst);
+                REFUSING.store(true, SeqCst);
+                let refused = mailmap.as_ref().resolve_signature(old.as_ref());
+                REFUSING.store(false, SeqCst);
+                assert_eq!(refused.unwrap_err().class(), Some(ErrorClass::NoMemory));
+                let real = mailmap.as_ref().resolve_signature(old.as_ref()).unwrap();
+                assert_eq!(real.as_ref().name(), Some(c"Real Name"));
+            },
+        );
     }
 }

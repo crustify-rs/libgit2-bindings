@@ -27,15 +27,15 @@
 //! The id options, `ObjectIdOptions<'f>`, are Rust storage that libgit2 reads in place,
 //! holding a filter list it applies through them: the tests set every object and id
 //! type and a list (empty, or `crlf`) through the safe setters, have C hash content
-//! through the options (the fixture's `object_id`, standing in for the
-//! `git_object_id_from_buffer` wrapper) between Rust's own shared and exclusive
+//! through the options (`id_from_buffer`) between Rust's own shared and exclusive
 //! reborrows of them (BorrowSanitizer), and drop the options before the list and the
 //! list before its repository, which the borrows enforce: outliving the list, or
 //! reaching it otherwise while the options hold it, does not compile
 //! (`compile_fail/object_id_options_*` and the doctests on `ObjectIdOptions`). A list
 //! read back through the options is the one lent, and C applies it while it lives
 //! (ASan). Loading a filter list initialises libgit2's filters unsynchronised (see
-//! `filter.rs`), so those tests run alone in a child process.
+//! `filter.rs`), so those tests run alone in a child process. `id_from_file` hashes a
+//! file through the same options, reading it whole and keeping nothing of its path.
 //!
 //! Every test calls libgit2, so Miri skips them all.
 
@@ -44,7 +44,9 @@ use std::ffi::{CStr, CString};
 use libgit2::ffi;
 use libgit2::libgit2::core::types::ObjectType;
 use libgit2::libgit2::filter::filter::FilterList;
-use libgit2::libgit2::object::object::{Object, ObjectArc, ObjectIdOptions, ObjectIdOptionsMut};
+use libgit2::libgit2::object::object::{
+    Object, ObjectArc, ObjectIdOptions, ObjectIdOptionsMut, id_from_buffer, id_from_file,
+};
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::repository::repository::{
     Repository, RepositoryBox, RepositoryError, RepositoryRef,
@@ -54,7 +56,7 @@ use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 use crate::fixture::object_and_tree_entry::{
     enable_caching, object_view, open_testrepo, repository, set_cache_max_size, write_raw,
 };
-use crate::fixture::{TempRepo, isolated, object_id};
+use crate::fixture::{TempRepo, isolated};
 
 const COMMIT: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
 const TREE: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
@@ -602,6 +604,15 @@ fn derived_objects_outlive_cache_eviction() {
     );
 }
 
+/// The hex id [`id_from_buffer`] computes for `data` through `opts`, or the code it
+/// failed with.
+fn object_id(opts: &mut ObjectIdOptions<'_>, data: &[u8]) -> Result<String, i32> {
+    match id_from_buffer(data, Some(opts.as_mut())) {
+        Ok(id) => Ok(id.as_ref().to_hex_string().unwrap()),
+        Err(e) => Err(e.raw_code()),
+    }
+}
+
 /// `a\nb\n` and `a\r\nb\r\n` as blobs, as `git hash-object --no-filters` hashes them.
 const LF: &str = "422c2b7ab3b3c668038da977e4e93a5fc623169c";
 const CRLF: &str = "c30dea8a3641ea99b125d04d599d843712292759";
@@ -702,6 +713,105 @@ fn id_options_apply_the_list_they_borrow() {
             assert_eq!(crate::fixture::filter_count(&empty), 0);
             drop(crlf);
             drop(empty);
+            drop(repo);
+            let _ = std::fs::remove_dir_all(&path);
+        },
+    );
+}
+
+/// `id_from_file` reads exactly the file it is given and keeps nothing: an empty file,
+/// one longer than libgit2's 64 KiB read buffer, each named by a heap path freed right
+/// after the call (ASan, BSan: a retained pointer), the defaults and every id type; a
+/// missing path and a directory fail, leaving nothing open or allocated (LSan). The
+/// ids agree with [`id_from_buffer`] over the same bytes.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn ids_of_files_read_them_whole() {
+    crate::fixture::init();
+    let dir = std::env::temp_dir().join(format!("crustify-id-file-ub-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Past the 64 KiB read buffer; smaller under BorrowSanitizer, which hashes slowly.
+    let len = if cfg!(bsan) { 70_000 } else { 200_000 };
+    let big: Vec<u8> = (0..len).map(|i: u32| (i % 251) as u8).collect();
+    let contents: [&[u8]; 3] = [b"", b"hello\n", &big];
+    let mut opts = ObjectIdOptions::new();
+    for (i, data) in contents.iter().enumerate() {
+        let file = dir.join(format!("f{i}"));
+        std::fs::write(&file, data).unwrap();
+        for kind in [None, Some(OidType::Sha1), Some(OidType::Sha256)] {
+            opts.as_mut().set_oid_type(kind);
+            let path = Box::new(CString::new(file.to_str().unwrap()).unwrap());
+            let from_file = id_from_file(&path, Some(opts.as_mut())).unwrap();
+            drop(path);
+            let from_buffer = id_from_buffer(data, Some(opts.as_mut())).unwrap();
+            assert_eq!(
+                from_file.as_ref().to_hex_string().unwrap(),
+                from_buffer.as_ref().to_hex_string().unwrap(),
+                "{i} {kind:?}"
+            );
+        }
+    }
+    let defaulted = id_from_file(
+        &CString::new(dir.join("f1").to_str().unwrap()).unwrap(),
+        None,
+    );
+    assert_eq!(
+        defaulted.unwrap().as_ref().to_hex_string().unwrap(),
+        "ce013625030ba8dba906f756967f9e9ca394464a"
+    );
+    let missing = id_from_file(
+        &CString::new(dir.join("none").to_str().unwrap()).unwrap(),
+        None,
+    );
+    let e = missing.unwrap_err();
+    assert_eq!(
+        (e.code(), e.class()),
+        (Some(ErrorCode::NotFound), Some(ErrorClass::Os))
+    );
+    let directory = id_from_file(&CString::new(dir.to_str().unwrap()).unwrap(), None);
+    assert_eq!(directory.unwrap_err().class(), Some(ErrorClass::Os));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file's content runs through the options' list as a buffer's does: CRLF to LF for
+/// a blob, the list read back while the options hold it, and nothing kept once they
+/// are gone (ASan, LSan). Loading the list initialises libgit2's filters, so the test
+/// runs alone in a child process.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn ids_of_files_apply_the_list_they_borrow() {
+    isolated(
+        concat!(module_path!(), "::ids_of_files_apply_the_list_they_borrow"),
+        || {
+            crate::fixture::init();
+            let path = std::env::temp_dir()
+                .join(format!("crustify-id-file-list-ub-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            let c_path = CString::new(path.to_str().unwrap()).unwrap();
+            let repo = Repository::init(&c_path, false).unwrap();
+            std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
+            let file = path.join("a.txt");
+            std::fs::write(&file, b"a\r\nb\r\n").unwrap();
+            let file = CString::new(file.to_str().unwrap()).unwrap();
+            let mut crlf = FilterList::load(repo.as_ref(), c"a.txt", ffi::GIT_FILTER_TO_ODB, 0)
+                .unwrap()
+                .unwrap();
+            {
+                let mut opts = ObjectIdOptions::new();
+                let hex = |id: Oid| id.as_ref().to_hex_string().unwrap();
+                assert_eq!(hex(id_from_file(&file, Some(opts.as_mut())).unwrap()), CRLF);
+                opts.as_mut().set_filters(Some(crlf.as_mut()));
+                for _ in 0..3 {
+                    assert_eq!(hex(id_from_file(&file, Some(opts.as_mut())).unwrap()), LF);
+                    assert!(opts.as_ref().filters().is_some());
+                }
+                opts.as_mut().set_object_type(Some(ObjectType::Tag));
+                let tag = hex(id_from_file(&file, Some(opts.as_mut())).unwrap());
+                assert!(tag != LF && tag != CRLF);
+            }
+            assert_eq!(crate::fixture::filter_count(&crlf), 1);
+            drop(crlf);
             drop(repo);
             let _ = std::fs::remove_dir_all(&path);
         },

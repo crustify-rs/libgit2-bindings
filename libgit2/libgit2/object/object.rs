@@ -90,13 +90,13 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, CZeroable};
 
 use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
 use crate::libgit2::core::types::ObjectType;
 use crate::libgit2::filter::filter::{FilterListMut, FilterListRef};
-use crate::libgit2::oid::oid::{OidRef, OidType};
+use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
@@ -1113,6 +1113,103 @@ pub fn content_is_valid(
     Ok(valid != 0)
 }
 
+/// The id `data` would have as the raw content (no `<type> <size>` header) of an object,
+/// as `opts` say (see [`ObjectIdOptions`]): of the type they name, a blob by default,
+/// hashed into an id of the type they name, SHA-1 by default, a blob's content first
+/// run through their filters, if they have any. `None` means the default options.
+/// Nothing is written, and no repository is read but the one the filters were loaded
+/// for.
+///
+/// The options are taken exclusively: applying their filter list writes its filters'
+/// state.
+///
+/// Fails, with the filter's code and error, when a filter fails, as a CRLF filter does
+/// under `core.safecrlf`; and with libgit2's error when it runs out of memory, or
+/// cannot be initialised.
+///
+/// ```
+/// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+/// use libgit2::libgit2::core::types::ObjectType;
+/// use libgit2::libgit2::object::object::{ObjectIdOptions, id_from_buffer};
+/// use libgit2::libgit2::oid::oid::OidType;
+///
+/// let blob = id_from_buffer(b"hello\n", None).unwrap();
+/// assert_eq!(blob.as_ref().to_hex_string().unwrap(), "ce013625030ba8dba906f756967f9e9ca394464a");
+///
+/// let mut opts = ObjectIdOptions::new();
+/// opts.as_mut().set_object_type(Some(ObjectType::Tree));
+/// opts.as_mut().set_oid_type(Some(OidType::Sha256));
+/// let tree = id_from_buffer(b"", Some(opts.as_mut())).unwrap();
+/// assert_eq!(tree.as_ref().kind(), Some(OidType::Sha256));
+/// ```
+///
+/// Wraps: git_object_id_from_buffer
+pub fn id_from_buffer(
+    data: &[u8],
+    opts: Option<ObjectIdOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    if !runtime_pinned() {
+        return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+    }
+    // An empty slice's pointer is dangling, and libgit2 hands it to the hash and the
+    // filters whatever the length: lend a live byte instead.
+    let buf = if data.is_empty() {
+        c"".as_ptr()
+    } else {
+        data.as_ptr().cast()
+    };
+    let opts = opts.map_or(ptr::null(), |mut o| o.as_mut_ptr().cast_const());
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `buf` addresses `data.len()`
+    // readable bytes (or one, for no data), read for the call; `opts` is NULL or live
+    // options borrowed exclusively, holding named types (all the setters store) and a
+    // NULL list or one lent to them alone, which libgit2 applies on this thread. The
+    // runtime is pinned, so allocations and errors reach live state.
+    let rc = unsafe { ffi::git_object_id_from_buffer(out, buf.cast(), data.len(), opts) };
+    if rc < 0 {
+        Err(RepositoryError::from_libgit2(rc))
+    } else {
+        Ok(id)
+    }
+}
+
+/// The id the content of the file at `path` would have as the raw content of an
+/// object, as `opts` say, read and hashed as [`id_from_buffer`] hashes a buffer. A
+/// relative `path` is taken from the current directory.
+///
+/// No attribute or repository setting applies, only the options' filters: so a blob's
+/// id may differ from the one adding the file to a repository gives, which
+/// [`RepositoryRef::hash_file`](crate::libgit2::repository::repository::RepositoryRef::hash_file)
+/// computes.
+///
+/// Fails with [`ErrorCode::NotFound`] (class `GIT_ERROR_OS`) when there is no such
+/// file; with libgit2's error (`GIT_ERROR_OS`) when it cannot be opened or read in
+/// full (a directory, say, or a file that shrinks meanwhile); and as
+/// [`id_from_buffer`] does otherwise.
+///
+/// Wraps: git_object_id_from_file
+pub fn id_from_file(
+    path: &CStr,
+    opts: Option<ObjectIdOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    if !runtime_pinned() {
+        return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+    }
+    let opts = opts.map_or(ptr::null(), |mut o| o.as_mut_ptr().cast_const());
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `path` is NUL-terminated
+    // and read for the call; `opts` as in `id_from_buffer`. libgit2 opens, reads and
+    // closes the file within the call. The runtime is pinned.
+    let rc = unsafe { ffi::git_object_id_from_file(out, path.as_ptr(), opts) };
+    if rc < 0 {
+        Err(RepositoryError::from_libgit2(rc))
+    } else {
+        Ok(id)
+    }
+}
+
 // An `Object` is a `git_object`, never held by value; the owner is one pointer.
 const _: () = assert!(
     size_of::<Object<'static>>() == size_of::<ffi::git_object>()
@@ -1764,5 +1861,25 @@ mod unit_tests {
                 },
             );
         }
+    }
+
+    /// An empty buffer reaches C as one live byte with a length of 0, which hashes as
+    /// the empty blob, through the default options and through none alike; a missing
+    /// file keeps libgit2's code.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn ids_of_empty_buffers_lend_a_live_byte() {
+        assert!(runtime_pinned());
+        let hex = |id: Oid| id.as_ref().to_hex_string().unwrap();
+        let empty = hex(id_from_buffer(&[], None).unwrap());
+        assert_eq!(empty, "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+        let mut opts = ObjectIdOptions::new();
+        assert_eq!(
+            hex(id_from_buffer(&b"x"[..0], Some(opts.as_mut())).unwrap()),
+            empty
+        );
+        let missing = id_from_file(c"/nonexistent/crustify", None).unwrap_err();
+        assert_eq!(missing.code(), Some(ErrorCode::NotFound));
+        assert_eq!(missing.class(), Some(ErrorClass::Os));
     }
 }

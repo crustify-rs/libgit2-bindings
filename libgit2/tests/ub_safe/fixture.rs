@@ -591,15 +591,15 @@ pub fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
 // --- `git2/commit.h`: `git_commitarray`; `git2/config.h`: `git_config` --------------
 
 /// Fixtures over the repositories that hand out commit arrays and configs, and
-/// standing in for the `git_commit_id` and config-routine wrappers the tests read
-/// through; replace each once its safe counterpart lands.
+/// standing in for the config-routine wrappers the tests read through; replace each
+/// once its safe counterpart lands.
 pub mod commit_and_config {
     use std::ffi::{CStr, c_int};
     use std::ptr;
 
     use libgit2::ffi;
     use libgit2::libgit2::config::config::ConfigArc;
-    use libgit2::libgit2::object::commit::{CommitArrayVal, CommitRef};
+    use libgit2::libgit2::object::commit::CommitArrayVal;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
     /// A fixture repository opened read-only, freed on drop.
@@ -626,25 +626,6 @@ pub mod commit_and_config {
     /// The commit parents, through the safe wrapper.
     pub fn commit_parents(repo: &OpenRepo) -> CommitArrayVal<'_> {
         repo.0.as_ref().commit_parents().unwrap()
-    }
-
-    /// The hex id of a commit; stands in for the `git_commit_id` wrapper.
-    pub fn commit_id(commit: CommitRef<'_, '_>) -> String {
-        let commit = commit.to_commit();
-        let mut out = [0u8; 41];
-        // SAFETY: the owner keeps the commit alive; 41 writable bytes, NUL included.
-        unsafe {
-            ffi::git_oid_tostr(
-                out.as_mut_ptr().cast(),
-                out.len(),
-                ffi::git_commit_id(commit.as_c_ptr()),
-            )
-        };
-        CStr::from_bytes_until_nul(&out)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned()
     }
 
     /// The repository's config, through the safe wrapper: a shared reference, which
@@ -2155,37 +2136,4 @@ pub mod blob {
         unsafe { ffi::git_buf_dispose(&mut out) };
         if rc < 0 { Err(rc) } else { Ok(bytes) }
     }
-}
-
-// --- `git2/object.h`: `git_object_id_options` ---------------------------------------
-
-/// `git_object_id_from_buffer(out, data, len, opts)`, standing in for its wrapper (a
-/// later run), which replaces it: the id's hex digits, or the code libgit2 failed with.
-/// Applying the options' filter list writes its filters' state, hence the exclusive
-/// borrow.
-pub fn object_id(
-    opts: &mut libgit2::libgit2::object::object::ObjectIdOptions<'_>,
-    data: &[u8],
-) -> Result<String, c_int> {
-    let mut out = ffi::git_oid::default();
-    // An empty slice's pointer is dangling, and libgit2 hashes from it even for a length
-    // of 0: lend a live byte instead.
-    let bytes = if data.is_empty() { &[0u8][..] } else { data };
-    // `ObjectIdOptions` is transparent over the C struct, which Rust owns inline.
-    let raw = core::ptr::from_mut(opts).cast::<ffi::git_object_id_options>();
-    // SAFETY: a writable id; `data.len()` readable bytes; live options, borrowed
-    // exclusively for the call, whose list (if any) is live and lent to them alone.
-    let rc =
-        unsafe { ffi::git_object_id_from_buffer(&mut out, bytes.as_ptr().cast(), data.len(), raw) };
-    if rc < 0 {
-        return Err(rc);
-    }
-    let mut hex = [0u8; 65];
-    // SAFETY: the id libgit2 wrote; `hex` holds 65 bytes, NUL included.
-    unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
-    Ok(CStr::from_bytes_until_nul(&hex)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned())
 }
