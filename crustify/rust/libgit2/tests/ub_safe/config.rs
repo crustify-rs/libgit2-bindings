@@ -305,3 +305,27 @@ mod parsers {
         );
     }
 }
+
+/// Scalar priorities are copied between threads without accessing foreign memory;
+/// extreme/unknown values are never interpreted as Rust enum discriminants.
+#[test]
+fn config_level_values_and_threads() {
+    use libgit2::libgit2::config::config::ConfigLevel;
+    let levels = [
+        ConfigLevel::SYSTEM,
+        ConfigLevel::XDG,
+        ConfigLevel::GLOBAL,
+        ConfigLevel::LOCAL,
+        ConfigLevel::WORKTREE,
+        ConfigLevel::APP,
+        ConfigLevel::HIGHEST,
+        ConfigLevel::from_raw(i32::MIN),
+        ConfigLevel::from_raw(i32::MAX),
+        ConfigLevel::from_raw(42),
+    ];
+    thread::scope(|s| {
+        for level in &levels {
+            s.spawn(move || assert_eq!(ConfigLevel::from_raw(level.raw()), *level));
+        }
+    });
+}

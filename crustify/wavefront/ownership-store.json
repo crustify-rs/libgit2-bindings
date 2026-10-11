@@ -870,6 +870,49 @@
    ]
   },
   {
+   "name": "git_config_backend_memory_options",
+   "defined_in": "include/git2/sys/config.h",
+   "_comment_agent": "Stack/by-value options initialized by git_config_backend_memory_options_init; no allocation, destructor or C clone. Native shallow Clone retains immutable string borrows. Both backend constructors read options but neither retains the struct or string pointers; config_backend_new owns strdup copies and config_memory_free releases only those copies.",
+   "fields": [
+    {
+     "name": "backend_type",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller-owned NUL string; options never free it. config_backend_new strdup copies it synchronously; NULL selects in-memory for backend_type or no origin for origin_path."
+     }
+    },
+    {
+     "name": "origin_path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Caller-owned NUL string; options never free it. config_backend_new strdup copies it synchronously; NULL selects in-memory for backend_type or no origin for origin_path."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_level_t",
+   "defined_in": "include/git2/config.h",
+   "_comment_agent": "By-value signed C enum with custom application levels >= APP and HIGHEST=-1 query sentinel. No lifecycle or pointer ownership. C stores and compares supplied integer levels; preserve unknown values without enum transmute. reader_cmp/writer_cmp subtract signed integers: later backend-registration wrappers must restrict negative/extreme combinations to prevent overflow.",
+   "fields": []
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "_comment_agent": "Published only as `const git_error *` by git_error_last, which never returns NULL: a static error, or &error_threadstate.error of the calling thread, whose fields libgit2 overwrites on the next git_error_set*/git_error_clear on that thread, so a borrow is only valid until the next libgit2 call there and must not cross threads. klass is a git_error_t value stored as int. Its lifecycle routines (git_error_save = alloc constructor through out, git_error_free / git_error_restore = droppers, statics skipped by IS_STATIC_ERROR) are internal to libgit2.so (src/util/errors.h, hidden), so a wrapper copies a published error into Rust storage instead.",
@@ -6755,6 +6798,39 @@
       "nullable": false,
       "mutable": false,
       "note": "Header value; each newline is continued by a space; copied."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_config_backend_memory_options_init",
+   "defined_in": "src/libgit2/config_mem.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive writable storage; full template memcpy on supported version, no retention or resource allocation."
      }
     }
    ]

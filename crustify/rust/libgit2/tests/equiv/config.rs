@@ -399,3 +399,24 @@ mod parsers {
         compare!(ffi::git_config_parse_int64, parse_int64, i64, |x| x);
     }
 }
+
+/// The signed sentinel and application-defined values survive a C-value round trip.
+#[test]
+fn config_level_values_match_c() {
+    use libgit2::libgit2::config::config::ConfigLevel;
+    for (rust, c) in [
+        (ConfigLevel::SYSTEM, ffi::GIT_CONFIG_LEVEL_SYSTEM),
+        (ConfigLevel::XDG, ffi::GIT_CONFIG_LEVEL_XDG),
+        (ConfigLevel::GLOBAL, ffi::GIT_CONFIG_LEVEL_GLOBAL),
+        (ConfigLevel::LOCAL, ffi::GIT_CONFIG_LEVEL_LOCAL),
+        (ConfigLevel::WORKTREE, ffi::GIT_CONFIG_LEVEL_WORKTREE),
+        (ConfigLevel::APP, ffi::GIT_CONFIG_LEVEL_APP),
+        (ConfigLevel::HIGHEST, ffi::GIT_CONFIG_HIGHEST_LEVEL),
+    ] {
+        assert_eq!(rust.raw(), c);
+        assert_eq!(ConfigLevel::from_raw(c), rust);
+    }
+    for custom in [7, 8, 42, i32::MAX] {
+        assert_eq!(ConfigLevel::from_raw(custom).raw(), custom);
+    }
+}
