@@ -375,7 +375,8 @@ mod entry_and_map_types {
         let cfg = repo.as_ref().config().unwrap();
         let first = cfg.as_ref().entry(c"TEST.value").unwrap();
         let second = cfg.as_ref().entry(c"test.value").unwrap();
-        assert!(EntryArc::ptr_eq(&first, &second));
+        // Each lookup reads its own snapshot of the config: distinct entries.
+        assert!(!EntryArc::ptr_eq(&first, &second));
         assert_eq!(first.as_ref().name(), Some(c"test.value"));
         assert_eq!(first.as_ref().value(), Some(c"first"));
         assert_eq!(first.as_ref().backend_type(), Some(c"file"));
@@ -435,6 +436,138 @@ mod entry_and_map_types {
         };
         assert_eq!(cloned.as_ref().str_match(), Some(text.as_c_str()));
         assert_eq!(cloned.as_ref().map_value(), i32::MIN);
+    }
+
+    /// A `static` table is read from many threads at once, shared handles and
+    /// scoped borrows cross threads, an exclusive handle writes on another
+    /// thread, and records holding only `'static` borrows move to a detached one
+    /// (TSan: data race; Miri: aliasing of the handles' pointers).
+    #[test]
+    fn maps_cross_threads() {
+        static TABLE: [ConfigMap<'static>; 3] = [
+            ConfigMap::new(MapMatch::False, 0),
+            ConfigMap::new(MapMatch::Int32, 1),
+            ConfigMap::new(MapMatch::String(c"input"), 2),
+        ];
+        let text = CString::new("scoped").unwrap();
+        let text = text.as_c_str();
+        let mut map = ConfigMap::new(MapMatch::String(text), 7);
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    let rules: Vec<_> = TABLE.iter().map(|m| m.as_ref().rule()).collect();
+                    assert_eq!(
+                        rules,
+                        [MapMatch::False, MapMatch::Int32, MapMatch::String(c"input")]
+                    );
+                });
+            }
+            let shared = map.as_ref();
+            for _ in 0..2 {
+                s.spawn(move || assert_eq!(shared.rule(), MapMatch::String(text)));
+            }
+            let owner = &map;
+            s.spawn(move || assert_eq!(owner.as_ref().map_value(), 7));
+        });
+        std::thread::scope(|s| {
+            let mut exclusive = map.as_mut();
+            s.spawn(move || {
+                exclusive.set_match(MapMatch::True);
+                exclusive.set_map_value(8);
+            });
+        });
+        assert_eq!(map.as_ref().rule(), MapMatch::True);
+        assert_eq!(map.as_ref().str_match(), None);
+        let detached = TABLE.to_vec();
+        let observed = std::thread::spawn(move || {
+            detached
+                .iter()
+                .map(|m| (m.as_ref().map_value(), m.as_ref().str_match().is_some()))
+                .collect::<Vec<_>>()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(observed, [(0, false), (1, false), (2, true)]);
+    }
+
+    /// Regression for `crustify/reviews/.../config/wave-1/batch-0/ub_safe/entry-lookup-forms-member-of-unwritten-backend-entry`:
+    /// a lookup that rereads a file rewritten into something libgit2 cannot parse
+    /// fails with the parse error instead of reaching `get_entry`'s member
+    /// access through the entry pointer the failed backend never wrote (UBSan:
+    /// member access within null pointer); entries acquired before stay valid.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn rewritten_unparsable_file_fails_lookup_cleanly() {
+        let path = std::env::temp_dir().join(format!(
+            "crustify-ub-entry-unparsable-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"[test]\n key = value\n").unwrap();
+        let file = CString::new(path.to_str().unwrap()).unwrap();
+        let config = Config::open(&file).unwrap();
+        let entry = config.as_ref().entry(c"test.key").unwrap();
+        std::fs::write(&path, b"[test\n key = no closing bracket\n").unwrap();
+        let error = config.as_ref().entry(c"test.key").unwrap_err();
+        assert_eq!(error.code(), Some(ErrorCode::Generic));
+        let stale = config.as_ref().entry(c"test.key").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(entry.as_ref().value(), Some(c"value"));
+        assert_eq!(stale.as_ref().value(), Some(c"value"));
+    }
+
+    /// Entries stay readable after everything that produced them is gone: a
+    /// snapshot and its source, a level view and its parent, the list a write
+    /// replaces, and the file's own config; any release order is fine (ASan:
+    /// use after free, double free; LSan: leaked entry lists).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_outlive_snapshots_views_and_writes() {
+        let path =
+            std::env::temp_dir().join(format!("crustify-ub-entry-sources-{}", std::process::id()));
+        std::fs::write(&path, b"[multi]\n v = one\n[test]\n key = before\n").unwrap();
+        let file = CString::new(path.to_str().unwrap()).unwrap();
+        let mut source = Config::new().unwrap();
+        source
+            .as_mut()
+            .add_file(&file, ConfigLevel::GLOBAL, None, false)
+            .unwrap();
+
+        let before = source.as_ref().entry(c"test.key").unwrap();
+        source
+            .as_mut()
+            .set_multivar(c"multi.v", c"^$", c"two")
+            .unwrap();
+        let multi = source.as_ref().entry(c"multi.v").unwrap();
+        assert_eq!(multi.as_ref().value(), Some(c"two"));
+        source.as_mut().set_string(c"test.key", c"after").unwrap();
+        let after = source.as_ref().entry(c"test.key").unwrap();
+        assert!(!EntryArc::ptr_eq(&before, &after));
+        assert_eq!(before.as_ref().value(), Some(c"before"));
+
+        let snapshot = source.as_ref().snapshot().unwrap();
+        let snapped = snapshot.as_ref().entry(c"test.key").unwrap();
+        let viewed = {
+            let mut m = source.as_mut();
+            let view = m.open_level(ConfigLevel::GLOBAL).unwrap();
+            let viewed = view.as_ref().entry(c"multi.v").unwrap();
+            drop(view);
+            viewed
+        };
+        drop(snapshot);
+        drop(source);
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(snapped.as_ref().value(), Some(c"after"));
+        assert_eq!(snapped.as_ref().level(), ConfigLevel::GLOBAL);
+        assert_eq!(snapped.as_ref().origin_path(), Some(file.as_c_str()));
+        assert_eq!(viewed.as_ref().value(), Some(c"two"));
+        assert_eq!(viewed.as_ref().name(), Some(c"multi.v"));
+        assert_eq!(after.as_ref().value(), Some(c"after"));
+        drop(after);
+        assert_eq!(before.as_ref().backend_type(), Some(c"file"));
+        drop((multi, viewed));
+        assert_eq!(before.as_ref().name(), Some(c"test.key"));
+        drop((snapped, before));
     }
 }
 
