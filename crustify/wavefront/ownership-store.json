@@ -2027,6 +2027,48 @@
    "fields": []
   },
   {
+   "name": "git_pathspec_match_list",
+   "defined_in": "src/libgit2/pathspec.h",
+   "_comment_agent": "Opaque public type; no public fields. Sole owning list, no refcount/clone/init/disposer. Public constructors: match_workdir/index/tree/diff; free releases arrays,pool,and counted pathspec, never deltas. Contrary to stale alloc comment, pathspec_build_failure_array strdup-copies failures into own pool. String sources may be dropped immediately. No locks/Send/Sync.",
+   "fields": [
+    {
+     "name": "matches.ptr",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "other"
+        }
+       }
+      },
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Array buffer owned by list; size matches.size. datatype STRINGS: elements borrowed from own pool, copied from iterator. datatype DIFF: delta pointers borrowed from external diff, neither copied nor retained; require source diff keepalive and immutability. Empty array may be NULL."
+     }
+    },
+    {
+     "name": "pathspec",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "pathspec_match_alloc increments rc; pathspec_match_free releases one reference; no published clone. Non-null in constructed lists."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_refdb",
    "defined_in": "src/libgit2/refdb.h",
    "_comment_agent": "Opaque in the public API (forward-declared in git2/types.h, defined in src/libgit2/refdb.h). Refcounted (rc) with an owner slot: GIT_REFCOUNT_DEC frees only when the count reaches 0 and rc.owner is NULL; a repository's own refdb is owned (GIT_REFCOUNT_OWN in set_refdb / git_repository_refdb__weakptr) and freed when the repository clears ownership and drops its reference. Public lifecycle: constructors git_refdb_open (with the backend the repo's refdb_type names) and git_refdb_new (no backend; usable only after git_refdb_set_backend), down-ref git_refdb_free (NULL-safe). No public up_ref: git_repository_refdb hands out a new reference (GIT_REFCOUNT_INC) and git_repository_set_refdb takes one. Rust: Refdb<'r> borrowing the repository for 'r, RefdbBox (sole: new/open) and RefdbArc (shared, no Clone) under RefdbFree = git_refdb_free; Refdb::new = git_refdb_new + git_refdb_set_backend so no handle designates a backendless refdb.",
@@ -14405,6 +14447,472 @@
    ]
   },
   {
+   "name": "git_pathspec_match_diff",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "diff",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Diff deltas are retained uncounted; diff must outlive list and remain unchanged. Other sources retained only for call by iterator."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional writable out slot; successful non-null output is fresh owning list. C frees partial lists and nulls out on failure; early failures may leave slot unchanged."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live heap pathspec, borrowed for call; list increments rc and retains own reference. No transfer from caller."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_index",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Call-only source; filenames copied into list pool."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional writable out slot; successful non-null output is fresh owning list. C frees partial lists and nulls out on failure; early failures may leave slot unchanged."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live heap pathspec, borrowed for call; list increments rc and retains own reference. No transfer from caller."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_list_diff_entry",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Shared initialized list, or NULL; no mutation/retention."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:m"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Diff delta: borrowed from original diff, whose lifetime must cover any dereference; list itself does not retain diff."
+    }
+   }
+  },
+  {
+   "name": "git_pathspec_match_list_entry",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Shared initialized list, or NULL; no mutation/retention."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:m"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "NUL-terminated string copied into list pool; borrowed until list free; NULL for absent/wrong datatype/index."
+    }
+   }
+  },
+  {
+   "name": "git_pathspec_match_list_entrycount",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Shared initialized list, or NULL; no mutation/retention."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_list_failed_entry",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Shared initialized list, or NULL; no mutation/retention."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": null,
+     "string": true,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:m"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "NUL-terminated string copied into list pool; borrowed until list free; NULL for absent/wrong datatype/index."
+    }
+   }
+  },
+  {
+   "name": "git_pathspec_match_list_failed_entrycount",
+   "defined_in": "src/libgit2/pathspec.c",
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Shared initialized list, or NULL; no mutation/retention."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_list_free",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "m",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_tree",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional writable out slot; successful non-null output is fresh owning list. C frees partial lists and nulls out on failure; early failures may leave slot unchanged."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live heap pathspec, borrowed for call; list increments rc and retains own reference. No transfer from caller."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Call-only source; filenames copied into list pool."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_pathspec_match_workdir",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional writable out slot; successful non-null output is fresh owning list. C frees partial lists and nulls out on failure; early failures may leave slot unchanged."
+     }
+    },
+    {
+     "name": "ps",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live heap pathspec, borrowed for call; list increments rc and retains own reference. No transfer from caller."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "call"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Call-only source; filenames copied into list pool."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_refdb_free",
    "defined_in": "src/libgit2/refdb.c",
    "lifetime": {
@@ -21252,6 +21760,33 @@
      "note": "libc malloc: NON-zeroing; NULL on failure. Called directly by the stdalloc/debugalloc backends of git__allocator and by vendored deps (ntlmclient, reftable's default). Released by free."
     }
    }
+  },
+  {
+   "name": "pathspec_match_free",
+   "defined_in": "src/libgit2/pathspec.c",
+   "lifetime": {
+    "for": "m",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "m",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true
+     }
+    }
+   ]
   },
   {
    "name": "reftable_calloc",
