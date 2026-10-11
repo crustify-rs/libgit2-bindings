@@ -1387,3 +1387,68 @@ mod conflict_cursor {
         assert_eq!(rust.bits(), c);
     }
 }
+
+/// `git_index_add` copies entry timestamps verbatim, without normalising them: an entry
+/// whose times were set through the safe [`IndexTime`] API and one built from raw
+/// integers read back the same after every step.
+///
+/// [`IndexTime`]: libgit2::libgit2::index::index::IndexTime
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn timestamp_entry_roundtrips() {
+    use libgit2::libgit2::index::index::{IndexTime, IndexTimeRef};
+    let raw = |time: IndexTimeRef<'_>| ffi::git_index_time {
+        seconds: time.seconds(),
+        nanoseconds: time.nanoseconds(),
+    };
+    let left = Index::new().unwrap();
+    let right = Index::new().unwrap();
+    let mut safe = IndexTime::new(0, 0);
+    let cases = [
+        (0, 0),
+        (i32::MIN, u32::MAX),
+        (-1, 1_000_000_000),
+        (i32::MAX, 999_999_999),
+    ];
+    for (step, (seconds, nanoseconds)) in cases.into_iter().enumerate() {
+        safe.as_mut().set_seconds(seconds);
+        safe.as_mut().set_nanoseconds(nanoseconds);
+        let copied = safe.as_ref().to_time();
+        let raw_time = ffi::git_index_time {
+            seconds,
+            nanoseconds,
+        };
+        let mut c_entry = ffi::git_index_entry {
+            ctime: raw_time,
+            mtime: raw_time,
+            mode: 0o100644,
+            path: c"timestamp".as_ptr(),
+            ..Default::default()
+        };
+        c_entry.id.type_ = ffi::GIT_OID_SHA1 as u8;
+        let mut rust_entry = c_entry;
+        rust_entry.ctime = raw(copied.as_ref());
+        rust_entry.mtime = raw(safe.as_ref());
+        // SAFETY: two live independent indexes; entries and NUL paths are readable
+        // for the calls, which copy them. The entry pointers stay valid until the
+        // next mutation of their index, after the reads below.
+        unsafe {
+            assert_eq!(ffi::git_index_add(left.as_c_ptr(), &c_entry), 0);
+            assert_eq!(ffi::git_index_add(right.as_c_ptr(), &rust_entry), 0);
+            assert_eq!(ffi::git_index_entrycount(left.as_c_ptr()), 1);
+            let a = ffi::git_index_get_byindex(left.as_c_ptr(), 0);
+            let b = ffi::git_index_get_byindex(right.as_c_ptr(), 0);
+            for (x, y) in [((*a).ctime, (*b).ctime), ((*a).mtime, (*b).mtime)] {
+                assert_eq!(
+                    (x.seconds, x.nanoseconds),
+                    (y.seconds, y.nanoseconds),
+                    "step {step}"
+                );
+            }
+            assert_eq!(
+                ((*a).mtime.seconds, (*a).mtime.nanoseconds),
+                (seconds, nanoseconds)
+            );
+        }
+    }
+}

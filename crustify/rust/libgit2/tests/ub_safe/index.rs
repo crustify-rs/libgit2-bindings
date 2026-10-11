@@ -694,3 +694,22 @@ mod conflict_cursor {
         });
     }
 }
+
+#[test]
+fn timestamp_extremes_and_reborrows() {
+    use libgit2::libgit2::index::index::IndexTime;
+    let mut value = IndexTime::default();
+    for seconds in [i32::MIN, -1, 0, 1, i32::MAX] {
+        for nanos in [0, 1, 999_999_999, 1_000_000_000, u32::MAX] {
+            let mut exclusive = value.as_mut();
+            exclusive.as_mut().set_seconds(seconds);
+            exclusive.as_mut().set_nanoseconds(nanos);
+            let shared = exclusive.as_ref();
+            let another = shared;
+            assert_eq!((shared.seconds(), another.nanoseconds()), (seconds, nanos));
+            let copy = shared.to_time();
+            exclusive.set_seconds(0);
+            assert_eq!(copy.as_ref().seconds(), seconds);
+        }
+    }
+}
