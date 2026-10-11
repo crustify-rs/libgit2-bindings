@@ -1453,3 +1453,334 @@ fn timestamp_entry_roundtrips() {
         }
     }
 }
+
+mod entry_and_options {
+    //! Equivalence tests for the `IndexEntry` and `IndexOptions` values: a value built
+    //! through the safe API and one C code fills in by hand, for the same inputs, are the
+    //! same struct (by [`into_raw`](IndexEntry::into_raw)); and libgit2 treats them the
+    //! same when they are handed to independently owned indexes, step after step.
+
+    use super::*;
+    use ffibox::CZeroable;
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::index::index::{
+        EntryExtendedFlags, EntryFlags, IndexEntry, IndexOptions, IndexTime,
+    };
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    /// One entry's inputs.
+    #[derive(Clone, Copy)]
+    struct Spec {
+        path: &'static CStr,
+        mode: u32,
+        kind: OidType,
+        byte: u8,
+        ctime: (i32, u32),
+        mtime: (i32, u32),
+        stat: [u32; 5],
+        flags: u16,
+        flags_extended: u16,
+    }
+
+    /// Every field of an entry, its path copied.
+    type Fields = (
+        (i32, u32),
+        (i32, u32),
+        [u32; 6],
+        (u8, [u8; 32]),
+        (u16, u16),
+        CString,
+    );
+
+    fn fields(e: &ffi::git_index_entry) -> Fields {
+        (
+            (e.ctime.seconds, e.ctime.nanoseconds),
+            (e.mtime.seconds, e.mtime.nanoseconds),
+            [e.dev, e.ino, e.mode, e.uid, e.gid, e.file_size],
+            (e.id.type_, e.id.id),
+            (e.flags, e.flags_extended),
+            // SAFETY: every entry compared here has a live NUL-terminated path.
+            unsafe { CStr::from_ptr(e.path) }.to_owned(),
+        )
+    }
+
+    /// The entry C code builds: a zeroed struct with each field assigned.
+    fn c_entry(spec: Spec) -> ffi::git_index_entry {
+        let mut e = ffi::git_index_entry {
+            ctime: ffi::git_index_time {
+                seconds: spec.ctime.0,
+                nanoseconds: spec.ctime.1,
+            },
+            mtime: ffi::git_index_time {
+                seconds: spec.mtime.0,
+                nanoseconds: spec.mtime.1,
+            },
+            dev: spec.stat[0],
+            ino: spec.stat[1],
+            mode: spec.mode,
+            uid: spec.stat[2],
+            gid: spec.stat[3],
+            file_size: spec.stat[4],
+            flags: spec.flags,
+            flags_extended: spec.flags_extended,
+            path: spec.path.as_ptr(),
+            ..Default::default()
+        };
+        e.id.type_ = spec.kind.raw() as u8;
+        e.id.id[..spec.kind.size()].fill(spec.byte);
+        e
+    }
+
+    /// The same entry through the safe API: the constructor, then every setter.
+    fn rust_entry(spec: Spec) -> IndexEntry<'static> {
+        let mut raw = [0; 32];
+        raw[..spec.kind.size()].fill(spec.byte);
+        let id = Oid::from_raw(&raw[..spec.kind.size()], spec.kind).unwrap();
+        let mut entry = IndexEntry::new(spec.path, Oid::zeroed().as_ref(), FileMode::Blob);
+        let mut e = entry.as_mut();
+        e.set_ctime(IndexTime::new(spec.ctime.0, spec.ctime.1).as_ref());
+        e.mtime_mut().set_seconds(spec.mtime.0);
+        e.mtime_mut().set_nanoseconds(spec.mtime.1);
+        e.set_dev(spec.stat[0]);
+        e.set_ino(spec.stat[1]);
+        match FileMode::from_raw(spec.mode) {
+            Some(mode) => e.set_filemode(mode),
+            None => e.set_mode(spec.mode),
+        }
+        e.set_uid(spec.stat[2]);
+        e.set_gid(spec.stat[3]);
+        e.set_file_size(spec.stat[4]);
+        e.set_id(id.as_ref());
+        e.set_flags(EntryFlags::from_bits_retain(spec.flags.into()))
+            .unwrap();
+        e.set_flags_extended(EntryExtendedFlags::from_bits_retain(
+            spec.flags_extended.into(),
+        ))
+        .unwrap();
+        entry
+    }
+
+    /// Every entry of `index`, in order.
+    fn entries(index: *mut ffi::git_index) -> Vec<Fields> {
+        // SAFETY: a live index, only read; each entry is copied before the next call.
+        unsafe {
+            (0..ffi::git_index_entrycount(index))
+                .map(|i| fields(&*ffi::git_index_get_byindex(index, i)))
+                .collect()
+        }
+    }
+
+    /// `git_index_add` of `entry`, then its status, the thread's error and the entries.
+    fn add(
+        index: *mut ffi::git_index,
+        entry: &ffi::git_index_entry,
+    ) -> (c_int, Option<(c_int, CString)>, Vec<Fields>) {
+        clear();
+        // SAFETY: a live index; `entry` and its path are read and copied for the call.
+        let rc = unsafe { ffi::git_index_add(index, entry) };
+        (rc, (rc < 0).then(c_last), entries(index))
+    }
+
+    /// Entries built both ways are the same struct, report the same stage, and two
+    /// independent indexes fed one kind each accept, refuse, replace and order them alike
+    /// after every step: new paths, a replacement in place, conflict stages, unnamed and
+    /// refused modes, SHA-256 ids, every flag bit and extreme stat data.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_built_in_rust_match_c_built_entries() {
+        init();
+        let base = Spec {
+            path: c"src/lib.rs",
+            mode: ffi::GIT_FILEMODE_BLOB,
+            kind: OidType::Sha1,
+            byte: 1,
+            ctime: (1, 2),
+            mtime: (3, 4),
+            stat: [5, 6, 7, 8, 9],
+            flags: 0,
+            flags_extended: 0,
+        };
+        let steps = [
+            base,
+            Spec {
+                path: c"README",
+                mode: ffi::GIT_FILEMODE_BLOB_EXECUTABLE,
+                byte: 2,
+                ..base
+            },
+            // The same path and stage again: replaced in place, keeping the old path.
+            Spec {
+                ctime: (i32::MIN, u32::MAX),
+                mtime: (i32::MAX, 1_000_000_000),
+                stat: [u32::MAX; 5],
+                byte: 3,
+                ..base
+            },
+            // Conflict stages 1..=3, beside the stage-0 entry.
+            Spec {
+                flags: 1 << 12,
+                byte: 4,
+                ..base
+            },
+            Spec {
+                flags: 2 << 12,
+                mode: ffi::GIT_FILEMODE_LINK,
+                byte: 5,
+                ..base
+            },
+            Spec {
+                flags: 3 << 12 | 0x0fff,
+                byte: 6,
+                ..base
+            },
+            // Flag bits C keeps or recomputes, and in-memory extended flags.
+            Spec {
+                path: c"flags",
+                flags: 0xc000,
+                flags_extended: u16::MAX,
+                ..base
+            },
+            Spec {
+                path: c"submodule",
+                mode: ffi::GIT_FILEMODE_COMMIT,
+                ..base
+            },
+            Spec {
+                path: c"sha256",
+                kind: OidType::Sha256,
+                byte: 0xff,
+                ..base
+            },
+            // Refused: an unnamed mode, a tree, and a path under `.git`.
+            Spec {
+                path: c"group-writable",
+                mode: 0o100664,
+                ..base
+            },
+            Spec {
+                path: c"tree",
+                mode: ffi::GIT_FILEMODE_TREE,
+                ..base
+            },
+            Spec {
+                path: c".git/config",
+                ..base
+            },
+            // libgit2 accepts an empty path.
+            Spec { path: c"", ..base },
+        ];
+        let (left, right) = (Index::new().unwrap(), Index::new().unwrap());
+        for (step, spec) in steps.into_iter().enumerate() {
+            let c = c_entry(spec);
+            let rust = rust_entry(spec);
+            assert_eq!(fields(&rust.into_raw()), fields(&c), "step {step}: struct");
+            assert_eq!(
+                rust.into_raw().path,
+                c.path,
+                "step {step}: path is borrowed"
+            );
+            // SAFETY: both entries are live and only read.
+            let stages = unsafe {
+                (
+                    ffi::git_index_entry_stage(&c),
+                    ffi::git_index_entry_stage(rust.as_ref_raw()),
+                )
+            };
+            assert_eq!(stages.0, stages.1, "step {step}: stage");
+            assert_eq!(stages.0, c_int::from(spec.flags >> 12 & 3));
+            let expected = add(left.as_c_ptr(), &c);
+            assert_eq!(
+                expected.0 == 0,
+                !(9..12).contains(&step),
+                "step {step}: verdict"
+            );
+            assert_eq!(
+                add(right.as_c_ptr(), &rust.into_raw()),
+                expected,
+                "step {step}: add"
+            );
+        }
+        assert_eq!(entries(left.as_c_ptr()).len(), 9);
+    }
+
+    /// Hands the entry's struct to C by pointer, as the index routines will.
+    trait AsRefRaw {
+        fn as_ref_raw(&self) -> *const ffi::git_index_entry;
+    }
+
+    impl AsRefRaw for IndexEntry<'_> {
+        fn as_ref_raw(&self) -> *const ffi::git_index_entry {
+            // `IndexEntry` is `#[repr(transparent)]` over the struct.
+            ptr::from_ref(self).cast()
+        }
+    }
+
+    /// `IndexOptions::new` is `git_index_options_init`'s struct and
+    /// `GIT_INDEX_OPTIONS_INIT`; after each change of type it is the struct C code would
+    /// assign; and an index opened with either, then written with the same entry, writes
+    /// the same file (a SHA-256 index has its own entry and checksum sizes).
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn options_match_git_index_options_init() {
+        init();
+        let mut c = ffi::git_index_options {
+            version: 0,
+            oid_type: 99,
+        };
+        // SAFETY: `c` is writable storage for the options, overwritten for the call.
+        let rc = unsafe { ffi::git_index_options_init(&mut c, ffi::GIT_INDEX_OPTIONS_VERSION) };
+        assert_eq!(rc, 0);
+        let mut rust = IndexOptions::new();
+        let raw = rust.into_raw();
+        assert_eq!((raw.version, raw.oid_type), (c.version, c.oid_type));
+        assert_eq!(
+            (raw.version, raw.oid_type),
+            (ffi::GIT_INDEX_OPTIONS_VERSION, 0)
+        );
+        let scratch = Scratch::new("options");
+        for (step, kind) in [
+            None,
+            Some(OidType::Sha256),
+            Some(OidType::Sha1),
+            Some(OidType::Sha256),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            c.oid_type = kind.map_or(0, OidType::raw);
+            rust.as_mut().set_oid_type(kind);
+            let raw = rust.into_raw();
+            assert_eq!(
+                (raw.version, raw.oid_type),
+                (c.version, c.oid_type),
+                "step {step}"
+            );
+            let mut written = Vec::new();
+            for (side, opts) in [("c", c), ("rust", raw)] {
+                let file = c_path(&scratch.file(&format!("{side}-{step}")));
+                let mut out = ptr::null_mut();
+                // SAFETY: a live slot, a NUL-terminated path and options read for the call.
+                let rc = unsafe { ffi::git_index_open_ext(&mut out, file.as_ptr(), &opts) };
+                assert_eq!(rc, 0, "step {step} {side}");
+                let index = CIndex(out);
+                let kind = kind.unwrap_or_default();
+                let entry = c_entry(Spec {
+                    path: c"file",
+                    mode: ffi::GIT_FILEMODE_BLOB,
+                    kind,
+                    byte: 7,
+                    ctime: (0, 0),
+                    mtime: (0, 0),
+                    stat: [0; 5],
+                    flags: 0,
+                    flags_extended: 0,
+                });
+                assert_eq!(add(index.0, &entry).0, 0);
+                assert_eq!(write(index.0), (0, None));
+                written.push(std::fs::read(scratch.file(&format!("{side}-{step}"))).unwrap());
+            }
+            assert_eq!(written[0], written[1], "step {step}: written index");
+        }
+    }
+}
