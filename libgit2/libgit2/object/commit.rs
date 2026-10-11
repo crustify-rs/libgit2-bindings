@@ -169,6 +169,14 @@
 //! the parents by id. A [`CreateCallback`] (`git_commit_create_cb`) writes the commits a
 //! routine (a rebase) is about to write, in its place.
 //!
+//! [`create_from_stage`] and [`create_from_tree`] commit the index or a tree on `HEAD`,
+//! as `git commit` does, with [creation options](#creation-options) whose unset
+//! signatures are the repository's default identity, and [`amend_from_stage`] and
+//! [`amend_from_tree`] amend `HEAD`'s commit the same way. The two creating routines are
+//! composed from the routines libgit2 composes them from, but for the parents, which
+//! come from [`RepositoryRef::commit_parents`]: libgit2's own collection frees commits
+//! the object cache still holds when `MERGE_HEAD` cannot be read through.
+//!
 //! libgit2 asserts that the tree is the repository's (a release build fails, a debug
 //! one aborts), and ends the parent list silently at the first commit of another
 //! repository: the wrappers refuse both before it runs. They also refuse a signature
@@ -191,10 +199,11 @@ use ffibox::{
 
 use crate::ffi;
 use crate::libgit2::core::buffer::{Buf, BufVal};
-use crate::libgit2::core::types::{SignatureBox, SignatureRef, StreamError};
+use crate::libgit2::core::types::{Signature, SignatureBox, SignatureRef, StreamError};
+use crate::libgit2::index::index::IndexRef;
 use crate::libgit2::object::mailmap::MailmapRef;
 use crate::libgit2::object::object::{ObjectArc, ObjectRef, id_fits};
-use crate::libgit2::object::tree::{TreeArc, TreeRef};
+use crate::libgit2::object::tree::{Tree, TreeArc, TreeRef};
 use crate::libgit2::odb::sys::odb_backend::{OdbDataArrayFree, OdbDataVec};
 use crate::libgit2::oid::oid::{Oid, OidRef};
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
@@ -1641,8 +1650,9 @@ type SignFn<'f> =
 /// header says about that code. A panic in the closure does not cross into C: the
 /// trampoline stops the commit with `GIT_EUSER` and the panic resumes once control is
 /// back in Rust, in the wrapper that wrote the commit ([`create_ext`] for a callback
-/// lent to options with [`CreateExtOptionsMut::set_signer`]), or from
-/// [`resume_panic`](Self::resume_panic).
+/// lent to options with [`CreateExtOptionsMut::set_signer`], [`create_from_stage`] and
+/// the other routines committing on `HEAD` for one lent with
+/// [`CreateOptionsMut::set_signer`]), or from [`resume_panic`](Self::resume_panic).
 ///
 /// The handles cannot outlive the call:
 ///
@@ -1693,8 +1703,9 @@ impl<'f> SignatureCallback<'f> {
     /// Resumes a panic the closure raised inside a libgit2 call it was lent to through
     /// [`CreateExtOptionsMut::set_signer`] or [`CreateOptionsMut::set_signer`], if any:
     /// that call failed with `GIT_EUSER`, and the callback refuses to sign until the
-    /// panic is resumed. A wrapper that runs the call itself ([`create_ext`]) resumes it
-    /// on its own.
+    /// panic is resumed. A wrapper that runs the call itself ([`create_ext`],
+    /// [`create_from_stage`], [`create_from_tree`], [`amend_from_stage`],
+    /// [`amend_from_tree`]) resumes it on its own.
     pub fn resume_panic(&mut self) {
         if let Some(panic) = self.panic.take() {
             resume_unwind(panic);
@@ -2293,6 +2304,448 @@ impl<'a, 'r> CommitRef<'a, 'r> {
         };
         if rc < 0 { failed(rc) } else { Ok(id) }
     }
+}
+
+// --- Committing on `HEAD` --------------------------------------------------------------
+
+/// `Ok` when libgit2 can write the signatures `options` set (see [`writable`]); the
+/// refusal otherwise, set as the thread's error. An unset one is the repository's
+/// default identity, which libgit2 builds whole, or the amended commit's author, which
+/// [`head_commit`] checks.
+fn options_writable(options: Option<CreateOptionsRef<'_, '_>>) -> Result<(), RepositoryError> {
+    let Some(options) = options else {
+        return Ok(());
+    };
+    if let Some(author) = options.author() {
+        writable(author)?;
+    }
+    if let Some(committer) = options.committer() {
+        writable(committer)?;
+    }
+    Ok(())
+}
+
+/// What a routine committing on `HEAD` commits: a tree, or the repository's index.
+#[derive(Clone, Copy)]
+enum Committed<'a, 'r> {
+    Tree(TreeRef<'a, 'r>),
+    Index(IndexRef<'a>),
+}
+
+/// `check_for_empty_commit` (static in libgit2's `commit.c`): `Ok` when what is committed
+/// differs from the tree `HEAD` points at (from nothing, on an unborn `HEAD`); when it
+/// does not, the failure `GIT_EUNCHANGED`, class `GIT_ERROR_REPOSITORY`, "no changes are
+/// staged for commit", set as the thread's error; libgit2's error when `HEAD` cannot be
+/// read or peeled to a tree, or the diff fails.
+///
+/// Composed from the routines it calls, in its order: `git_repository_head_tree`
+/// (private to libgit2) as [`RepositoryRef::head`] and `git_reference_peel`, then
+/// `git_diff_tree_to_tree` or `git_diff_tree_to_index` with the default options, whose
+/// deltas are counted. `git2/diff.h` has no safe wrapper yet: the diff stays a raw seam,
+/// released here.
+fn changes(repo: RepositoryRef<'_>, committed: Committed<'_, '_>) -> Result<(), RepositoryError> {
+    let head = match repo.head() {
+        Ok(head) => Some(head),
+        Err(e) if e.code() == Some(ErrorCode::UnbornBranch) => None,
+        Err(e) => return Err(e),
+    };
+    let head_tree = match head {
+        Some(head) => {
+            let mut tree = ptr::null_mut();
+            // SAFETY: a writable slot; `head` is the live reference `git_repository_head`
+            // handed out, of `repo`, used on this thread only and only read;
+            // `GIT_OBJECT_TREE` is a target libgit2 accepts.
+            let rc = unsafe {
+                ffi::git_reference_peel(&mut tree, head.as_ref().as_ptr(), ffi::GIT_OBJECT_TREE)
+            };
+            if rc < 0 {
+                return failed(rc);
+            }
+            // SAFETY: on success one counted reference to a live object of type
+            // `GIT_OBJECT_TREE`, so a `git_tree`, of `repo`; the owner releases it.
+            Some(unsafe { TreeArc::from_c(tree.cast()) }.expect("a peel succeeded without a tree"))
+        }
+        None => None,
+    };
+    let old = head_tree
+        .as_ref()
+        .map_or(ptr::null_mut(), TreeArc::as_c_ptr);
+    // The committed tree is a live tree of the repository (checked by the callers), only
+    // read despite the `git_tree *`, as `check_for_empty_commit` casts its `const` away;
+    // the index is the repository's, which the diff snapshots on this thread (an index is
+    // neither `Send` nor `Sync`), as `git_commit_create_from_stage` diffs it.
+    let (repo, mut diff) = (repo.as_ptr().cast_mut(), ptr::null_mut());
+    // SAFETY: a writable slot, NULL unless the diff succeeds; a live repository, used on
+    // this thread only, whose configuration and odb libgit2 loads through this shared
+    // handle; `old` NULL or `HEAD`'s tree, held above; the committed tree or index as
+    // above; NULL options are the defaults.
+    let rc = unsafe {
+        match committed {
+            Committed::Tree(tree) => ffi::git_diff_tree_to_tree(
+                &mut diff,
+                repo,
+                old,
+                tree.as_ptr().cast_mut(),
+                ptr::null(),
+            ),
+            Committed::Index(index) => ffi::git_diff_tree_to_index(
+                &mut diff,
+                repo,
+                old,
+                index.as_ptr().cast_mut(),
+                ptr::null(),
+            ),
+        }
+    };
+    if rc < 0 {
+        return failed(rc);
+    }
+    // SAFETY: `diff` is the live diff just handed out, which this function owns alone:
+    // its deltas are counted, then it is released once.
+    let deltas = unsafe {
+        let deltas = ffi::git_diff_num_deltas(diff);
+        ffi::git_diff_free(diff);
+        deltas
+    };
+    if deltas == 0 {
+        set(ErrorClass::Repository, c"no changes are staged for commit");
+        return failed(ErrorCode::Unchanged.raw());
+    }
+    Ok(())
+}
+
+/// `create_from_tree` (static in libgit2's `commit.c`): writes a commit of `tree` and
+/// moves `HEAD` to it, with the author and the committer `options` set (the repository's
+/// default signature for each unset one), the parents a commit made now would have
+/// ([`RepositoryRef::commit_parents`]), and the options' encoding, extra headers and
+/// signer, through [`create_ext`].
+///
+/// libgit2's routine takes the parents from `git_repository_commit_parents`, whose
+/// defects [`RepositoryRef::commit_parents`] avoids: it frees the commits it collected
+/// while the object cache holds them when `MERGE_HEAD` cannot be read through (a use
+/// after free), and takes whatever object `HEAD` resolves to as a commit. So `HEAD` at a
+/// tag is peeled to its commit, which then fails as not the tip of `HEAD` (libgit2 writes
+/// the tag as the first parent), and `HEAD` at another object fails (libgit2 writes it as
+/// a parent).
+///
+/// Fails, as libgit2 does, with `-1` and the thread's error when the default signature
+/// or the parents cannot be had, and otherwise as [`create_ext`] fails.
+fn commit_on_head<'r>(
+    repo: RepositoryRef<'r>,
+    tree: TreeRef<'_, 'r>,
+    message: &CStr,
+    mut options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    let opts = options.as_ref().map(|o| o.as_ref());
+    let (author, committer) = (
+        opts.and_then(|o| o.author()),
+        opts.and_then(|o| o.committer()),
+    );
+    let default = if author.is_none() || committer.is_none() {
+        let default = Signature::default(repo).or_else(|_| failed(ErrorCode::Generic.raw()))?;
+        Some(default)
+    } else {
+        None
+    };
+    let default = default.as_ref().map(SignatureBox::as_ref);
+    let (author, committer) = match (author.or(default), committer.or(default)) {
+        (Some(author), Some(committer)) => (author, committer),
+        _ => unreachable!("the default signature fills every unset one"),
+    };
+    let parents = repo
+        .commit_parents()
+        .or_else(|_| failed(ErrorCode::Generic.raw()))?;
+    let parents: Vec<_> = parents.as_ref().iter().collect();
+    let write = |mut ext: CreateExtOptionsMut<'_, '_>| {
+        ext.set_update_ref(Some(c"HEAD"));
+        create_ext(repo, author, committer, message, tree, &parents, Some(ext))
+    };
+    match options.as_mut() {
+        Some(options) => options.with_ext_options(write),
+        None => write(CreateExtOptions::new().as_mut()),
+    }
+}
+
+/// Commits the repository's index on `HEAD`, as `git commit -m <message>` does, and
+/// returns the new commit's id: the index is written as a tree into the object database,
+/// and a commit of that tree is written, whose parents are the commit `HEAD` resolves to
+/// (none on an unborn `HEAD`) and, during a merge, each commit `MERGE_HEAD` names; `HEAD`
+/// (its branch) is then moved to it, with a reflog entry.
+///
+/// The commit gets what `options` set (the defaults of [`CreateOptions::new`] for
+/// `None`): the author and the committer, the repository's default signature
+/// ([`Signature::default`]) for each unset one; the `encoding` header and the extra
+/// headers; and the signing callback, which libgit2 calls once with the contents before
+/// writing them. Unless the options allow it, a commit that changes nothing is refused:
+/// when the index holds the tree `HEAD` points at (no entries, on an unborn `HEAD`), the
+/// call fails with [`ErrorCode::Unchanged`] (class `GIT_ERROR_REPOSITORY`, "no changes are
+/// staged for commit") before anything is written.
+///
+/// The options are borrowed exclusively for the call, as their signing callback is. A
+/// panic of its closure stops the commit, which fails with `GIT_EUSER`, and resumes here
+/// once libgit2 has returned; an error it returns fails the call with its code and
+/// message. Either way the index's tree, written before signing, stays in the object
+/// database, and `HEAD` does not move.
+///
+/// Refuses, before libgit2 runs and with `GIT_ERROR_INVALID`, an author or committer
+/// libgit2 cannot write (see [`create`]). Fails with `-1` and libgit2's error when the
+/// index cannot be read or written as a tree, the default signature is needed and
+/// missing (an unset or empty `user.name` or `user.email`), or the parents cannot be
+/// read (`HEAD` at an object that is not a commit or a tag included); with libgit2's
+/// error when the diff against `HEAD` fails, `HEAD` has moved meanwhile
+/// ([`ErrorCode::Modified`]), or the reference or the object database cannot be written.
+///
+/// This is `git_commit_create_from_stage` composed from the routines it calls, the same
+/// way, but for the parents, which come from [`RepositoryRef::commit_parents`]: libgit2's
+/// own collection frees `HEAD`'s commit while the object cache still holds it when
+/// `MERGE_HEAD` holds a line it cannot parse or that names no commit, and writes any
+/// object `HEAD` resolves to as a parent. Here `HEAD` at a tag fails with
+/// [`ErrorCode::Modified`] (its commit is not the tip `HEAD` names), and `HEAD` at a tree
+/// or a blob with `-1`.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::core::types::{SignatureView, Time};
+/// use libgit2::libgit2::object::commit::{Commit, CreateOptions, create_from_stage};
+/// use libgit2::libgit2::repository::repository::Repository;
+/// use libgit2::libgit2::util::errors::ErrorCode;
+///
+/// let dir = std::env::temp_dir().join(format!("commit-stage-doc-{}", std::process::id()));
+/// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+/// let repo = Repository::init(&path, true).unwrap();
+/// let me = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(1_700_000_000, 60));
+/// let mut options = CreateOptions::new();
+/// options.as_mut().set_author(Some(me.as_ref()));
+/// options.as_mut().set_committer(Some(me.as_ref()));
+/// // The index is empty, as the unborn `HEAD` is: nothing to commit.
+/// let e = create_from_stage(repo.as_ref(), c"Initial\n", Some(options.as_mut())).unwrap_err();
+/// assert_eq!(e.code(), Some(ErrorCode::Unchanged));
+/// options.as_mut().set_allow_empty_commit(true);
+/// let id = create_from_stage(repo.as_ref(), c"Initial\n", Some(options.as_mut())).unwrap();
+/// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+/// assert_eq!(commit.as_ref().parent_count(), 0);
+/// # drop(commit);
+/// # drop(repo);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// ```
+///
+/// Replaces: git_commit_create_from_stage
+pub fn create_from_stage(
+    repo: RepositoryRef<'_>,
+    message: &CStr,
+    options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    let opts = options.as_ref().map(|o| o.as_ref());
+    options_writable(opts)?;
+    let index = repo.index().or_else(|_| failed(ErrorCode::Generic.raw()))?;
+    if !opts.is_some_and(|o| o.allow_empty_commit()) {
+        changes(repo, Committed::Index(index.as_ref()))?;
+    }
+    let mut id = Oid::zeroed();
+    // SAFETY: `id` is a writable id, set on success; the index is the repository's, live
+    // through the reference held above, written (sorted, its tree cache refreshed) on this
+    // thread only, as `git_commit_create_from_stage` writes it: an index is neither `Send`
+    // nor `Sync`, and no handle to it lends any of its contents. libgit2 writes the trees
+    // into the object database of the repository that keeps the index.
+    let rc = unsafe { ffi::git_index_write_tree(id.as_mut().as_mut_ptr(), index.as_c_ptr()) };
+    if rc < 0 {
+        return failed(ErrorCode::Generic.raw());
+    }
+    let tree = Tree::lookup(repo, id.as_ref()).or_else(|_| failed(ErrorCode::Generic.raw()))?;
+    commit_on_head(repo, tree.as_ref(), message, options)
+}
+
+/// Commits `tree` on `HEAD` and returns the new commit's id: [`create_from_stage`], with
+/// the given tree in place of the index's, written the same way and with the same
+/// options, refusals and failures.
+///
+/// A commit that changes nothing (`tree` is the tree `HEAD` points at, or empty on an
+/// unborn `HEAD`), unless the options allow it, fails with `-1` (`GIT_ERROR`), class
+/// `GIT_ERROR_REPOSITORY`, "no changes are staged for commit", as libgit2 reports the
+/// check here, rather than [`ErrorCode::Unchanged`]; so does a failure of the diff
+/// against `HEAD`.
+///
+/// Refuses besides, before libgit2 runs, a `tree` looked up in another repository, with
+/// the error a release build of libgit2 reports from its assertion (`GIT_ERROR_INVALID`,
+/// "invalid argument: 'git_tree_owner(tree) == repo'"; a debug build aborts), which it
+/// reaches only after diffing that tree against `HEAD`.
+///
+/// This is `git_commit_create_from_tree` composed from the routines it calls, as
+/// [`create_from_stage`] is, for the same defects.
+///
+/// Replaces: git_commit_create_from_tree
+pub fn create_from_tree<'r>(
+    repo: RepositoryRef<'r>,
+    tree: TreeRef<'_, 'r>,
+    message: &CStr,
+    options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    tree_in(repo, tree)?;
+    let opts = options.as_ref().map(|o| o.as_ref());
+    options_writable(opts)?;
+    if !opts.is_some_and(|o| o.allow_empty_commit()) {
+        changes(repo, Committed::Tree(tree)).or_else(|_| failed(ErrorCode::Generic.raw()))?;
+    }
+    commit_on_head(repo, tree, message, options)
+}
+
+/// The commit `HEAD` resolves to, as `git_commit_amend_from_tree` peels it, when the
+/// options leave the author unset and libgit2 writes that commit's author: `Ok(None)`
+/// when the commit cannot be had (libgit2 then fails the same way, setting its own
+/// error) or the options set an author, the refusal of [`writable`] for an author it
+/// cannot write. Held for the call, the commit stays in the object cache, from which
+/// libgit2's own lookup of the same id takes it.
+fn head_commit<'r>(
+    repo: RepositoryRef<'r>,
+    options: Option<CreateOptionsRef<'_, '_>>,
+) -> Result<Option<CommitArc<'r>>, RepositoryError> {
+    if options.and_then(|o| o.author()).is_some() {
+        return Ok(None);
+    }
+    let Ok(head) = repo.head() else {
+        return Ok(None);
+    };
+    let mut commit = ptr::null_mut();
+    // SAFETY: a writable slot; `head` is the live reference `git_repository_head` handed
+    // out, of `repo`, used on this thread only and only read; `GIT_OBJECT_COMMIT` is a
+    // target libgit2 accepts.
+    let rc = unsafe {
+        ffi::git_reference_peel(&mut commit, head.as_ref().as_ptr(), ffi::GIT_OBJECT_COMMIT)
+    };
+    if rc < 0 {
+        return Ok(None);
+    }
+    // SAFETY: on success one counted reference to a live object of type
+    // `GIT_OBJECT_COMMIT`, so a `git_commit`, of `repo`, borrowed for `'r`; the owner
+    // releases it.
+    let commit = unsafe { CommitArc::from_c(commit.cast()) };
+    let commit = commit.expect("a peel succeeded without a commit");
+    writable(commit.as_ref().author())?;
+    Ok(Some(commit))
+}
+
+/// `git_commit_amend_from_tree` with `tree`, or `git_commit_amend_from_stage` for `None`,
+/// after the refusals both wrappers make; resumes the signer's panic once libgit2 returns.
+fn amend_on_head<'r>(
+    repo: RepositoryRef<'r>,
+    tree: Option<TreeRef<'_, 'r>>,
+    message: Option<&CStr>,
+    mut options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    let opts = options.as_ref().map(|o| o.as_ref());
+    options_writable(opts)?;
+    let held = head_commit(repo, opts)?;
+    let mut id = Oid::zeroed();
+    let (out, raw) = (id.as_mut().as_mut_ptr(), repo.as_ptr().cast_mut());
+    let message = message.map_or(ptr::null(), CStr::as_ptr);
+    let opts = opts.map_or(ptr::null(), |o| o.as_ptr());
+    // `opts` is NULL or the live options this function borrows exclusively, only read by
+    // libgit2 with the signatures (writable, checked above), strings and headers they
+    // borrow for their `'o`; their signing callback, if any, is the trampoline over the
+    // `SignatureCallback` they borrow exclusively, which libgit2 calls on this thread.
+    // `HEAD`'s commit, whose author is written when the options set none, is writable.
+    // SAFETY: `out` addresses `id`, written on success; `repo` is live on this thread, its
+    // index, references, odb and caches written through this shared handle as
+    // `RepositoryRef` allows; `tree` is a live tree of `repo` (checked by the caller);
+    // `message` is NULL or NUL-terminated; `opts` as above.
+    let rc = unsafe {
+        match tree {
+            Some(tree) => ffi::git_commit_amend_from_tree(out, raw, tree.as_ptr(), message, opts),
+            None => ffi::git_commit_amend_from_stage(out, raw, message, opts),
+        }
+    };
+    drop(held);
+    if let Some(options) = options.as_mut() {
+        options.resume_signer_panic();
+    }
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Amends the commit `HEAD` resolves to with the repository's index, as `git commit
+/// --amend` does, and returns the new commit's id: the index is written as a tree into
+/// the object database, and a commit of that tree is written with the amended commit's
+/// parents; `HEAD` (its branch) is then moved to it, with a reflog entry.
+///
+/// The commit gets `message`, or the amended commit's message *and its encoding*, which
+/// then override the options' encoding, for `None`; the author `options` set, or the
+/// amended commit's author; the committer they set, or the repository's default
+/// signature ([`Signature::default`]); and their encoding, extra headers (the amended
+/// commit's own are not carried over) and signing callback, as [`create_from_stage`]
+/// takes them. A commit that changes nothing is written whatever the options say.
+///
+/// The options are borrowed exclusively for the call, as their signing callback is: a
+/// panic of its closure stops the commit, which fails with `GIT_EUSER`, and resumes here
+/// once libgit2 has returned; an error it returns fails the call with its code and
+/// message. Either way the index's tree, written before signing, stays in the object
+/// database, and `HEAD` does not move.
+///
+/// Refuses, before libgit2 runs and with `GIT_ERROR_INVALID`, an author or committer
+/// libgit2 cannot write (see [`create`]), the amended commit's author included when the
+/// options set none. Fails with `-1` and libgit2's error when the index cannot be read or
+/// written as a tree; with [`ErrorCode::UnbornBranch`] on an unborn `HEAD`, and with
+/// libgit2's error when `HEAD` cannot be peeled to a commit, the default signature is
+/// needed and missing, or the reference or the object database cannot be written.
+///
+/// Wraps: git_commit_amend_from_stage
+pub fn amend_from_stage(
+    repo: RepositoryRef<'_>,
+    message: Option<&CStr>,
+    options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    amend_on_head(repo, None, message, options)
+}
+
+/// Amends the commit `HEAD` resolves to with `tree` and returns the new commit's id:
+/// [`amend_from_stage`], with the given tree in place of the index's, written the same
+/// way and with the same options, refusals and failures.
+///
+/// Refuses besides, before libgit2 runs, a `tree` looked up in another repository, with
+/// the error [`create_from_tree`] reports for one: libgit2 does not check it here, and
+/// writes its id, of whatever type, unchecked.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::core::types::{SignatureView, Time};
+/// use libgit2::libgit2::object::commit::{Commit, CreateOptions, amend_from_tree, create_from_tree};
+/// use libgit2::libgit2::object::tree::Tree;
+/// use libgit2::libgit2::oid::oid::{Oid, OidType};
+/// use libgit2::libgit2::repository::repository::Repository;
+///
+/// let dir = std::env::temp_dir().join(format!("commit-amend-doc-{}", std::process::id()));
+/// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+/// let repo = Repository::init(&path, true).unwrap();
+/// let tree_id = Oid::from_string(c"4b825dc642cb6eb9a060e54bf8d69288fbee4904", OidType::Sha1).unwrap();
+/// let tree = Tree::lookup(repo.as_ref(), tree_id.as_ref()).unwrap();
+/// let me = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(1_700_000_000, 60));
+/// let mut options = CreateOptions::new();
+/// let mut m = options.as_mut();
+/// m.set_allow_empty_commit(true);
+/// m.set_author(Some(me.as_ref()));
+/// m.set_committer(Some(me.as_ref()));
+/// m.set_message_encoding(Some(c"ISO-8859-1"));
+/// create_from_tree(repo.as_ref(), tree.as_ref(), c"Initial\n", Some(options.as_mut())).unwrap();
+/// // The amended commit's message and encoding, the options' author.
+/// let mut options = CreateOptions::new();
+/// options.as_mut().set_committer(Some(me.as_ref()));
+/// let id = amend_from_tree(repo.as_ref(), tree.as_ref(), None, Some(options.as_mut())).unwrap();
+/// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
+/// assert_eq!(commit.as_ref().message(), c"Initial\n");
+/// assert_eq!(commit.as_ref().message_encoding(), Some(c"ISO-8859-1"));
+/// # drop(commit);
+/// # drop(tree);
+/// # drop(repo);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// ```
+///
+/// Wraps: git_commit_amend_from_tree
+pub fn amend_from_tree<'r>(
+    repo: RepositoryRef<'r>,
+    tree: TreeRef<'_, 'r>,
+    message: Option<&CStr>,
+    options: Option<CreateOptionsMut<'_, '_>>,
+) -> Result<Oid, RepositoryError> {
+    tree_in(repo, tree)?;
+    amend_on_head(repo, Some(tree), message, options)
 }
 
 /// The closure a [`CreateCallback`] calls: the commit's author, committer, message
@@ -3296,9 +3749,9 @@ const _: () = assert!(
             == align_of::<ffi::git_commit_create_ext_options>()
 );
 
-/// Options for committing the index or a tree on `HEAD` with
-/// `git_commit_create_from_stage`, `git_commit_create_from_tree` and their `amend`
-/// counterparts (`git_commit_create_options`), held by value in Rust storage.
+/// Options for committing the index or a tree on `HEAD` with [`create_from_stage`],
+/// [`create_from_tree`] and their `amend` counterparts, [`amend_from_stage`] and
+/// [`amend_from_tree`] (`git_commit_create_options`), held by value in Rust storage.
 ///
 /// Built by [`new`](Self::new) (or [`Default`]) with libgit2's defaults: no empty
 /// commits, the default author and committer, no encoding header, no extra headers and
@@ -3716,8 +4169,10 @@ impl<'a, 'o> CreateOptionsMut<'a, 'o> {
     /// itself, which they borrow until they are dropped: it cannot be used, moved or
     /// dropped meanwhile, nor lent to other options, so each libgit2 call reaches it
     /// alone. A panic of its closure stops the commit with `GIT_EUSER` and is kept in the
-    /// callback, which [`resume_panic`](SignatureCallback::resume_panic) resumes once the
-    /// options are gone.
+    /// callback, which the routines committing on `HEAD` ([`create_from_stage`],
+    /// [`create_from_tree`], [`amend_from_stage`], [`amend_from_tree`]) resume once
+    /// libgit2 returns (and [`resume_panic`](SignatureCallback::resume_panic) resumes for
+    /// options lent to C another way).
     ///
     /// ```compile_fail,E0499
     /// use libgit2::libgit2::core::types::StreamError;
@@ -3752,6 +4207,52 @@ impl<'a, 'o> CreateOptionsMut<'a, 'o> {
     }
 }
 
+impl<'o> CreateOptionsMut<'_, 'o> {
+    /// Runs `f` with the `git_commit_create_ext_options` libgit2's routines committing on
+    /// `HEAD` build from these options (`init_ext_options`): their encoding, extra headers
+    /// and signing callback with its payload, and nothing else set. The copy lives for
+    /// `f` alone, during which this handle, which borrows the options exclusively, is
+    /// frozen: the callback the options borrow exclusively is reached through the copy
+    /// only.
+    fn with_ext_options<R>(&mut self, f: impl FnOnce(CreateExtOptionsMut<'_, 'o>) -> R) -> R {
+        let mut ext = CreateExtOptions::new();
+        // Each value copied is one `CreateOptionsMut`'s setters stored and
+        // `CreateExtOptionsMut`'s store under the same invariant, for the same `'o`: NULL
+        // or a `&'o CStr`; NULL with 0 or a `&'o [Header<'o>]`; `None` with NULL or the
+        // trampoline with a `SignatureCallback` borrowed exclusively for `'o`, which
+        // nothing but the copy reaches while `f` runs, as this handle stays borrowed.
+        let (from, to) = (self.as_mut_ptr(), ext.as_mut().as_mut_ptr());
+        // SAFETY: reads through this exclusive handle's pointer to live options, and
+        // writes through the pointer to `ext`, held above, of plain data valid as above.
+        unsafe {
+            addr_of_mut!((*to).message_encoding).write(addr_of!((*from).message_encoding).read());
+            addr_of_mut!((*to).extra_headers).write(addr_of!((*from).extra_headers).read());
+            addr_of_mut!((*to).extra_headers_len).write(addr_of!((*from).extra_headers_len).read());
+            addr_of_mut!((*to).sign).write(addr_of!((*from).sign).read());
+            addr_of_mut!((*to).payload).write(addr_of!((*from).payload).read());
+        }
+        f(ext.as_mut())
+    }
+
+    /// Resumes a panic the signing callback's closure raised during the libgit2 call
+    /// these options were just lent to, if any: what [`amend_from_stage`] and
+    /// [`amend_from_tree`] do once libgit2 returns.
+    fn resume_signer_panic(&mut self) {
+        let p = self.as_mut_ptr();
+        // SAFETY: a read through the exclusive handle's pointer to live options.
+        let payload = unsafe { addr_of!((*p).payload).read() };
+        if payload.is_null() {
+            return;
+        }
+        // SAFETY: a non-NULL payload is the `SignatureCallback` `set_signer` stored, which
+        // the options borrow exclusively for `'o`; this handle borrows the options
+        // exclusively, and the libgit2 call that used the callback has returned, so
+        // nothing else reaches it.
+        let signer = unsafe { &mut *payload.cast::<SignatureCallback<'_>>() };
+        signer.resume_panic();
+    }
+}
+
 impl fmt::Debug for CreateOptionsMut<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_ref().fmt(f)
@@ -3778,7 +4279,7 @@ mod unit_tests {
     use core::ffi::{CStr, c_char, c_int, c_void};
     use core::mem::size_of;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     /// The fixture repositories: `testrepo.git` (a branch at `a65fedf`), `mergedrepo`
     /// (merging `e280915` into `3a34580`) and `empty_bare.git` (an unborn `HEAD`).
@@ -3874,6 +4375,8 @@ mod unit_tests {
     }
 
     static REFUSING: AtomicBool = AtomicBool::new(false);
+    /// An allocation length [`Refusing`] refuses besides; 0 for none.
+    static REFUSED_LEN: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
@@ -3881,13 +4384,14 @@ mod unit_tests {
         fn free(p: *mut c_void);
     }
 
-    /// libc's allocator, refusing everything while `REFUSING` is set.
+    /// libc's allocator, refusing everything while `REFUSING` is set, and fresh blocks of
+    /// `REFUSED_LEN` bytes.
     struct Refusing;
 
     // SAFETY: forwards to libc's `malloc` family, or fails, which `Alloc` allows.
     unsafe impl Alloc for Refusing {
         fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
-            if REFUSING.load(SeqCst) {
+            if REFUSING.load(SeqCst) || REFUSED_LEN.load(SeqCst) == len {
                 return None;
             }
             // SAFETY: plain libc allocation.
@@ -6587,5 +7091,331 @@ mod unit_tests {
                 )
             );
         }
+    }
+
+    // --- Committing on `HEAD` --------------------------------------------------------
+
+    /// The copy the creating routines hand `git_commit_create_ext` carries the options'
+    /// encoding, headers, signer and payload, and nothing else: no reference to update,
+    /// no signatures (`init_ext_options`).
+    #[test]
+    #[cfg_attr(miri, ignore = "fills the copy through libgit2")]
+    fn ext_options_copy_what_libgit2_copies() {
+        let headers = [Header::new(c"x-a", c"1"), Header::new(c"x-b", c"2")];
+        let who = SignatureView::new(c"W", c"w@example.com", Time::new(0, 0));
+        let mut f = |_: CommitBuilderMut<'_>, _: RepositoryRef<'_>, _: &CStr| Ok(());
+        let mut signer = SignatureCallback::new(&mut f);
+        let mut options = create_template();
+        let mut m = options.as_mut();
+        m.set_allow_empty_commit(true);
+        m.set_author(Some(who.as_ref()));
+        m.set_committer(Some(who.as_ref()));
+        m.set_message_encoding(Some(c"UTF-16"));
+        m.set_extra_headers(&headers);
+        m.set_signer(Some(&mut signer));
+        let (sign, payload) = m.as_ref().sign_callback();
+        let seen = m.with_ext_options(|ext| {
+            let r = ext.as_ref();
+            assert_eq!(r.version(), ffi::GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION);
+            assert_eq!(r.update_ref(), None);
+            assert_eq!(r.message_encoding(), Some(c"UTF-16"));
+            assert_eq!(r.extra_headers().len(), 2);
+            assert_eq!(r.extra_headers().as_ptr(), headers.as_ptr().cast());
+            // SAFETY: a read of the live copy through its shared handle's pointer.
+            let raw = unsafe { r.as_ptr().read() };
+            assert_eq!(raw.sign.map(|f| f as usize), sign.map(|f| f as usize));
+            assert_eq!(raw.payload, payload);
+            7
+        });
+        assert_eq!(seen, 7);
+        // Options without a signer, encoding or headers copy none.
+        let mut bare = create_template();
+        bare.as_mut().with_ext_options(|ext| {
+            let r = ext.as_ref();
+            assert!(!r.has_signer() && r.message_encoding().is_none());
+            assert!(r.extra_headers().is_empty());
+        });
+        // Nothing to resume on either.
+        options.as_mut().resume_signer_panic();
+        bare.as_mut().resume_signer_panic();
+    }
+
+    /// The wrappers refuse, before libgit2 runs, a signature that lost a string (as
+    /// libgit2's parser leaves one when out of memory), set as the author or the
+    /// committer, and a tree of another repository: nothing is written, the index's tree
+    /// included, and `HEAD` stays unborn.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn head_routines_refuse_what_libgit2_cannot_write() {
+        let (s, other) = (
+            Scratch::new("head-refusals"),
+            Scratch::new("head-refusals-other"),
+        );
+        let (repo, tree, foreign) = (s.repo(), s.empty_tree(), other.empty_tree());
+        let mut raw = ffi::git_signature {
+            name: ptr::null_mut(),
+            email: c"e@x".as_ptr().cast_mut(),
+            when: Time::new(0, 0).into(),
+        };
+        // SAFETY: a live signature on the stack, whose strings are NULL or static, read
+        // only while it lives.
+        let lost = unsafe { SignatureRef::from_ptr(&mut raw) }.unwrap();
+        let missing = (
+            -1,
+            Some(ErrorClass::Invalid),
+            "failed to create commit: signature is missing its name or email".to_owned(),
+        );
+        let before = s.objects();
+        for as_author in [true, false] {
+            let mut options = CreateOptions::new();
+            let mut m = options.as_mut();
+            m.set_allow_empty_commit(true);
+            if as_author {
+                m.set_author(Some(lost));
+            } else {
+                m.set_committer(Some(lost));
+            }
+            let out = [
+                super::create_from_tree(repo, tree.as_ref(), c"m\n", Some(m.as_mut())),
+                create_from_stage(repo, c"m\n", Some(m.as_mut())),
+                amend_from_tree(repo, tree.as_ref(), None, Some(m.as_mut())),
+                amend_from_stage(repo, None, Some(m.as_mut())),
+            ];
+            for e in out {
+                assert_eq!(refusal(e.unwrap_err()), missing);
+            }
+        }
+        let owner = (
+            -1,
+            Some(ErrorClass::Invalid),
+            "invalid argument: 'git_tree_owner(tree) == repo'".to_owned(),
+        );
+        let e = super::create_from_tree(repo, foreign.as_ref(), c"m\n", None).unwrap_err();
+        assert_eq!(refusal(e), owner);
+        let e = amend_from_tree(repo, foreign.as_ref(), None, None).unwrap_err();
+        assert_eq!(refusal(e), owner);
+        assert_eq!(s.objects(), before);
+        assert!(repo.head().is_err());
+    }
+
+    /// An amend that leaves the author unset writes `HEAD`'s commit's author: when
+    /// libgit2's parser lost its name (out of memory, reporting success), the wrappers
+    /// refuse before libgit2 runs, and the commit they hold keeps libgit2 reading the
+    /// same parse.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn amended_authors_libgit2_lost_are_refused() {
+        isolated(
+            concat!(module_path!(), "::amended_authors_libgit2_lost_are_refused"),
+            || {
+                install_refusing();
+                let s = Scratch::new("lost-author");
+                let (repo, tree) = (s.repo(), s.empty_tree());
+                let name = std::ffi::CString::new("N".repeat(200)).unwrap();
+                let author = SignatureView::new(&name, c"a@example.com", Time::new(5, 0));
+                let me = who(0);
+                let id = create(
+                    repo,
+                    Some(c"HEAD"),
+                    author.as_ref(),
+                    me.as_ref(),
+                    None,
+                    c"root\n",
+                    tree.as_ref(),
+                    &[],
+                )
+                .unwrap();
+                // Writing `HEAD` looked the commit up for its reflog message: a fresh
+                // instance of the repository, with an empty object cache, parses it anew.
+                let path = std::ffi::CString::new(s.dir.to_str().unwrap()).unwrap();
+                let fresh = Repository::open(&path).unwrap();
+                let (repo, tree) = (
+                    fresh.as_ref(),
+                    Tree::lookup(fresh.as_ref(), tree.as_ref().id()).unwrap(),
+                );
+                let before = s.objects();
+                let mut options = CreateOptions::new();
+                options.as_mut().set_committer(Some(me.as_ref()));
+                // The name's copy is the parse's only block of its length.
+                REFUSED_LEN.store(201, SeqCst);
+                let tree_amend = amend_from_tree(repo, tree.as_ref(), None, Some(options.as_mut()));
+                let stage_amend = amend_from_stage(repo, None, Some(options.as_mut()));
+                REFUSED_LEN.store(0, SeqCst);
+                for e in [tree_amend, stage_amend] {
+                    assert_eq!(
+                        refusal(e.unwrap_err()).2,
+                        "failed to create commit: signature is missing its name or email"
+                    );
+                }
+                let cached = Commit::lookup(repo, id.as_ref()).unwrap();
+                assert_eq!(cached.as_ref().author().name(), None);
+                // `amend_from_stage` wrote the index's tree, the empty one libgit2 knows.
+                assert!(s.objects() <= before + 1);
+                // With an author set, `HEAD`'s is not written, nor checked.
+                options.as_mut().set_author(Some(me.as_ref()));
+                let amended = amend_from_tree(repo, tree.as_ref(), None, Some(options.as_mut()));
+                let amended = Commit::lookup(repo, amended.unwrap().as_ref()).unwrap();
+                assert_eq!(amended.as_ref().author().name(), Some(c"A U Thor"));
+                assert_eq!(amended.as_ref().message(), c"root\n");
+            },
+        );
+    }
+
+    /// What `git_commit_create_from_tree` or `git_commit_create_from_stage` (for `None`)
+    /// gives on `repo`'s `HEAD` with an empty commit allowed: the code, class and message,
+    /// or 0.
+    fn c_commit_on_head(
+        repo: RepositoryRef<'_>,
+        tree: Option<TreeRef<'_, '_>>,
+    ) -> (c_int, Option<ErrorClass>, String) {
+        let mut options = CreateOptions::new();
+        options.as_mut().set_allow_empty_commit(false);
+        let mut id = ffi::git_oid::default();
+        let (raw, opts) = (repo.as_ptr().cast_mut(), options.as_ref().as_ptr());
+        // SAFETY: a writable id; the live repository and, for the tree routine, a live
+        // tree of it; a NUL-terminated message; options Rust holds, borrowing nothing.
+        // Only called where libgit2 fails before collecting the parents.
+        let rc = unsafe {
+            match tree {
+                Some(tree) => ffi::git_commit_create_from_tree(
+                    &mut id,
+                    raw,
+                    tree.as_ptr(),
+                    c"m\n".as_ptr(),
+                    opts,
+                ),
+                None => ffi::git_commit_create_from_stage(&mut id, raw, c"m\n".as_ptr(), opts),
+            }
+        };
+        if rc == 0 {
+            return (0, None, String::new());
+        }
+        let e = last();
+        (rc, e.class(), e.message().to_string_lossy().into_owned())
+    }
+
+    /// The composed creating routines fail as libgit2's do where `HEAD` cannot be
+    /// peeled to a tree or is missing, where the index cannot be written as a tree (a
+    /// conflict), where the diff against `HEAD` fails (a missing subtree), and where the
+    /// repository has no index (no paths); amending the index fails alike.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn composed_routines_fail_as_libgit2_does() {
+        let s = Scratch::new("composed-failures");
+        let (repo, tree) = (s.repo(), s.empty_tree());
+        let tree_of = |r: RepositoryRef<'_>, t: &TreeArc<'_>| {
+            let mut opts = CreateOptions::new();
+            opts.as_mut().set_allow_empty_commit(false);
+            let ours = super::create_from_tree(r, t.as_ref(), c"m\n", Some(opts.as_mut()));
+            (
+                ours.map(|_| ()).map_err(refusal),
+                c_commit_on_head(r, Some(t.as_ref())),
+            )
+        };
+        let stage_of = |r: RepositoryRef<'_>| {
+            let ours = create_from_stage(r, c"m\n", None);
+            (ours.map(|_| ()).map_err(refusal), c_commit_on_head(r, None))
+        };
+        // `HEAD` at a blob: no tree to diff against.
+        let blob = crate::libgit2::object::blob::create_from_buffer(repo, b"blob\n").unwrap();
+        let head = s.dir.join("HEAD");
+        std::fs::write(
+            &head,
+            format!("{}\n", blob.as_ref().to_hex_string().unwrap()),
+        )
+        .unwrap();
+        let (ours, theirs) = tree_of(repo, &tree);
+        assert_eq!(ours.unwrap_err(), theirs);
+        let (ours, theirs) = stage_of(repo);
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert!(theirs.0 < 0);
+        // No `HEAD` at all.
+        std::fs::remove_file(&head).unwrap();
+        let (ours, theirs) = tree_of(repo, &tree);
+        assert_eq!(ours.unwrap_err(), theirs);
+        let (ours, theirs) = stage_of(repo);
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert_eq!(theirs.0, ErrorCode::NotFound.raw());
+        std::fs::write(&head, "ref: refs/heads/master\n").unwrap();
+
+        // A conflicted index changes something, and cannot be written as a tree.
+        let index = repo.index().unwrap();
+        // SAFETY: a zeroed entry is a valid one with no stat data.
+        let mut entry: ffi::git_index_entry = unsafe { core::mem::zeroed() };
+        entry.mode = ffi::GIT_FILEMODE_BLOB;
+        entry.id = ffi::git_oid {
+            type_: blob.as_ref().raw_kind(),
+            id: blob.as_ref().id(),
+        };
+        entry.path = c"conflicted".as_ptr();
+        // Stage 1 (`GIT_INDEX_ENTRY_STAGESHIFT` is 12): the common ancestor's side.
+        entry.flags = 1 << 12;
+        // SAFETY: the live index; libgit2 copies the entry and its path.
+        assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+        let before = s.objects();
+        let (ours, theirs) = stage_of(repo);
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert_eq!(theirs.0, -1);
+        // Amending writes the index first too.
+        let e = amend_from_stage(repo, None, None).unwrap_err();
+        assert_eq!(refusal(e), (-1, theirs.1, theirs.2.clone()));
+        assert_eq!(s.objects(), before);
+        drop(index);
+
+        // `HEAD` at a commit whose tree names a missing subtree: the diff against it
+        // fails while descending into it.
+        let mut raw = b"40000 sub\0".to_vec();
+        raw.extend_from_slice(&[0xab; 20]);
+        let (mut odb, mut broken) = (ptr::null_mut(), ffi::git_oid::default());
+        // SAFETY: writable slots, the live repository and `raw.len()` bytes; the odb
+        // reference is released once.
+        unsafe {
+            assert_eq!(
+                ffi::git_repository_odb(&mut odb, repo.as_ptr().cast_mut()),
+                0
+            );
+            let rc = ffi::git_odb_write(
+                &mut broken,
+                odb,
+                raw.as_ptr().cast(),
+                raw.len(),
+                ffi::GIT_OBJECT_TREE,
+            );
+            assert_eq!(rc, 0);
+            ffi::git_odb_free(odb);
+        }
+        let broken = Oid::from_raw(&broken.id[..20], OidType::Sha1).unwrap();
+        let broken = Tree::lookup(repo, broken.as_ref()).unwrap();
+        let me = who(0);
+        let tip = create(
+            repo,
+            None,
+            me.as_ref(),
+            me.as_ref(),
+            None,
+            c"broken\n",
+            broken.as_ref(),
+            &[],
+        )
+        .unwrap();
+        std::fs::write(
+            &head,
+            format!("{}\n", tip.as_ref().to_hex_string().unwrap()),
+        )
+        .unwrap();
+        let (ours, theirs) = tree_of(repo, &tree);
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert_eq!(theirs.0, -1);
+        let (ours, theirs) = stage_of(repo);
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert!(theirs.0 < 0 && theirs.2 != "no changes are staged for commit");
+
+        // A repository without paths has no index.
+        let pathless = Repository::new().unwrap();
+        let (ours, theirs) = stage_of(pathless.as_ref());
+        assert_eq!(ours.unwrap_err(), theirs);
+        assert_eq!(theirs.0, -1);
+        let e = amend_from_stage(pathless.as_ref(), None, None).unwrap_err();
+        assert_eq!(refusal(e), theirs);
     }
 }

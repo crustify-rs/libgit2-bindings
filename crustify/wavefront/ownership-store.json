@@ -16411,6 +16411,328 @@
      }
     }
    ]
+  },
+  {
+   "name": "git_commit_amend_from_stage",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL takes HEAD's commit's message and encoding."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call, written though shared: index (write_tree sorts it and refreshes its tree cache), references (HEAD and its reflog), odb and caches. Not retained. Writes the index's tree first, then git_commit_amend_from_tree."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_amend_from_tree",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "given_message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_message"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "NULL takes HEAD's commit's message and its encoding, overriding opts->message_encoding."
+     }
+    },
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. allow_empty_commit is ignored."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call, written though shared: index (write_tree sorts it and refreshes its tree cache), references (HEAD and its reflog), odb and caches. Not retained. HEAD must peel to a commit, whose parents are kept."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree, only its id read (git_tree_id) and written unchecked (validate=false, no owner assertion): a tree of another repository, or of another oid type, is written as is. Not retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_from_stage",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "given_opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. Empty-commit check returns GIT_EUNCHANGED."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given; NULL is refused by GIT_ASSERT_ARG."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call, written though shared: index (write_tree sorts it and refreshes its tree cache), references (HEAD and its reflog), odb and caches. Not retained. The index's tree is written into the odb before signing, and stays on any later failure. Parents come from git_repository_commit_parents, which git__free()s the collected (cached) commits when MERGE_HEAD has an unparsable line or names no commit (heap use after free on the next lookup) and takes HEAD at a tag/tree as a commit: the Rust wrapper composes the routine with RepositoryRef::commit_parents instead (Replaces)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_commit_create_from_tree",
+   "defined_in": "src/libgit2/commit.c",
+   "ptr_args": [
+    {
+     "name": "given_opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:given_opts"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Read in place for the call, never retained: allow_empty_commit, author/committer (NULL = git_signature_default; for amend a NULL author is HEAD's commit's author), message_encoding, extra_headers, sign + payload copied into a local git_commit_create_ext_options (init_ext_options). The signer gets the builder, repo and content; the payload is the caller's exclusively for the call. Signatures are printed with %s and their offset negated as int: NULL strings / INT_MIN are UB. Empty-commit check failures return -1 (not GIT_EUNCHANGED)."
+     }
+    },
+    {
+     "name": "message",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:message"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Message, written as given; NULL is refused by GIT_ASSERT_ARG."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-parameter: the new commit's id, written only on success."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Live repository for the call, written though shared: index (write_tree sorts it and refreshes its tree cache), references (HEAD and its reflog), odb and caches. Not retained. Parents come from git_repository_commit_parents, which git__free()s the collected (cached) commits when MERGE_HEAD has an unparsable line or names no commit (heap use after free on the next lookup) and takes HEAD at a tag/tree as a commit: the Rust wrapper composes the routine with RepositoryRef::commit_parents instead (Replaces)."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Live tree, only read (check_for_empty_commit casts const away for the diff). Must be the repo's: GIT_ASSERT_ARG(git_tree_owner(tree) == repo) in git_commit_create_ext, reached after the empty-commit diff. Not retained."
+     }
+    }
+   ]
   }
  ]
 }

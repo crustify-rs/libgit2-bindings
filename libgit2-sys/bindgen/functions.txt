@@ -80,6 +80,10 @@ git_config_free
 git_config_get_int32
 git_config_new
 git_config_set_int32
+git_diff_free
+git_diff_num_deltas
+git_diff_tree_to_index
+git_diff_tree_to_tree
 git_error_clear
 git_error_last
 git_error_set
@@ -211,6 +215,7 @@ git_reference_lookup
 git_reference_name
 git_reference_normalize_name
 git_reference_owner
+git_reference_peel
 git_reference_symbolic_target
 git_reference_target
 git_reference_target_peel
