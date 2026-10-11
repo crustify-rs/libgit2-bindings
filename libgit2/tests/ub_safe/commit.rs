@@ -371,6 +371,7 @@ mod commit {
     use libgit2::libgit2::core::types::ObjectType;
     use libgit2::libgit2::object::commit::{Commit, CommitArc, CommitArray, CommitRef};
     use libgit2::libgit2::object::object::{Object, ObjectArc};
+    use libgit2::libgit2::object::tree::Tree;
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
@@ -555,7 +556,7 @@ mod commit {
         let viewed = CommitRef::from_object(object.as_ref()).unwrap();
         assert_eq!(commit_id(viewed), COMMITS[1]);
         let from_view = viewed.to_commit();
-        let commit = Commit::try_from_object(object).unwrap();
+        let commit = Commit::from_object(object).unwrap();
         assert!(CommitArc::ptr_eq(&commit, &from_view));
         let as_object: ObjectArc<'_> = commit.as_ref().as_object().to_object();
         assert_eq!(
@@ -566,7 +567,7 @@ mod commit {
         drop(from_view);
         assert_eq!(object_view(&back), object_view(&as_object));
         drop(as_object);
-        let again = Commit::try_from_object(back).unwrap();
+        let again = Commit::from_object(back).unwrap();
         assert_eq!(hex(&again), COMMITS[1]);
 
         for (other, kind) in [
@@ -576,15 +577,176 @@ mod commit {
         ] {
             let object = Object::lookup(r, id(other).as_ref(), Some(kind)).unwrap();
             assert!(CommitRef::from_object(object.as_ref()).is_none());
-            let object = Commit::try_from_object(object).unwrap_err();
+            let object = Commit::from_object(object).unwrap_err();
             assert_eq!(object_view(&object).0, other);
         }
         // A tag peeled to its commit converts.
         let tag = Object::lookup(r, id(TAG).as_ref(), None).unwrap();
         let peeled = tag.as_ref().peel(Some(ObjectType::Commit)).unwrap();
         drop(tag);
-        let commit = Commit::try_from_object(peeled).unwrap();
+        let commit = Commit::from_object(peeled).unwrap();
         assert_eq!(hex(&commit), "e90810b8df3e80c413d903f631643c716887138d");
+    }
+
+    /// Parents, first-parent ancestors and trees, each derived from a commit whose owner
+    /// is then dropped, and from those in turn, released in every order (ASan: a read of
+    /// a commit freed under a derived owner; LSan: a reference never given back). The
+    /// commits an array lends derive owners that outlive the array.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn derived_owners_outlive_what_they_came_from() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        let mut commits: Vec<CommitArc<'_>> = Vec::new();
+        let mut trees = Vec::new();
+        let mut base = Commit::lookup(r, id(COMMITS[0]).as_ref()).unwrap();
+        for generation in 0..5 {
+            let parent = base.as_ref().parent(0).unwrap();
+            let ancestor = base.as_ref().nth_gen_ancestor(1).unwrap();
+            assert!(CommitArc::ptr_eq(&parent, &ancestor));
+            trees.push(base.as_ref().tree().unwrap());
+            if base.as_ref().parent(1).is_ok() {
+                commits.push(base.as_ref().parent(1).unwrap());
+            }
+            commits.push(base.as_ref().nth_gen_ancestor(0).unwrap());
+            drop(base);
+            if generation % 2 == 0 {
+                drop(ancestor);
+                base = parent;
+            } else {
+                commits.push(parent);
+                base = ancestor;
+            }
+        }
+        assert_eq!(hex(&base), COMMITS[6]);
+        drop(base);
+        for (i, commit) in commits.iter().enumerate() {
+            assert!(COMMITS.contains(&hex(commit).as_str()), "{i}");
+        }
+        for tree in &trees {
+            assert!(
+                !tree
+                    .as_ref()
+                    .as_object()
+                    .id()
+                    .to_hex_string()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        // From the middle out, trees and commits interleaved.
+        while !commits.is_empty() || !trees.is_empty() {
+            if !commits.is_empty() {
+                drop(commits.remove(commits.len() / 2));
+            }
+            if !trees.is_empty() {
+                drop(trees.remove(0));
+            }
+        }
+
+        let array = CommitArray::from_commits(vec![
+            Commit::lookup(r, id(COMMITS[1]).as_ref()).unwrap(),
+            Commit::lookup(r, id(COMMITS[3]).as_ref()).unwrap(),
+        ])
+        .unwrap();
+        let derived: Vec<_> = array
+            .as_ref()
+            .iter()
+            .flat_map(|c| [c.parent(0).unwrap(), c.nth_gen_ancestor(2).unwrap()])
+            .collect();
+        let tree = array.as_ref().get(0).unwrap().tree().unwrap();
+        drop(array);
+        assert_eq!(
+            derived.iter().map(hex).collect::<Vec<_>>(),
+            [COMMITS[3], COMMITS[4], COMMITS[4], COMMITS[5]]
+        );
+        drop(derived);
+        assert_eq!(
+            object_view(&Tree::into_object(tree)).1,
+            libgit2::ffi::GIT_OBJECT_TREE
+        );
+    }
+
+    /// With a one-byte cache every derived commit and tree is evicted while its owner
+    /// holds it, and with the cache off each derivation parses afresh: each owner keeps
+    /// its object alive either way.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn derived_owners_survive_eviction_and_a_disabled_cache() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::derived_owners_survive_eviction_and_a_disabled_cache"
+            ),
+            || {
+                set_cache_max_size(1);
+                let repo = open_testrepo();
+                let head = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
+                let derived: Vec<_> = (0..6)
+                    .map(|n| head.as_ref().nth_gen_ancestor(n).unwrap())
+                    .collect();
+                let trees: Vec<_> = derived.iter().map(|c| c.as_ref().tree().unwrap()).collect();
+                drop(head);
+                for (commit, expected) in derived.iter().zip([0, 1, 3, 4, 5, 6]) {
+                    assert_eq!(hex(commit), COMMITS[expected]);
+                }
+                drop(derived);
+                enable_caching(false);
+                let head = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
+                let a = head.as_ref().parent(0).unwrap();
+                let b = head.as_ref().parent(0).unwrap();
+                assert!(!CommitArc::ptr_eq(&a, &b));
+                let itself = head.as_ref().nth_gen_ancestor(0).unwrap();
+                assert!(CommitArc::ptr_eq(&itself, &head));
+                drop((head, a));
+                assert_eq!(hex(&b), COMMITS[1]);
+                drop((trees, itself, b));
+            },
+        );
+    }
+
+    /// Refused derivations leave nothing behind (LSan) and the commit usable: a parent
+    /// index past the last, ancestors past a root at every width, and the same through a
+    /// commit whose repository has no further objects to give.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn refused_derivations_leave_nothing() {
+        let repo = open_testrepo();
+        let r = repo.as_ref();
+        let root = Commit::lookup(r, id(COMMITS[6]).as_ref()).unwrap();
+        let merge = Commit::lookup(r, id(COMMITS[1]).as_ref()).unwrap();
+        for n in [0, 1, 2, u32::MAX] {
+            assert_failed(
+                root.as_ref().parent(n),
+                ErrorCode::NotFound.raw(),
+                ErrorClass::Invalid,
+            );
+        }
+        for n in [2, 3, u32::MAX] {
+            assert_failed(
+                merge.as_ref().parent(n),
+                ErrorCode::NotFound.raw(),
+                ErrorClass::Invalid,
+            );
+        }
+        for n in [1, 2, 6, 1000, u32::MAX] {
+            assert_failed(
+                root.as_ref().nth_gen_ancestor(n),
+                ErrorCode::NotFound.raw(),
+                ErrorClass::Invalid,
+            );
+        }
+        assert_failed(
+            merge.as_ref().nth_gen_ancestor(5),
+            ErrorCode::NotFound.raw(),
+            ErrorClass::Invalid,
+        );
+        assert_eq!(hex(&root.as_ref().nth_gen_ancestor(0).unwrap()), COMMITS[6]);
+        assert_eq!(
+            hex(&merge.as_ref().nth_gen_ancestor(4).unwrap()),
+            COMMITS[6]
+        );
+        assert!(root.as_ref().tree().is_ok());
     }
 }
 

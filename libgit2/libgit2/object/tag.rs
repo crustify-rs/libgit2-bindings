@@ -372,8 +372,8 @@ impl<'r> Tag<'r> {
     /// tag while the cache keeps it.
     ///
     /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup) with
-    /// type [`ObjectType::Tag`](crate::libgit2::core::types::ObjectType::Tag) does:
-    /// with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
+    /// type [`ObjectType::Tag`] does:
+    /// with [`ErrorCode::NotFound`]
     /// when the object database has no such object, or the object is not a tag (class
     /// `GIT_ERROR_INVALID`, "the requested type does not match the type in the ODB"),
     /// and with libgit2's error when the tag cannot be read or parsed. An `id` of

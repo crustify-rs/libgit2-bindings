@@ -1,12 +1,9 @@
 // A commit array carries its commits' repository borrow: it cannot be dropped after the
-// repository, nor can what it lends or hands out, and its exclusive handle takes
-// commits of that repository's borrow only.
-use libgit2::libgit2::object::commit::{CommitArc, CommitArrayMut};
+// repository, nor can what it lends or hands out. (That its exclusive handle takes
+// commits of that borrow only is `CommitArrayMut::set_commits`' `compile_fail,E0521`
+// doctest: the note rustc attaches to that error is worded differently across the
+// stable and nightly toolchains the suites run under.)
 use libgit2::libgit2::repository::repository::Repository;
-
-fn store<'r>(mut array: CommitArrayMut<'_, 'static>, commit: CommitArc<'r>) {
-    let _ = array.set_commits(vec![commit]);
-}
 
 fn main() {
     let repo = Repository::open(c".").unwrap();

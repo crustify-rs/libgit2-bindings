@@ -585,7 +585,10 @@ impl MessageTrailerArray {
     /// `message`.
     ///
     /// Pins the runtime first. Fails, with libgit2's error, when the block cannot be
-    /// allocated or libgit2 cannot be initialised.
+    /// allocated or libgit2 cannot be initialised. libgit2 does not check the growth
+    /// of its trailer buffer (`git_array_alloc`): should that allocation fail, it writes
+    /// the trailer through NULL and the process crashes, which only exhausting memory
+    /// between the block's allocation and the buffer's can bring about.
     ///
     /// Wraps: git_message_trailers
     pub fn parse(message: &CStr) -> Result<MessageTrailerArrayVal, ErrorBuf> {
@@ -593,12 +596,13 @@ impl MessageTrailerArray {
             return Err(last());
         }
         let mut array = Self::new();
-        // SAFETY: the exclusive handle addresses a live, empty array, which libgit2
-        // overwrites whole only on success (nothing to leak), and leaves empty on
-        // failure; `message` is NUL-terminated and only read during the call. The
-        // runtime is pinned, so the allocations go through an initialised allocator.
-        let rc =
-            unsafe { ffi::git_message_trailers(array.as_mut().as_mut_ptr(), message.as_ptr()) };
+        let place = array.as_mut().as_mut_ptr();
+        // SAFETY: `place` addresses the live, empty array the exclusive borrow just
+        // lent, which libgit2 overwrites whole only on success (nothing to leak), and
+        // leaves empty on failure; `message` is NUL-terminated and only read during the
+        // call. The runtime is pinned, so the allocations go through an initialised
+        // allocator.
+        let rc = unsafe { ffi::git_message_trailers(place, message.as_ptr()) };
         if rc < 0 {
             return Err(last());
         }
