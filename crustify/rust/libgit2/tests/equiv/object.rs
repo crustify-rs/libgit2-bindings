@@ -1245,6 +1245,10 @@ mod types_and_contents {
     /// clearing the error, compared step by step.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its corpus, for every type and id type, outlasts a BorrowSanitizer gate; the other variants run it"
+    )]
     fn content_checks_match_c() {
         init();
         let corpus = corpus();

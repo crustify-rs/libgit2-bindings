@@ -1662,6 +1662,10 @@ mod writing {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn writes_match_c() {
         isolated(concat!(module_path!(), "::writes_match_c"), || {
             compare(Side::new("c", false), Side::new("rust", false))
@@ -1670,6 +1674,10 @@ mod writing {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn writes_into_bare_repositories_match_c() {
         isolated(
             concat!(module_path!(), "::writes_into_bare_repositories_match_c"),
@@ -1679,6 +1687,10 @@ mod writing {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn writes_without_paths_match_c() {
         isolated(
             concat!(module_path!(), "::writes_without_paths_match_c"),

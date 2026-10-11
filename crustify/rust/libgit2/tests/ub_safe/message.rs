@@ -353,6 +353,10 @@ mod prettify {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn messages_are_read_during_the_call_only() {
         let comments = if cfg!(bsan) {
             vec![None, Some(b'#'), Some(0xff)]

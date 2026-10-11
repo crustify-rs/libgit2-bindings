@@ -4628,6 +4628,10 @@ mod unit_tests {
         /// tree stores is written whole.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
+        #[cfg_attr(
+            bsan,
+            ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+        )]
         fn create_updated_refuses_overlong_components() {
             let temp = TempRepo::new("updated-long");
             let repo = temp.repo();

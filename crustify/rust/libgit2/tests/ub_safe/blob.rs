@@ -1174,6 +1174,10 @@ mod reading {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[cfg_attr(
+        bsan,
+        ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+    )]
     fn contents_are_read_whole_through_every_holder() {
         let temp = TempRepo::new("blob-read-holders");
         let repo = repository(&temp);
