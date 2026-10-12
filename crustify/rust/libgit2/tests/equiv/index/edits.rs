@@ -204,6 +204,12 @@ fn removal_sequences_match() {
         // SAFETY: a live index; each path is NUL-terminated, read for the call.
         let expected = c_status(unsafe {
             match step {
+                Remove(path, Stage::Any) => {
+                    // A deliberate divergence: C removes whichever stage its search meets,
+                    // and drops the path's stage 3 entry from its lookup table; Rust removes
+                    // the first entry at the path, which `git_index_find` finds.
+                    ffi::git_index_remove(c.0, path.as_ptr(), c_first_stage(c.0, path))
+                }
                 Remove(path, stage) => ffi::git_index_remove(c.0, path.as_ptr(), stage.raw()),
                 ByPath(path) => ffi::git_index_remove_bypath(c.0, path.as_ptr()),
                 Directory(dir, stage) => {
@@ -229,6 +235,20 @@ fn removal_sequences_match() {
         std::fs::read(scratch.file("c")).unwrap(),
         std::fs::read(scratch.file("r")).unwrap()
     );
+}
+
+/// The stage of the first entry at `path`, as `git_index_find` finds it, or C's
+/// wildcard when there is none.
+fn c_first_stage(index: *mut ffi::git_index, path: &CStr) -> c_int {
+    let mut position = 0;
+    // SAFETY: a writable slot, a live index and a NUL-terminated path; a found position
+    // is within the count, so the entry it names is live, and only read.
+    unsafe {
+        if ffi::git_index_find(&mut position, index, path.as_ptr()) < 0 {
+            return Stage::Any.raw();
+        }
+        ffi::git_index_entry_stage(ffi::git_index_get_byindex(index, position))
+    }
 }
 
 /// What one scan's callback saw and returned.
