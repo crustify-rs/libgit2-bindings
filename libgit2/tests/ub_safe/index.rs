@@ -739,15 +739,16 @@ fn timestamp_extremes_and_reborrows() {
 mod entry_value {
     //! UB tests for the `IndexEntry` value (`git_index_entry`) and its handles: every
     //! getter and setter, exclusive and shared reborrows, copies that outlive the handle
-    //! they came from, entries borrowing paths of several lifetimes, and values shared
-    //! and moved across threads.
+    //! they came from, entries borrowing paths of several lifetimes, the stage bits
+    //! through the stage macros, and values shared and moved across threads.
 
     use std::ffi::{CStr, CString};
 
     use ffibox::CZeroable;
     use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::index::index::{
-        EntryExtendedFlags, EntryFlags, IndexEntry, IndexEntryMut, IndexEntryRef, IndexTime,
+        AnyStageError, EntryExtendedFlags, EntryFlags, IndexEntry, IndexEntryMut, IndexEntryRef,
+        IndexTime, Stage,
     };
     use libgit2::libgit2::oid::oid::{Oid, OidType};
 
@@ -931,6 +932,69 @@ mod entry_value {
             }
         });
         assert_eq!(entry.as_ref().file_size(), 0);
+    }
+
+    /// The stage setter and getter over every value of the 16 flag bits, through nested
+    /// exclusive reborrows, shared reborrows and copies: each concrete stage lands in the
+    /// two stage bits only, the wildcard is refused without a write, and copies taken
+    /// before a change keep their own stage.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2's stage macros")]
+    fn stages_round_trip_through_reborrows_and_copies() {
+        const STAGES: [Stage; 4] = [Stage::Normal, Stage::Ancestor, Stage::Ours, Stage::Theirs];
+        let path = CString::new("staged").unwrap();
+        let mut entry = IndexEntry::new(&path, Oid::zeroed().as_ref(), FileMode::Blob);
+        for flags in 0..=u32::from(u16::MAX) {
+            let mut handle: IndexEntryMut<'_, '_> = entry.as_mut();
+            handle
+                .set_flags(EntryFlags::from_bits_retain(flags))
+                .unwrap();
+            let initial = handle.as_ref().stage();
+            assert_eq!(initial.raw() as u32, (flags >> 12) & 3);
+            let copy = handle.as_ref().to_index_entry();
+            for (i, stage) in STAGES.into_iter().enumerate() {
+                {
+                    let mut inner = handle.as_mut();
+                    assert_eq!(inner.set_stage(stage), Ok(()));
+                    assert_eq!(inner.set_stage(Stage::Any), Err(AnyStageError));
+                }
+                let shared: IndexEntryRef<'_, '_> = handle.as_ref();
+                let again = shared;
+                assert_eq!(shared.stage(), stage);
+                assert_eq!(again.flags().bits(), (flags & !0x3000) | (i as u32) << 12);
+                assert_eq!(shared.to_index_entry().as_ref().stage(), stage);
+            }
+            assert_eq!(copy.as_ref().stage(), initial);
+            assert_eq!(copy.as_ref().flags().bits(), flags);
+        }
+        assert_eq!(entry.as_ref().path(), c"staged");
+    }
+
+    /// Threads read the stage of one shared entry while each restages a copy of its own,
+    /// over and over; the shared entry and every other copy keep their stage.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2's stage macros")]
+    fn stages_of_entry_values_across_threads() {
+        let path = CString::new("threaded/stage").unwrap();
+        let mut entry = IndexEntry::new(&path, Oid::zeroed().as_ref(), FileMode::Blob);
+        entry.as_mut().set_stage(Stage::Ours).unwrap();
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let shared = &entry;
+                let mut mine = entry;
+                s.spawn(move || {
+                    let stage = [Stage::Normal, Stage::Ancestor, Stage::Theirs][i % 3];
+                    for _ in 0..1000 {
+                        mine.as_mut().set_stage(stage).unwrap();
+                        assert_eq!(shared.as_ref().stage(), Stage::Ours);
+                        assert_eq!(mine.as_ref().stage(), stage);
+                        mine.as_mut().set_stage(Stage::Ours).unwrap();
+                        assert_eq!(&mine, shared);
+                    }
+                });
+            }
+        });
+        assert_eq!(entry.as_ref().stage(), Stage::Ours);
     }
 }
 

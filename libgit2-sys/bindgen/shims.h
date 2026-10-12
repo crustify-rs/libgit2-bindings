@@ -15,4 +15,11 @@
  */
 git_oid_t crustify_GIT_OID_DEFAULT(void);
 
+/*
+ * GIT_INDEX_ENTRY_STAGE and GIT_INDEX_ENTRY_STAGE_SET are function-like macros over
+ * an entry's `flags`, which bindgen cannot bind.
+ */
+int crustify_GIT_INDEX_ENTRY_STAGE(const git_index_entry *entry);
+void crustify_GIT_INDEX_ENTRY_STAGE_SET(git_index_entry *entry, int stage);
+
 #endif

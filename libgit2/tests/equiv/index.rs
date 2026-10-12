@@ -1787,6 +1787,197 @@ mod entry_and_options {
     }
 }
 
+/// Equivalence tests for the entry stage accessors: `IndexEntryRef::stage` and
+/// `IndexEntryMut::set_stage` against the `GIT_INDEX_ENTRY_STAGE` and
+/// `GIT_INDEX_ENTRY_STAGE_SET` macros (compiled by the sys crate's shims) and libgit2's
+/// `git_index_entry_stage`, on independently owned entries, step after step; and against
+/// what libgit2 makes of the entries each side staged.
+mod entry_stage {
+    use super::*;
+    use ffibox::CZeroable;
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::index::index::{AnyStageError, EntryFlags, IndexEntry, Stage};
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    const STAGES: [Stage; 4] = [Stage::Normal, Stage::Ancestor, Stage::Ours, Stage::Theirs];
+
+    /// The stage C reads from `e`: through the macro, and through libgit2's function.
+    fn c_stages(e: &ffi::git_index_entry) -> (c_int, c_int) {
+        // SAFETY: `e` is a live entry; both only read its flags.
+        unsafe {
+            (
+                ffi::crustify_GIT_INDEX_ENTRY_STAGE(e),
+                ffi::git_index_entry_stage(e),
+            )
+        }
+    }
+
+    /// `GIT_INDEX_ENTRY_STAGE_SET(e, stage)`.
+    fn c_set_stage(e: &mut ffi::git_index_entry, stage: c_int) {
+        // SAFETY: `e` is a live entry, exclusively borrowed; the macro rewrites its flags.
+        unsafe { ffi::crustify_GIT_INDEX_ENTRY_STAGE_SET(e, stage) }
+    }
+
+    /// For every value of the 16 flag bits, a C entry and a Rust entry start from the same
+    /// flags and read the same stage; then each stage is set on both, up and back down,
+    /// and after every step the flags are the same and all three readers agree.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn stages_set_and_read_match_the_macros_for_every_flag_value() {
+        let id = Oid::zeroed();
+        for flags in 0..=u16::MAX {
+            let mut c = ffi::git_index_entry {
+                flags,
+                path: c"f".as_ptr(),
+                ..Default::default()
+            };
+            let mut rust = IndexEntry::new(c"f", id.as_ref(), FileMode::Blob);
+            rust.as_mut()
+                .set_flags(EntryFlags::from_bits_retain(flags.into()))
+                .unwrap();
+            let read = rust.as_ref().stage().raw();
+            assert_eq!(c_stages(&c), (read, read), "flags {flags:#06x}");
+            for stage in STAGES.into_iter().chain(STAGES.into_iter().rev()) {
+                c_set_stage(&mut c, stage.raw());
+                assert_eq!(rust.as_mut().set_stage(stage), Ok(()));
+                assert_eq!(
+                    rust.into_raw().flags,
+                    c.flags,
+                    "flags {flags:#06x} {stage:?}"
+                );
+                assert_eq!(c_stages(&c), (stage.raw(), stage.raw()));
+                assert_eq!(rust.as_ref().stage(), stage);
+            }
+        }
+    }
+
+    /// A deliberate divergence: the macro keeps the low two bits of
+    /// `GIT_INDEX_STAGE_ANY`, moving the entry to stage 3, while `set_stage` refuses the
+    /// wildcard and leaves every flag bit as it was. The stages set before and after
+    /// still match.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn the_wildcard_is_refused_where_the_macro_stores_stage_3() {
+        let id = Oid::zeroed();
+        for flags in [0, 0x0fff, 0x1000, 0x2abc, 0xcfff, 0xffff] {
+            let mut c = ffi::git_index_entry {
+                flags,
+                ..Default::default()
+            };
+            let mut rust = IndexEntry::new(c"f", id.as_ref(), FileMode::Blob);
+            let mut handle = rust.as_mut();
+            handle
+                .set_flags(EntryFlags::from_bits_retain(flags.into()))
+                .unwrap();
+            let before = handle.as_ref().stage();
+            c_set_stage(&mut c, Stage::Any.raw());
+            assert_eq!(handle.set_stage(Stage::Any), Err(AnyStageError));
+            assert_eq!(c_stages(&c), (3, 3));
+            assert_eq!(c.flags, flags | 0x3000);
+            assert_eq!(handle.as_ref().flags().bits(), u32::from(flags));
+            assert_eq!(handle.as_ref().stage(), before);
+            c_set_stage(&mut c, before.raw());
+            assert_eq!(handle.as_ref().flags().bits(), u32::from(c.flags));
+        }
+    }
+
+    /// Every entry of `index`, as (path, stage, first id byte), and its conflict verdict.
+    fn view(index: *mut ffi::git_index) -> (Vec<(CString, c_int, u8)>, c_int) {
+        // SAFETY: a live index, only read; each entry is copied before the next call.
+        unsafe {
+            let entries = (0..ffi::git_index_entrycount(index))
+                .map(|i| {
+                    let e = ffi::git_index_get_byindex(index, i);
+                    (
+                        CStr::from_ptr((*e).path).to_owned(),
+                        ffi::git_index_entry_stage(e),
+                        (*e).id.id[0],
+                    )
+                })
+                .collect();
+            (entries, ffi::git_index_has_conflicts(index))
+        }
+    }
+
+    /// The first id byte of the entry `git_index_get_bypath` finds at each path and stage.
+    fn lookups(index: *mut ffi::git_index, paths: &[&CStr]) -> Vec<Option<u8>> {
+        let mut found = Vec::new();
+        for path in paths {
+            for stage in STAGES {
+                // SAFETY: a live index and a NUL-terminated path; the entry is read before
+                // the next call.
+                found.push(unsafe {
+                    let e = ffi::git_index_get_bypath(index, path.as_ptr(), stage.raw());
+                    (!e.is_null()).then(|| (*e).id.id[0])
+                });
+            }
+        }
+        found
+    }
+
+    /// Entries staged by each side over the same starting flags, handed to two
+    /// independently owned indexes: after every addition both indexes report the same
+    /// result and error, hold the same entries at the same stages, report the same
+    /// conflicts, and find the same entry at each path and stage. The sequence builds a
+    /// three-way conflict, replaces entries in place, and restages an entry whose flags
+    /// arrived with another stage.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn entries_staged_by_each_side_index_alike() {
+        init();
+        let steps: [(&CStr, u16, Stage, u8); 9] = [
+            (c"a", 0, Stage::Normal, 1),
+            (c"b", 0x0fff, Stage::Ancestor, 2),
+            (c"b", 0, Stage::Ours, 3),
+            (c"b", 0x8000, Stage::Theirs, 4),
+            (c"a", 0x3000, Stage::Normal, 5),
+            (c"c", 0x2000, Stage::Ancestor, 6),
+            (c"c", 0x1000, Stage::Ancestor, 7),
+            (c"b", 0x3000, Stage::Ours, 8),
+            (c"d", 0xffff, Stage::Theirs, 9),
+        ];
+        let paths = [c"a", c"b", c"c", c"d"];
+        let (left, right) = (Index::new().unwrap(), Index::new().unwrap());
+        for (step, (path, flags, stage, byte)) in steps.into_iter().enumerate() {
+            let mut c = ffi::git_index_entry {
+                mode: ffi::GIT_FILEMODE_BLOB,
+                flags,
+                path: path.as_ptr(),
+                ..Default::default()
+            };
+            c.id.type_ = OidType::Sha1.raw() as u8;
+            c.id.id[..20].fill(byte);
+            c_set_stage(&mut c, stage.raw());
+            let id = Oid::from_raw(&[byte; 20], OidType::Sha1).unwrap();
+            let mut rust = IndexEntry::new(path, id.as_ref(), FileMode::Blob);
+            let mut handle = rust.as_mut();
+            handle
+                .set_flags(EntryFlags::from_bits_retain(flags.into()))
+                .unwrap();
+            handle.set_stage(stage).unwrap();
+            assert_eq!(rust.into_raw().flags, c.flags, "step {step}: flags");
+
+            let mut results = Vec::new();
+            for (index, entry) in [(left.as_c_ptr(), c), (right.as_c_ptr(), rust.into_raw())] {
+                clear();
+                // SAFETY: a live index; the entry and its path are read and copied.
+                let rc = unsafe { ffi::git_index_add(index, &entry) };
+                results.push((
+                    rc,
+                    (rc < 0).then(c_last),
+                    view(index),
+                    lookups(index, &paths),
+                ));
+            }
+            assert_eq!(results[0], results[1], "step {step}");
+            assert_eq!(results[0].0, 0, "step {step}: added");
+        }
+        let (entries, conflicts) = view(left.as_c_ptr());
+        assert_eq!(entries.len(), 6);
+        assert_eq!(conflicts, 1);
+    }
+}
+
 /// The index routines against their C counterparts on independently owned indexes
 /// built alike, compared on results, errors, callbacks and the state the index then
 /// reports through C, after every step of a sequence.
