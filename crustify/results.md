@@ -9,8 +9,8 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **campaign objective** — `wrap`
 - **`impl_files`** — `src/libgit2/`, `src/util/`, `deps/xdiff/`, `deps/reftable/`, `deps/ntlmclient/`, `deps/llhttp/`
 - **`api_headers`** — `include/git2.h`, `include/git2/*.h`, `include/git2/sys/*.h`, except `deprecated.h`, `cred_helpers.h`, `stdint.h` and `sys/cred.h`
-- **agent backend** — `claude`; `codex` for `libgit2/config`
-- **model** — `openrouter/anthropic/claude-opus-5.5`; `openrouter/openai/gpt-6.1-sol` (reasoning effort `high`) for `libgit2/config`
+- **agent backend** — `claude`; `codex` for `libgit2/config` and `libgit2/index` wave 0
+- **model** — `openrouter/anthropic/claude-opus-5.5`; `openrouter/openai/gpt-6.1-sol` (reasoning effort `high`) for `libgit2/config`; `openrouter/openai/gpt-6-astra` (reasoning effort `high`) for `libgit2/index` wave 0, except batches 5 and 6, rerun on `openrouter/anthropic/claude-opus-5.5`
 - **`--billing`** — `api`
 - **`--max-types`** — `2`
 - **`--max-syms`** — `25`
@@ -148,7 +148,7 @@ in Notes.
 - **wrapped types** — `77` (`29.84`% of total types)
 - **wrapped symbols** — `341` (`34.83`% of total symbols)
 
-Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/openai/gpt-6.1-sol` via `codex` for `libgit2/config`; review
+Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/openai/gpt-6.1-sol` via `codex` for `libgit2/config`, `openrouter/openai/gpt-6-astra` via `codex` for `libgit2/index` wave 0; review
 `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgit2/object` review wave 0, `openrouter/anthropic/claude-opus-5.5` via `claude` from its review wave 1.
 
 | sub-campaign | nr types | nr symbols | sub-campaign wall | batch | batch tokens | review | review tokens | total | total tokens | $/type | $/sym |
@@ -161,8 +161,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 | `libgit2/repository` | `23` | `75` | `8h27m28s` | `$227.32` | `689.05M` | `$123.41` | `177.79M` | `$350.73` | `866.84M` | `$15.25` | `$4.68` |
 | `libgit2/object` | `21` | `152` | `12h10m54s` | `$279.41` | `887.00M` | `$232.10` | `320.59M` | `$511.51` | `1207.59M` | `$24.36` | `$3.37` |
 | `libgit2/config` | `9` | `47` | `6h09m05s` | `$36.16` | `129.17M` | `$94.07` | `265.11M` | `$130.23` | `394.28M` | `$14.47` | `$2.77` |
+| `libgit2/index` | `18` | `75` | `10h41m03s` | `$195.65` | `307.26M` | `$67.64` | `186.28M` | `$263.29` | `493.54M` | `$14.63` | `$3.51` |
 | orchestrator | `<n>` | `<n>` | — | — | — | — | — | `$<n>`+ | `<n>M`+ | — | — |
-| **Σ recorded agents** | **`77`** | **`314`** | **`40h20m`** | **`$700.69`** | **`2084.35M`** | **`$634.27`** | **`989.23M`** | **`$1334.96`** | **`3073.58M`** | **`$17.34`** | **`$4.25`** |
+| **Σ recorded agents** | **`95`** | **`389`** | **`51h01m`** | **`$896.34`** | **`2391.61M`** | **`$701.91`** | **`1175.51M`** | **`$1598.25`** | **`3567.12M`** | **`$16.82`** | **`$4.11`** |
 
 ## Raw lifetime discovery
 
@@ -188,7 +189,7 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 
 ### Batches — wrap
 
-`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`; `openrouter/openai/gpt-6-astra` via `codex` (reasoning effort `high`) for `libgit2/index` wave 0, whose batches 5 and 6 add an `openrouter/anthropic/claude-opus-5.5` rerun.
 
 | subsystem | wave | batch | types | fields | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | $ | tokens | wall | $/type | $/field |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -239,11 +240,21 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`0`| `1` | `4` |`+1131/-24`| `42.79`% / `98.76`% | `+2` | `+1` | `$1.95` | `6.79M` | `19m01s` | `$1.95` | `$0.49` |
 |`libgit2/config`|`4`|`0`| `1` | `14` |`+1118/-35`| `43.11`% / `98.77`% | `+0` | `+0` | `$2.49` | `9.45M` | `24m50s` | `$2.49` | `$0.18` |
 |`libgit2/config`|`4`|`0`| `1` | `14` |`+2746/-5`| `42.84`% / `98.75`% | `+0` | `+0` | `$11.63` | `34.73M` | `39m04s` | `$11.63` | `$0.83` |
-| **Σ** |  |  | **`78`** | **`123`** | **`+80531/-1446`** | **`42.84`% / `98.75`%** | **`+16`** | **`+17`** | **`$396.21`** | **`1126.07M`** | — | **`$5.08`** | **`$3.22`** |
+|`libgit2/index`|`0`|`0`| `2` | `0` |`+1340/-43`| `45.00`% / `98.80`% | `+2` | `+1` | `$20.29` | `12.38M` | `27m57s` | `$10.14` | — |
+|`libgit2/index`|`0`|`1`| `2` | `0` |`+431/-0`| `42.82`% / `98.77`% | `+0` | `+0` | `$5.76` | `2.63M` | `7m04s` | `$2.88` | — |
+|`libgit2/index`|`0`|`2`| `2` | `0` |`+522/-0`| `44.19`% / `98.79`% | `+0` | `+0` | `$16.64` | `10.75M` | `19m17s` | `$8.32` | — |
+|`libgit2/index`|`0`|`3`| `2` | `0` |`+402/-5`| `44.19`% / `98.79`% | `+0` | `+0` | `$13.75` | `8.80M` | `14m41s` | `$6.88` | — |
+|`libgit2/index`|`0`|`4`| `2` | `3` |`+543/-0`| `44.14`% / `98.79`% | `+0` | `+0` | `$9.70` | `5.50M` | `12m25s` | `$4.85` | `$3.23` |
+|`libgit2/index`|`0`|`5`| `2` | `2` |`+914/-1`| `45.58`% / `98.81`% | `+0` | `+0` | `$12.84` | `19.71M` | `36m20s` | `$6.42` | `$6.42` |
+|`libgit2/index`|`0`|`6`| `2` | `0` |`+889/-520`| `45.46`% / `98.80`% | `-4` | `-4` | `$16.15` | `16.46M` | `36m16s` | `$8.07` | — |
+|`libgit2/index`|`0`|`7`| `1` | `0` |`+1226/-1`| `45.43`% / `98.80`% | `+5` | `+5` | `$21.81` | `13.93M` | `40m51s` | `$21.81` | — |
+|`libgit2/index`|`1`|`0`| `2` | `14` |`+1543/-14`| `45.80`% / `98.83`% | `+0` | `+0` | `$5.84` | `14.76M` | `23m16s` | `$2.92` | `$0.42` |
+|`libgit2/index`|`1`|`1`| `1` | `3` |`+806/-5`| `45.85`% / `98.84`% | `+0` | `+0` | `$6.21` | `17.23M` | `25m45s` | `$6.21` | `$2.07` |
+| **Σ** |  |  | **`96`** | **`145`** | **`+89147/-2035`** | **`45.85`% / `98.84`%** | **`+19`** | **`+19`** | **`$525.20`** | **`1248.21M`** | — | **`$5.47`** | **`$3.62`** |
 
 ### Batches — wrap: tests
 
-`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`; `openrouter/openai/gpt-6-astra` via `codex` (reasoning effort `high`) for `libgit2/index` wave 0, whose batches 5 and 6 add an `openrouter/anthropic/claude-opus-5.5` rerun.
 
 | subsystem | wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
 |---|---|---|---|---|---|---|
@@ -294,7 +305,17 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`0`|`+4` (`-0.01`/`+0.25` pp)|`+1` (`+0.03`/`+0.21` pp)|`+1` (`+0.01`/`+0.19` pp)|`+3` (`+0.02`/`-0.03` pp)|
 |`libgit2/config`|`4`|`0`|`+2` (`+0.32`/`+0.09` pp)|`+0` (`-0.55`/`-0.03` pp)|`+3` (`+0.25`/`+0.09` pp)|`+5` (`+0.14`/`-0.09` pp)|
 |`libgit2/config`|`4`|`0`|`+9` (`+0.03`/`+0.90` pp)|`+0` (`+0.22`/`-0.13` pp)|`+3` (`+0.01`/`+0.43` pp)|`+9` (`+0.00`/`+0.06` pp)|
-| **Σ** |  |  | **`+389` (`+23.27`/`+2.06` pp)** | **`+49` (`+16.50`/`-19.35` pp)** | **`+220` (`+29.45`/`-6.26` pp)** | **`+402` (`+12.13`/`+13.35` pp)** |
+|`libgit2/index`|`0`|`0`|`+4` (`+0.82`/`+0.25` pp)|`+1` (`+0.35`/`+0.89` pp)|`+3` (`+0.78`/`+0.36` pp)|`+3` (`+0.16`/`-0.44` pp)|
+|`libgit2/index`|`0`|`1`|`+2` (`-0.03`/`+0.11` pp)|`+0` (`+0.01`/`-0.01` pp)|`+3` (`+0.02`/`+0.05` pp)|`+2` (`-0.01`/`-0.12` pp)|
+|`libgit2/index`|`0`|`2`|`+2` (`-0.01`/`-0.04` pp)|`+0` (`+0.19`/`-0.02` pp)|`+2` (`-0.02`/`-0.02` pp)|`+3` (`+0.04`/`+0.02` pp)|
+|`libgit2/index`|`0`|`3`|`+2` (`+0.05`/`-0.04` pp)|`+0` (`-0.21`/`-0.02` pp)|`+2` (`+0.05`/`-0.03` pp)|`+2` (`+0.02`/`+0.02` pp)|
+|`libgit2/index`|`0`|`4`|`+3` (`+0.05`/`+0.05` pp)|`+0` (`+0.02`/`-0.02` pp)|`+2` (`+0.08`/`+0.06` pp)|`+4` (`+0.06`/`+0.00` pp)|
+|`libgit2/index`|`0`|`5`|`+5` (`+0.02`/`-0.03` pp)|`+0` (`-0.11`/`-0.05` pp)|`+3` (`+0.10`/`-0.02` pp)|`+5` (`+0.03`/`+0.05` pp)|
+|`libgit2/index`|`0`|`6`|`+6` (`+0.19`/`+0.06` pp)|`+0` (`-1.22`/`-0.45` pp)|`+2` (`+0.06`/`-0.10` pp)|`+4` (`+0.03`/`-0.01` pp)|
+|`libgit2/index`|`0`|`7`|`+2` (`+0.35`/`-0.02` pp)|`+5` (`+1.23`/`+0.39` pp)|`+3` (`+0.45`/`+0.16` pp)|`+2` (`+0.13`/`-0.15` pp)|
+|`libgit2/index`|`1`|`0`|`+6` (`+0.02`/`+0.35` pp)|`+0` (`+0.18`/`-0.07` pp)|`+2` (`+0.02`/`-0.06` pp)|`+4` (`+0.00`/`-0.10` pp)|
+|`libgit2/index`|`1`|`1`|`+4` (`+0.12`/`+0.00` pp)|`+0` (`-0.16`/`-0.02` pp)|`+2` (`+0.13`/`+0.02` pp)|`+2` (`+0.02`/`-0.01` pp)|
+| **Σ** |  |  | **`+425` (`+24.85`/`+2.75` pp)** | **`+55` (`+16.78`/`-18.73` pp)** | **`+244` (`+31.12`/`-5.84` pp)** | **`+433` (`+12.61`/`+12.61` pp)** |
 
 ### Batches — port
 
@@ -338,7 +359,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`0`| `1` |`+627/-239`| `42.82`% / `98.76`% | `-1` | `-1` | `+627/-239` | `$8.39` | `24.83M` | `28m21s` | `$8.39` |
 |`libgit2/config`|`4`|`0`| `1` |`+631/-286`| `43.14`% / `98.78`% | `+0` | `+0` | `+631/-286` | `$8.66` | `25.44M` | `27m14s` | `$8.66` |
 |`libgit2/config`|`4`|`0`| `1` |`+198/-26`| `42.79`% / `98.77`% | `+0` | `+0` | `+198/-26` | `$8.96` | `25.80M` | `26m55s` | `$8.96` |
-| **Σ** |  |  | **`78`** | **`+8323/-1944`** | **`42.79`% / `98.77`%** | **`-4`** | **`-1`** | **`+8323/-1944`** | **`$360.37`** | **`526.54M`** | — | **`$4.62`** |
+|`libgit2/index`|`0`|`0`| `15` |`+738/-79`| `45.75`% / `98.82`% | `-2` | `-2` | `+738/-79` | `$15.85` | `50.35M` | `46m20s` | `$1.06` |
+|`libgit2/index`|`1`|`0`| `3` |`+203/-8`| `46.57`% / `98.83`% | `+0` | `+0` | `+203/-8` | `$12.82` | `35.96M` | `48m41s` | `$4.27` |
+| **Σ** |  |  | **`96`** | **`+9264/-2031`** | **`46.57`% / `98.83`%** | **`-6`** | **`-3`** | **`+9264/-2031`** | **`$389.04`** | **`612.85M`** | — | **`$4.05`** |
 
 ### Batches — review: tests
 
@@ -364,7 +387,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`0`|`+1` (`-0.01`/`-0.10` pp)|`+0` (`+0.06`/`-0.04` pp)|`+2` (`+0.01`/`-0.10` pp)|`+4` (`+0.00`/`+0.08` pp)|
 |`libgit2/config`|`4`|`0`|`+1` (`+0.02`/`-0.04` pp)|`+0` (`+0.37`/`-0.02` pp)|`+2` (`+0.02`/`-0.15` pp)|`+7` (`+0.09`/`+0.19` pp)|
 |`libgit2/config`|`4`|`0`|`+0` (`-0.02`/`-0.02` pp)|`+0` (`-0.29`/`-0.01` pp)|`+1` (`-0.04`/`-0.03` pp)|`+1` (`-0.02`/`+0.02` pp)|
-| **Σ** |  |  | **`+32` (`+0.30`/`-1.44` pp)** | **`+1` (`-0.77`/`-3.13` pp)** | **`+21` (`+2.54`/`-2.61` pp)** | **`+35` (`+4.56`/`+0.52` pp)** |
+|`libgit2/index`|`0`|`0`|`+1` (`+0.08`/`-0.09` pp)|`+2` (`+0.33`/`+0.15` pp)|`+1` (`+0.18`/`-0.07` pp)|`+2` (`+0.00`/`+0.04` pp)|
+|`libgit2/index`|`1`|`0`|`+1` (`-0.01`/`-0.10` pp)|`+0` (`+0.04`/`-0.01` pp)|`+0` (`-0.01`/`-0.10` pp)|`+2` (`+0.10`/`+0.04` pp)|
+| **Σ** |  |  | **`+34` (`+0.37`/`-1.63` pp)** | **`+3` (`-0.40`/`-2.99` pp)** | **`+22` (`+2.71`/`-2.78` pp)** | **`+39` (`+4.66`/`+0.60` pp)** |
 
 ### Batches — review: PoC + reports
 
@@ -390,13 +415,15 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 | `libgit2/config` | `3` | `0` | `+0` | `+2` | `+0` | `+0` | `+0` | `+0` | `+2` | `+1` | `5` | `0` |
 | `libgit2/config` | `4` | `0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+1` | `+2` | `+3` | `7` | `0` |
 | `libgit2/config` | `4` | `0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `+3` | `4` | `0` |
-| **Σ** |  |  | **`+6`** | **`+7`** | **`+2`** | **`+0`** | **`+3`** | **`+3`** | **`+11`** | **`+43`** | **`75`** | **`0`** |
+| `libgit2/index` | `0` | `0` | `+0` | `+2` | `+0` | `+1` | `+0` | `+0` | `+2` | `+2` | `7` | `0` |
+| `libgit2/index` | `1` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+4` | `5` | `0` |
+| **Σ** |  |  | **`+6`** | **`+9`** | **`+2`** | **`+1`** | **`+3`** | **`+3`** | **`+14`** | **`+49`** | **`87`** | **`0`** |
 
 ## Symbols
 
 ### Batches
 
-`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`; `openrouter/openai/gpt-6-astra` via `codex` (reasoning effort `high`) for `libgit2/index` wave 0, whose batches 5 and 6 add an `openrouter/anthropic/claude-opus-5.5` rerun.
 
 | subsystem | wave | batch | objective | symbols | loc | +LoC | cov (C/Rust) | +unsafe fn smell | +raw-ptr smell | $ | tokens | wall | $/symbol | $/loc |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -427,11 +454,17 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`1`| wrap | `3` | `52` |`+707/-9`| `42.76`% / `98.75`% | `+0` | `+0` | `$1.41` | `4.66M` | `9m46s` | `$0.47` | `$0.03` |
 |`libgit2/config`|`4`|`1`| wrap | `5` | `91` |`+422/-88`| `42.85`% / `98.76`% | `+0` | `+0` | `$1.17` | `3.84M` | `6m28s` | `$0.23` | `$0.01` |
 |`libgit2/config`|`5`|`0`| wrap | `3` | `66` |`+1073/-2`| `43.15`% / `98.80`% | `+0` | `+0` | `$2.04` | `8.40M` | `14m30s` | `$0.68` | `$0.03` |
-| **Σ** |  |  |  | **`310`** | **`5425`** | **`+51624/-2123`** | **`43.15`% / `98.80`%** | **`+40`** | **`+0`** | **`$290.71`** | **`928.10M`** | — | **`$0.94`** | **`$0.05`** |
+|`libgit2/index`|`0`|`8`| wrap | `1` | `0` |`+548/-0`| `44.05`% / `98.78`% | `+0` | `+0` | `$8.57` | `4.72M` | `9m53s` | `$8.57` | — |
+|`libgit2/index`|`1`|`2`| wrap | `25` | `370` |`+2142/-57`| `46.56`% / `98.83`% | `+0` | `+0` | `$22.30` | `78.75M` | `1h06m15s` | `$0.89` | `$0.06` |
+|`libgit2/index`|`1`|`3`| wrap | `25` | `405` |`+2120/-46`| `45.96`% / `98.83`% | `+0` | `+0` | `$15.01` | `42.85M` | `55m51s` | `$0.60` | `$0.04` |
+|`libgit2/index`|`1`|`4`| wrap | `5` | `47` |`+342/-22`| `45.76`% / `98.82`% | `+0` | `+0` | `$3.09` | `7.11M` | `12m00s` | `$0.62` | `$0.07` |
+|`libgit2/index`|`2`|`0`| wrap | `17` | `383` |`+2323/-79`| `46.66`% / `98.85`% | `+0` | `+0` | `$14.38` | `43.62M` | `43m51s` | `$0.85` | `$0.04` |
+|`libgit2/index`|`2`|`1`| wrap | `2` | `0` |`+369/-6`| `46.57`% / `98.84`% | `+0` | `+0` | `$3.31` | `8.07M` | `18m25s` | `$1.66` | — |
+| **Σ** |  |  |  | **`385`** | **`6630`** | **`+59468/-2333`** | **`46.66`% / `98.85`%** | **`+40`** | **`+0`** | **`$357.37`** | **`1113.22M`** | — | **`$0.93`** | **`$0.05`** |
 
 ### Batches: tests
 
-`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`.
+`openrouter/anthropic/claude-opus-5.5` via `claude`; `openrouter/openai/gpt-6.1-sol` via `codex` (reasoning effort `high`) for `libgit2/config`; `openrouter/openai/gpt-6-astra` via `codex` (reasoning effort `high`) for `libgit2/index` wave 0, whose batches 5 and 6 add an `openrouter/anthropic/claude-opus-5.5` rerun.
 
 | subsystem | wave | batch | +UB safe tests (+C/+Rust pp) | +UB unsafe tests (+C/+Rust pp) | +equiv tests (+C/+Rust pp) | +unit tests (+C/+Rust pp) |
 |---|---|---|---|---|---|---|
@@ -462,7 +495,13 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`1`|`+4` (`+0.02`/`+0.08` pp)|`+0` (`+0.01`/`-0.02` pp)|`+3` (`+0.02`/`+0.09` pp)|`+2` (`+0.00`/`+0.02` pp)|
 |`libgit2/config`|`4`|`1`|`+3` (`+0.03`/`+0.01` pp)|`+0` (`+0.06`/`-0.01` pp)|`+1` (`+0.00`/`+0.02` pp)|`+1` (`+0.00`/`+0.00` pp)|
 |`libgit2/config`|`5`|`0`|`+4` (`+0.02`/`-0.10` pp)|`+0` (`-0.31`/`-0.07` pp)|`+2` (`+0.02`/`-0.07` pp)|`+4` (`+0.08`/`+0.08` pp)|
-| **Σ** |  |  | **`+229` (`+8.20`/`+4.81` pp)** | **`+13` (`+3.08`/`-1.89` pp)** | **`+152` (`+7.58`/`+7.31` pp)** | **`+176` (`+9.75`/`-11.93` pp)** |
+|`libgit2/index`|`0`|`8`|`+3` (`+0.00`/`+0.01` pp)|`+0` (`+0.18`/`-0.03` pp)|`+1` (`+0.09`/`+0.01` pp)|`+3` (`+1.70`/`-0.02` pp)|
+|`libgit2/index`|`1`|`2`|`+8` (`+1.45`/`+0.07` pp)|`+0` (`+0.01`/`-0.06` pp)|`+5` (`+1.06`/`+0.14` pp)|`+8` (`+0.12`/`-0.05` pp)|
+|`libgit2/index`|`1`|`3`|`+8` (`+0.27`/`+0.19` pp)|`+0` (`+0.04`/`-0.06` pp)|`+10` (`+0.17`/`+0.26` pp)|`+7` (`+0.07`/`-0.11` pp)|
+|`libgit2/index`|`1`|`4`|`+3` (`+0.10`/`+0.02` pp)|`+0` (`-0.04`/`+0.00` pp)|`+2` (`+0.02`/`+0.03` pp)|`+0` (`+0.00`/`-0.01` pp)|
+|`libgit2/index`|`2`|`0`|`+10` (`+0.19`/`+0.09` pp)|`+0` (`-0.13`/`-0.06` pp)|`+10` (`+0.09`/`+0.20` pp)|`+6` (`+0.14`/`+0.01` pp)|
+|`libgit2/index`|`2`|`1`|`+2` (`+0.00`/`-0.02` pp)|`+0` (`+0.03`/`-0.01` pp)|`+3` (`-0.02`/`+0.02` pp)|`+2` (`-0.02`/`+0.01` pp)|
+| **Σ** |  |  | **`+263` (`+10.21`/`+5.17` pp)** | **`+13` (`+3.17`/`-2.11` pp)** | **`+183` (`+8.99`/`+7.97` pp)** | **`+202` (`+11.76`/`-12.10` pp)** |
 
 ### Batches — review
 
@@ -489,7 +528,10 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`1`| `3` |`+561/-34`| `42.78`% / `98.76`% | `+0` | `+0` | `+561/-34` | `$6.96` | `18.87M` | `24m40s` | `$2.32` |
 |`libgit2/config`|`4`|`1`| `5` |`+575/-147`| `43.14`% / `98.78`% | `+0` | `+0` | `+575/-147` | `$6.30` | `15.93M` | `20m24s` | `$1.26` |
 |`libgit2/config`|`5`|`0`| `3` |`+172/-99`| `43.17`% / `98.80`% | `+0` | `+0` | `+172/-99` | `$7.39` | `17.00M` | `47m40s` | `$2.46` |
-| **Σ** |  |  | **`310`** | **`+5326/-1094`** | **`43.17`% / `98.80`%** | **`+1`** | **`+0`** | **`+5326/-1094`** | **`$255.12`** | **`437.50M`** | — | **`$0.82`** |
+|`libgit2/index`|`0`|`1`| `1` |`+303/-147`| `45.57`% / `98.82`% | `+0` | `+0` | `+303/-147` | `$6.50` | `18.04M` | `24m32s` | `$6.50` |
+|`libgit2/index`|`1`|`1`| `55` |`+442/-9`| `46.58`% / `98.83`% | `+0` | `+0` | `+442/-9` | `$12.37` | `39.58M` | `39m02s` | `$0.22` |
+|`libgit2/index`|`2`|`0`| `19` |`+190/-21`| `46.64`% / `98.85`% | `+0` | `+0` | `+190/-21` | `$20.10` | `42.35M` | `1h18m28s` | `$1.06` |
+| **Σ** |  |  | **`385`** | **`+6261/-1271`** | **`46.64`% / `98.85`%** | **`+1`** | **`+0`** | **`+6261/-1271`** | **`$294.09`** | **`537.47M`** | — | **`$0.76`** |
 
 ### Batches — review: tests
 
@@ -516,7 +558,10 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 |`libgit2/config`|`3`|`1`|`+3` (`+0.02`/`+0.08` pp)|`+0` (`-0.49`/`+0.00` pp)|`+2` (`+0.00`/`+0.13` pp)|`+0` (`+0.00`/`-0.11` pp)|
 |`libgit2/config`|`4`|`1`|`+1` (`-0.01`/`-0.02` pp)|`+0` (`+0.12`/`-0.01` pp)|`+2` (`-0.02`/`-0.01` pp)|`+2` (`-0.01`/`+0.01` pp)|
 |`libgit2/config`|`5`|`0`|`+0` (`+0.00`/`+0.03` pp)|`+0` (`+0.19`/`+0.00` pp)|`+0` (`+0.02`/`+0.03` pp)|`+0` (`+0.00`/`+0.00` pp)|
-| **Σ** |  |  | **`+8` (`+0.31`/`-2.68` pp)** | **`+2` (`-0.87`/`-0.85` pp)** | **`+18` (`+0.09`/`-2.28` pp)** | **`+25` (`+2.29`/`+2.18` pp)** |
+|`libgit2/index`|`0`|`1`|`+1` (`-0.02`/`-0.07` pp)|`+0` (`-0.13`/`-0.01` pp)|`+0` (`-0.01`/`-0.07` pp)|`+2` (`+0.01`/`+0.02` pp)|
+|`libgit2/index`|`1`|`1`|`+2` (`+0.04`/`-0.08` pp)|`+0` (`-0.02`/`-0.04` pp)|`+0` (`+0.01`/`-0.01` pp)|`+4` (`+0.16`/`+0.08` pp)|
+|`libgit2/index`|`2`|`0`|`+3` (`+0.01`/`+0.00` pp)|`+0` (`+0.10`/`+0.00` pp)|`+1` (`+0.00`/`+0.01` pp)|`+1` (`-0.02`/`+0.00` pp)|
+| **Σ** |  |  | **`+14` (`+0.34`/`-2.83` pp)** | **`+2` (`-0.92`/`-0.90` pp)** | **`+19` (`+0.09`/`-2.35` pp)** | **`+32` (`+2.44`/`+2.28` pp)** |
 
 ### Batches — review: PoC + reports
 
@@ -543,7 +588,10 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 | `libgit2/config` | `3` | `1` | — | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` | `0` |
 | `libgit2/config` | `4` | `1` | — | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+1` | `2` | `0` |
 | `libgit2/config` | `5` | `0` | — | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `1` | `0` |
-| **Σ** |  |  | — | **`+3`** | **`+2`** | **`+1`** | **`+2`** | **`+4`** | **`+10`** | **`+30`** | **`52`** | **`0`** |
+| `libgit2/index` | `0` | `1` | — | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+5` | `6` | `0` |
+| `libgit2/index` | `1` | `1` | — | `+0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+5` | `6` | `0` |
+| `libgit2/index` | `2` | `0` | — | `+0` | `+0` | `+0` | `+1` | `+0` | `+1` | `+4` | `6` | `0` |
+| **Σ** |  |  | — | **`+4`** | **`+3`** | **`+1`** | **`+3`** | **`+4`** | **`+11`** | **`+44`** | **`70`** | **`0`** |
 
 ## Safety audit
 
@@ -996,3 +1044,40 @@ re-sort (`+5904/-5784`), which a memory note warns against. The reviewers read a
 memory as before. A crustify fix that passes the notes to non-Claude backends exists on
 branch `fix/codex-shared-memory` but was not deployed for this sub-campaign, so the Opus
 and GPT translation rows also differ in memory access.
+
+### `libgit2/index`
+
+Three waves wrapped `index.h`, `pathspec.h`, the `git_diff` and `git_diff_delta` types it
+needs, and the notes and index iterators (18 types, 75 symbols and callbacks). The
+reviews filed 30 reports (13, 11 and 6 per review wave) and fixed them in place. Two were
+UB through the API: an empty-pattern over-read reachable through the unsafe diff-options
+seam (`ub_unsafe`), and an over-read in `git_index_write`'s racily-clean scan of an
+index holding an empty path (`ub_safe`). The final review's BSan gate passed on every
+suite, and no wave changed the C target.
+
+By the operator's decision, wave 0's translators ran `openrouter/openai/gpt-6-astra` at
+reasoning effort `high`, through Codex; waves 1 and 2 ran `claude-opus-5.5`. OpenAI's
+filter refused three of the nine wave 0 sessions as a "possible cybersecurity risk".
+Batch 7 survived the refusal messages and landed. Batches 5 and 6 were cut off, after
+7 and 17 minutes, while writing allocator-failure and sanitizer tests, the work the
+translator prompt asks for. Batch 5 had also edited `src/libgit2/notes.c` to initialize a
+`git_tree *` freed uninitialized when `git_commit_tree` fails. The operator had the edit
+discarded and both batches rerun on `claude-opus-5.5` in their retained worktrees. The
+rerun of batch 5 works around that defect in Rust and leaves C unchanged. Each of those
+two rows counts both attempts in `$`, `tokens` and `wall`; the first attempts' records
+are under each batch's `attempt-1/`. Wave 0 cost `$125.51`: `$96.52` for the seven
+batches that landed on `gpt-6-astra`, `$19.65` for the two refused attempts, and
+`$9.34` for the Opus reruns.
+
+Batch 0's `diff_not_sync` trybuild case expected rustc's `core/src/marker.rs` source
+snippet, which appears only with the `rust-src` component, so `ub_safe`'s `compile_fail`
+test failed on every variant from that landing until review wave 0 fixed it. The shared
+memory note on toolchain-dependent compile-fail output exists, but Codex agents do not
+load it.
+
+ffibox `5a98173`, which gives `CCell` generic handle constructors from typed and `void *`
+pointers, merged to its `main` before wave 2. The crate built and passed every suite
+against it unchanged; its adoption, a generic `git_object` downcast and the 10
+hand-built `from_ptr` copies, is not part of this sub-campaign. The sub-campaign wall
+runs from 2026-10-11 19:00 to 2026-10-12 05:37 and includes about four hours of operator
+pauses (the refusal decision, then a pause after review wave 1).
