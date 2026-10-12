@@ -23702,6 +23702,256 @@
    ]
   },
   {
+   "name": "index_entry_create",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written only on success with a fresh calloc'd entry_internal whose path is a copy of `path` in the same block (pathlen recorded); every other field zero. Released by index_entry_free. Untouched when the path is invalid (GIT_ERROR_INDEX \"invalid path\"), on size overflow or OOM."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Entry path, strlen'd, validated and memcpy'd into the new block; never retained. Must be non-NULL."
+     }
+    },
+    {
+     "name": "repo",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:repo"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The index's owner (INDEX_OWNER, NULL for an unowned index), read by git_path_is_valid for core.protectHFS/protectNTFS, whose configmap lookups cache values in the repository. Not retained."
+     }
+    },
+    {
+     "name": "st",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:st"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional stat of the working-directory file; only st_mode is read, for the path validity check. NULL when duplicating an entry."
+     }
+    }
+   ]
+  },
+  {
+   "name": "index_entry_dup",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "src",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read only for its owner (INDEX_OWNER), whose config decides the path validity checks; not retained."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot, written on success with a fresh index-owned entry from index_entry_create (path copied inline) whose fields are then memcpy'd from src by index_entry_cpy, keeping the new path. Released by index_entry_free. Untouched on failure."
+     }
+    },
+    {
+     "name": "src",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:src"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "The caller's entry (git_index_add, add_from_buffer, conflict_add, git_index__fill), read for the call: path strlen'd and copied, every other field copied verbatim (flags, id with its type, stat data). Never retained, so a Rust IndexEntry<'p> only needs its path for the call."
+     }
+    }
+   ]
+  },
+  {
+   "name": "index_entry_dup_pool",
+   "defined_in": "src/libgit2/merge.c",
+   "lifetime": {
+    "for": "src",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": true,
+     "upref": false
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller storage (a git_merge_diff's ancestor/our/their entry), overwritten with a byte copy of src whose path is then replaced by a git_pool_strdup copy; untouched when src is NULL. The copy's path lives as long as the pool; no per-entry free."
+     }
+    },
+    {
+     "name": "pool",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:pool"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "The merge diff list's pool, which allocates and later frees the copied path."
+     }
+    },
+    {
+     "name": "src",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:src"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Source entry, read for the call; NULL (an absent side) copies nothing and succeeds."
+     }
+    }
+   ]
+  },
+  {
+   "name": "index_entry_free",
+   "defined_in": "src/libgit2/index.c",
+   "lifetime": {
+    "for": "entry",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Consumes one index-owned entry allocated by index_entry_create (the entry_internal block, path inline in its flexible array), zeroing the id before a single git__free, so the path goes with it. NULL is a no-op. Static helper with nine callers (removal, replacement, read/read_tree, deferred frees of index->deleted, failed additions); the public API never hands an entry to its caller to release."
+     }
+    }
+   ]
+  },
+  {
    "name": "index_entry_reuc_free",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {

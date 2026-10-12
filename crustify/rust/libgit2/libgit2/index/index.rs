@@ -482,11 +482,11 @@ impl Index {
             return Err(last());
         }
         let opts = IndexOptions::with_oid_type(oid_type);
+        let opts = opts.as_ref();
         let mut out = ptr::null_mut();
-        // SAFETY: as in `open`; `opts` is a live options struct of this version naming a
-        // valid type, which the routine reads for the call and does not retain.
-        let rc =
-            unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), opts.as_ref().as_ptr()) };
+        // SAFETY: as in `open`; `opts` borrows a live options struct of this version
+        // naming a valid type, which the routine reads for the call and does not retain.
+        let rc = unsafe { ffi::git_index_open_ext(&mut out, path.as_ptr(), opts.as_ptr()) };
         // SAFETY: as in `open`.
         constructed(rc, unsafe { IndexBox::from_c(out) })
     }
@@ -2531,7 +2531,6 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// string that stays live and unchanged for `'p`. For an entry an index lends, both
     /// end before the index is next changed or released: the path lives in the entry's
     /// own allocation.
-    #[allow(dead_code)] // Used by the index symbol waves, which lend entries.
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_index_entry) -> Option<Self> {
         let ptr = NonNull::new(ptr.cast_mut().cast::<IndexEntry<'p>>())?;
         // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
@@ -2570,7 +2569,9 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
             .expect("a field is never NULL")
     }
 
-    /// The device holding the file, truncated to 32 bits.
+    /// The device number as stored, truncated to 32 bits. git writes the device
+    /// holding the file (`st_dev`), but libgit2 stores the file's `st_rdev` when it
+    /// stats it (adding by path, updating), which is 0 for a regular file.
     ///
     /// Field: git_index_entry.dev
     pub fn dev(&self) -> u32 {
@@ -2587,8 +2588,10 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
         unsafe { addr_of!((*self.as_ptr()).ino).read() }
     }
 
-    /// The entry's mode as stored: a [`FileMode`] value for every entry libgit2 adds,
-    /// but whatever an index file spelled for one it read.
+    /// The entry's mode as stored: a [`FileMode`] value for every entry libgit2 checks
+    /// on the way in (`git_index_add`, `git_index_conflict_add`) or stats in the working
+    /// directory, but whatever an index file it read spelled, and a tree's raw mode
+    /// for the entries `git_index_read_tree` adds (git's legacy `0100664`, say).
     ///
     /// Field: git_index_entry.mode
     pub fn mode(&self) -> u32 {
@@ -3690,6 +3693,76 @@ mod unit_tests {
         );
     }
 
+    /// A REUC record is allocated whole, path inline (`reuc_entry_alloc`), before it is
+    /// inserted. When that allocation or the vector's growth fails, libgit2 frees the new
+    /// record and the index keeps the records it had, the one at the same path included:
+    /// `git_vector_insert_sorted` grows a full vector before it looks for a duplicate,
+    /// so even a replacement can fail there.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn reuc_record_allocation_failures_release_the_new_record() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::reuc_record_allocation_failures_release_the_new_record"
+            ),
+            || {
+                use crate::libgit2::index::sys::index::ReucSide;
+
+                install_countdown();
+                assert!(runtime_pinned());
+                set(ErrorClass::Invalid, c"allocate error state");
+                let id = Oid::zeroed();
+                let side = |mode| Some(ReucSide::new(mode, id.as_ref()));
+                let mut failures = 0;
+                let mut successes = 0;
+                for (path, new_path) in [(c"p8", true), (c"p0", false)] {
+                    for allowed in 0..=2 {
+                        let before = LIVE.load(SeqCst);
+                        let mut index = Index::new().unwrap();
+                        // Fill the initial vector so that the next insertion grows it.
+                        for i in 0..8 {
+                            let path = CString::new(format!("p{i}")).unwrap();
+                            let blob = side(FileMode::Blob);
+                            index.as_mut().add_reuc(&path, blob, None, None).unwrap();
+                        }
+                        ALLOWED.store(allowed, SeqCst);
+                        REFUSING.store(true, SeqCst);
+                        let link = side(FileMode::Link);
+                        let result = index.as_mut().add_reuc(path, None, link, None);
+                        REFUSING.store(false, SeqCst);
+                        let count = index.as_ref().reuc_entry_count();
+                        let handle = index.as_mut();
+                        let record = handle.reuc_entry_by_path(path);
+                        match result {
+                            Err(error) => {
+                                failures += 1;
+                                assert_eq!(
+                                    (error.class(), error.message()),
+                                    (Some(ErrorClass::NoMemory), c"Out of memory")
+                                );
+                                assert_eq!(count, 8);
+                                let kept = record.map(|r| r.modes());
+                                let old = [ffi::GIT_FILEMODE_BLOB, 0, 0];
+                                assert_eq!(kept, (!new_path).then_some(old));
+                            }
+                            Ok(()) => {
+                                successes += 1;
+                                assert_eq!(count, if new_path { 9 } else { 8 });
+                                let modes = record.unwrap().modes();
+                                assert_eq!(modes, [0, ffi::GIT_FILEMODE_LINK, 0]);
+                            }
+                        }
+                        drop(index);
+                        assert_eq!(LIVE.load(SeqCst), before, "{path:?}, allowance {allowed}");
+                    }
+                }
+                // The record, then the growth, for either path.
+                assert_eq!((failures, successes), (4, 2));
+            },
+        );
+    }
+
     /// When libgit2 cannot be initialised, neither constructor calls it.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -4633,6 +4706,78 @@ mod unit_tests {
                     REFUSING.store(false, SeqCst);
                     assert!(LIVE.load(SeqCst) < before);
                     assert_eq!(index.as_ref().name_entry_count(), 0);
+                },
+            );
+        }
+
+        /// What the entry getters read off entries libgit2 fills itself, as their docs
+        /// say: `dev` holds the file's `st_rdev` (0 for a regular file), not the device
+        /// holding it, and `git_index_read_tree` keeps a tree's raw mode, even one with
+        /// no [`FileMode`] (git's legacy `0100664`). In a child: adding by path loads the
+        /// filters.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn entry_getters_read_what_libgit2_stores() {
+            isolated(
+                concat!(module_path!(), "::entry_getters_read_what_libgit2_stores"),
+                || {
+                    use crate::libgit2::object::tree::Tree;
+                    use std::os::unix::fs::MetadataExt;
+
+                    let scratch = Scratch::new("stored");
+                    let file = scratch.dir.join("file");
+                    std::fs::write(&file, "contents").unwrap();
+                    let stat = std::fs::metadata(&file).unwrap();
+                    assert_ne!(stat.dev(), stat.rdev());
+                    scratch.with_index(|mut index| {
+                        index.add_path(c"file").unwrap();
+                        // SAFETY: the exclusive handle's live index, whose one entry is
+                        // read here and neither changed nor released meanwhile.
+                        let entry = unsafe {
+                            IndexEntryRef::from_ptr(ffi::git_index_get_byindex(
+                                index.as_mut_ptr(),
+                                0,
+                            ))
+                        }
+                        .unwrap();
+                        assert_eq!(entry.path(), c"file");
+                        assert_eq!(
+                            (entry.dev(), entry.ino()),
+                            (stat.rdev() as u32, stat.ino() as u32)
+                        );
+                        assert_eq!(entry.dev(), 0);
+                        assert_eq!(entry.filemode(), Some(FileMode::Blob));
+                    });
+
+                    let repo = scratch.repo.as_ref().unwrap();
+                    let odb = repo.as_ref().odb().unwrap();
+                    let data = [&b"100664 legacy\0"[..], &[0x11; 20]].concat();
+                    let mut id = Oid::zeroed();
+                    // SAFETY: a live odb, a writable id, and `data` read for the call.
+                    let rc = unsafe {
+                        ffi::git_odb_write(
+                            id.as_mut().as_mut_ptr(),
+                            odb.as_c_ptr(),
+                            data.as_ptr().cast(),
+                            data.len(),
+                            ffi::GIT_OBJECT_TREE,
+                        )
+                    };
+                    assert_eq!(rc, 0);
+                    let tree = Tree::lookup(repo.as_ref(), id.as_ref()).unwrap();
+                    let index = Index::new().unwrap();
+                    // SAFETY: the box's live index, which nothing else reaches, and a live
+                    // tree, whose entries libgit2 copies for the call.
+                    let rc = unsafe { ffi::git_index_read_tree(index.as_c_ptr(), tree.as_c_ptr()) };
+                    assert_eq!(rc, 0);
+                    // SAFETY: as above, for the index's one entry.
+                    let entry = unsafe {
+                        IndexEntryRef::from_ptr(ffi::git_index_get_byindex(index.as_c_ptr(), 0))
+                    }
+                    .unwrap();
+                    assert_eq!(entry.path(), c"legacy");
+                    assert_eq!((entry.mode(), entry.filemode()), (0o100664, None));
+                    assert_eq!(entry.id().id()[..20], [0x11; 20]);
                 },
             );
         }
