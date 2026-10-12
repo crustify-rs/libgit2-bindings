@@ -1918,7 +1918,10 @@ mod routines {
 
     /// Both sides' lookups of every probe, compared. `find_prefix` diverges where a
     /// probe is the path of a conflicted entry: C lands on any of its stages, Rust on the
-    /// first, which is then at or before C's and of the same path.
+    /// first, which is then at or before C's and of the same path. It also diverges in a
+    /// case-insensitive index, where C compares only the entry it lands on in folded
+    /// order: Rust returns the first entry whose path starts with the probe byte for byte,
+    /// read through C, which is at or before any position C finds.
     fn assert_same_finds(
         c: *mut ffi::git_index,
         rust: &mut IndexBox,
@@ -1932,6 +1935,21 @@ mod routines {
                 "{step}: find {probe:?}"
             );
             let (c_at, rust_at) = (c_find_prefix(c, probe), rust.as_mut().find_prefix(probe));
+            // SAFETY: a live index, whose three capability bits are only read.
+            if unsafe { ffi::git_index_caps(c) } & ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE != 0 {
+                let entries = view(c).entries;
+                let first = entries
+                    .iter()
+                    .position(|(path, _)| path.to_bytes().starts_with(probe.to_bytes()));
+                assert_eq!(rust_at, first, "{step}: prefix {probe:?}");
+                if let Some(c_at) = c_at {
+                    assert!(
+                        rust_at.is_some_and(|at| at <= c_at),
+                        "{step}: prefix {probe:?}"
+                    );
+                }
+                continue;
+            }
             match (c_at, rust_at) {
                 (Some(c_at), Some(rust_at)) if c_at != rust_at => {
                     let entries = view(c).entries;

@@ -12157,7 +12157,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Entry vector sorted (index_find), then read. No GIT_ASSERT_ARG on index or prefix. When an entry's path equals the prefix and it has several stages, the bsearch stops at an arbitrary stage, not the first one the header promises (the wrapper backs up)."
+      "note": "Entry vector sorted (index_find), then read. No GIT_ASSERT_ARG on index or prefix. When an entry's path equals the prefix and it has several stages, the bsearch stops at an arbitrary stage, not the first one the header promises (the wrapper backs up). In an ignore_case index the bsearch runs in folded order but the landed entry is compared byte for byte (git__prefixcmp), so a matching path after a case variant is missed (GIT_ENOTFOUND for 'a/' in ['A/x','a/y'])."
      }
     },
     {
@@ -12808,7 +12808,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Removes and frees one entry (deferred to index->deleted while readers>0); stage -1 matches any stage."
+      "note": "Removes and frees one entry (deferred to index->deleted while readers>0). Stage -1 (GIT_INDEX_STAGE_ANY) removes whichever stage index_find's bsearch meets (stage 2 of a three-way conflict), and first drops the key (path, stage 3) from entries_map, since GIT_INDEX_ENTRY_STAGE_SET(-1) stores stage 3: a kept stage-3 entry then vanishes from git_index_get_bypath. Wrappers should resolve the wildcard to a concrete stage."
      }
     },
     {
@@ -13352,7 +13352,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Writes the file through a lock; counts a reference for the call. Sorts entries/REUC, sets extended flags, resets racily-clean entries' file_size (owner with workdir only), stamp/checksum/dirty. Frees no entry."
+      "note": "Writes the file through a lock; counts a reference for the call. Sorts entries/REUC, sets extended flags, resets racily-clean entries' file_size (owner with workdir only), stamp/checksum/dirty. Frees no entry. Before writing, truncate_racily_clean passes the paths of entries neither UPTODATE nor gitlinks and newer than the read stamp to git_diff_index_to_workdir as a pathspec: an empty-path entry (an index file can hold one) beside another is parsed and parse_optimized_patterns reads one byte past it (UB); wrappers must refuse that mix."
      }
     }
    ]

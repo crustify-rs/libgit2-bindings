@@ -651,8 +651,9 @@ impl IndexMut<'_> {
     /// The index must belong to a repository, as for [`add_path`](Self::add_path), which
     /// no exclusive handle the safe API hands out does yet. Refused, with a
     /// `GIT_ERROR_INDEX` error and libgit2's generic code, when the index has no owning
-    /// repository (see [`IndexRef::has_owner`]), as a sole owner's never has. libgit2 instead asks the missing repository whether it is bare, and reports a
-    /// bare repository ([`ErrorCode::BareRepo`]). A pathspec mixing empty and non-empty
+    /// repository (see [`IndexRef::has_owner`]), as a sole owner's never has. libgit2
+    /// instead asks the missing repository whether it is bare, and reports a bare
+    /// repository ([`ErrorCode::BareRepo`]). A pathspec mixing empty and non-empty
     /// patterns is refused, with a `GIT_ERROR_INVALID` error, before libgit2 reads past
     /// its empty ones (see [`Pathspec::new`]).
     ///
@@ -722,14 +723,23 @@ impl IndexMut<'_> {
     /// find the first entry inside it. The empty prefix finds the first entry. The
     /// prefix is compared byte for byte, even when the index ignores case.
     ///
-    /// A deliberate divergence: when an entry's path is `prefix` itself and it has
+    /// Deliberate divergences: when an entry's path is `prefix` itself and it has
     /// several stages (a conflict), libgit2's binary search stops at whichever stage it
-    /// meets first, not necessarily the first one; this backs up to the first.
+    /// meets first, not necessarily the first one; this backs up to the first. In an
+    /// index that ignores case, libgit2 searches in case-folded order and then compares
+    /// the one entry it lands on byte for byte, so it misses a matching path after
+    /// another that differs only in case (`"a/"` in `["A/x", "a/y"]`); this scans the
+    /// entries instead.
     ///
     /// Takes the exclusive handle: libgit2 sorts the entries first.
     ///
     /// Wraps: git_index_find_prefix
     pub fn find_prefix(&mut self, prefix: &CStr) -> Option<usize> {
+        let caps = self.as_ref().capabilities();
+        if caps.contains(Capabilities::IGNORE_CASE) {
+            let count = self.as_ref().entry_count();
+            return (0..count).find(|&position| self.path_at_starts_with(position, prefix));
+        }
         let mut position = 0;
         // SAFETY: as in `find`.
         let rc = unsafe {
@@ -1365,6 +1375,62 @@ impl IndexRef<'_> {
         }
         Ok(())
     }
+
+    /// Refuses, before libgit2 writes an index that a repository with a working
+    /// directory owns, one holding an entry with an empty path beside another entry.
+    /// libgit2 first diffs the racily clean entries against the working directory,
+    /// with their paths as the pathspec (`truncate_racily_clean`), and parsing an empty
+    /// pattern beside a non-empty one reads past the empty one's terminator (see
+    /// `patterns_are_parsable`). Which entries are racy depends on the timestamp
+    /// libgit2 last read the index file with, which it does not publish, so every
+    /// entry that can be counts: those neither up to date nor a submodule.
+    fn racy_paths_parsable(&self) -> Result<(), RepositoryError> {
+        let ptr = self.as_ptr().cast_mut();
+        // SAFETY: a live index, whose owner field libgit2 only reads.
+        let owner = unsafe { ffi::git_index_owner(ptr) };
+        // SAFETY: a non-NULL owner is the live repository keeping the index (libgit2
+        // clears the field when it releases the index), used on this thread for this
+        // call only.
+        let Some(repo) = (unsafe { RepositoryRef::from_ptr(owner) }) else {
+            return Ok(());
+        };
+        if repo.workdir().is_none() {
+            return Ok(());
+        }
+        let (mut empty, mut named) = (false, false);
+        // SAFETY: a live index, only read; the count is a vector length.
+        let count = unsafe { ffi::git_index_entrycount(ptr) };
+        for position in 0..count {
+            // SAFETY: the handle keeps the index live, used on this thread only; the
+            // routine sorts the entry vector and returns a live entry within the count.
+            let raw = unsafe { ffi::git_index_get_byindex(ptr, position) };
+            // SAFETY: `raw` is that entry, with its path in its own allocation. Nothing
+            // removes, replaces or writes entries until this function returns.
+            let Some(entry) = (unsafe { IndexEntryRef::from_ptr(raw) }) else {
+                continue;
+            };
+            let submodule = entry.mode() & 0o170000 == ffi::GIT_FILEMODE_COMMIT;
+            let up_to_date = entry
+                .flags_extended()
+                .contains(EntryExtendedFlags::UP_TO_DATE);
+            if submodule || up_to_date {
+                continue;
+            }
+            if entry.path().is_empty() {
+                empty = true;
+            } else {
+                named = true;
+            }
+        }
+        if empty && named {
+            set(
+                ErrorClass::Index,
+                c"cannot write an index holding an entry with an empty path beside others",
+            );
+            return Err(RepositoryError::from_libgit2(-1));
+        }
+        Ok(())
+    }
 }
 
 impl<'a> IndexRef<'a> {
@@ -1418,10 +1484,20 @@ impl<'a> IndexRef<'a> {
     /// only", code `-1`), when the lock file exists ([`ErrorCode::Locked`]) and when
     /// the file cannot be written.
     ///
+    /// Refused, with a `GIT_ERROR_INDEX` error (code `-1`), before libgit2 sees it: an
+    /// index that a repository with a working directory owns, holding an entry with an
+    /// empty path (which an index file can hold) beside another entry that is neither
+    /// up to date nor a submodule. libgit2 would pass the racily clean entries' paths
+    /// to a diff as its pathspec, and read past the empty one (see
+    /// [`Pathspec::new`](crate::libgit2::index::pathspec::Pathspec::new)). Which
+    /// entries are racily clean depends on the index file's timestamp, which libgit2
+    /// keeps private, so such an index is refused even when libgit2 would find none.
+    ///
     /// [`ErrorCode::Locked`]: crate::libgit2::util::errors::ErrorCode::Locked
     ///
     /// Wraps: git_index_write
     pub fn write(&self) -> Result<(), RepositoryError> {
+        self.racy_paths_parsable()?;
         // SAFETY: a live index used on this thread only: libgit2 counts a reference for
         // the call, writes the file and the index's bookkeeping (stamp, checksum, dirty
         // flag), sorts its vectors and resets entry sizes in place, and frees no entry.
@@ -1551,19 +1627,47 @@ impl IndexMut<'_> {
         status(unsafe { ffi::git_index_set_caps(self.as_mut_ptr(), caps.to_raw()) })
     }
 
-    /// Removes the entry at `path` at `stage`, or at the first stage found for
-    /// [`Stage::Any`], freeing it.
+    /// Removes the entry at `path` at `stage`, or, for [`Stage::Any`], the first entry
+    /// at `path` in index order (its lowest stage, as [`find`](Self::find) finds it),
+    /// freeing it.
     ///
     /// Fails with [`ErrorCode::NotFound`] (and a `GIT_ERROR_INDEX` error) when there is
     /// no such entry.
+    ///
+    /// A deliberate divergence: given [`Stage::Any`], libgit2 removes whichever stage
+    /// its binary search meets first, and also drops the path's stage 3 entry, which it
+    /// keeps, from its path lookup table (it computes the table's key from the wildcard
+    /// with `GIT_INDEX_ENTRY_STAGE_SET`). This passes the stage of the entry
+    /// [`find`](Self::find) finds instead.
     ///
     /// [`ErrorCode::NotFound`]: crate::libgit2::util::errors::ErrorCode::NotFound
     ///
     /// Wraps: git_index_remove
     pub fn remove(&mut self, path: &CStr, stage: Stage) -> Result<(), RepositoryError> {
+        let stage = match stage {
+            // Without an entry at `path`, libgit2 reports the wildcard as not found, and
+            // the table holds no entry at `path` to drop.
+            Stage::Any => self.first_stage_at(path).unwrap_or(Stage::Any),
+            stage => stage,
+        };
         // SAFETY: the exclusive handle excludes every borrow of the entry freed; `path`
         // is NUL-terminated, read for the call; the stage is a named one (-1..=3).
         status(unsafe { ffi::git_index_remove(self.as_mut_ptr(), path.as_ptr(), stage.raw()) })
+    }
+
+    /// The stage of the first entry at `path`, as [`find`](Self::find) finds it; `None`
+    /// when the index has none.
+    fn first_stage_at(&mut self, path: &CStr) -> Option<Stage> {
+        let position = self.find(path)?;
+        // SAFETY: the exclusive handle addresses a live index, whose entry vector
+        // libgit2 may sort, which no borrow reads. `position` is within the count, so it
+        // returns one of the index's entries, which nothing writes or frees while the
+        // handle, used only here, stays borrowed.
+        let entry = unsafe {
+            IndexEntryRef::from_ptr(ffi::git_index_get_byindex(self.as_mut_ptr(), position))
+        }?;
+        // SAFETY: `entry` addresses a live entry, whose flags libgit2 only reads.
+        Stage::from_raw(unsafe { ffi::git_index_entry_stage(entry.as_ptr()) })
     }
 
     /// Removes the stage-0 entry at `path`, then resolves a conflict at `path` by
@@ -3196,6 +3300,151 @@ mod unit_tests {
             let _ = std::fs::remove_dir_all(dir);
         }
 
+        /// A deliberate divergence: libgit2 removes whichever stage of a conflict its
+        /// search meets for `GIT_INDEX_STAGE_ANY` (stage 2 of three), and drops the stage 3
+        /// entry it keeps from its path lookup table, so `git_index_get_bypath` no longer
+        /// finds it. `remove` takes the first stage, and the table stays whole.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn removal_at_any_stage_takes_the_first_and_keeps_lookups() {
+            let conflicted = || {
+                let mut index = Index::new().unwrap();
+                for stage in 1..=3 {
+                    add(&mut index.as_mut(), c"a", stage, 1, stage as u8, 0o100644);
+                }
+                index
+            };
+            let found = |index: &mut IndexBox| -> Vec<bool> {
+                (1..=3)
+                    .map(|stage| {
+                        // SAFETY: a live index and a NUL-terminated path, read for the call;
+                        // the entry returned is only compared with NULL.
+                        let entry = unsafe {
+                            ffi::git_index_get_bypath(index.as_c_ptr(), c"a".as_ptr(), stage)
+                        };
+                        !entry.is_null()
+                    })
+                    .collect()
+            };
+
+            let mut raw = conflicted();
+            // SAFETY: a live index, exclusively borrowed with no entry borrow; the path is
+            // read for the call; the stage is C's wildcard.
+            let rc = unsafe { ffi::git_index_remove(raw.as_c_ptr(), c"a".as_ptr(), -1) };
+            assert_eq!(rc, 0);
+            let kept = [(c"a".to_owned(), 1), (c"a".to_owned(), 3)];
+            assert_eq!(paths(raw.as_ref()), kept);
+            assert_eq!(found(&mut raw), [true, false, false]);
+
+            let mut index = conflicted();
+            index.as_mut().remove(c"a", Stage::Any).unwrap();
+            let kept = [(c"a".to_owned(), 2), (c"a".to_owned(), 3)];
+            assert_eq!(paths(index.as_ref()), kept);
+            assert_eq!(found(&mut index), [false, true, true]);
+            index.as_mut().remove(c"a", Stage::Any).unwrap();
+            index.as_mut().remove(c"a", Stage::Any).unwrap();
+            assert!(paths(index.as_ref()).is_empty());
+            let error = index.as_mut().remove(c"a", Stage::Any).unwrap_err();
+            assert_eq!(
+                (error.code(), error.class(), error.message()),
+                (
+                    Some(ErrorCode::NotFound),
+                    Some(ErrorClass::Index),
+                    c"index does not contain a at stage -1"
+                )
+            );
+
+            // Case-insensitively, the first entry `find` finds goes.
+            let mut index = Index::new().unwrap();
+            let caps = CapabilitySetting::Explicit(Capabilities::IGNORE_CASE);
+            index.as_mut().set_caps(caps).unwrap();
+            add(&mut index.as_mut(), c"A", 2, 1, 2, 0o100644);
+            add(&mut index.as_mut(), c"A", 3, 1, 3, 0o100644);
+            index.as_mut().remove(c"a", Stage::Any).unwrap();
+            assert_eq!(paths(index.as_ref()), [(c"A".to_owned(), 3)]);
+        }
+
+        /// `write` refuses an index a repository with a working directory owns when it
+        /// holds an empty path beside another entry libgit2 may scan as racily clean;
+        /// submodules and indexes without such a repository are left to libgit2.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn writes_refuse_empty_paths_beside_scannable_entries() {
+            let dir = std::env::temp_dir()
+                .join(format!("crustify-index-edits-racy-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let path = CString::new(dir.to_str().unwrap()).unwrap();
+            let mut repo = Repository::init(&path, false).unwrap();
+            let in_memory = c"failed to write index: The index is in-memory only";
+            // Entries as an index file holds them: `git_index_add` marks its entries up
+            // to date (until the next write), and an index file's are not.
+            let owned = |entries: &[(&CStr, u32)], repo: &mut RepositoryBox| {
+                let mut index = Index::new().unwrap();
+                for (n, &(path, mode)) in entries.iter().enumerate() {
+                    add(&mut index.as_mut(), path, 0, 1, n as u8 + 1, mode);
+                }
+                for position in 0..entries.len() {
+                    // SAFETY: a live index lending no entry; `position` is within the
+                    // count, so the entry is live, and its flag is written in place.
+                    unsafe {
+                        let entry = ffi::git_index_get_byindex(index.as_c_ptr(), position);
+                        let flags = &raw mut (*entry.cast_mut()).flags_extended;
+                        *flags &= !(ffi::GIT_INDEX_ENTRY_UPTODATE as u16);
+                    }
+                }
+                let index: IndexArc = index.into();
+                repo.as_mut().set_index(Some(&index));
+                index
+            };
+
+            for entries in [
+                &[(c"", 0o100644), (c"a", 0o100644)][..],
+                &[
+                    (c"a", 0o100644),
+                    (c"", 0o100755),
+                    (c"sub", ffi::GIT_FILEMODE_COMMIT),
+                ],
+            ] {
+                let index = owned(entries, &mut repo);
+                let error = index.as_ref().write().unwrap_err();
+                assert_eq!(
+                    (error.raw_code(), error.class(), error.message()),
+                    (
+                        -1,
+                        Some(ErrorClass::Index),
+                        c"cannot write an index holding an entry with an empty path beside others"
+                    )
+                );
+            }
+            // Left to libgit2, which scans none of these as racily clean beside `""`.
+            for entries in [
+                &[(c"", 0o100644)][..],
+                &[(c"", 0o100644), (c"sub", ffi::GIT_FILEMODE_COMMIT)],
+                &[(c"", ffi::GIT_FILEMODE_COMMIT), (c"a", 0o100644)],
+                &[(c"a", 0o100644), (c"b", 0o100644)],
+            ] {
+                let index = owned(entries, &mut repo);
+                let error = index.as_ref().write().unwrap_err();
+                assert_eq!(error.message(), in_memory);
+            }
+            // Up to date, as `git_index_add` leaves its entries.
+            let mut index = Index::new().unwrap();
+            add(&mut index.as_mut(), c"", 0, 1, 1, 0o100644);
+            add(&mut index.as_mut(), c"a", 0, 1, 2, 0o100644);
+            let index: IndexArc = index.into();
+            repo.as_mut().set_index(Some(&index));
+            assert_eq!(index.as_ref().write().unwrap_err().message(), in_memory);
+            let index = owned(&[(c"", 0o100644), (c"a", 0o100644)], &mut repo);
+            drop(repo);
+            assert_eq!(index.as_ref().write().unwrap_err().message(), in_memory);
+            let (bare_dir, mut bare) = scratch_repo("racy-bare");
+            let index = owned(&[(c"", 0o100644), (c"a", 0o100644)], &mut bare);
+            assert_eq!(index.as_ref().write().unwrap_err().message(), in_memory);
+            drop((index, bare));
+            let _ = std::fs::remove_dir_all(bare_dir);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
         /// The repository owning an index is checked as `write_tree_to`'s argument is.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -4200,6 +4449,22 @@ mod unit_tests {
             });
         }
 
+        /// A directory whose submodule lookup cannot parse `.gitmodules` fails
+        /// `add_path` with libgit2's configuration error, leaving the index unchanged.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn add_path_reports_a_failed_submodule_lookup() {
+            let scratch = Scratch::new("submodule-lookup");
+            std::fs::create_dir(scratch.dir.join("dir")).unwrap();
+            std::fs::write(scratch.dir.join("dir/file"), "contents").unwrap();
+            std::fs::write(scratch.dir.join(".gitmodules"), "[submodule").unwrap();
+            scratch.with_index(|mut index| {
+                let error = index.add_path(c"dir").unwrap_err();
+                assert_eq!(error.class(), Some(ErrorClass::Config));
+                assert_eq!(index.as_ref().entry_count(), 0);
+            });
+        }
+
         /// A deliberate divergence: libgit2's prefix search stops at whichever stage of
         /// an entry whose path is the prefix it meets first; `find_prefix` backs up to the
         /// first stage, as `find` and the header promise.
@@ -4232,6 +4497,44 @@ mod unit_tests {
             assert_eq!(index.as_mut().find_prefix(c"ab"), Some(4));
             assert_eq!(index.as_mut().find_prefix(c"a/"), None);
             assert_eq!(index.as_mut().find_prefix(c"b"), None);
+        }
+
+        /// A deliberate divergence: in an index that ignores case, libgit2 lands on the
+        /// first entry in case-folded order and compares it byte for byte, missing a
+        /// later match; `find_prefix` returns the first entry starting with the prefix.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn find_prefix_scans_case_insensitive_indexes() {
+            let mut index = Index::new().unwrap();
+            let caps = CapabilitySetting::Explicit(Capabilities::IGNORE_CASE);
+            index.as_mut().set_caps(caps).unwrap();
+            for (path, stage) in [(c"A/x", 0u16), (c"a/y", 0), (c"b", 2), (c"b", 3)] {
+                let mut entry = ffi::git_index_entry {
+                    mode: 0o100644,
+                    path: path.as_ptr(),
+                    // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
+                    flags: stage << 12,
+                    ..Default::default()
+                };
+                entry.id.id[0] = 1;
+                entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+                // SAFETY: the box's live index, borrowed exclusively; `entry` and its
+                // path are read and copied for the call.
+                assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+            }
+            let mut position = usize::MAX;
+            // SAFETY: a writable slot, the box's live index and a NUL-terminated prefix.
+            let rc = unsafe {
+                ffi::git_index_find_prefix(&mut position, index.as_c_ptr(), c"a/".as_ptr())
+            };
+            assert_eq!((rc, position), (ErrorCode::NotFound.raw(), usize::MAX));
+            assert_eq!(index.as_mut().find_prefix(c"a/"), Some(1));
+            assert_eq!(index.as_mut().find_prefix(c"A/"), Some(0));
+            assert_eq!(index.as_mut().find_prefix(c"a/y"), Some(1));
+            assert_eq!(index.as_mut().find_prefix(c""), Some(0));
+            assert_eq!(index.as_mut().find_prefix(c"b"), Some(2));
+            assert_eq!(index.as_mut().find_prefix(c"B"), None);
+            assert_eq!(index.as_mut().find_prefix(c"c"), None);
         }
 
         /// Every allocation the extension routines make can fail: the lookup reports it
