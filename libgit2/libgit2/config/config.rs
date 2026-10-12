@@ -202,9 +202,9 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
     /// for no repository or for one that outlives `'r`.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_config) -> Option<Self> {
-        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
-        // contract; `Config` is transparent over `git_config`.
-        NonNull::new(ptr.cast::<Config<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_config` that outlives `'a` and is not written meanwhile.
+        unsafe { <Config<'r> as CCell>::ref_from_ptr(ptr) }
     }
 
     /// Pointer to the C object, for the routines that take a `git_config *` and

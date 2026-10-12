@@ -162,9 +162,9 @@ impl<'a, 'r> OdbRef<'a, 'r> {
     /// repository or by one that outlives `'r`.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_odb) -> Option<Self> {
-        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
-        // contract; `Odb` is transparent over `git_odb`.
-        NonNull::new(ptr.cast::<Odb<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_odb` that outlives `'a` and is not written meanwhile.
+        unsafe { <Odb<'r> as CCell>::ref_from_ptr(ptr) }
     }
 
     /// Pointer to the C object, for the routines that take a `git_odb *` and lock it

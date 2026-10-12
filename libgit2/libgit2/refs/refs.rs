@@ -133,9 +133,9 @@ impl<'a, 'r> ReferenceRef<'a, 'r> {
     /// outlives `'r`.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_reference) -> Option<Self> {
-        // SAFETY: a non-null pointer the caller vouches for, per this function's
-        // contract; `Reference` is transparent over `git_reference`.
-        NonNull::new(ptr.cast_mut()).map(|p| ReferenceRef(unsafe { CBorrowedPtr::new(p.cast()) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_reference` that outlives `'a` and is not written meanwhile.
+        unsafe { <Reference<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
     }
 
     /// Read-only pointer to the C object.

@@ -197,9 +197,9 @@ impl<'a, 'r> RefdbRef<'a, 'r> {
     /// another handle meanwhile.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_refdb) -> Option<Self> {
-        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
-        // contract; `Refdb` is transparent over `git_refdb`.
-        NonNull::new(ptr.cast::<Refdb<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_refdb` that outlives `'a` and is not written meanwhile.
+        unsafe { <Refdb<'r> as CCell>::ref_from_ptr(ptr) }
     }
 
     /// Read-only pointer to the C object.
