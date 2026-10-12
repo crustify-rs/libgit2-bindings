@@ -35,6 +35,17 @@
 //! `git_index_owner` lends the repository that keeps a reference to the index, if any,
 //! without counting it: libgit2 clears it when that repository releases the index.
 //!
+//! # Entries
+//!
+//! An index lends its entries as [`IndexEntryRef`]s borrowing an exclusive handle
+//! ([`IndexMut::entry`], [`IndexMut::entry_by_path`], [`IndexMut::conflict`], and a
+//! [`ConflictIterator`] over it): only that handle proves that no other holder frees or
+//! rewrites them meanwhile. A shared index's entries are copied
+//! ([`IndexEntryBuf`]) out of an [`IndexIterator`]'s snapshot instead. The routines
+//! that add entries
+//! ([`IndexMut::add`], [`IndexMut::add_from_buffer`], [`IndexMut::add_conflict`]) copy
+//! the [`IndexEntry`] they are given, path and all, and keep nothing.
+//!
 //! # Threads
 //!
 //! libgit2 synchronises only the reference count: two threads must not use one index
@@ -55,6 +66,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::num::TryFromIntError;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use std::ffi::CString;
 
 use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CNew, CZeroable, define_ctype, impl_cdrop};
 
@@ -63,6 +75,7 @@ use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::core::types::FileMode;
 use crate::libgit2::index::pathspec::patterns_are_parsable;
 use crate::libgit2::object::object::id_fits;
+use crate::libgit2::object::tree::TreeRef;
 use crate::libgit2::oid::oid::{Oid, OidMut, OidRef, OidType};
 use crate::libgit2::raw::OdbDataVec;
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
@@ -756,14 +769,8 @@ impl IndexMut<'_> {
 
     /// Whether the entry at `position` exists and its path starts with `prefix`, as
     /// libgit2 checks the entry its prefix search found (`git__prefixcmp`).
-    fn path_at_starts_with(&mut self, position: usize, prefix: &CStr) -> bool {
-        // SAFETY: the exclusive handle addresses a live index, whose entry vector
-        // libgit2 may sort, which no borrow reads. It returns NULL past the end, or one of
-        // the index's entries, with its path in its own allocation, which nothing writes
-        // or frees while the handle, used only here, stays borrowed.
-        let entry = unsafe {
-            IndexEntryRef::from_ptr(ffi::git_index_get_byindex(self.as_mut_ptr(), position))
-        };
+    fn path_at_starts_with(&self, position: usize, prefix: &CStr) -> bool {
+        let entry = self.entry(position);
         entry.is_some_and(|entry| entry.path().to_bytes().starts_with(prefix.to_bytes()))
     }
 
@@ -1672,15 +1679,7 @@ impl IndexMut<'_> {
     /// when the index has none.
     fn first_stage_at(&mut self, path: &CStr) -> Option<Stage> {
         let position = self.find(path)?;
-        // SAFETY: the exclusive handle addresses a live index, whose entry vector
-        // libgit2 may sort, which no borrow reads. `position` is within the count, so it
-        // returns one of the index's entries, which nothing writes or frees while the
-        // handle, used only here, stays borrowed.
-        let entry = unsafe {
-            IndexEntryRef::from_ptr(ffi::git_index_get_byindex(self.as_mut_ptr(), position))
-        }?;
-        // SAFETY: `entry` addresses a live entry, whose flags libgit2 only reads.
-        Stage::from_raw(unsafe { ffi::git_index_entry_stage(entry.as_ptr()) })
+        Some(self.entry(position)?.stage())
     }
 
     /// Removes the stage-0 entry at `path`, then resolves a conflict at `path` by
@@ -1816,6 +1815,318 @@ impl IndexMut<'_> {
             },
         };
         status(rc)
+    }
+}
+
+/// The sides of one conflicted path, as [`IndexMut::conflict`] and a
+/// [`ConflictIteratorMut`] lend them: the path's entries at [`Stage::Ancestor`],
+/// [`Stage::Ours`] and [`Stage::Theirs`], each `None` when the path has no entry at that
+/// stage, and never all `None`.
+///
+/// The entries are the index's own, borrowed for `'a`, as [`IndexMut::entry`] lends
+/// them; copy one with [`IndexEntryRef::to_index_entry`] (and its path) to keep it
+/// longer. Neither `Send` nor `Sync`, as its entries are not:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::index::index::Conflict;
+///
+/// fn send<T: Send>() {}
+/// send::<Conflict<'static>>();
+/// ```
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug)]
+pub struct Conflict<'a> {
+    /// The common ancestor's entry, stage 1.
+    pub ancestor: Option<IndexEntryRef<'a, 'a>>,
+    /// Our side's entry, stage 2.
+    pub ours: Option<IndexEntryRef<'a, 'a>>,
+    /// Their side's entry, stage 3.
+    pub theirs: Option<IndexEntryRef<'a, 'a>>,
+}
+
+impl<'a> Conflict<'a> {
+    /// The sides `[ancestor, ours, theirs]`; `None` when every side is.
+    fn from_sides(sides: [Option<IndexEntryRef<'a, 'a>>; 3]) -> Option<Self> {
+        let [ancestor, ours, theirs] = sides;
+        (ancestor.is_some() || ours.is_some() || theirs.is_some()).then_some(Self {
+            ancestor,
+            ours,
+            theirs,
+        })
+    }
+}
+
+/// Whether libgit2 inserts an entry of `mode` (`valid_filemode`, `src/libgit2/index.c`).
+fn insertable_mode(mode: FileMode) -> bool {
+    matches!(
+        mode,
+        FileMode::Blob | FileMode::BlobExecutable | FileMode::Link | FileMode::Commit
+    )
+}
+
+impl IndexRef<'_> {
+    /// Refuses, before libgit2 inserts `entries` into an index that a repository owns,
+    /// one whose id libgit2 would look up in that repository though it is of another
+    /// type: libgit2 formats the loose object's path from the id's own size, overflowing
+    /// the path buffer (see `id_fits`). libgit2 looks up every inserted entry's id but a
+    /// submodule's (`index_insert`), after refusing any entry whose mode is not a
+    /// blob's, a link's or a submodule's, which is left to it.
+    fn insertable(&self, entries: &[IndexEntryRef<'_, '_>]) -> Result<(), RepositoryError> {
+        // SAFETY: a live index, whose owner field libgit2 only reads.
+        let owner = unsafe { ffi::git_index_owner(self.as_ptr()) };
+        // SAFETY: a non-NULL owner is the live repository keeping the index (libgit2
+        // clears the field when it releases the index), used on this thread for this
+        // call only.
+        let Some(repo) = (unsafe { RepositoryRef::from_ptr(owner) }) else {
+            return Ok(());
+        };
+        let modes = entries.iter().map(|entry| entry.filemode());
+        if !modes.clone().all(|mode| mode.is_some_and(insertable_mode)) {
+            return Ok(());
+        }
+        for (entry, mode) in entries.iter().zip(modes) {
+            if mode != Some(FileMode::Commit) {
+                id_fits(repo, entry.id())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl IndexMut<'_> {
+    /// The entry at `position`, in the order the index keeps its entries (by path, then
+    /// by stage); `None` past the last one.
+    ///
+    /// The entry is the index's own, lent for as long as this handle is borrowed: the
+    /// routines that free, replace or reorder entries take the handle exclusively.
+    ///
+    /// ```compile_fail,E0502
+    /// use libgit2::libgit2::index::index::Index;
+    ///
+    /// let mut index = Index::new().unwrap();
+    /// let mut handle = index.as_mut();
+    /// let entry = handle.entry(0);
+    /// handle.clear().unwrap();
+    /// let _ = entry;
+    /// ```
+    ///
+    /// A shared index may change behind any of its holders, so its shared handle lends
+    /// no entries; an [`IndexIterator`] copies them out of a snapshot instead.
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::index::index::{Index, IndexArc};
+    ///
+    /// let index: IndexArc = Index::new().unwrap().into();
+    /// let _ = index.as_ref().entry(0);
+    /// ```
+    ///
+    /// Wraps: git_index_get_byindex
+    pub fn entry(&self, position: usize) -> Option<IndexEntryRef<'_, '_>> {
+        let index = self.as_ref().as_ptr().cast_mut();
+        // SAFETY: a live index no other holder reaches; libgit2 sorts its entry vector,
+        // which moves no entry, and returns NULL or one of its entries, path inline,
+        // which nothing frees or rewrites while `&self` is borrowed (see above).
+        unsafe { IndexEntryRef::from_ptr(ffi::git_index_get_byindex(index, position)) }
+    }
+
+    /// The entry at `path` and `stage`; `None` when the index has none. Compares paths as
+    /// the index's [`Capabilities::IGNORE_CASE`] says. Borrowing is as for
+    /// [`entry`](Self::entry).
+    ///
+    /// A deliberate divergence: [`Stage::Any`] finds the entry at `path` of the lowest
+    /// stage, the first in index order, as [`find`](Self::find) finds it. libgit2 masks
+    /// the wildcard's `-1` to the two stage bits of its lookup key
+    /// (`GIT_INDEX_ENTRY_STAGE_SET`), so it finds only the stage 3 entry.
+    ///
+    /// Wraps: git_index_get_bypath
+    pub fn entry_by_path(&self, path: &CStr, stage: Stage) -> Option<IndexEntryRef<'_, '_>> {
+        const STAGES: [Stage; 4] = [Stage::Normal, Stage::Ancestor, Stage::Ours, Stage::Theirs];
+        let stages = match stage {
+            Stage::Any => &STAGES[..],
+            ref stage => core::slice::from_ref(stage),
+        };
+        let index = self.as_ref().as_ptr().cast_mut();
+        stages.iter().find_map(|stage| {
+            // SAFETY: as in `entry`; libgit2 only looks `path`, a NUL-terminated key read
+            // for the call, up in the path table, with a concrete stage (0..=3).
+            unsafe {
+                IndexEntryRef::from_ptr(ffi::git_index_get_bypath(
+                    index,
+                    path.as_ptr(),
+                    stage.raw(),
+                ))
+            }
+        })
+    }
+
+    /// The conflict at `path`: its entries at stages 1 to 3. `None` when the index has no
+    /// such entry at `path` (a merged path, or none at all). Compares paths as the
+    /// index's [`Capabilities::IGNORE_CASE`] says. Borrowing is as for
+    /// [`entry`](Self::entry).
+    ///
+    /// Wraps: git_index_conflict_get
+    pub fn conflict(&self, path: &CStr) -> Option<Conflict<'_>> {
+        let index = self.as_ref().as_ptr().cast_mut();
+        let mut slots = [ptr::null(); 3];
+        let [ancestor, ours, theirs] = &mut slots;
+        // SAFETY: a live index no other holder reaches, whose entry vector libgit2 sorts
+        // (moving no entry); three writable slots, and `path` a NUL-terminated key read
+        // for the call.
+        let rc =
+            unsafe { ffi::git_index_conflict_get(ancestor, ours, theirs, index, path.as_ptr()) };
+        if rc < 0 {
+            return None;
+        }
+        // SAFETY: each slot is NULL or one of the index's entries, path inline, which
+        // nothing frees or rewrites while `&self` is borrowed, as in `entry`.
+        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot) });
+        Conflict::from_sides(sides)
+    }
+
+    /// Adds a copy of `entry`, path and all, or replaces the entry at its path and stage
+    /// (the stage its [`flags`](IndexEntryRef::flags) hold, normally
+    /// [`Stage::Normal`]) with it. The copy is marked
+    /// [`UP_TO_DATE`](EntryExtendedFlags::UP_TO_DATE), and its flags record its path's
+    /// length. Adding a normal entry does not resolve a conflict at its path. The entries
+    /// of its stage that its path collides with are removed: a file at one of its parent
+    /// directories (`"a"` for `"a/b"`), and the files under it (`"a/b"` for `"a"`).
+    ///
+    /// The id is not checked unless a repository owns the index: then it must name an
+    /// object of the type the mode says in that repository, unless the entry is a
+    /// submodule's.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for a mode other than
+    /// [`FileMode::Blob`], [`FileMode::BlobExecutable`], [`FileMode::Link`] and
+    /// [`FileMode::Commit`], and for a path an index cannot hold (`".git/config"`,
+    /// `"../a"`; the empty path is accepted, as libgit2 accepts it); with libgit2's error
+    /// for an id the owning repository does not have.
+    ///
+    /// Refused, with a `GIT_ERROR_INVALID` error (code `-1`), before libgit2 sees it: in
+    /// an index that a repository owns, an entry (other than a submodule's) whose id is
+    /// not of that repository's object id type, which libgit2 would overflow its path
+    /// buffer looking up. The refusal precedes libgit2's check of the path.
+    ///
+    /// The exclusive handle comes only from a sole owner, which no repository shares
+    /// (see [`IndexRef::has_owner`]), so through the safe API alone the index has no
+    /// owner, and no id is looked up.
+    ///
+    /// Wraps: git_index_add
+    pub fn add(&mut self, entry: IndexEntryRef<'_, '_>) -> Result<(), RepositoryError> {
+        self.as_ref().insertable(&[entry])?;
+        // SAFETY: the exclusive handle excludes every borrow of the entry replaced, whose
+        // fields (and same-length path) libgit2 rewrites in place; `entry` is a live entry
+        // with a NUL-terminated path, read and copied for the call, and its id, if looked
+        // up, is of the owner's type.
+        status(unsafe { ffi::git_index_add(self.as_mut_ptr(), entry.as_ptr()) })
+    }
+
+    /// Writes `data` as a blob to the object database of the repository that owns the
+    /// index, then adds a copy of `entry` naming it, with its file size set to the length
+    /// of `data`, or replaces the entry at its path and stage with it, as
+    /// [`add`](Self::add) does. Resolves a conflict at the path, moving its sides to the
+    /// resolved-conflict (`REUC`) records. The path is not checked against ignore rules.
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index that no repository
+    /// owns ("could not initialize index entry"), as an index reached through this
+    /// exclusive handle has none (see [`IndexRef::has_owner`]); for a mode other than
+    /// [`FileMode::Blob`], [`FileMode::BlobExecutable`] and [`FileMode::Link`]; for
+    /// `data` longer than `u32::MAX` bytes; and for a path as [`add`](Self::add) fails
+    /// it. Fails with libgit2's error when the blob cannot be written.
+    ///
+    /// Refused, with a `GIT_ERROR_INDEX` error (code `-1`), before libgit2 sees it: an
+    /// entry whose [`stage`](IndexEntryRef::stage) is not [`Stage::Normal`]. libgit2
+    /// adds it at that stage, then resolves the conflict it finds at the path, which the
+    /// new entry itself makes: it moves the entry to the resolved-conflict records,
+    /// freeing it, and then reads its path (`git_index_add_from_buffer`,
+    /// `src/libgit2/index.c`), a use after free.
+    ///
+    /// Wraps: git_index_add_from_buffer
+    pub fn add_from_buffer(
+        &mut self,
+        entry: IndexEntryRef<'_, '_>,
+        data: &[u8],
+    ) -> Result<(), RepositoryError> {
+        if entry.stage() != Stage::Normal {
+            set(
+                ErrorClass::Index,
+                c"cannot add a conflict side from a buffer: give a stage 0 entry",
+            );
+            return Err(RepositoryError::from_libgit2(ErrorCode::Generic.raw()));
+        }
+        // SAFETY: as in `add`, for the entries replaced or moved to the REUC records;
+        // `data` is `data.len()` readable bytes at a non-NULL pointer, read for the call.
+        // libgit2 replaces the copy's id with the blob's, which it does not look up; the
+        // entry is of stage 0, so resolving the path's conflict leaves the copy alone.
+        let rc = unsafe {
+            ffi::git_index_add_from_buffer(
+                self.as_mut_ptr(),
+                entry.as_ptr(),
+                data.as_ptr().cast(),
+                data.len(),
+            )
+        };
+        status(rc)
+    }
+
+    /// Records a conflict: removes the normal entries at the paths of the sides given,
+    /// then adds a copy of each side, at stage 1 for `ancestor`, 2 for `ours` and 3 for
+    /// `theirs` (whatever stage its flags hold), replacing an entry already there. A side
+    /// that is `None` was absent from its tree; the others are left as they are. The
+    /// sides normally share one path; with none given, nothing changes.
+    ///
+    /// The ids are checked as for [`add`](Self::add).
+    ///
+    /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), changing nothing, for a side
+    /// whose mode or path [`add`](Self::add) would refuse; fails with libgit2's error
+    /// when a side cannot be added after the normal entries were removed, which leaves
+    /// the sides before it added. Refuses the ids [`add`](Self::add) refuses, changing
+    /// nothing.
+    ///
+    /// Wraps: git_index_conflict_add
+    pub fn add_conflict(
+        &mut self,
+        ancestor: Option<IndexEntryRef<'_, '_>>,
+        ours: Option<IndexEntryRef<'_, '_>>,
+        theirs: Option<IndexEntryRef<'_, '_>>,
+    ) -> Result<(), RepositoryError> {
+        let sides = [ancestor, ours, theirs];
+        let given: Vec<_> = sides.iter().flatten().copied().collect();
+        self.as_ref().insertable(&given)?;
+        let [ancestor, ours, theirs] = sides.map(|side| side.map_or(ptr::null(), |e| e.as_ptr()));
+        // SAFETY: the exclusive handle excludes every borrow of the entries removed or
+        // replaced; each side is NULL or a live entry with a NUL-terminated path, read and
+        // copied for the call, its id, if looked up, of the owner's type.
+        let rc = unsafe { ffi::git_index_conflict_add(self.as_mut_ptr(), ancestor, ours, theirs) };
+        status(rc)
+    }
+
+    /// Replaces the index's entries with those of `tree`, recursively: one normal entry
+    /// for each blob, link and submodule, with the tree entry's mode as stored (git's
+    /// legacy `0100664` included). An entry whose path, mode and id the index already
+    /// held keeps its file metadata (times, sizes) but loses its extended flags. Removes
+    /// everything else [`clear`](Self::clear) removes (conflicts, resolved-conflict and
+    /// rename records, extensions), and caches `tree`'s trees as the index's tree cache.
+    /// Only the index in memory changes until it is written.
+    ///
+    /// `tree` may be of any repository, whatever its object id type and the index's,
+    /// and need not be the owning repository's; its subtrees are read from its own.
+    ///
+    /// Fails with libgit2's error when a subtree cannot be read, and with a
+    /// `GIT_ERROR_INDEX` error (code `-1`) for a tree entry whose name an index cannot
+    /// hold (`.git`); the index is then left as it was, but for its tree cache, which is
+    /// dropped.
+    ///
+    /// libgit2 leaks the joined path of a tree entry whose name it refuses
+    /// (`read_tree_cb`, `src/libgit2/index.c`), and the entries it read when it runs out
+    /// of memory filling its path table (`git_index_read_tree`).
+    ///
+    /// Wraps: git_index_read_tree
+    pub fn read_tree(&mut self, tree: TreeRef<'_, '_>) -> Result<(), RepositoryError> {
+        // SAFETY: the exclusive handle excludes every borrow of the entries freed; `tree`
+        // is a live tree, walked for the call with its repository, used on this thread,
+        // and nothing of it is retained.
+        status(unsafe { ffi::git_index_read_tree(self.as_mut_ptr(), tree.as_ptr()) })
     }
 }
 
@@ -1973,6 +2284,48 @@ impl IndexIterator {
     }
 }
 
+/// Steps through the snapshot, in path order: an exclusive handle to an
+/// [`IndexIteratorBox`] is the iterator, and yields a copy of each entry, path included.
+///
+/// ```
+/// use libgit2::libgit2::index::index::{Index, IndexArc, IndexIterator};
+///
+/// # if cfg!(miri) { return; }
+/// let index: IndexArc = Index::new().unwrap().into();
+/// let mut iterator = IndexIterator::new(&index).unwrap();
+/// assert_eq!(iterator.as_mut().count(), 0);
+/// ```
+///
+/// Copies, because the snapshot shares its entries with the index: libgit2 keeps every
+/// entry it holds until the iterator is freed, even those the index has removed since,
+/// but the index's other holders rewrite an entry in place when they add one at its
+/// path, its path's bytes included (in another case, for an index that ignores case),
+/// and writing the index clears every entry's
+/// [`UP_TO_DATE`](EntryExtendedFlags::UP_TO_DATE) flag. A borrow of a shared index's
+/// entry could not keep them out.
+impl Iterator for IndexIteratorMut<'_> {
+    type Item = IndexEntryBuf;
+
+    /// A copy of the snapshot's next entry; `None` once every entry was returned, and
+    /// after.
+    ///
+    /// Wraps: git_index_iterator_next
+    fn next(&mut self) -> Option<IndexEntryBuf> {
+        let mut entry = ptr::null();
+        // SAFETY: the exclusive handle addresses a live iterator, whose position libgit2
+        // advances; `entry` is a writable slot, written only on success.
+        let rc = unsafe { ffi::git_index_iterator_next(&mut entry, self.as_mut_ptr()) };
+        if rc != 0 {
+            return None;
+        }
+        // SAFETY: an entry of the snapshot, path inline, which libgit2 frees no sooner
+        // than the iterator; nothing runs between its return and the copy below, which
+        // the borrow does not outlive.
+        let entry = unsafe { IndexEntryRef::from_ptr(entry) }?;
+        Some(entry.to_entry_buf())
+    }
+}
+
 /// Opaque conflict cursor, borrowing one exclusively held index for `'index`.
 ///
 /// C neither retains the index nor snapshots its entries. The exclusive borrow
@@ -2066,7 +2419,6 @@ impl ConflictIteratorRef<'_, '_> {
 }
 
 impl<'index> ConflictIteratorMut<'_, 'index> {
-    #[allow(dead_code)] // Used by the following symbol wave.
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_index_conflict_iterator {
         self.0.0.as_non_null().as_ptr().cast()
     }
@@ -2138,6 +2490,57 @@ impl<'index> ConflictIterator<'index> {
         // SAFETY: success transfers one initialized allocation paired with the
         // policy's destructor. The index borrow is carried in the layout type.
         unsafe { ConflictIteratorBox::from_c(out) }.ok_or_else(last)
+    }
+}
+
+/// Steps through the index's conflicts, in path order, one [`Conflict`] per conflicted
+/// path: an exclusive handle to a [`ConflictIteratorBox`] is the iterator.
+///
+/// The entries are the index's own, which nothing can change or free while the cursor's
+/// exclusive borrow of the index lasts, so they live as long as that borrow (`'index`),
+/// past the cursor itself:
+///
+/// ```
+/// use libgit2::libgit2::index::index::{ConflictIterator, Index};
+///
+/// # if cfg!(miri) { return; }
+/// let mut index = Index::new().unwrap();
+/// let mut cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// let conflicts: Vec<_> = cursor.as_mut().collect();
+/// drop(cursor);
+/// assert!(conflicts.is_empty());
+/// ```
+///
+/// ```compile_fail,E0499
+/// use libgit2::libgit2::index::index::{ConflictIterator, Index};
+///
+/// let mut index = Index::new().unwrap();
+/// let mut cursor = ConflictIterator::new(index.as_mut()).unwrap();
+/// let conflict = cursor.as_mut().next();
+/// drop(cursor);
+/// index.as_mut().clear().unwrap();
+/// let _ = conflict;
+/// ```
+impl<'index> Iterator for ConflictIteratorMut<'_, 'index> {
+    type Item = Conflict<'index>;
+
+    /// The next conflict; `None` once every conflict was returned, and after.
+    ///
+    /// Wraps: git_index_conflict_next
+    fn next(&mut self) -> Option<Conflict<'index>> {
+        let mut slots = [ptr::null(); 3];
+        let [ancestor, ours, theirs] = &mut slots;
+        // SAFETY: the exclusive handle addresses a live cursor over a live index it
+        // borrows exclusively, whose entry vector libgit2 sorts (moving no entry); three
+        // writable slots.
+        let rc = unsafe { ffi::git_index_conflict_next(ancestor, ours, theirs, self.as_mut_ptr()) };
+        if rc != 0 {
+            return None;
+        }
+        // SAFETY: each slot is NULL or one of the index's entries, path inline, which
+        // nothing changes or frees for `'index`, the cursor's exclusive borrow of it.
+        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot) });
+        Conflict::from_sides(sides)
     }
 }
 
@@ -2683,7 +3086,11 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// [`flags`](Self::flags): [`Stage::Normal`] for a file without a conflict, or the
     /// side of a conflict the entry records. Never [`Stage::Any`].
     ///
+    /// `git_index_entry_stage` is the exported function form of the same macro; the two
+    /// read the same bits, so this one method stands for both.
+    ///
     /// Wraps: GIT_INDEX_ENTRY_STAGE
+    /// Wraps: git_index_entry_stage
     pub fn stage(&self) -> Stage {
         // SAFETY: the shim only reads the `flags` field, through the shared handle's
         // pointer to a live entry.
@@ -2708,6 +3115,21 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
         // initialised entry; it is plain data, and the copy's path keeps the handles'
         // invariant for `'p`, as this entry's does.
         IndexEntry(unsafe { self.as_ptr().read() }, PhantomData)
+    }
+
+    /// A copy of the entry with its own copy of the path, borrowing nothing.
+    pub fn to_entry_buf(&self) -> IndexEntryBuf {
+        let mut entry = self.to_index_entry().into_raw();
+        entry.path = self.path().to_owned().into_raw();
+        IndexEntryBuf { entry }
+    }
+
+    /// Whether the entry is a conflict side: of a stage other than [`Stage::Normal`].
+    ///
+    /// Wraps: git_index_entry_is_conflict
+    pub fn is_conflict(&self) -> bool {
+        // SAFETY: the handle addresses a live entry, whose flags libgit2 only reads.
+        unsafe { ffi::git_index_entry_is_conflict(self.as_ptr()) != 0 }
     }
 }
 
@@ -2931,6 +3353,101 @@ impl<'p> IndexEntryMut<'_, 'p> {
 }
 
 impl fmt::Debug for IndexEntryMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// An index entry holding its own copy of its path: the owned counterpart of an
+/// [`IndexEntry`], as `PathBuf` is of `Path`. An [`IndexIterator`] yields these, and
+/// [`IndexEntryRef::to_entry_buf`] copies any entry into one, so that it outlives the
+/// index it was lent from, or is added back to it:
+///
+/// ```
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::{Index, IndexEntry, Stage};
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// # if cfg!(miri) { return; }
+/// let mut index = Index::new().unwrap();
+/// let entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+/// index.as_mut().add(entry.as_ref()).unwrap();
+/// let copy = index.as_mut().entry(0).unwrap().to_entry_buf();
+/// index.as_mut().add_conflict(None, Some(copy.as_ref()), None).unwrap();
+/// assert_eq!(index.as_mut().entry(0).unwrap().stage(), Stage::Ours);
+/// assert_eq!(copy.as_ref().path(), c"a");
+/// ```
+///
+/// Rust storage throughout: the struct, and the path in Rust's allocator, which C only
+/// reads for the calls it is lent to. There is no exclusive handle, which could store a
+/// borrowed path in place of the owned one; copy the entry out with
+/// [`IndexEntryRef::to_index_entry`] to change it.
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::core::types::FileMode;
+/// use libgit2::libgit2::index::index::IndexEntry;
+/// use libgit2::libgit2::oid::oid::Oid;
+/// use ffibox::CZeroable;
+///
+/// let buf = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob).as_ref().to_entry_buf();
+/// let path = buf.as_ref().path();
+/// drop(buf);
+/// let _ = path;
+/// ```
+///
+/// Handwritten
+pub struct IndexEntryBuf {
+    /// The entry, whose `path` is a `CString` given up with `CString::into_raw` (so that
+    /// no move of an owner retags it), never written through and reclaimed on drop.
+    entry: ffi::git_index_entry,
+}
+
+// SAFETY: the struct is integers, an id's bytes and an owned string, never written
+// through: nothing has thread affinity or interior mutability, and the string is
+// released by Rust's allocator on any thread.
+unsafe impl Send for IndexEntryBuf {}
+// SAFETY: as above; shared access only reads (there is no exclusive handle).
+unsafe impl Sync for IndexEntryBuf {}
+
+impl IndexEntryBuf {
+    /// Shared handle to the entry: the getters, and the pointer for C calls that read
+    /// it, with its path borrowed from this value.
+    pub fn as_ref(&self) -> IndexEntryRef<'_, '_> {
+        // SAFETY: `entry` is initialised and lives, unchanged, while `self` is borrowed,
+        // and its path is the string `self` owns, NUL-terminated and likewise unchanged.
+        unsafe { IndexEntryRef::from_ptr(&self.entry) }.expect("a field is never NULL")
+    }
+
+    /// The entry's path, this value's own copy; as `self.as_ref().path()`.
+    pub fn path(&self) -> &CStr {
+        self.as_ref().path()
+    }
+}
+
+impl Drop for IndexEntryBuf {
+    fn drop(&mut self) {
+        // SAFETY: `path` is the pointer `to_entry_buf` took from `CString::into_raw`,
+        // unchanged since, reclaimed once here; no borrow of `self` outlives the drop.
+        drop(unsafe { CString::from_raw(self.entry.path.cast_mut()) });
+    }
+}
+
+impl Clone for IndexEntryBuf {
+    fn clone(&self) -> Self {
+        self.as_ref().to_entry_buf()
+    }
+}
+
+impl PartialEq for IndexEntryBuf {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref().to_index_entry() == other.as_ref().to_index_entry()
+    }
+}
+
+impl Eq for IndexEntryBuf {}
+
+impl fmt::Debug for IndexEntryBuf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.as_ref().fmt(f)
     }
@@ -3196,6 +3713,290 @@ mod unit_tests {
         );
     }
 
+    /// The routines that lend, add and replace entries and conflicts: the private
+    /// pieces they share, their refusals before libgit2 sees an entry, and their
+    /// deliberate divergences.
+    mod entries {
+        use super::*;
+        use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+        use std::path::PathBuf;
+
+        /// An entry of mode `mode` at `path` and `stage`, of id type `kind` (any byte,
+        /// named or not) with first id byte `byte`.
+        pub(super) fn entry(
+            path: &CStr,
+            stage: u16,
+            kind: u8,
+            byte: u8,
+            mode: u32,
+        ) -> IndexEntry<'_> {
+            let mut entry = IndexEntry::new(path, Oid::zeroed().as_ref(), FileMode::Blob);
+            let mut handle = entry.as_mut();
+            handle.set_mode(mode);
+            handle
+                .set_flags(EntryFlags::from_bits_retain(u32::from(stage) << 12))
+                .unwrap();
+            let mut id = handle.id_mut();
+            id.set_raw_kind(kind);
+            let mut bytes = [0; 32];
+            bytes[0] = byte;
+            id.set_id(bytes);
+            entry
+        }
+
+        /// The sides `[ancestor, ours, theirs]` are kept as given; none at all is no
+        /// conflict. Rust-only: runs under Miri.
+        #[test]
+        fn conflict_keeps_the_sides_given() {
+            assert!(Conflict::from_sides([None; 3]).is_none());
+            let ours = IndexEntry::new(c"ours", Oid::zeroed().as_ref(), FileMode::Blob);
+            let theirs = IndexEntry::new(c"theirs", Oid::zeroed().as_ref(), FileMode::Link);
+            let conflict = Conflict::from_sides([None, Some(ours.as_ref()), Some(theirs.as_ref())]);
+            let conflict = conflict.unwrap();
+            assert!(conflict.ancestor.is_none());
+            assert_eq!(conflict.ours.unwrap().path(), c"ours");
+            assert_eq!(conflict.theirs.unwrap().filemode(), Some(FileMode::Link));
+            let copy = conflict;
+            assert!(format!("{copy:?}").contains("theirs"));
+            for side in 0..3 {
+                let mut sides = [None; 3];
+                sides[side] = Some(ours.as_ref());
+                let conflict = Conflict::from_sides(sides).unwrap();
+                let found = [conflict.ancestor, conflict.ours, conflict.theirs];
+                for (n, found) in found.iter().enumerate() {
+                    assert_eq!(found.is_some(), n == side);
+                }
+            }
+        }
+
+        /// An owned copy keeps its own path, which its entry points at across moves and
+        /// clones; it compares and prints as the entry. Rust-only: runs under Miri.
+        #[test]
+        fn entry_buf_owns_the_path_its_entry_points_at() {
+            let path = CString::new("dir/file").unwrap();
+            let mut entry =
+                IndexEntry::new(&path, Oid::zeroed().as_ref(), FileMode::BlobExecutable);
+            entry.as_mut().set_file_size(9);
+            let buf = entry.as_ref().to_entry_buf();
+            drop(path);
+            let mut bufs = vec![buf.clone()];
+            for _ in 0..64 {
+                bufs.push(bufs[0].clone());
+            }
+            let moved = bufs.swap_remove(0);
+            for buf in bufs.iter().chain([&moved, &buf]) {
+                let handle = buf.as_ref();
+                assert_eq!(handle.path(), c"dir/file");
+                assert!(ptr::eq(handle.path().as_ptr(), buf.path().as_ptr()));
+                assert_eq!(handle.file_size(), 9);
+                assert_eq!(handle.filemode(), Some(FileMode::BlobExecutable));
+            }
+            assert_eq!(moved, buf);
+            assert_ne!(moved.path().as_ptr(), buf.path().as_ptr());
+            assert_eq!(format!("{moved:?}"), format!("{:?}", buf.as_ref()));
+            let other = IndexEntry::new(c"dir/file", Oid::zeroed().as_ref(), FileMode::Blob);
+            assert_ne!(other.as_ref().to_entry_buf(), buf);
+            fn send_sync<T: Send + Sync>(_: &T) {}
+            send_sync(&buf);
+            std::thread::scope(|s| {
+                s.spawn(|| assert_eq!(buf.as_ref().path(), c"dir/file"));
+            });
+        }
+
+        /// `stage` and `is_conflict` read the two stage bits of every flags value.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn stage_reads_the_two_stage_bits_of_every_flags_value() {
+            let mut entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+            for bits in 0..=u16::MAX {
+                let flags = EntryFlags::from_bits_retain(bits.into());
+                entry.as_mut().set_flags(flags).unwrap();
+                let raw = i32::from((bits & 0x3000) >> 12);
+                assert_eq!(entry.as_ref().stage(), Stage::from_raw(raw).unwrap());
+                assert_eq!(entry.as_ref().is_conflict(), raw > 0);
+            }
+        }
+
+        /// The corrected [`Stage::Any`] lookup finds the lowest stage at a path, where
+        /// `git_index_get_bypath(-1)` looks for stage 3 only.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn any_stage_lookup_finds_the_lowest_stage_where_c_finds_stage_3() {
+            let mut index = Index::new().unwrap();
+            let mut handle = index.as_mut();
+            for (path, stage) in [(c"a", 2), (c"a", 1), (c"b", 3), (c"b", 0), (c"c", 3)] {
+                let entry = entry(path, stage, 1, stage as u8 + 1, 0o100644);
+                handle.add(entry.as_ref()).unwrap();
+            }
+            let c_stage = |path: &CStr| {
+                // SAFETY: a live index lending no entry; the result is read at once.
+                unsafe {
+                    let e = ffi::git_index_get_bypath(
+                        handle.as_ref().as_ptr().cast_mut(),
+                        path.as_ptr(),
+                        -1,
+                    );
+                    (!e.is_null()).then(|| ffi::git_index_entry_stage(e))
+                }
+            };
+            let rust_stage =
+                |path: &CStr| handle.entry_by_path(path, Stage::Any).map(|e| e.stage());
+            assert_eq!(c_stage(c"a"), None);
+            assert_eq!(rust_stage(c"a"), Some(Stage::Ancestor));
+            assert_eq!(c_stage(c"b"), Some(3));
+            assert_eq!(rust_stage(c"b"), Some(Stage::Normal));
+            assert_eq!(c_stage(c"c"), Some(3));
+            assert_eq!(rust_stage(c"c"), Some(Stage::Theirs));
+            assert_eq!(c_stage(c"d"), None);
+            assert_eq!(rust_stage(c"d"), None);
+            let error = last();
+            assert_eq!(
+                (error.class(), error.message()),
+                (Some(ErrorClass::Index), c"index does not contain 'd'")
+            );
+            // A concrete stage is libgit2's own lookup.
+            assert!(handle.entry_by_path(c"a", Stage::Theirs).is_none());
+            assert_eq!(
+                handle.entry_by_path(c"a", Stage::Ours).unwrap().id().id()[0],
+                3
+            );
+        }
+
+        /// The corrected `add_from_buffer`: an entry of a conflict stage is refused, where
+        /// libgit2 adds it, moves it to the resolved-conflict records (freeing it) and
+        /// reads its path; a stage 0 entry still resolves the conflict at its path.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn buffers_refuse_conflict_stages_libgit2_would_free_while_adding() {
+            let scratch = Scratch::new("buffer-stage");
+            scratch.with_index(|mut index| {
+                for stage in 1..=3 {
+                    let side = entry(c"g", stage, 1, 0, 0o100644);
+                    let error = index.add_from_buffer(side.as_ref(), b"x").unwrap_err();
+                    assert_eq!(
+                        (error.raw_code(), error.raw_class(), error.message()),
+                        (
+                            -1,
+                            ErrorClass::Index as c_int,
+                            c"cannot add a conflict side from a buffer: give a stage 0 entry"
+                        )
+                    );
+                    assert_eq!(index.as_ref().entry_count(), 0);
+                    assert_eq!(index.as_ref().reuc_entry_count(), 0);
+                }
+                // A conflict, resolved by a stage 0 entry from a buffer.
+                let side = entry(c"g", 0, 1, 0, 0o160000);
+                index
+                    .add_conflict(Some(side.as_ref()), Some(side.as_ref()), None)
+                    .unwrap();
+                index
+                    .add_from_buffer(entry(c"g", 0, 1, 0, 0o100644).as_ref(), b"x")
+                    .unwrap();
+                assert_eq!(index.as_ref().entry_count(), 1);
+                assert_eq!(index.entry(0).unwrap().stage(), Stage::Normal);
+                assert_eq!(index.as_ref().reuc_entry_count(), 1);
+            });
+        }
+
+        /// A fresh repository with a working directory, removed on drop.
+        struct Scratch {
+            dir: PathBuf,
+            repo: Option<RepositoryBox>,
+        }
+
+        impl Scratch {
+            fn new(tag: &str) -> Self {
+                let dir = std::env::temp_dir().join(format!(
+                    "crustify-index-entries-{}-{tag}",
+                    std::process::id()
+                ));
+                let _ = std::fs::remove_dir_all(&dir);
+                let path = CString::new(dir.to_str().unwrap()).unwrap();
+                let repo = Some(Repository::init(&path, false).unwrap());
+                Self { dir, repo }
+            }
+
+            /// The repository's index, with `body` given an exclusive handle over it.
+            fn with_index(&self, body: impl FnOnce(IndexMut<'_>)) {
+                let index = self.repo.as_ref().unwrap().as_ref().index().unwrap();
+                // SAFETY: the arc's counted reference keeps the index live past the
+                // handle, and nothing else reaches the index or its repository while
+                // `body` runs: the test holds no other reference to either.
+                let handle = unsafe { IndexMut::from_ptr(index.as_c_ptr()) }.unwrap();
+                body(handle);
+            }
+        }
+
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                drop(self.repo.take());
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        /// In an index a repository owns, `add` and `add_conflict` refuse an id of
+        /// another type before libgit2 looks it up (and overflows its path buffer), but
+        /// leave submodule entries, invalid modes and unowned indexes to libgit2.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn owned_indexes_refuse_foreign_ids_before_libgit2_looks_them_up() {
+            let refused = c"specified object ID type does not match repository object ID type";
+            let scratch = Scratch::new("foreign");
+            scratch.with_index(|mut index| {
+                let sha256 = entry(c"file", 0, 2, 7, 0o100644);
+                let error = index.add(sha256.as_ref()).unwrap_err();
+                assert_eq!((error.raw_code(), error.message()), (-1, refused));
+                let link = entry(c"link", 0, 2, 7, 0o120000);
+                assert_eq!(index.add(link.as_ref()).unwrap_err().message(), refused);
+                // Zero and unset types are refused as well: neither is the repository's.
+                let unset = entry(c"unset", 0, 0, 0, 0o100644);
+                assert_eq!(index.add(unset.as_ref()).unwrap_err().message(), refused);
+                // A submodule's commit is never looked up.
+                let submodule = entry(c"sub", 0, 2, 7, 0o160000);
+                index.add(submodule.as_ref()).unwrap();
+                // libgit2 refuses an invalid mode before any lookup.
+                let tree = entry(c"tree", 0, 2, 7, 0o040000);
+                let error = index.add(tree.as_ref()).unwrap_err();
+                assert_eq!(error.message(), c"invalid entry mode");
+                // A SHA-1 id of an object the repository lacks is libgit2's to refuse.
+                let missing = entry(c"missing", 0, 1, 7, 0o100644);
+                let error = index.add(missing.as_ref()).unwrap_err();
+                assert_eq!(error.raw_code(), -1);
+                assert_ne!(error.message(), refused);
+
+                let sha1 = entry(c"c", 0, 1, 0, 0o100644);
+                let ours = entry(c"c", 0, 2, 7, 0o100644);
+                let error = index.add_conflict(None, Some(sha1.as_ref()), Some(ours.as_ref()));
+                assert_eq!(error.unwrap_err().message(), refused);
+                let tree = entry(c"c", 0, 1, 0, 0o040000);
+                let error = index.add_conflict(Some(ours.as_ref()), None, Some(tree.as_ref()));
+                assert_eq!(
+                    error.unwrap_err().message(),
+                    c"invalid filemode for stage 3 entry"
+                );
+                let paths: Vec<_> = (0..index.as_ref().entry_count())
+                    .map(|n| index.entry(n).unwrap().path().to_owned())
+                    .collect();
+                assert_eq!(paths, [c"sub".to_owned()]);
+                index.add_conflict(None, None, None).unwrap();
+            });
+            // Without an owner, nothing is looked up.
+            let mut index = Index::new().unwrap();
+            let sha256 = entry(c"file", 0, 2, 7, 0o100644);
+            index.as_mut().add(sha256.as_ref()).unwrap();
+            let unset = entry(c"file", 1, 0, 0, 0o100644);
+            index
+                .as_mut()
+                .add_conflict(Some(unset.as_ref()), Some(sha256.as_ref()), None)
+                .unwrap();
+            let handle = index.as_mut();
+            let conflict = handle.conflict(c"file").unwrap();
+            assert_eq!(conflict.ours.unwrap().id().raw_kind(), 2);
+            assert_eq!(conflict.ancestor.unwrap().id().raw_kind(), 0);
+            assert!(handle.entry_by_path(c"file", Stage::Normal).is_none());
+        }
+    }
+
     /// The routines of `git2/index.h` that read, write and remove entries, beside the
     /// refusals the wrappers make before libgit2 sees an argument.
     mod edits {
@@ -3204,20 +4005,11 @@ mod unit_tests {
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::ErrorCode;
 
-        /// A regular-file entry at `path` and `stage`, of id type `kind` with first byte
-        /// `byte` (0 for the zero id), added raw: `git_index_add` is a later batch.
+        /// An entry of mode `mode` at `path` and `stage`, of id type `kind` with first
+        /// byte `byte` (0 for the zero id), added through `IndexMut::add`.
         fn add(index: &mut IndexMut<'_>, path: &CStr, stage: u16, kind: u8, byte: u8, mode: u32) {
-            let mut entry = ffi::git_index_entry {
-                mode,
-                path: path.as_ptr(),
-                flags: stage << 12, // GIT_INDEX_ENTRY_STAGESHIFT
-                ..Default::default()
-            };
-            entry.id.type_ = kind;
-            entry.id.id[0] = byte;
-            // SAFETY: a live index, exclusively borrowed with no entry borrow; C copies
-            // the initialised entry and its NUL-terminated path.
-            assert_eq!(unsafe { ffi::git_index_add(index.as_mut_ptr(), &entry) }, 0);
+            let entry = super::entries::entry(path, stage, kind, byte, mode);
+            index.add(entry.as_ref()).unwrap();
         }
 
         fn paths(index: IndexRef<'_>) -> Vec<(CString, i32)> {

@@ -520,3 +520,8 @@ git_index_has_conflicts
 
 # index review wave 1 batch 1: the path lookup table behind git_index_remove(-1)
 git_index_get_bypath
+
+# index wave 2 batch 0: index entry and conflict symbol wrappers
+git_index_add_from_buffer
+git_index_conflict_get
+git_index_entry_is_conflict

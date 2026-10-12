@@ -971,6 +971,7 @@ fn scalar_capabilities_from_owner() {
 }
 
 mod edits;
+mod entries;
 
 mod matched_path_callback {
     use super::*;
@@ -1138,7 +1139,7 @@ fn stage_values_match_c() {
 }
 
 /// Creation is the safe operation under test. `next` is an observation of the
-/// resulting C state, not another wrapper (the entry type is a later workset).
+/// resulting C state here; the safe `next` is compared in `index/entries.rs`.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn iterator_snapshot_lifecycle_matches_c() {
@@ -1281,7 +1282,8 @@ mod conflict_cursor {
 
     type Observation = (i32, [Option<(Vec<u8>, u16)>; 3]);
 
-    /// Observes constructor state via C (next is owned by the later symbol wave).
+    /// Observes constructor state via C; the safe `next` is compared in
+    /// `index/entries.rs`.
     ///
     /// # Safety
     /// `cursor` must be a live cursor over a live, unmodified, exclusively held index.

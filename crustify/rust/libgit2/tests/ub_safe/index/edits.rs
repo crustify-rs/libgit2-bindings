@@ -20,7 +20,8 @@ use super::Scratch;
 use crate::fixture::index::{Owner, add_staged, repository_index, set_repository_index};
 use crate::fixture::{TempRepo, init, isolated};
 
-/// Adds an entry: `git_index_add` is a later batch's.
+/// Adds an entry to either owner (raw, through the fixture: a shared index yields no
+/// exclusive handle for `IndexMut::add`).
 fn add(index: &impl Owner, path: &CStr, stage: u16, kind: OidType, byte: u8, mode: u32) {
     add_staged(index, path, stage, kind.raw() as u8, byte, mode);
 }
