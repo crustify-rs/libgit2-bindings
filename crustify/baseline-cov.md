@@ -342,7 +342,7 @@ The public exceptions are `filter.h` (the filter API in full), `credential.h`
 
 ## 4. Unsafe surface
 
-`crustify scan-unsafe`'s rustc driver at crustify `c1e054a`, which counts only
+`crustify scan-unsafe`'s rustc driver at crustify `c2c4425`, which counts only
 what the scanned crate defines, by rustc's effective visibility (reachable from
 outside the crate) and, for fn signatures, by safety; methods implementing
 another crate's trait are left out, since that crate fixed their signature.
@@ -356,15 +356,15 @@ packages are never primary and never measured.
 | metric | `https,ssh` | default |
 |---|---:|---:|
 | `code_lines` (HIR denominator) | `14,178` | `13,915` |
-| `fns_pub` / `fns_priv` | `2,234` / `939` | `2,229` / `930` |
+| `safe_fns_pub` / `safe_fns_priv` | `1,748` / `637` | `1,743` / `628` |
 | **`unsafe_fns_pub`** (public unsafe surface) | **`112`** | `112` |
 | `unsafe_fns_priv` | `12` | `12` |
-| `raw_ptr` | `338` | `338` |
-| ↳ `raw_ptr_type_pub` / `_type_priv` (fields) | **`73`** / `1` | same |
+| raw-pointer positions, all six counters | `338` | `338` |
+| ↳ `raw_ptr_ty_pub` / `_ty_priv` (fields) | **`73`** / `1` | same |
 | ↳ `raw_ptr_fn_pub_safe` / `_fn_pub_unsafe` | **`66`** / `70` | same |
 | ↳ `raw_ptr_fn_priv_safe` / `_fn_priv_unsafe` | `120` / `8` | same |
-| **raw pointers on the safe public interface** (`_type_pub` + `_fn_pub_safe`) | **`139`** | `139` |
-| `void_ptr` (all private safe fns) | `36` | `36` |
+| **raw pointers on the safe public interface** (`_ty_pub` + `_fn_pub_safe`) | **`139`** | `139` |
+| `void_ptr_fn_priv_safe` (every `*c_void` position) | `36` | `36` |
 | `unsafe_blocks` | `949` | `932` |
 | `unsafe_block_code_lines` | `3,505` (`24.7%` of `code_lines`) | `3,497` |
 | `ffi_calls` | `672` | `672` |
@@ -432,16 +432,16 @@ their own revision's API.
 | test Rust LoC | `16,799` | `5,817` (`5,341` inline + `476` `tests/`) |
 | `code_lines` (HIR) | `24,928` | `14,178` |
 | public `unsafe fn` (`unsafe_fns_pub`)¹ | `48` | `112` |
-| raw pointers on the safe public interface (`raw_ptr_type_pub` + `raw_ptr_fn_pub_safe`)¹ | `6` (`1` + `5`) | `139` (`73` + `66`) |
+| raw pointers on the safe public interface (`raw_ptr_ty_pub` + `raw_ptr_fn_pub_safe`)¹ | `6` (`1` + `5`) | `139` (`73` + `66`) |
 | raw pointers in public `unsafe fn`s¹ | `4` | `70` |
-| all raw-pointer positions (`raw_ptr`)¹ | `442` | `338` |
+| all raw-pointer positions (sum of the six `raw_ptr_*` partitions)¹ | `442` | `338` |
 | `ffi_calls` | `919` | `672` |
 | tests targeting a sanitizer | see `results.md` | `0` |
 | C line coverage, gcov | not recorded | `47.96%` (campaign-equivalent scope, `https,ssh`) |
 
 The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
 item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
-same driver (crustify `c1e054a`), the campaign's at the active campaign's tip
+same driver (crustify `c2c4425`), the campaign's at the active campaign's tip
 (`libgit2-wrap-20261007`, `crustify/campaigns/20261008-170008` at
 `cb1118ea3`, `crustify/campaigns/20261008-170008/scan-unsafe.json`). They
 count only what each crate defines, so ffibox's own conversions and the
