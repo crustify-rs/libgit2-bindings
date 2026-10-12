@@ -217,8 +217,7 @@ fn update_all_without_an_owner_runs_no_callback() {
 }
 
 /// Ids of another type than the repository's, which libgit2 would look up with an
-/// overflowing path buffer, and names too long for a tree, are refused through both
-/// routes; nothing is written.
+/// overflowing path buffer, are refused through both routes; nothing is written.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn tree_writes_refuse_foreign_ids_without_overflow() {
@@ -244,6 +243,17 @@ fn tree_writes_refuse_foreign_ids_without_overflow() {
     );
     drop(other);
     drop(repo);
+}
+
+/// Names too long for a tree are refused before libgit2 writes one; nothing is written.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+#[cfg_attr(
+    bsan,
+    ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+)]
+fn tree_writes_refuse_long_names() {
+    init();
     let long = CString::new("n".repeat(70_000)).unwrap();
     let index = seeded(&[(&long, 0)]);
     let repo = TempRepo::new("edits-long");

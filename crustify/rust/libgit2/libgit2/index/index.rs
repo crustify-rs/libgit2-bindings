@@ -1967,14 +1967,13 @@ impl IndexMut<'_> {
     ///
     /// Wraps: git_index_conflict_get
     pub fn conflict(&self, path: &CStr) -> Option<Conflict<'_>> {
-        let index = self.as_ref().as_ptr().cast_mut();
+        let (index, path) = (self.as_ref().as_ptr().cast_mut(), path.as_ptr());
         let mut slots = [ptr::null(); 3];
         let [ancestor, ours, theirs] = &mut slots;
         // SAFETY: a live index no other holder reaches, whose entry vector libgit2 sorts
         // (moving no entry); three writable slots, and `path` a NUL-terminated key read
         // for the call.
-        let rc =
-            unsafe { ffi::git_index_conflict_get(ancestor, ours, theirs, index, path.as_ptr()) };
+        let rc = unsafe { ffi::git_index_conflict_get(ancestor, ours, theirs, index, path) };
         if rc < 0 {
             return None;
         }
@@ -2035,11 +2034,14 @@ impl IndexMut<'_> {
     /// it. Fails with libgit2's error when the blob cannot be written.
     ///
     /// Refused, with a `GIT_ERROR_INDEX` error (code `-1`), before libgit2 sees it: an
-    /// entry whose [`stage`](IndexEntryRef::stage) is not [`Stage::Normal`]. libgit2
-    /// adds it at that stage, then resolves the conflict it finds at the path, which the
-    /// new entry itself makes: it moves the entry to the resolved-conflict records,
-    /// freeing it, and then reads its path (`git_index_add_from_buffer`,
-    /// `src/libgit2/index.c`), a use after free.
+    /// entry whose [`stage`](IndexEntryRef::stage) is not [`Stage::Normal`], when libgit2
+    /// would get as far as adding it (the index has an owner, the mode is one of the
+    /// three above, and `data` fits). libgit2 adds it at that stage, then resolves the
+    /// conflict it finds at the path, which the new entry itself makes: it moves the
+    /// entry to the resolved-conflict records, freeing it, and then reads its path
+    /// (`git_index_add_from_buffer`, `src/libgit2/index.c`), a use after free. The
+    /// refusal precedes libgit2's check of the path. Any other such entry fails with
+    /// libgit2's own error, as above.
     ///
     /// Wraps: git_index_add_from_buffer
     pub fn add_from_buffer(
@@ -2047,7 +2049,15 @@ impl IndexMut<'_> {
         entry: IndexEntryRef<'_, '_>,
         data: &[u8],
     ) -> Result<(), RepositoryError> {
-        if entry.stage() != Stage::Normal {
+        let inserted = self.as_ref().has_owner()
+            && entry.filemode().is_some_and(|mode| {
+                matches!(
+                    mode,
+                    FileMode::Blob | FileMode::BlobExecutable | FileMode::Link
+                )
+            })
+            && u32::try_from(data.len()).is_ok();
+        if inserted && entry.stage() != Stage::Normal {
             set(
                 ErrorClass::Index,
                 c"cannot add a conflict side from a buffer: give a stage 0 entry",
@@ -2056,8 +2066,9 @@ impl IndexMut<'_> {
         }
         // SAFETY: as in `add`, for the entries replaced or moved to the REUC records;
         // `data` is `data.len()` readable bytes at a non-NULL pointer, read for the call.
-        // libgit2 replaces the copy's id with the blob's, which it does not look up; the
-        // entry is of stage 0, so resolving the path's conflict leaves the copy alone.
+        // libgit2 replaces the copy's id with the blob's, which it does not look up; an
+        // entry it inserts is of stage 0, so resolving the path's conflict leaves the
+        // copy alone.
         let rc = unsafe {
             ffi::git_index_add_from_buffer(
                 self.as_mut_ptr(),
@@ -2118,8 +2129,10 @@ impl IndexMut<'_> {
     /// dropped.
     ///
     /// libgit2 leaks the joined path of a tree entry whose name it refuses
-    /// (`read_tree_cb`, `src/libgit2/index.c`), and the entries it read when it runs out
-    /// of memory filling its path table (`git_index_read_tree`).
+    /// (`read_tree_cb`, `src/libgit2/index.c`), and, whenever the read fails, the
+    /// entries it read before the failure: it disposes of their vector alone
+    /// (`git_index_read_tree`). That includes a refused name or a missing subtree after
+    /// a blob, and running out of memory filling its path table.
     ///
     /// Wraps: git_index_read_tree
     pub fn read_tree(&mut self, tree: TreeRef<'_, '_>) -> Result<(), RepositoryError> {
@@ -4097,16 +4110,14 @@ mod unit_tests {
             assert!(paths(index.as_ref()).is_empty());
         }
 
-        /// Ids libgit2 would look up in a repository of another id type, and names too
-        /// long for a tree entry, are refused before any tree is written; a conflicted
-        /// index is left to libgit2's `GIT_EUNMERGED`, and submodule and zero ids are not
-        /// looked up.
+        /// Ids libgit2 would look up in a repository of another id type are refused
+        /// before any tree is written; a conflicted index is left to libgit2's
+        /// `GIT_EUNMERGED`, and submodule and zero ids are not looked up.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
-        fn tree_writes_refuse_foreign_ids_and_long_names() {
+        fn tree_writes_refuse_foreign_ids() {
             let (dir, repo) = scratch_repo("refusals");
             let sha256 = OidType::Sha256.raw() as u8;
-            let sha1 = OidType::Sha1.raw() as u8;
 
             let mut index = Index::new().unwrap();
             add(&mut index.as_mut(), c"a", 0, sha256, 1, 0o100644);
@@ -4136,7 +4147,21 @@ mod unit_tests {
             add(&mut index.as_mut(), c"a", 2, sha256, 2, 0o100644);
             let error = index.as_ref().write_tree_to(repo.as_ref()).unwrap_err();
             assert_eq!(error.code(), Some(ErrorCode::Unmerged));
+            drop(repo);
+            let _ = std::fs::remove_dir_all(dir);
+        }
 
+        /// Names too long for a tree entry are refused before any tree is written; the
+        /// longest a tree stores is left to libgit2.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        #[cfg_attr(
+            bsan,
+            ignore = "its large inputs outlast the BorrowSanitizer gate, over an hour alone; the other variants run it"
+        )]
+        fn tree_writes_refuse_long_names() {
+            let (dir, repo) = scratch_repo("long-names");
+            let sha1 = OidType::Sha1.raw() as u8;
             let long = CString::new(format!("dir/{}", "n".repeat(TREE_NAME_MAX + 1))).unwrap();
             let mut index = Index::new().unwrap();
             add(&mut index.as_mut(), &long, 0, sha1, 1, 0o100644);

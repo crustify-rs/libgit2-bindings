@@ -479,6 +479,47 @@ fn refused_tree_entry_names_leave_the_index_as_it_was() {
     );
 }
 
+/// A walk that fails after reading entries (a subtree whose object is gone, after a
+/// blob) leaves the index as it was. libgit2 leaks the entries it read
+/// (`git_index_read_tree` disposes of their vector alone), so the test runs in a child
+/// with LeakSanitizer off.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn failed_tree_reads_after_entries_leave_the_index_as_it_was() {
+    isolated_tolerating_leaks(
+        concat!(
+            module_path!(),
+            "::failed_tree_reads_after_entries_leave_the_index_as_it_was"
+        ),
+        || {
+            init();
+            let scratch = Scratch::new("entries-failed-read");
+            let repo = work_repo(&scratch);
+            let kept = tree(repo.as_ref(), &["k", "d/x"]);
+            let broken = tree(repo.as_ref(), &["a", "b", "q/r"]);
+            let sub = broken.as_ref().get_by_name(c"q").unwrap().id().to_oid();
+            let hex = sub.as_ref().to_hex_string().unwrap();
+            let object = scratch
+                .0
+                .join(".git/objects")
+                .join(&hex[..2])
+                .join(&hex[2..]);
+            std::fs::remove_file(object).unwrap();
+            let mut index = Index::new().unwrap();
+            index.as_mut().read_tree(kept.as_ref()).unwrap();
+            for _ in 0..2 {
+                let error = index.as_mut().read_tree(broken.as_ref()).unwrap_err();
+                assert!(error.raw_code() < 0);
+                let paths: Vec<_> = listing(&mut index).into_iter().map(|(p, _)| p).collect();
+                assert_eq!(paths, [c"d/x".to_owned(), c"k".to_owned()]);
+            }
+            drop(broken);
+            drop(kept);
+            drop(repo);
+        },
+    );
+}
+
 /// Snapshot copies outlive later steps, the index's changes behind the snapshot (an
 /// entry replaced in place, removed, the index cleared) and the index itself; a
 /// drained iterator stays drained. BSan targets this test.
@@ -601,4 +642,46 @@ fn threads_add_and_read_their_own_indexes() {
             });
         }
     });
+}
+
+/// Snapshot copies cross threads, as their `Send` and `Sync` say: shared by reference
+/// with readers that clone them, then moved, compared and dropped on other threads,
+/// after the index they were copied from is gone. TSan watches.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn snapshot_copies_cross_threads() {
+    init();
+    let mut sole = Index::new().unwrap();
+    for n in 0..8u8 {
+        let path = CString::new(format!("f{n}")).unwrap();
+        sole.as_mut().add(blob(&path, n).as_ref()).unwrap();
+    }
+    let sole: IndexArc = sole.into();
+    let copies: Vec<IndexEntryBuf> = IndexIterator::new(&sole).unwrap().as_mut().collect();
+    drop(sole);
+    let clones: Vec<Vec<IndexEntryBuf>> = std::thread::scope(|s| {
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let copies = &copies;
+                s.spawn(move || {
+                    for (n, copy) in copies.iter().enumerate() {
+                        assert_eq!(copy.path().to_bytes(), format!("f{n}").as_bytes());
+                        assert_eq!(copy.as_ref().stage(), Stage::Normal);
+                    }
+                    copies.clone()
+                })
+            })
+            .collect();
+        readers.into_iter().map(|r| r.join().unwrap()).collect()
+    });
+    std::thread::scope(|s| {
+        for moved in clones {
+            let copies = &copies;
+            s.spawn(move || {
+                assert_eq!(&moved, copies);
+                drop(moved);
+            });
+        }
+    });
+    std::thread::spawn(move || drop(copies)).join().unwrap();
 }
