@@ -342,7 +342,7 @@ The public exceptions are `filter.h` (the filter API in full), `credential.h`
 
 ## 4. Unsafe surface
 
-`crustify scan-unsafe`'s rustc driver at crustify `039884b`, which counts only
+`crustify scan-unsafe`'s rustc driver at crustify `ef0ffe0`, which counts only
 what the scanned crate defines, by rustc's effective visibility (reachable from
 outside the crate) and, for fn signatures, by safety; methods implementing
 another crate's trait are left out, since that crate fixed their signature.
@@ -360,10 +360,10 @@ packages are never primary and never measured.
 | **`unsafe_fns_pub`** (public unsafe surface) | **`112`** | `112` |
 | `unsafe_fns_priv` | `12` | `12` |
 | raw-pointer positions, all six counters | `338` | `338` |
-| ↳ `raw_ptr_ty_pub` / `_ty_priv` (fields) | **`73`** / `1` | same |
+| ↳ `raw_ptr_ty_pub_fields_pub` / `_ty_pub_fields_priv` / `_ty_priv` (fields) | **`0`** / `73` / `1` | same |
 | ↳ `raw_ptr_fn_pub_safe` / `_fn_pub_unsafe` | **`66`** / `70` | same |
 | ↳ `raw_ptr_fn_priv_safe` / `_fn_priv_unsafe` | `120` / `8` | same |
-| **raw pointers on the safe public interface** (`_ty_pub` + `_fn_pub_safe`) | **`139`** | `139` |
+| **raw pointers on the safe public interface** (`_ty_pub_fields_pub` + `_fn_pub_safe`) | **`66`** | `66` |
 | `void_ptr_fn_priv_safe` (every `*c_void` position) | `36` | `36` |
 | `unsafe_blocks` | `949` | `932` |
 | `unsafe_block_code_lines` | `3,505` (`24.7%` of `code_lines`) | `3,497` |
@@ -384,11 +384,12 @@ What the public figures are made of, by name:
   process-wide state the caller must synchronise: the `21` `opts::*` getters
   and setters (`set_search_path`, `set_mwindow_size`, `set_ssl_cert_file`, …)
   and `transport::register`.
-- **raw pointers on the safe public interface (`139`)** — `66` are the
+- **raw pointers on the safe public interface (`66`)** — all of them the
   returns of the safe `Binding::raw()` accessors, the libgit2 pointer of each
-  wrapper; `73` are fields of public types, one per wrapper (`Commit`,
-  `Config`, `Blob`, …; two in `Indexer`, `OdbPackwriter`, `PushOptions`):
-  the pointer each wrapper holds.
+  wrapper. No public type has a public raw-pointer field: the `73` pointers
+  public types hold (`raw_ptr_ty_pub_fields_priv`; one per wrapper, `Commit`,
+  `Config`, `Blob`, …, two in `Indexer`, `OdbPackwriter`, `PushOptions`) are
+  private `raw` fields, reachable only through `raw()`.
 - **`raw_ptr_fn_pub_unsafe` (`70`)** — the parameters of `from_raw` (`63`),
   `raw` (`6`) and `Cred::unwrap` (`1`).
 
@@ -432,7 +433,8 @@ their own revision's API.
 | test Rust LoC | `16,799` | `5,817` (`5,341` inline + `476` `tests/`) |
 | `code_lines` (HIR) | `24,928` | `14,178` |
 | public `unsafe fn` (`unsafe_fns_pub`)¹ | `48` | `112` |
-| raw pointers on the safe public interface (`raw_ptr_ty_pub` + `raw_ptr_fn_pub_safe`)¹ | `6` (`1` + `5`) | `139` (`73` + `66`) |
+| raw pointers on the safe public interface (`raw_ptr_ty_pub_fields_pub` + `raw_ptr_fn_pub_safe`)¹ | `5` (`0` + `5`) | `66` (`0` + `66`) |
+| raw pointers held in private fields of public types (`raw_ptr_ty_pub_fields_priv`)¹ | `1` | `73` |
 | raw pointers in public `unsafe fn`s¹ | `4` | `70` |
 | all raw-pointer positions (sum of the six `raw_ptr_*` partitions)¹ | `442` | `338` |
 | `ffi_calls` | `919` | `672` |
@@ -441,7 +443,7 @@ their own revision's API.
 
 The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
 item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
-same driver (crustify `039884b`), the campaign's at the active campaign's tip
+same driver (crustify `ef0ffe0`), the campaign's at the active campaign's tip
 (`libgit2-wrap-20261007`, `crustify/campaigns/20261008-170008` at
 `cb1118ea3`, `crustify/campaigns/20261008-170008/scan-unsafe.json`). They
 count only what each crate defines, so ffibox's own conversions and the
