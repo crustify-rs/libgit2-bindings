@@ -1,5 +1,7 @@
 # Agent-owned bindgen allowlist: one regex per line, matched against C functions names.
 # Add only the items a batch needs; keep entries sorted.
+crustify_GIT_INDEX_ENTRY_STAGE
+crustify_GIT_INDEX_ENTRY_STAGE_SET
 crustify_GIT_OID_DEFAULT
 git_annotated_commit_free
 git_annotated_commit_from_fetchhead

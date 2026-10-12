@@ -1310,6 +1310,19 @@ impl Stage {
     }
 }
 
+/// [`IndexEntryMut::set_stage`] was given [`Stage::Any`], the wildcard of the
+/// stage-matching operations, which is not a stage an entry can be at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AnyStageError;
+
+impl fmt::Display for AnyStageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("an index entry cannot be at any stage: give a concrete stage")
+    }
+}
+
+impl std::error::Error for AnyStageError {}
+
 /// The longest name a tree entry stores whole.
 const TREE_NAME_MAX: usize = u16::MAX as usize;
 
@@ -2284,7 +2297,7 @@ impl IndexTimeMut<'_> {
 ///
 /// ```
 /// use libgit2::libgit2::core::types::FileMode;
-/// use libgit2::libgit2::index::index::{EntryExtendedFlags, IndexEntry, IndexTime};
+/// use libgit2::libgit2::index::index::{EntryExtendedFlags, IndexEntry, IndexTime, Stage};
 /// use libgit2::libgit2::oid::oid::Oid;
 /// use ffibox::CZeroable;
 ///
@@ -2295,7 +2308,9 @@ impl IndexTimeMut<'_> {
 /// handle.set_file_size(42);
 /// handle.set_mtime(IndexTime::new(1_700_000_000, 5).as_ref());
 /// handle.set_flags_extended(EntryExtendedFlags::INTENT_TO_ADD).unwrap();
+/// handle.set_stage(Stage::Ours).unwrap();
 /// assert_eq!(entry.as_ref().mtime().seconds(), 1_700_000_000);
+/// assert_eq!(entry.as_ref().stage(), Stage::Ours);
 /// ```
 ///
 /// `#[repr(transparent)]` over `git_index_entry`, so a pointer to it is a pointer to the
@@ -2644,8 +2659,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     }
 
     /// The entry's 16 flag bits, widened: the path length (`GIT_INDEX_ENTRY_NAMEMASK`),
-    /// the stage (`GIT_INDEX_ENTRY_STAGEMASK`), and [`EntryFlags::EXTENDED`] and
-    /// [`EntryFlags::VALID`].
+    /// the stage (`GIT_INDEX_ENTRY_STAGEMASK`, decoded by [`stage`](Self::stage)), and
+    /// [`EntryFlags::EXTENDED`] and [`EntryFlags::VALID`].
     ///
     /// Field: git_index_entry.flags
     pub fn flags(&self) -> EntryFlags {
@@ -2662,6 +2677,18 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
         // SAFETY: as `dev`, for `flags_extended`.
         let raw = unsafe { addr_of!((*self.as_ptr()).flags_extended).read() };
         EntryExtendedFlags::from_bits_retain(raw.into())
+    }
+
+    /// The entry's stage, the two `GIT_INDEX_ENTRY_STAGEMASK` bits of its
+    /// [`flags`](Self::flags): [`Stage::Normal`] for a file without a conflict, or the
+    /// side of a conflict the entry records. Never [`Stage::Any`].
+    ///
+    /// Wraps: GIT_INDEX_ENTRY_STAGE
+    pub fn stage(&self) -> Stage {
+        // SAFETY: the shim only reads the `flags` field, through the shared handle's
+        // pointer to a live entry.
+        let raw = unsafe { ffi::crustify_GIT_INDEX_ENTRY_STAGE(self.as_ptr()) };
+        Stage::from_raw(raw).expect("a two-bit stage is a named one")
     }
 
     /// The file's path, relative to the working directory, borrowed for `'p`.
@@ -2846,6 +2873,36 @@ impl<'p> IndexEntryMut<'_, 'p> {
         let raw = u16::try_from(flags.bits())?;
         // SAFETY: as `set_dev`, for `flags`; every `u16` is valid.
         unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(raw) }
+        Ok(())
+    }
+
+    /// Replaces the entry's stage (the `GIT_INDEX_ENTRY_STAGEMASK` bits of its
+    /// [`flags`](IndexEntryRef::flags)) with `stage`, keeping every other flag bit.
+    ///
+    /// Fails, changing nothing, for [`Stage::Any`], which is not a stage an entry can be
+    /// at: the C macro would keep the low two bits of its `-1`, storing
+    /// [`Stage::Theirs`].
+    ///
+    /// Only the exclusive handle restages an entry:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::core::types::FileMode;
+    /// use libgit2::libgit2::index::index::{IndexEntry, Stage};
+    /// use libgit2::libgit2::oid::oid::Oid;
+    /// use ffibox::CZeroable;
+    ///
+    /// let entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
+    /// entry.as_ref().set_stage(Stage::Ours);
+    /// ```
+    ///
+    /// Wraps: GIT_INDEX_ENTRY_STAGE_SET
+    pub fn set_stage(&mut self, stage: Stage) -> Result<(), AnyStageError> {
+        if stage == Stage::Any {
+            return Err(AnyStageError);
+        }
+        // SAFETY: the shim only rewrites the `flags` field, through the exclusive handle's
+        // pointer to a live entry; the stage is a concrete one (0..=3).
+        unsafe { ffi::crustify_GIT_INDEX_ENTRY_STAGE_SET(self.as_mut_ptr(), stage.raw()) }
         Ok(())
     }
 
@@ -4276,6 +4333,57 @@ mod unit_tests {
         assert_eq!(handle.as_ref().flags_extended().bits(), 0x8001);
         let raw = entry.into_raw();
         assert_eq!((raw.flags, raw.flags_extended), (0xffff, 0x8001));
+    }
+
+    /// `set_stage` refuses the wildcard in Rust, before the macro would store stage 3,
+    /// without a panic and with every flag bit as it was; the error says why.
+    #[test]
+    fn entry_stage_setter_refuses_the_wildcard() {
+        let mut entry = IndexEntry::new(c"s", Oid::zeroed().as_ref(), FileMode::Blob);
+        let mut handle = entry.as_mut();
+        for bits in [0, 0x1fff, 0xcfff, 0xffff] {
+            handle
+                .set_flags(EntryFlags::from_bits_retain(bits))
+                .unwrap();
+            assert_eq!(handle.set_stage(Stage::Any), Err(AnyStageError));
+            assert_eq!(handle.as_ref().flags().bits(), bits);
+        }
+        assert_eq!(entry.into_raw().flags, 0xffff);
+        let error: &dyn std::error::Error = &AnyStageError;
+        assert_eq!(
+            error.to_string(),
+            "an index entry cannot be at any stage: give a concrete stage"
+        );
+    }
+
+    /// The stage of an entry adopted from a raw pointer is the two stage bits C stored,
+    /// whatever the other flag bits; and stages set on a copy reach the raw struct the
+    /// copy hands back, and nothing else.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2's stage macros")]
+    fn entry_stage_of_a_borrowed_entry() {
+        let path = CString::new("lent").unwrap();
+        for (flags, stage) in [
+            (0x0000, Stage::Normal),
+            (0xcfff, Stage::Normal),
+            (0x1000, Stage::Ancestor),
+            (0x2abc, Stage::Ours),
+            (0xffff, Stage::Theirs),
+        ] {
+            let raw = ffi::git_index_entry {
+                flags,
+                path: path.as_ptr(),
+                ..Default::default()
+            };
+            // SAFETY: `raw` is initialised, outlives the handle and is not written while
+            // it lives; its path is a live NUL-terminated string that outlives `copy`.
+            let entry = unsafe { IndexEntryRef::from_ptr(&raw const raw) }.unwrap();
+            assert_eq!(entry.stage(), stage);
+            let mut copy = entry.to_index_entry();
+            copy.as_mut().set_stage(Stage::Ancestor).unwrap();
+            assert_eq!(copy.into_raw().flags, (flags & !0x3000) | 0x1000);
+            assert_eq!((raw.flags, entry.stage()), (flags, stage));
+        }
     }
 
     /// The constructor zeroes every field it is not given, and equality and the debug
