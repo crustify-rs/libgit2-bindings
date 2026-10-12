@@ -701,8 +701,9 @@ pub mod create_ext {
     }
 }
 
-/// Fills a repository's index, standing in for the `git_index_read_tree` and
-/// `git_index_add` wrappers (a later run), which replace it.
+/// Fills a repository's index through raw `git_index_read_tree` and `git_index_add`:
+/// their wrappers (`IndexMut::read_tree`, `IndexMut::add`) take an exclusive handle,
+/// which no safe wrapper hands out for a repository's shared index.
 pub mod stage {
     use std::ffi::CStr;
 
@@ -768,6 +769,23 @@ pub mod odb {
                 data.as_ptr().cast(),
                 data.len(),
                 ffi::GIT_OBJECT_BLOB,
+            )
+        };
+        if rc == 0 { Ok(id) } else { Err(rc) }
+    }
+
+    /// `git_odb_write` of `data` as a tree, unchecked: a tree no tree builder writes (an
+    /// entry named `.git`, say); the id, or the error code.
+    pub fn write_tree(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: as in `write_blob`.
+        let rc = unsafe {
+            ffi::git_odb_write(
+                &mut id,
+                odb.as_c_ptr(),
+                data.as_ptr().cast(),
+                data.len(),
+                ffi::GIT_OBJECT_TREE,
             )
         };
         if rc == 0 { Ok(id) } else { Err(rc) }
@@ -957,10 +975,14 @@ pub mod refs {
 pub mod index {
     use std::ffi::{CStr, CString, c_int};
 
+    use ffibox::CZeroable;
     use libgit2::ffi;
-    use libgit2::libgit2::index::index::{Capabilities, IndexArc, IndexBox, IndexRef};
+    use libgit2::libgit2::core::types::FileMode;
+    use libgit2::libgit2::index::index::{
+        Capabilities, EntryExtendedFlags, EntryFlags, IndexArc, IndexBox, IndexEntry, IndexRef,
+    };
     use libgit2::libgit2::index::sys::index::ReucSide;
-    use libgit2::libgit2::oid::oid::Oid;
+    use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError};
 
     use super::{CHILD, TempRepo};
@@ -1034,28 +1056,24 @@ pub mod index {
         index.handle().path().map(CStr::to_owned)
     }
 
-    /// `git_index_add` of a regular file at `path`; the status.
+    /// `IndexMut::add` of a regular file at `path`; the status.
     pub fn add(index: &mut IndexBox, path: &CStr) -> c_int {
         add_flagged(index, path, 0)
     }
 
-    /// `git_index_add` of a regular file at `path` in `stage` (a conflict side for 1 to
-    /// 3), of the SHA1 id starting with the bytes of `id`; the status. Stands in for the
-    /// conflict and entry wrappers. A repository's index needs the id of an object its
-    /// repository has.
+    /// `IndexMut::add` of a regular file at `path` in `stage` (a conflict side for 1 to
+    /// 3), of the SHA1 id starting with the bytes of `id`; the status. A repository's
+    /// index needs the id of an object its repository has.
     pub fn add_staged_id(index: &mut IndexBox, path: &CStr, stage: u16, id: &[u8]) -> c_int {
-        let mut entry = ffi::git_index_entry {
-            mode: 0o100644,
-            path: path.as_ptr(),
-            // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
-            flags: stage << 12,
-            ..Default::default()
-        };
-        entry.id.id[..id.len()].copy_from_slice(id);
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
-        // SAFETY: the box's live index, borrowed exclusively; `entry` and its path are
-        // read and copied for the call.
-        unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }
+        let mut bytes = [0; 32];
+        bytes[..id.len()].copy_from_slice(id);
+        let mut entry = IndexEntry::new(path, Oid::zeroed().as_ref(), FileMode::Blob);
+        let mut handle = entry.as_mut();
+        // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
+        handle.set_flags(EntryFlags::from_bits_retain(u32::from(stage) << 12)).unwrap();
+        handle.id_mut().set_kind(OidType::Sha1);
+        handle.id_mut().set_id(bytes);
+        status(index.as_mut().add(entry.as_ref()))
     }
 
     /// One more counted reference to `repo`'s index, adopted as the sole owner, for the
@@ -1073,14 +1091,15 @@ pub mod index {
         unsafe { IndexBox::from_c(out) }.unwrap()
     }
 
-    /// `git_index_add` of a regular file at `path` marked intent-to-add, which needs a
+    /// `IndexMut::add` of a regular file at `path` marked intent-to-add, which needs a
     /// version 3 entry; the status.
     pub fn add_intent_to_add(index: &mut IndexBox, path: &CStr) -> c_int {
         add_flagged(index, path, ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD as u16)
     }
 
     /// `git_index_add` of an entry at `path` and `stage`, of id type `kind` with first id
-    /// byte `byte`, and of mode `mode`; asserts it is added.
+    /// byte `byte`, and of mode `mode`; asserts it is added. Raw, for either owner:
+    /// `IndexMut::add` needs an exclusive handle, which a shared index never yields.
     pub fn add_staged(index: &impl Owner, path: &CStr, stage: u16, kind: u8, byte: u8, mode: u32) {
         let mut entry = ffi::git_index_entry {
             mode,
@@ -1105,17 +1124,16 @@ pub mod index {
     }
 
     fn add_flagged(index: &mut IndexBox, path: &CStr, flags_extended: u16) -> c_int {
-        let mut entry = ffi::git_index_entry {
-            mode: 0o100644,
-            path: path.as_ptr(),
-            flags_extended,
-            ..Default::default()
-        };
-        entry.id.id[0] = 1;
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
-        // SAFETY: the box's live index, borrowed exclusively; `entry` and its path are
-        // read and copied for the call.
-        unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }
+        let mut entry = IndexEntry::new(path, Oid::zeroed().as_ref(), FileMode::Blob);
+        let mut handle = entry.as_mut();
+        handle
+            .set_flags_extended(EntryExtendedFlags::from_bits_retain(flags_extended.into()))
+            .unwrap();
+        handle.id_mut().set_kind(OidType::Sha1);
+        let mut id = [0; 32];
+        id[0] = 1;
+        handle.id_mut().set_id(id);
+        status(index.as_mut().add(entry.as_ref()))
     }
 
     /// `IndexRef::write`; the status.
@@ -2070,19 +2088,12 @@ pub mod signature {
     }
 }
 
-/// The index-entry insertion wrapper is scheduled in the next index wave. This
-/// one fixture supplies populated indexes; construction already uses the safe API.
+/// An index holding a regular-file entry at each of `paths`, added through
+/// `IndexMut::add`.
 pub fn match_list_index(paths: &[&CStr]) -> libgit2::libgit2::index::index::IndexBox {
-    let index = libgit2::libgit2::index::index::Index::new().unwrap();
+    let mut index = libgit2::libgit2::index::index::Index::new().unwrap();
     for path in paths {
-        let mut entry = ffi::git_index_entry {
-            path: path.as_ptr(), mode: 0o100644, ..Default::default()
-        };
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
-        entry.id.id[0] = 1;
-        // SAFETY: exclusive live index; entry and NUL-terminated path are copied
-        // by git_index_add during the call. The fixture retains no raw pointer.
-        assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+        assert_eq!(self::index::add(&mut index, path), 0);
     }
     index
 }

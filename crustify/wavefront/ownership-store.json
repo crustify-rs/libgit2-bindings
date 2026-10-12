@@ -11776,9 +11776,9 @@
      "ptr": {
       "scalar": {
        "by_ref": {
-        "owned": false,
+        "owned": null,
         "borrowed": {
-         "lifetime": "other"
+         "lifetime": "arg:iterator"
         }
        }
       },
@@ -11786,11 +11786,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "other"
+       "lifetime": "arg:ancestor_out"
       },
       "nullable": false,
       "mutable": false,
-      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
      }
     },
     {
@@ -11803,11 +11803,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "other"
+       "lifetime": "arg:iterator"
       },
       "nullable": false,
       "mutable": true,
-      "note": "Exclusive borrowed cursor, advances cur. Stored index must be live and unmodified; no ownership transfer."
+      "note": "Advances cur; get_byindex sorts the borrowed index's vector. Entries belong to the index the cursor borrows, unchanged while it lives."
      }
     },
     {
@@ -11815,9 +11815,9 @@
      "ptr": {
       "scalar": {
        "by_ref": {
-        "owned": false,
+        "owned": null,
         "borrowed": {
-         "lifetime": "other"
+         "lifetime": "arg:iterator"
         }
        }
       },
@@ -11825,11 +11825,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "other"
+       "lifetime": "arg:our_out"
       },
       "nullable": false,
       "mutable": false,
-      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
      }
     },
     {
@@ -11837,9 +11837,9 @@
      "ptr": {
       "scalar": {
        "by_ref": {
-        "owned": false,
+        "owned": null,
         "borrowed": {
-         "lifetime": "other"
+         "lifetime": "arg:iterator"
         }
        }
       },
@@ -11847,11 +11847,11 @@
       "string": false,
       "owned": false,
       "borrowed": {
-       "lifetime": "other"
+       "lifetime": "arg:their_out"
       },
       "nullable": false,
       "mutable": false,
-      "note": "Required writable output slot receives optional shared entry borrowed from iterator index, never owned. Set NULL initially; missing sides stay NULL. Valid until index mutation or destruction. const applies to pointee, not output slot."
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
      }
     }
    ]
@@ -24300,6 +24300,505 @@
      "note": "Fresh calloc'd entry whose path points into its own allocation; modes and oids zeroed. NULL on size overflow or OOM. Released by index_entry_reuc_free."
     }
    }
+  },
+  {
+   "name": "git_index_add",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive: replaces a same-path, same-stage entry in place (index_entry_cpy, path bytes memcpy'd) or inserts a fresh copy; with an owner, looks the id up in its odb (git_object__is_valid), which overflows on an id of another oid type."
+     }
+    },
+    {
+     "name": "source_entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source_entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: index_entry_dup copies every field and the path (stage bits included); nothing retained."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_add_from_buffer",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "buffer",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:buffer"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "len bytes read for the call by git_blob_create_from_buffer; may be NULL only for len 0; len > UINT32_MAX refused."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive; needs an owning repository (fails otherwise), writes a blob to its odb, inserts or replaces the entry with trust_id, then moves a conflict at the path to REUC."
+     }
+    },
+    {
+     "name": "source_entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source_entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call: mode must be blob/exec/link; copied with its path, id and file_size replaced by the blob's."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_add",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "ancestor_entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor_entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional side, copied with its path; stage overwritten to 1."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive: removes stage-0 entries at each side's path (freed), inserts copies at stages 1-3; with an owner, looks each id up (overflows on a foreign oid type). Partial insertion persists when a later side fails."
+     }
+    },
+    {
+     "name": "our_entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:our_entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional side, copied with its path; stage overwritten to 2."
+     }
+    },
+    {
+     "name": "their_entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:their_entry"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "Optional side, copied with its path; stage overwritten to 3."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_conflict_get",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "ancestor_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "arg:index"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:ancestor_out"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
+     }
+    },
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "git_index_find sorts the entry vector (entries do not move); otherwise read-only."
+     }
+    },
+    {
+     "name": "our_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "arg:index"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:our_out"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Search key, read for the call; ENOTFOUND (error set only when the path is absent) when it has no stage 1-3 entry."
+     }
+    },
+    {
+     "name": "their_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "arg:index"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:their_out"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Out slot, always written: NULL or a const entry owned by the index, valid until the index next changes."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_entry_is_conflict",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: the flags' stage bits."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_entry_stage",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "entry",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:entry"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read-only: the flags' stage bits."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_get_byindex",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Sorts the entry vector (entries do not move), then reads it."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "Const index-owned entry, NULL out of range; freed by removal/clear/read, rewritten in place by a same-path add and by write."
+    }
+   }
+  },
+  {
+   "name": "git_index_get_bypath",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Hash-map lookup only; sets an error on a miss."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Lookup key, read for the call."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:index"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "As get_byindex. Stage -1 is masked to 3 by GIT_INDEX_ENTRY_STAGE_SET, so it is no wildcard."
+    }
+   }
+  },
+  {
+   "name": "git_index_iterator_next",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "it",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:it"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Advances cur over the snapshot vector."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": null,
+        "borrowed": {
+         "lifetime": "arg:it"
+        }
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Written only on success: a const entry from the snapshot, kept alive (frees deferred) until the iterator is freed."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_index_read_tree",
+   "defined_in": "src/libgit2/index.c",
+   "ptr_args": [
+    {
+     "name": "index",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:index"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Exclusive: clears (frees) every entry and the tree cache, swaps in fresh entries; copies stat data of unchanged old entries. Leaks the new vector and map when the map insert fails (OOM)."
+     }
+    },
+    {
+     "name": "tree",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:tree"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Walked (subtrees looked up in the tree's repository) for the call; ids copied; nothing retained."
+     }
+    }
+   ]
   }
  ]
 }
