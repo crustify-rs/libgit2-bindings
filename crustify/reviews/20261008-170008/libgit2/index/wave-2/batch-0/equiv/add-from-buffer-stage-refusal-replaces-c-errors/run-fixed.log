@@ -1,0 +1,10 @@
+stage 2 file:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+stage 3 tree:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+stage 0 file:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+exit status: 0

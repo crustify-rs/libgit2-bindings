@@ -1,0 +1,20 @@
+test index::entries::zz_probe_read_tree_failure_leak ... ok
+==2507535==ERROR: LeakSanitizer: detected memory leaks
+Direct leak of 98 byte(s) in 1 object(s) allocated from:
+    #0 0x62308cd0a704 in malloc (crustify/rust/target/asan-ubsan/x86_64-unknown-linux-gnu/debug/build/libgit2/3c72a356cc4f2ee9/out/ub_safe-3c72a356cc4f2ee9+0x742704) (BuildId: c86dbd0246b2e8c448c1df33185e449b66e0379e)
+    #1 0x7c2c3cb21bd2 in git__malloc /target/src/util/alloc.h:19:12
+    #2 0x7c2c3cb21bd2 in git__calloc /target/src/util/alloc.c:31:13
+    #3 0x7c2c3cc3cd06 in index_entry_create /target/src/libgit2/index.c:993:10
+    #4 0x7c2c3cc3a132 in read_tree_cb /target/src/libgit2/index.c:3430:6
+    #5 0x7c2c3cd87b14 in tree_walk /target/src/libgit2/tree.c:1022:12
+    #6 0x7c2c3cd87676 in git_tree_walk /target/src/libgit2/tree.c:1048:10
+    #7 0x7c2c3cc39c41 in git_index_read_tree /target/src/libgit2/index.c:3480:15
+    #8 0x62308dcd8563 in <libgit2::libgit2::index::index::IndexMut>::read_tree crustify/rust/libgit2/libgit2/index/index.rs:2141:25
+    #9 0x62308d450167 in ub_safe::index::entries::zz_probe_read_tree_failure_leak crustify/rust/libgit2/tests/ub_safe/index/entries.rs:616:32
+    #10 0x62308d6c68c8 in ub_safe::index::entries::zz_probe_read_tree_failure_leak::{closure#0} crustify/rust/libgit2/tests/ub_safe/index/entries.rs:607:37
+    #11 0x62308d165b37 in <ub_safe::index::entries::zz_probe_read_tree_failure_leak::{closure#0} as core::ops::function::FnOnce<()>>::call_once /root/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+    #12 0x62308dc2606a in <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/core/src/ops/function.rs:250:5
+    #13 0x62308dc2606a in test::__rust_begin_short_backtrace::<core::result::Result<(), alloc::string::String>, fn() -> core::result::Result<(), alloc::string::String>> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/test/src/lib.rs:701:18
+    #14 0x62308dc33244 in test::run_test_in_process::{closure#0} /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/test/src/lib.rs:724:74
+    #15 0x62308dc33244 in <core::panic::unwind_safe::AssertUnwindSafe<test::run_test_in_process::{closure#0}> as core::ops::function::FnOnce<()>>::call_once /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/core/src/panic/unwind_safe.rs:275:9
+    #16 0x62308dc33244 in std::panicking::catch_unwind::do_call::<core::panic::unwind_safe::AssertUnwindSafe<test::run_test_in_process::{closure#0}>, core::result::Result<(), alloc::string::String>> /rustc/1d81eb4ad9cd207e3e638bd32b17ec4fce8412a6/library/std/src/panicking.rs:573:43

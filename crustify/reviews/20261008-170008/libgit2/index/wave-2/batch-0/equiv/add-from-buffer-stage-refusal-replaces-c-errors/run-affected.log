@@ -1,0 +1,14 @@
+stage 2 file:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "cannot add a conflict side from a buffer: give a stage 0 entry")), 0)
+stage 3 tree:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "cannot add a conflict side from a buffer: give a stage 0 entry")), 0)
+stage 0 file:
+  C:    (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+  Rust: (-1, Some((10, "could not initialize index entry. Index is not backed up by an existing repository.")), 0)
+
+thread 'main' (2505073) panicked at src/main.rs:86:5:
+the safe API's errors differ from libgit2's
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+exit status: 101
