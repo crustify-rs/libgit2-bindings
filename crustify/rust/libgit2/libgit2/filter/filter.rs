@@ -216,9 +216,9 @@ impl<'a, 'r> FilterListRef<'a, 'r> {
     /// handle meanwhile.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_filter_list) -> Option<Self> {
-        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
-        // contract; `FilterList` is transparent over `git_filter_list`.
-        NonNull::new(ptr.cast::<FilterList<'r>>()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_filter_list` that outlives `'a` and is not written meanwhile.
+        unsafe { <FilterList<'r> as CCell>::ref_from_ptr(ptr) }
     }
 
     /// Read-only pointer to the C object.

@@ -306,9 +306,9 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
     /// least that long).
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_commit) -> Option<Self> {
-        // SAFETY: a non-null pointer the caller vouches for, per this function's
-        // contract; `Commit` is transparent over `git_commit`.
-        NonNull::new(ptr.cast_mut()).map(|p| CommitRef(unsafe { CBorrowedPtr::new(p.cast()) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_commit` that outlives `'a` and is not written meanwhile.
+        unsafe { <Commit<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
     }
 
     /// Read-only pointer to the C object.

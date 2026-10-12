@@ -1016,9 +1016,9 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// least that long) and which no one writes during `'a`.
     #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_tree) -> Option<Self> {
-        // SAFETY: a non-null pointer the caller vouches for, per this function's
-        // contract; `Tree` is transparent over `git_tree`.
-        NonNull::new(ptr.cast_mut()).map(|p| TreeRef(unsafe { CBorrowedPtr::new(p.cast()) }))
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_tree` that outlives `'a` and is not written meanwhile.
+        unsafe { <Tree<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
     }
 
     /// Read-only pointer to the C object.
