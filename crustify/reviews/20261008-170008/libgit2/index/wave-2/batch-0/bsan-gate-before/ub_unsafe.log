@@ -1,0 +1,131 @@
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> libgit2-sys/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+22 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+20 ~ cc = "1.2"
+21 + [lints]
+   |
+warning: `libgit2-sys` (manifest) generated 1 warning
+warning: `package.homepage` is redundant with `package.repository`
+  --> /opt/venv/share/ffibox/Cargo.toml:11:12
+   |
+ 9 | repository = "https://github.com/crustify-rs/ffibox"
+   |              ---------------------------------------
+10 | documentation = "https://docs.rs/ffibox"
+11 | homepage = "https://github.com/crustify-rs/ffibox"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `ffibox` (manifest) generated 1 warning
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/ub_unsafe/main.rs (target-bsan/bsan/x86_64-unknown-linux-gnu/debug/build/libgit2/e6aa5d26d645c5a4/out/ub_unsafe-e6aa5d26d645c5a4)
+
+running 95 tests
+test buffer::adopting_an_unowned_buffer_never_reads_or_frees_it ... ok
+test buffer::adopting_git_buf_init_owns_nothing ... ok
+test commit::adopts_a_null_buffer_with_any_count ... ok
+test buffer::adopted_buffers_handed_back_to_c ... ok
+test commit::adopts_what_c_code_builds ... ok
+test buffer::adopting_c_built_buffers_at_the_edges ... ok
+test commit::adopts_what_libgit2_fills ... ok
+test checkout::set_notify_callback::a_cancel_is_returned_and_no_file_is_written ... ok
+test checkout::set_notify_callback::no_callback_ignores_the_payload_and_flags ... ok
+test message::block_only_arrays_are_adopted ... ok
+test message::null_arrays_are_adopted_without_c ... ok
+test message::arrays_given_back_by_the_safe_api_are_adopted ... ok
+test message::trailers_given_back_by_the_safe_api_are_adopted ... ok
+test checkout::set_progress_callback::a_replaced_payload_may_be_freed ... ok
+test checkout::set_progress_callback::every_report_is_readable_including_the_null_path ... ok
+test message::arrays_c_filled_are_adopted_and_freed_once ... ok
+test checkout::set_notify_callback::the_callback_may_reenter ... ok
+test checkout::set_perfdata_callback::reported_once_per_successful_checkout ... ok
+test sys_alloc::free_member_ignores_null ... ok
+test checkout::set_notify_callback::a_replaced_payload_may_be_freed ... ok
+test sys_alloc::free_member_releases_blocks_from_either_allocating_member ... ok
+test sys_alloc::malloc_member_accepts_zero_bytes ... ok
+test sys_alloc::malloc_member_reports_failure_as_null ... ok
+test refdb::new_leaves_a_refused_backend_to_its_caller ... ok
+test message::parsed_trailers_are_adopted_until_the_array_is_freed ... ok
+test refdb::new_takes_a_backend_it_accepts ... ok
+test diff::generate_with_options_contract ... ok
+test sys_alloc::realloc_member_failure_leaves_the_block_live ... ok
+test sys_alloc::realloc_member_resizes_and_keeps_the_prefix ... ok
+test sys_alloc::zero_byte_requests_are_allocations ... ok
+test buffer::adopting_what_libgit2_leaves ... ok
+test sys_config::iterator_set_backend_live_and_null ... ok
+test sys_odb_backend::adopts_a_c_array_with_spare_capacity ... ok
+test sys_odb_backend::adopts_an_allocated_array_of_no_strings ... ok
+test diff::generate_with_options_refuses_empty_pattern_beside_others ... ok
+test sys_odb_backend::null_arrays ... ok
+test sys_odb_backend::adopts_what_libgit2_hands_out ... ok
+test sys_odb_backend::refuses_a_null_element_and_leaves_ownership ... ok
+test common::enable_caching ... ok
+test common::enable_strict_symbolic_ref_creation ... ok
+test common::enable_http_expect_continue ... ok
+test common::enable_strict_object_creation ... ok
+test common::allocation_failures_report_errors ... ok
+test diff::generate_with_options_checked_fields ... ok
+test common::cached_memory ... ok
+test checkout::set_notify_callback::arguments_are_readable_and_the_payload_reached ... ok
+test common::enable_ofs_delta ... ok
+test common::add_ssl_x509_cert ... ok
+test trace::from_fn_adopts_a_trampoline ... ok
+test common::set_cache_object_limit ... ok
+test trace::from_fn_calls_from_many_threads_race_nothing ... ok
+test common::disable_pack_keep_file_checks ... ok
+test trace::from_fn_reentrant_calls_nest ... ok
+test refdb::open_borrows_only_its_own_repository ... ok
+test common::failed_sysdir_copies_leave_empty_readable_directories ... ok
+test common::enable_strict_hash_verification ... ok
+test common::set_owner_validation ... ok
+test common::enable_fsync_gitdir ... ok
+test common::set_cache_max_size ... ok
+test common::set_homedir ... ok
+test common::set_mwindow_file_limit ... ok
+test common::set_allocator ... ok
+test checkout::set_notify_callback::checkouts_on_threads_share_nothing ... ok
+test common::set_odb_packed_priority ... ok
+test common::set_odb_loose_priority ... ok
+test common::set_mwindow_size ... ok
+test trace::from_fn_calls_reach_the_function_as_direct_calls_do ... ok
+test common::set_windows_sharemode ... ok
+test common::enable_unsaved_index_safety ... ok
+test common::set_user_agent ... ok
+test common::set_user_agent_product ... ok
+test common::set_server_connect_timeout ... ok
+test common::set_template_path ... ok
+test common::set_extensions ... ok
+test common::set_mwindow_mapped_limit ... ok
+test refdb::open_builds_independent_refdbs ... ok
+test common::set_pack_max_object_size ... ok
+test common::set_pack_max_objects ... ok
+test common::set_search_path ... ok
+test common::set_server_timeout ... ok
+test common::set_ssl_ciphers ... ok
+test common::set_ssl_cert_locations ... ok
+test common::without_a_runtime_pinned_options_fail ... ok
+test sys_odb_backend::adopts_its_own_raw_parts ... ok
+test repository::set_refdb_installs_the_repository_s_own_refdbs ... ok
+test trace::config::set_and_clear_before_init ... ok
+test trace::from_fn_installed_in_libgit2 ... ok
+test trace::config::set_and_clear_from_inside_the_callback ... ok
+test repository::set_refdb_installs_the_refdb_of_an_outliving_repository ... ok
+test trace::from_fn_installed_function_outlives_every_callback_value ... ok
+test trace::config::set_and_clear_while_a_traced_thread_waits_outside_libgit2 ... ok
+test trace::config::set_and_clear_from_successive_threads ... ok
+test trace::config::clear_and_set_at_every_level ... ok
+test trace::config::set_then_traced_from_many_threads ... ok
+test sys_alloc::malloc_member_returns_writable_aligned_blocks has been running for over 60 seconds
+test sys_alloc::malloc_member_returns_writable_aligned_blocks ... ok
+
+test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 71.83s
+
