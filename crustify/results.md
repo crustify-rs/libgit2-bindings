@@ -18,7 +18,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **`--min-fields`** — `20`
 - **orchestrator parallelism** — `10` concurrent batch processes through `libgit2/core`; `16` from `libgit2/repository`
 - **branch** — `crustify/campaigns/20261008-170008`, tip `<sha>`
-- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `scan-unsafe` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; every batch and wave `scan-unsafe` from `4771856`, the sub-campaign and campaign scans from `cbf6fbc`), ffibox `695d52d` (`main`)
+- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `scan-unsafe` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; batch and wave `scan-unsafe` records through `libgit2/config` from `4771856`, later ones and every sub-campaign and campaign scan from `cbf6fbc`), ffibox `695d52d` (`main`)
 - **build version** — `1`
 - **C test baseline** — `3443/3498, 55 skipped, and ctest targets invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online, online_customcert, proxy, auth_clone, auth_clone_and_push disabled`
 
@@ -145,8 +145,8 @@ in Notes.
 - **total symbols** — `979`
 - **ported types** — `<n>`
 - **ported symbols** — `<n>`
-- **wrapped types** — `77` (`29.84`% of total types)
-- **wrapped symbols** — `341` (`34.83`% of total symbols)
+- **wrapped types** — `96` (`37.21`% of total types)
+- **wrapped symbols** — `425` (`43.41`% of total symbols)
 
 Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/openai/gpt-6.1-sol` via `codex` for `libgit2/config`, `openrouter/openai/gpt-6-astra` via `codex` for `libgit2/index` wave 0; review
 `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgit2/object` review wave 0, `openrouter/anthropic/claude-opus-5.5` via `claude` from its review wave 1.
@@ -599,71 +599,71 @@ Deterministic `crustify scan-unsafe <workdir>`; no model.
 
 ### Final tally overview
 
-| | final (`a26547a6d`) |
+| | final (`70936502d`) |
 |---|---|
-| unsafe loc | `2137` |
-| % of loc | `15.64`% |
-| blocks | `1313` |
-| % in `impl T` | `71.97`% |
-| `unsafe fn` | `254` |
-| ...of which not sanctioned | `59` |
+| unsafe loc | `2593` |
+| % of loc | `16.53`% |
+| blocks | `1541` |
+| % in `impl T` | `75.41`% |
+| `unsafe fn` | `289` |
+| ...of which not sanctioned | `60` |
 | raw-ptr smell | `25` |
 | void-ptr smell | `7` |
-| FFI calls | `435` |
+| FFI calls | `530` |
 | `&`/`&mut` on a wrapper | `8` |
 | field proj outside an accessor | `4` |
 
 ### All metrics
 
-| metric | final (`a26547a6d`) | `raw-lifetime-void` (`99533715f`) | `raw-lifetime-string` (`3830c3c3d`) | `libgit2/util` (`6993f6bcd`) | `libgit2/oid` (`2752d23f4`) | `libgit2/core` (`bde2697ad`) | `libgit2/repository` (`e2e2a7473`) | `libgit2/object` (`8faffad69`) | `libgit2/config` (`6afdb3b46`) |
-|---|---|---|---|---|---|---|---|---|---|
-| `code_lines` | `13666` | `92` | `239` | `571` | `1106` | `3209` | `6735` | `11421` | `13666` |
-| `total_stmts` | `3318` | `29` | `71` | `248` | `378` | `794` | `1647` | `2806` | `3318` |
-| `unsafe_blocks` | `1313` | `12` | `30` | `64` | `117` | `312` | `642` | `1081` | `1313` |
-| `unsafe_block_stmts` | `79` | `0` | `0` | `0` | `9` | `18` | `40` | `72` | `79` |
-| `unsafe_block_lines` | `2183` | `12` | `30` | `64` | `150` | `436` | `922` | `1832` | `2183` |
-| `unsafe_block_code_lines` | `2137` | `12` | `30` | `62` | `146` | `412` | `884` | `1789` | `2137` |
-| `unsafe_blocks_wrapper_impl` | `945` | `0` | `11` | `30` | `78` | `157` | `435` | `758` | `945` |
-| `unsafe_blocks_ffi_export` | `76` | `0` | `0` | `4` | `4` | `9` | `16` | `37` | `76` |
-| `unsafe_fns` | `254` | `6` | `12` | `22` | `30` | `101` | `152` | `206` | `254` |
-| `unsafe_fns_seam` | `195` | `3` | `6` | `15` | `23` | `48` | `93` | `148` | `195` |
-| `unsafe_fns_pub_seam` | `49` | `3` | `6` | `6` | `8` | `14` | `26` | `44` | `49` |
-| `unsafe_fns_priv_seam` | `146` | `0` | `0` | `9` | `15` | `34` | `67` | `104` | `146` |
-| **`unsafe fn` smell** | **`59`** | `3` | `6` | `7` | `7` | `53` | `59` | `58` | `59` |
-| `unsafe_fns_pub_smell` | `42` | `0` | `1` | `1` | `1` | `36` | `42` | `41` | `42` |
-| `unsafe_fns_priv_smell` | `17` | `3` | `5` | `6` | `6` | `17` | `17` | `17` | `17` |
-| `fns_pub` | `1207` | `7` | `23` | `58` | `111` | `335` | `676` | `1037` | `1207` |
-| `fns_priv` | `474` | `6` | `12` | `30` | `50` | `112` | `224` | `362` | `474` |
-| `unsafe_impls` / `unsafe_traits` | `241` / `1` | `5` / `0` | `7` / `0` | `15` / `1` | `35` / `1` | `76` / `1` | `140` / `1` | `213` / `1` | `241` / `1` |
-| `ffi_calls` | `435` | `3` | `3` | `10` | `29` | `76` | `203` | `380` | `435` |
-| `wrapper_newtypes` | `60` | `0` | `1` | `3` | `6` | `12` | `27` | `45` | `60` |
-| `wrapper_newtypes_declared` | `52` | `0` | `0` | `2` | `5` | `10` | `25` | `43` | `52` |
-| `wrapper_declared_nonconformant` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| `wrapper_newtypes_undeclared` | `8` | `0` | `1` | `1` | `1` | `2` | `2` | `2` | `8` |
-| `raw_ptr_args` | `200` | `5` | `8` | `19` | `25` | `49` | `91` | `142` | `200` |
-| `raw_ptr_rets` | `172` | `2` | `6` | `16` | `26` | `49` | `99` | `143` | `172` |
-| `raw_ptr_fields` | `1` | `0` | `0` | `0` | `0` | `1` | `2` | `1` | `1` |
-| **total positions** | **`373`** | `7` | `14` | `35` | `51` | `99` | `192` | `286` | `373` |
-| `raw_ptr_seam` | `348` | `2` | `5` | `25` | `41` | `81` | `163` | `261` | `348` |
-| `raw_ptr_pub_seam` | `5` | `2` | `5` | `5` | `5` | `5` | `5` | `5` | `5` |
-| `raw_ptr_priv_seam` | `343` | `0` | `0` | `20` | `36` | `76` | `158` | `256` | `343` |
-| `raw_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `9` | `6` | `6` |
-| `raw_ptr_priv_smell` | `19` | `5` | `9` | `10` | `10` | `18` | `20` | `19` | `19` |
-| `raw_ptr_pub` | `11` | `2` | `5` | `5` | `5` | `5` | `14` | `11` | `11` |
-| `raw_ptr_priv` | `362` | `5` | `9` | `30` | `46` | `94` | `178` | `275` | `362` |
-| **smell (total − seam)** | **`25`** | `5` | `9` | `10` | `10` | `18` | `29` | `25` | `25` |
-| `raw_ptr_wrapped` | `5` | `0` | `0` | `0` | `0` | `5` | `5` | `5` | `5` |
-| `raw_ptr_derefs` | `311` | `0` | `0` | `8` | `26` | `65` | `152` | `243` | `311` |
-| `ref_to_type_wrapper_sanctioned` | `134` | `0` | `2` | `8` | `21` | `36` | `70` | `110` | `134` |
-| `ref_to_type_wrapper_smell` | `8` | `0` | `8` | `8` | `8` | `8` | `8` | `8` | `8` |
-| `ref_to_type_wrapper_body_smell` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| `deref_impl_on_wrapper` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| `field_proj_wrapped` | `285` | `0` | `0` | `8` | `26` | `60` | `144` | `227` | `285` |
-| `field_proj_outside_impl` | `4` | `0` | `0` | `0` | `0` | `4` | `4` | `4` | `4` |
-| `field_ref_wrapped` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| `void_ptr_seam` | `89` | `0` | `0` | `10` | `16` | `31` | `55` | `73` | `89` |
-| `void_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `6` | `6` | `6` |
-| `void_ptr_priv_smell` | `1` | `0` | `0` | `0` | `0` | `0` | `1` | `1` | `1` |
+| metric | final (`70936502d`) | `raw-lifetime-void` (`99533715f`) | `raw-lifetime-string` (`3830c3c3d`) | `libgit2/util` (`6993f6bcd`) | `libgit2/oid` (`2752d23f4`) | `libgit2/core` (`bde2697ad`) | `libgit2/repository` (`e2e2a7473`) | `libgit2/object` (`8faffad69`) | `libgit2/config` (`6afdb3b46`) | `libgit2/index` (`973f2e7ad`) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `code_lines` | `15690` | `92` | `239` | `571` | `1106` | `3209` | `6735` | `11421` | `13666` | `15690` |
+| `total_stmts` | `3693` | `29` | `71` | `248` | `378` | `794` | `1647` | `2806` | `3318` | `3693` |
+| `unsafe_blocks` | `1541` | `12` | `30` | `64` | `117` | `312` | `642` | `1081` | `1313` | `1541` |
+| `unsafe_block_stmts` | `82` | `0` | `0` | `0` | `9` | `18` | `40` | `72` | `79` | `82` |
+| `unsafe_block_lines` | `2641` | `12` | `30` | `64` | `150` | `436` | `922` | `1832` | `2183` | `2641` |
+| `unsafe_block_code_lines` | `2593` | `12` | `30` | `62` | `146` | `412` | `884` | `1789` | `2137` | `2593` |
+| `unsafe_blocks_wrapper_impl` | `1162` | `0` | `11` | `30` | `78` | `157` | `435` | `758` | `945` | `1162` |
+| `unsafe_blocks_ffi_export` | `79` | `0` | `0` | `4` | `4` | `9` | `16` | `37` | `76` | `79` |
+| `unsafe_fns` | `289` | `6` | `12` | `22` | `30` | `101` | `152` | `206` | `254` | `289` |
+| `unsafe_fns_seam` | `229` | `3` | `6` | `15` | `23` | `48` | `93` | `148` | `195` | `229` |
+| `unsafe_fns_pub_seam` | `55` | `3` | `6` | `6` | `8` | `14` | `26` | `44` | `49` | `55` |
+| `unsafe_fns_priv_seam` | `174` | `0` | `0` | `9` | `15` | `34` | `67` | `104` | `146` | `174` |
+| **`unsafe fn` smell** | **`60`** | `3` | `6` | `7` | `7` | `53` | `59` | `58` | `59` | `60` |
+| `unsafe_fns_pub_smell` | `43` | `0` | `1` | `1` | `1` | `36` | `42` | `41` | `42` | `43` |
+| `unsafe_fns_priv_smell` | `17` | `3` | `5` | `6` | `6` | `17` | `17` | `17` | `17` | `17` |
+| `fns_pub` | `1459` | `7` | `23` | `58` | `111` | `335` | `676` | `1037` | `1207` | `1459` |
+| `fns_priv` | `562` | `6` | `12` | `30` | `50` | `112` | `224` | `362` | `474` | `562` |
+| `unsafe_impls` / `unsafe_traits` | `271` / `1` | `5` / `0` | `7` / `0` | `15` / `1` | `35` / `1` | `76` / `1` | `140` / `1` | `213` / `1` | `241` / `1` | `271` / `1` |
+| `ffi_calls` | `530` | `3` | `3` | `10` | `29` | `76` | `203` | `380` | `435` | `530` |
+| `wrapper_newtypes` | `73` | `0` | `1` | `3` | `6` | `12` | `27` | `45` | `60` | `73` |
+| `wrapper_newtypes_declared` | `65` | `0` | `0` | `2` | `5` | `10` | `25` | `43` | `52` | `65` |
+| `wrapper_declared_nonconformant` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `wrapper_newtypes_undeclared` | `8` | `0` | `1` | `1` | `1` | `2` | `2` | `2` | `8` | `8` |
+| `raw_ptr_args` | `230` | `5` | `8` | `19` | `25` | `49` | `91` | `142` | `200` | `230` |
+| `raw_ptr_rets` | `213` | `2` | `6` | `16` | `26` | `49` | `99` | `143` | `172` | `213` |
+| `raw_ptr_fields` | `1` | `0` | `0` | `0` | `0` | `1` | `2` | `1` | `1` | `1` |
+| **total positions** | **`444`** | `7` | `14` | `35` | `51` | `99` | `192` | `286` | `373` | `444` |
+| `raw_ptr_seam` | `419` | `2` | `5` | `25` | `41` | `81` | `163` | `261` | `348` | `419` |
+| `raw_ptr_pub_seam` | `5` | `2` | `5` | `5` | `5` | `5` | `5` | `5` | `5` | `5` |
+| `raw_ptr_priv_seam` | `414` | `0` | `0` | `20` | `36` | `76` | `158` | `256` | `343` | `414` |
+| `raw_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `9` | `6` | `6` | `6` |
+| `raw_ptr_priv_smell` | `19` | `5` | `9` | `10` | `10` | `18` | `20` | `19` | `19` | `19` |
+| `raw_ptr_pub` | `11` | `2` | `5` | `5` | `5` | `5` | `14` | `11` | `11` | `11` |
+| `raw_ptr_priv` | `433` | `5` | `9` | `30` | `46` | `94` | `178` | `275` | `362` | `433` |
+| **smell (total − seam)** | **`25`** | `5` | `9` | `10` | `10` | `18` | `29` | `25` | `25` | `25` |
+| `raw_ptr_wrapped` | `5` | `0` | `0` | `0` | `0` | `5` | `5` | `5` | `5` | `5` |
+| `raw_ptr_derefs` | `365` | `0` | `0` | `8` | `26` | `65` | `152` | `243` | `311` | `365` |
+| `ref_to_type_wrapper_sanctioned` | `161` | `0` | `2` | `8` | `21` | `36` | `70` | `110` | `134` | `161` |
+| `ref_to_type_wrapper_smell` | `8` | `0` | `8` | `8` | `8` | `8` | `8` | `8` | `8` | `8` |
+| `ref_to_type_wrapper_body_smell` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `deref_impl_on_wrapper` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `field_proj_wrapped` | `338` | `0` | `0` | `8` | `26` | `60` | `144` | `227` | `285` | `338` |
+| `field_proj_outside_impl` | `4` | `0` | `0` | `0` | `0` | `4` | `4` | `4` | `4` | `4` |
+| `field_ref_wrapped` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
+| `void_ptr_seam` | `114` | `0` | `0` | `10` | `16` | `31` | `55` | `73` | `89` | `114` |
+| `void_ptr_pub_smell` | `6` | `0` | `0` | `0` | `0` | `0` | `6` | `6` | `6` | `6` |
+| `void_ptr_priv_smell` | `1` | `0` | `0` | `0` | `0` | `0` | `1` | `1` | `1` | `1` |
 
 ## Notes
 
@@ -930,7 +930,7 @@ sub-campaign scan were rerun with it, and the batch and wave scans, whose counte
 unchanged, were not. The rerun matched every earlier value. Each All-metrics column is the
 crate-wide scan at that sub-campaign's end, so the columns accumulate left to right. `final`
 is the campaign tip. `libgit2/config` is scanned at its tip after the export revert and the
-`git_config_backend` follow-up, so it equals `final`.
+`git_config_backend` follow-up.
 
 In the Final tally, `unsafe loc` is `unsafe_block_code_lines` and `% of loc` is
 `unsafe_loc_ratio`. `% in impl T` is `unsafe_blocks_wrapper_impl` over `unsafe_blocks`, and
