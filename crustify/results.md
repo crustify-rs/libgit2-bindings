@@ -135,11 +135,11 @@ in Notes.
 
 - **Rust LoC, non-test** — `<n>`
 - **Rust LoC, tests** — `<n>`
-- **UB safe tests** — `752` (`35.80`% C LoC coverage, `34.11`% Rust LoC coverage)
-- **UB unsafe tests** — `95` (`22.20`% C LoC coverage, `5.12`% Rust LoC coverage)
-- **Equiv tests** — `464` (`43.73`% C LoC coverage, `30.85`% Rust LoC coverage)
-- **Unit tests** — `712` (`32.13`% C LoC coverage, `93.98`% Rust LoC coverage)
-- **Total tests** — `2023` (`46.65`% C LoC coverage, `98.85`% Rust LoC coverage)
+- **UB safe tests** — `752` (`35.80`% C LoC coverage, `84.57`% Rust LoC coverage)
+- **UB unsafe tests** — `95` (`22.20`% C LoC coverage, `12.70`% Rust LoC coverage)
+- **Equiv tests** — `464` (`43.73`% C LoC coverage, `76.50`% Rust LoC coverage)
+- **Unit tests** — `712` (`32.13`% C LoC coverage, `87.48`% Rust LoC coverage)
+- **Total tests** — `2023` (`46.65`% C LoC coverage, `99.55`% Rust LoC coverage)
 - **C LoC** — `<n>`
 - **total types** — `258`
 - **total symbols** — `979`
@@ -851,7 +851,11 @@ trybuild runner itself is one `ub_safe` test. `ub_unsafe` holds 59 written `#[te
 tests` adds all four counts. The coverage pairs come from the method in "Reading the batch
 tables". Each workload runs alone against the `coverage` prebuild, and `Total tests`
 carries the union from the same run. Rust coverage excludes `tests/`, the `-sys`
-bindings and dependencies. The UB suites also run under ASan+UBSan, TSan and
+bindings and dependencies. It also excludes every line inside a `#[cfg(test)]` item, the
+inline unit-test modules being 60% of the instrumented library lines, so that the tests
+are not counted as code to cover. All four workloads share one denominator, and the total
+is the union of their covered lines. The batch tables' Rust cells still use the earlier
+method, which counted those test lines, until they are restated. The UB suites also run under ASan+UBSan, TSan and
 BorrowSanitizer in the agents' gates. Those runs share one test set and are not counted
 again.
 ### `libgit2/util`
