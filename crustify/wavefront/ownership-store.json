@@ -24393,7 +24393,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "Read for the call: mode must be blob/exec/link; copied with its path, id and file_size replaced by the blob's."
+      "note": "Read for the call: mode must be blob/exec/link; copied with its path, stage bits included, its id and file_size replaced by the blob's. A stage 1-3 entry is a use after free once inserted (owner, valid mode and length, valid path): git_index__conflict_to_reuc treats the new entry as the path's conflict, moves it to REUC and frees it, then git_tree_cache_invalidate_path reads entry->path (index.c:1563)."
      }
     }
    ]
@@ -24778,7 +24778,7 @@
       },
       "nullable": false,
       "mutable": true,
-      "note": "Exclusive: clears (frees) every entry and the tree cache, swaps in fresh entries; copies stat data of unchanged old entries. Leaks the new vector and map when the map insert fails (OOM)."
+      "note": "Exclusive: drops the tree cache first, then clears (frees) every entry and swaps in fresh ones; copies stat data of unchanged old entries. On any failure the old entries stay but every entry already created leaks (cleanup disposes the new vector without freeing its entries; the map-insert OOM path returns before cleanup, leaking vector and map too); read_tree_cb also leaks the joined path when index_entry_create refuses a name (.git), validated against the index owner."
      }
     },
     {

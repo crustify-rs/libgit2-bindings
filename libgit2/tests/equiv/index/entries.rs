@@ -621,6 +621,57 @@ fn add_from_buffer_sequences_match() {
     drop(c);
 }
 
+/// A case's name, its two indexes (C's, Rust's), and the mode and data of its entries.
+type BufferCase<'a> = (&'a str, &'a dyn Fn() -> (CIndex, IndexBox), u32, &'a [u8]);
+
+/// Entries of a conflict stage fail alike wherever libgit2 refuses them before adding
+/// them, safely: without an owner, with a mode other than a file's or a link's, and with
+/// more than `u32::MAX` bytes. `add_from_buffer` refuses only the entries libgit2 would
+/// add (and free), keeping libgit2's errors for these (`equiv/add-from-buffer-stage-
+/// refusal-replaces-c-errors`).
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn conflict_stage_buffers_fail_as_c_before_adding() {
+    init();
+    let big = vec![0u8; u32::MAX as usize + 1];
+    let unowned = || (c_open(None).1.unwrap(), Index::new().unwrap());
+    let (c_repo, rust_repo) = (Repo::new("entries-stage-c"), Repo::new("entries-stage-r"));
+    let owned = || (c_repo.c_index(), rust_repo.index_box());
+    let cases: &[BufferCase<'_>] = &[
+        ("unowned file", &unowned, 0o100644, b"x"),
+        ("unowned link", &unowned, 0o120000, b"x"),
+        ("unowned tree", &unowned, 0o040000, b"x"),
+        ("unowned oversized", &unowned, 0o100644, &big),
+        ("owned submodule", &owned, 0o160000, b"x"),
+        ("owned tree", &owned, 0o040000, b"x"),
+        ("owned oversized", &owned, 0o100755, &big),
+    ];
+    for (case, indexes, mode, data) in cases {
+        let (c, mut rust) = indexes();
+        for stage in 1..=3 {
+            let side = entry(c"f", stage, 1, 0, *mode, 0);
+            clear();
+            // SAFETY: a live index lending no entry; the entry and the bytes are read
+            // for the call, which fails before libgit2 adds anything.
+            let expected = c_status(unsafe {
+                ffi::git_index_add_from_buffer(
+                    c.0,
+                    &side.into_raw(),
+                    data.as_ptr().cast(),
+                    data.len(),
+                )
+            });
+            clear();
+            let actual = rust_status(rust.as_mut().add_from_buffer(side.as_ref(), data));
+            assert!(expected.0 < 0, "{case}, stage {stage}");
+            assert_eq!(expected, actual, "{case}, stage {stage}");
+            assert_same(c.0, &rust.as_mut(), &format!("{case}, stage {stage}"));
+        }
+        drop(rust);
+        drop(c);
+    }
+}
+
 /// On an index a repository owns, `add` and `add_conflict` look ids up as C does: a
 /// missing object fails alike, and a partial conflict stays alike.
 #[test]
