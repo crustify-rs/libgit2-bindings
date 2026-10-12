@@ -211,6 +211,56 @@ fn reuc_entries_survive_until_replacement_and_clear() {
     }
 }
 
+/// Records lent by the exclusive handle's `&self` stay borrowed while that handle writes
+/// the index through its shared reborrow, case-sensitive and ignore-case: writing sorts
+/// the REUC vector (and copies the entries into a case-sensitive order) but frees no
+/// record, so every held record still reads as it did.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn reuc_records_outlive_writes_through_the_shared_reborrow() {
+    let dir = std::env::temp_dir().join(format!("crustify-reuc-write-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = CString::new(dir.join("index").to_str().unwrap()).unwrap();
+    let ids = [1u8, 2, 3].map(|b| Oid::from_raw(&[b; 20], OidType::Sha1).unwrap());
+    let refs = [&ids[0], &ids[1], &ids[2]];
+    for ignore_case in [false, true] {
+        let mut index = Index::open(&file).unwrap();
+        assert_eq!(set_ignore_case(&mut index, ignore_case), 0);
+        for i in (0..12).rev() {
+            let path = CString::new(format!("{}{i:02}", ["p", "P"][i % 2])).unwrap();
+            assert_eq!(
+                add_reuc(&mut index, &path, [0o100644, 0, 0o100755], refs),
+                0
+            );
+        }
+        let handle = index.as_mut();
+        let held: Vec<_> = (0..12).map(|i| handle.reuc_entry(i).unwrap()).collect();
+        let found = handle.reuc_entry_by_path(c"p04").unwrap();
+        let before: Vec<_> = held.iter().map(|r| r.path().to_owned()).collect();
+        for _ in 0..2 {
+            handle.as_ref().write().unwrap();
+        }
+        for (record, path) in held.iter().zip(&before) {
+            assert_eq!(record.path(), path.as_c_str());
+            assert_eq!(record.modes(), [0o100644, 0, 0o100755]);
+            assert_eq!(record.theirs().unwrap().id.id()[..20], [3; 20]);
+        }
+        assert_eq!(found.path(), c"p04");
+        assert_eq!(found.ancestor().unwrap().id.id()[..20], [1; 20]);
+        drop(index);
+        // The file keeps the writer's order, case-folded for an ignore-case index, and the
+        // reader trusts it.
+        let mut reread = Index::open(&file).unwrap();
+        let handle = reread.as_mut();
+        let paths: Vec<_> = (0..12)
+            .map(|i| handle.reuc_entry(i).unwrap().path().to_owned())
+            .collect();
+        assert_eq!(paths, before);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Case-folded lookups after the index re-sorts its records for ignore-case.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
