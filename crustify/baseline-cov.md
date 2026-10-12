@@ -342,25 +342,29 @@ The public exceptions are `filter.h` (the filter API in full), `credential.h`
 
 ## 4. Unsafe surface
 
-`crustify scan-unsafe` (the rustc driver at crustify `HEAD` of `2026-10-12`).
+`crustify scan-unsafe`'s rustc driver at crustify `c1e054a`, which counts only
+what the scanned crate defines, by rustc's effective visibility (reachable from
+outside the crate) and, for fn signatures, by safety; methods implementing
+another crate's trait are left out, since that crate fixed their signature.
 `scan-unsafe` builds with default features, so the `https,ssh` figures come
-from the same driver run under those features through the same
-`driver._collect_emissions`, with the per-crate emission lines kept. Exactly one
-crate emitted, `git2`: the workspace root is the `git2` package and declares no
-members, so `libgit2-sys` and the workspace's other packages are never primary
-and never measured.
+from the same driver run under those features
+(`/data/marius.momeu/baseline-cov/scan_surface.py`), keeping the per-crate
+emission. Exactly one crate emitted, `git2`: the workspace root is the `git2`
+package and declares no members, so `libgit2-sys` and the workspace's other
+packages are never primary and never measured.
 
 | metric | `https,ssh` | default |
 |---|---:|---:|
 | `code_lines` (HIR denominator) | `14,178` | `13,915` |
 | `fns_pub` / `fns_priv` | `2,234` / `939` | `2,229` / `930` |
-| `unsafe_fns` | `124` | `124` |
-| ...exported (`_pub_seam` + `_pub_smell`) | **`112`** (`90` + `22`) | `112` (`90` + `22`) |
-| ...private | `12` | `12` |
-| raw-pointer positions, args / rets / fields | `177` / `87` / `74` | same |
-| ...exported (`raw_ptr_pub`) | **`136`** | `136` |
-| ...private (`raw_ptr_priv`) | `202` | `202` |
-| `*c_void` positions | `36` | `36` |
+| **`unsafe_fns_pub`** (public unsafe surface) | **`112`** | `112` |
+| `unsafe_fns_priv` | `12` | `12` |
+| `raw_ptr` | `338` | `338` |
+| ↳ `raw_ptr_type_pub` / `_type_priv` (fields) | **`73`** / `1` | same |
+| ↳ `raw_ptr_fn_pub_safe` / `_fn_pub_unsafe` | **`66`** / `70` | same |
+| ↳ `raw_ptr_fn_priv_safe` / `_fn_priv_unsafe` | `120` / `8` | same |
+| **raw pointers on the safe public interface** (`_type_pub` + `_fn_pub_safe`) | **`139`** | `139` |
+| `void_ptr` (all private safe fns) | `36` | `36` |
 | `unsafe_blocks` | `949` | `932` |
 | `unsafe_block_code_lines` | `3,505` (`24.7%` of `code_lines`) | `3,497` |
 | `ffi_calls` | `672` | `672` |
@@ -371,37 +375,25 @@ and never measured.
 `git2` writes almost no `// SAFETY:` comments (`11` of `940` lexical unsafe
 sites), so `undocumented_unsafe` is close to the full count.
 
-### Seam and smell, by `git2`'s own conventions
+What the public figures are made of, by name:
 
-The seam/smell split rests on the seam names the scan is given
-(`scan-unsafe --seams`); the scanner assumes none. These are `git2`'s own,
-read off its code: every exported `unsafe fn` and raw-pointer position was
-listed by name from a scan with no seam file, and the names that convert
-between a safe wrapper and a libgit2 pointer were kept. The file
-(`/data/marius.momeu/baseline-cov/seams/git2.txt`) lists, one per line:
+- **`unsafe_fns_pub` (`112`)** — `80` are `Binding::from_raw` (`git2`'s own
+  `Binding` trait, implemented on every wrapper: adopt a libgit2 pointer), `7`
+  `raw`, `1` each `from_raw_opt`, `Cred::unwrap` and
+  `CheckoutBuilder::configure`; the other `22` are not conversions but
+  process-wide state the caller must synchronise: the `21` `opts::*` getters
+  and setters (`set_search_path`, `set_mwindow_size`, `set_ssl_cert_file`, …)
+  and `transport::register`.
+- **raw pointers on the safe public interface (`139`)** — `66` are the
+  returns of the safe `Binding::raw()` accessors, the libgit2 pointer of each
+  wrapper; `73` are fields of public types, one per wrapper (`Commit`,
+  `Config`, `Blob`, …; two in `Indexer`, `OdbPackwriter`, `PushOptions`):
+  the pointer each wrapper holds.
+- **`raw_ptr_fn_pub_unsafe` (`70`)** — the parameters of `from_raw` (`63`),
+  `raw` (`6`) and `Cred::unwrap` (`1`).
 
-| seam fn | what it is |
-|---|---|
-| `from_raw`, `from_raw_opt`, `raw` | the `Binding` trait (`src/util.rs`): adopt / expose the libgit2 pointer; implemented on every wrapper |
-| `unwrap` | `Cred::unwrap`: surrender the raw `git_cred` |
-| `configure` | `CheckoutBuilder::configure`: fill a raw `git_checkout_options` |
-
-The C-ABI gateway (`extern "C"` / `#[no_mangle]` fns) is seam by structure,
-whatever the file says.
-
-| | `https,ssh` | default |
-|---|---:|---:|
-| exported `unsafe fn`: seam / smell | `90` / **`22`** | `90` / `22` |
-| private `unsafe fn`: seam / smell | `5` / `7` | `5` / `7` |
-| exported raw-pointer positions: seam / smell | `136` / **`0`** | `136` / `0` |
-| private raw-pointer positions: seam / smell | `110` / `92` | `110` / `92` |
-| exported `*c_void` smell | `0` | `0` |
-
-Every exported raw pointer is behind `Binding`. The `22` exported `unsafe fn`
-left as smell are not conversions but process-wide state the caller must
-synchronise: the `21` `opts::*` getters and setters (`set_search_path`,
-`set_mwindow_size`, `set_ssl_cert_file`, `set_server_timeout_in_milliseconds`,
-…) and `transport::register`. That is the obligation `git2` exports.
+The scan is name-blind: these are read off the `--sites` of the counters, not
+used to classify.
 
 ## 5. Sanitizers
 
@@ -439,17 +431,23 @@ their own revision's API.
 | non-test Rust LoC | `24,928` | `15,649` (`src/`) |
 | test Rust LoC | `16,799` | `5,817` (`5,341` inline + `476` `tests/`) |
 | `code_lines` (HIR) | `24,928` | `14,178` |
-| `unsafe_fns` | `998` | `124` |
-| raw-pointer positions | `1,166` | `338` |
+| public `unsafe fn` (`unsafe_fns_pub`)¹ | `48` | `112` |
+| raw pointers on the safe public interface (`raw_ptr_type_pub` + `raw_ptr_fn_pub_safe`)¹ | `6` (`1` + `5`) | `139` (`73` + `66`) |
+| raw pointers in public `unsafe fn`s¹ | `4` | `70` |
+| all raw-pointer positions (`raw_ptr`)¹ | `442` | `338` |
 | `ffi_calls` | `919` | `672` |
 | tests targeting a sanitizer | see `results.md` | `0` |
 | C line coverage, gcov | not recorded | `47.96%` (campaign-equivalent scope, `https,ssh`) |
 
 The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
-item), not a mention scan, so it is the stricter measure of the two. The
-`unsafe_fns` and raw-pointer rows are scale, not quality: the campaign's
-surface is mostly seam by construction (`781` of `998` unsafe fns, `1,147` of
-`1,166` positions), while section 4 splits `git2` by its own seam names.
+item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
+same driver (crustify `c1e054a`), the campaign's at the active campaign's tip
+(`libgit2-wrap-20261007`, `crustify/campaigns/20261008-170008` at
+`cb1118ea3`, `crustify/campaigns/20261008-170008/scan-unsafe.json`). They
+count only what each crate defines, so ffibox's own conversions and the
+`pub(crate)` constructors `define_ctype!` emits are outside the campaign's
+public figures by construction, while `git2`'s own `Binding::from_raw` /
+`raw` are inside its.
 
 The earlier campaign recorded no test coverage. The active one does, by the
 method section 2's C figures copy: at `122b78d05` its `Total tests` reach
