@@ -75,6 +75,12 @@ the campaign's.
 - `batch` / `review` — in the Overview, the computed cost of the sub-campaign's
   translation batches and of its review batches; `—` where it ran none
 - `total` — `batch` + `review`; for the orchestrator, its own cost
+- `orchestrator` — the Overview row for every orchestrator session of the campaign, priced
+  from the `orchestrator-*.usage.json` records in its campaign dir; `total` is their sum. A
+  session that died before writing its record is recovered from its transcript (Notes)
+- `Σ recorded agents` / `Σ campaign` — the batch and review agents alone, then those plus the
+  orchestrator. `$/type` and `$/sym` are given for the agents only, since the orchestrator's
+  cost cannot be split by unit kind
 - `$/type` / `$/sym` — in the Overview, a sub-campaign's cost over the types or
   symbols it was scheduled for; `—` where it was scheduled for none
 - `+LoC` — the landed batch's Rust-source insertions/deletions relative to its
@@ -163,8 +169,9 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 | `libgit2/object` | `21` | `152` | `12h10m54s` | `$279.41` | `887.00M` | `$232.10` | `320.59M` | `$511.51` | `1207.59M` | `$24.36` | `$3.37` |
 | `libgit2/config` | `9` | `47` | `6h09m05s` | `$36.16` | `129.17M` | `$94.07` | `265.11M` | `$130.23` | `394.28M` | `$14.47` | `$2.77` |
 | `libgit2/index` | `18` | `75` | `10h41m03s` | `$195.65` | `307.26M` | `$67.64` | `186.28M` | `$263.29` | `493.54M` | `$14.63` | `$3.51` |
-| orchestrator | `<n>` | `<n>` | — | — | — | — | — | `$<n>`+ | `<n>M`+ | — | — |
+| orchestrator | — | — | — | — | — | — | — | `$438.96` | `337.45M` | — | — |
 | **Σ recorded agents** | **`95`** | **`389`** | **`51h01m`** | **`$896.34`** | **`2391.61M`** | **`$701.91`** | **`1175.51M`** | **`$1598.25`** | **`3567.12M`** | **`$16.82`** | **`$4.11`** |
+| **Σ campaign** | **`95`** | **`389`** | **`51h01m`** | **`$896.34`** | **`2391.61M`** | **`$701.91`** | **`1175.51M`** | **`$2037.21`** | **`3904.57M`** | — | — |
 
 ## Raw lifetime discovery
 
@@ -1107,3 +1114,24 @@ against it unchanged; its adoption, a generic `git_object` downcast and the 10
 hand-built `from_ptr` copies, is not part of this sub-campaign. The sub-campaign wall
 runs from 2026-10-11 19:00 to 2026-10-12 05:37 and includes about four hours of operator
 pauses (the refusal decision, then a pause after review wave 1).
+
+### Orchestrator cost
+
+The Overview's orchestrator row sums the 10 `orchestrator-*.usage.json` records in
+`crustify/campaigns/20261008-170008/`: `$438.96` for `337.45M` tokens over `98.0h` of session wall,
+all `openrouter/anthropic/claude-opus-5.5`. Three of them were recovered from the session
+transcripts under the container's `/work/.claude/projects/-target/`, each marked with
+`recovered_from`:
+
+- `orchestrator-20261011-000919`, session `90f46020`: the running orchestrator, `$267.21` and
+  `185.15M` through its last request at `2026-10-12T18:33:53Z`. The container exited on
+  `2026-10-13` before the session ended, so it never wrote its record.
+- `orchestrator-20261008-162351` (`4beea589`, `$0.53`) and `orchestrator-20261008-163758`
+  (`7898a051`, `$2.05`): launches before this campaign id was minted, which left a transcript
+  but no log.
+
+The row excludes the CLI's auxiliary requests, which the transcript does not record. Also absent
+from every table: the `followups/ffibox-ref-from-ptr` review batch (session `4ac75278`, `$0.81`,
+`1.06M` tokens), whose worktree transcript survives but which wrote no record under the campaign
+dir.
+
