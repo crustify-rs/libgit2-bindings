@@ -342,11 +342,11 @@ The public exceptions are `filter.h` (the filter API in full), `credential.h`
 
 ## 4. Unsafe surface
 
-`crustify scan-unsafe`'s rustc driver at crustify `e1169d3`, which counts only
+`crustify ffimap`'s rustc driver at crustify `e1169d3`, which counts only
 what the scanned crate defines, by rustc's effective visibility (reachable from
 outside the crate) and, for fn signatures, by safety; methods implementing
 another crate's trait are left out, since that crate fixed their signature.
-`scan-unsafe` builds with default features, so the `https,ssh` figures come
+`ffimap` builds with default features, so the `https,ssh` figures come
 from the same driver run under those features
 (`/data/marius.momeu/baseline-cov/scan_surface.py`), keeping the per-crate
 emission. Exactly one crate emitted, `git2`: the workspace root is the `git2`
@@ -445,7 +445,7 @@ The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
 item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
 same driver (crustify `e1169d3`), the campaign's at the active campaign's tip
 (`libgit2-wrap-20261007`, `crustify/campaigns/20261008-170008` at
-`cb1118ea3`, `crustify/campaigns/20261008-170008/scan-unsafe.json`). They
+`cb1118ea3`, `crustify/campaigns/20261008-170008/ffimap.json`). They
 count only what each crate defines, so ffibox's own conversions and the
 `pub(crate)` constructors `define_ctype!` emits are outside the campaign's
 public figures by construction, while `git2`'s own `Binding::from_raw` /

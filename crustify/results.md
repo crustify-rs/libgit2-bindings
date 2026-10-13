@@ -18,7 +18,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **`--min-fields`** — `20`
 - **orchestrator parallelism** — `10` concurrent batch processes through `libgit2/core`; `16` from `libgit2/repository`
 - **branch** — `crustify/campaigns/20261008-170008`, tip `<sha>`
-- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `scan-unsafe` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; batch and wave `scan-unsafe` records through `libgit2/config` from `4771856`, later ones and every sub-campaign and campaign scan from `cbf6fbc`), ffibox `695d52d` (`main`)
+- **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `ffimap` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; batch and wave `ffimap` records through `libgit2/config` from `4771856`, later ones and every sub-campaign and campaign scan from `cbf6fbc`), ffibox `695d52d` (`main`)
 - **build version** — `1`
 - **C test baseline** — `3443/3498, 55 skipped, and ctest targets invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online, online_customcert, proxy, auth_clone, auth_clone_and_push disabled`
 
@@ -596,7 +596,7 @@ Implementation `openrouter/anthropic/claude-opus-5.5` via `claude`, `openrouter/
 
 ## Safety audit
 
-Deterministic `crustify scan-unsafe <workdir>`; no model.
+Deterministic `crustify ffimap <workdir>`; no model.
 
 ### Final tally overview
 
@@ -837,13 +837,13 @@ were measured against a private coverage build of their own source, which export
 last landing. The `(+C/+Rust pp)` pairs in the `…: tests` tables are each workload's own
 coverage after minus before, so a batch that adds code its workload does not reach shows a
 negative Rust delta. Smell deltas are the crate-wide `unsafe_fn_smell` and `raw_ptr_smell`
-of an unseeded `crustify scan-unsafe` over the same two states.
+of an unseeded `crustify ffimap` over the same two states.
 
 Test counts are `#[test]` functions the landing commits add, by directory; trybuild
 `compile_fail` cases are not counted. `+LoC` and `rv loc` count `.rs` lines under
 `crustify/rust/`, so review reproducer crates under `crustify/reviews/` are excluded. The
 measurement scripts live outside the repository, beside the orchestrator's other helpers;
-each batch's `scan-unsafe.json` beside it is the unseeded scan of its last landing commit.
+each batch's `ffimap.json` beside it is the unseeded scan of its last landing commit.
 
 
 ### Overview test counts
@@ -885,7 +885,7 @@ include it.
 or return those pointers. The raw form is unnecessary once every `Allocator` is built from an
 `Alloc` implementation, and the review's confirmed zero-byte `realloc` double free came from
 its contract. The `util` review judged the aliases necessary ("C function pointers and must
-stay so"), and `scan-unsafe` does not count function-pointer types, so neither flagged it.
+stay so"), and `ffimap` does not count function-pointer types, so neither flagged it.
 Left in place by decision; the same pattern can recur for the backend, filter, merge-driver,
 transport and stream vtables.
 
@@ -933,14 +933,14 @@ The translator prompt for these rules is crustify `e9ff79a` and `0fcfcae`
 therefore not like-for-like: earlier review rows are per translation batch, later ones per
 wave and route.
 
-### `scan-unsafe` schema from crustify `4771856`
+### `ffimap` schema from crustify `4771856`
 
 Crustify's scanner changed after `libgit2/core` (`f66b2c3`..`4771856`): it lost its seeded
 `--name` mode, split `unsafe_fns`, raw-pointer and `void *` positions into seam, pub smell and
 private smell, added `raw_ptr_fields`, the three `ref_to_type_wrapper_*` counters and
 `deref_impl_on_wrapper`, and dropped `raw_ptr_in_wrapper`. Every recorded scan was rerun with
-it: each batch's `scan-unsafe.json` at its last landing commit (the seeded per-batch scans,
-and `raw-lifetime-void`'s seeded `scan-unsafe.primitives.json` over the C primitives, have no
+it: each batch's `ffimap.json` at its last landing commit (the seeded per-batch scans,
+and `raw-lifetime-void`'s seeded `ffimap.primitives.json` over the C primitives, have no
 counterpart and are gone), each wave's and sub-campaign's at the commit that recorded it. The
 smell deltas in the batch tables were recomputed from the same scanner, which moved
 `libgit2/oid` wave 0 batch 0 and wave 1 batch 0 from `+1` to `+0` `unsafe fn` smell; no other earlier row
@@ -949,7 +949,7 @@ changed.
 
 ### Safety audit columns and `cbf6fbc` counters
 
-Crustify `cbf6fbc` added eight `scan-unsafe` counters, all split by effective visibility:
+Crustify `cbf6fbc` added eight `ffimap` counters, all split by effective visibility:
 `unsafe_fns_pub_seam`/`_priv_seam`, `raw_ptr_pub_seam`/`_priv_seam`, `raw_ptr_pub`/`_priv`
 and `fns_pub`/`fns_priv`. It changed no existing counter. The campaign scan and every
 sub-campaign scan were rerun with it, and the batch and wave scans, whose counters it left
