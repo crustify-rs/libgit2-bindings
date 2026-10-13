@@ -342,7 +342,7 @@ The public exceptions are `filter.h` (the filter API in full), `credential.h`
 
 ## 4. Unsafe surface
 
-`crustify ffimap`'s rustc driver at crustify `e1169d3`, which counts only
+`crustify ffimap`'s rustc driver at crustify `7a84ee6`, which counts only
 what the scanned crate defines, by rustc's effective visibility (reachable from
 outside the crate) and, for fn signatures, by safety; methods implementing
 another crate's trait are left out, since that crate fixed their signature.
@@ -443,7 +443,7 @@ their own revision's API.
 
 The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
 item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
-same driver (crustify `e1169d3`), the campaign's at the active campaign's tip
+same driver (crustify `7a84ee6`), the campaign's at the active campaign's tip
 (`libgit2-wrap-20261007`, `crustify/campaigns/20261008-170008` at
 `cb1118ea3`, `crustify/campaigns/20261008-170008/ffimap.json`). They
 count only what each crate defines, so ffibox's own conversions and the
