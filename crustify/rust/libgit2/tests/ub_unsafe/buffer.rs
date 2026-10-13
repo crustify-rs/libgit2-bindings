@@ -294,3 +294,23 @@ fn adopted_buffers_handed_back_to_c() {
     let buf = unsafe { Buf::from_raw(raw) };
     assert_eq!((buf.as_ref().as_c_str(), buf.as_ref().capacity()), (c"", 0));
 }
+
+/// A bare value `into_inner` gave up is adopted again by `CVal::new`, whose caller
+/// vouches for its ownership: the new owner releases it exactly once, whatever the
+/// safe setters wrote into it while it was bare.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn bare_values_return_to_an_owner() {
+    init();
+    let mut bare = Buf::new().into_inner();
+    assert_eq!(bare.as_mut().set_bytes(b""), Some(()));
+    // SAFETY: `bare` came out of `into_inner` and only its safe setters wrote it since,
+    // so it owns what it points at.
+    let again: BufVal = unsafe { ffibox::CVal::new(bare) };
+    assert!(again.as_ref().is_empty());
+
+    let copy = Buf::from_bytes(b"source").unwrap();
+    // SAFETY: `into_inner` gives up `copy`'s sole ownership of its allocation.
+    let again: BufVal = unsafe { ffibox::CVal::new(copy.into_inner()) };
+    assert_eq!(again.as_ref().as_bytes(), b"source");
+}

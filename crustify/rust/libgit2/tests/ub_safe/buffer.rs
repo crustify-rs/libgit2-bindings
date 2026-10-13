@@ -12,7 +12,6 @@
 use std::sync::Barrier;
 use std::thread;
 
-use ffibox::CVal;
 use libgit2::ffi;
 use libgit2::libgit2::core::buffer::{Buf, BufMut, BufRef, BufVal};
 use libgit2::libgit2::raw::{OdbDataStrFree, OdbDataVec};
@@ -45,8 +44,9 @@ fn empty_bare_buffer_in_rust_storage() {
     assert_eq!((r.len(), r.capacity(), r.as_bytes()), (0, 0, &b""[..]));
     assert_eq!(r.as_c_str(), c"");
     assert_eq!(format!("{m:?}"), r#"Buf("")"#);
-    let again: BufVal = CVal::new(bare);
-    assert!(again.as_ref().is_empty());
+    // Empty, so the bare value owns nothing and going out of scope leaks nothing.
+    // Handing a bare value back to an owner is `CVal::new`, unsafe: see
+    // `ub_unsafe::buffer`.
 }
 
 /// Before `git_libgit2_init` an empty buffer needs nothing from libgit2 (its dispose
@@ -189,9 +189,7 @@ fn moves_and_replacements_release_once() {
     drop(src);
     assert_eq!(copy.as_ref().as_bytes(), b"source");
 
-    // The bare value leaves its owner and is adopted by a new one, which releases it.
-    let again: BufVal = CVal::new(copy.into_inner());
-    assert_eq!(again.as_ref().as_bytes(), b"source");
+    drop(copy);
     let empty: OdbDataVec<u8> = Buf::new().as_mut().take_bytes();
     assert!(empty.is_empty());
 }

@@ -132,7 +132,8 @@ impl Buf {
     /// An empty buffer owning nothing, as `git_buf buf = GIT_BUF_INIT`: the storage
     /// libgit2 fills a result into.
     pub fn new() -> BufVal {
-        CVal::new(Self(INIT, PhantomData))
+        // SAFETY: an empty value owns nothing, which `git_buf_dispose` accepts.
+        unsafe { CVal::new(Self(INIT, PhantomData)) }
     }
 
     /// A buffer holding a copy of `bytes`, NUL-terminated, in a fresh allocation of
@@ -156,14 +157,15 @@ impl Buf {
         }
         dst[bytes.len()] = MaybeUninit::new(0);
         let (data, _) = storage.into_raw_parts();
-        Some(CVal::new(Self(
-            ffi::git_buf {
-                ptr: data.cast(),
-                reserved,
-                size: bytes.len(),
-            },
-            PhantomData,
-        )))
+        let raw = ffi::git_buf {
+            ptr: data.cast(),
+            reserved,
+            size: bytes.len(),
+        };
+        // SAFETY: `raw` is the sole owner of `data`, a fresh allocation of `reserved`
+        // bytes from libgit2's allocator, holding `bytes.len()` initialised bytes and the
+        // NUL after them, which `git_buf_dispose` releases.
+        Some(unsafe { CVal::new(Self(raw, PhantomData)) })
     }
 
     /// Adopts a `git_buf` C code filled, as libgit2 hands one out: what it owns becomes
@@ -182,7 +184,9 @@ impl Buf {
     /// With `raw.reserved == 0` there is no requirement: `raw.ptr` and `raw.size` are
     /// never read through.
     pub unsafe fn from_raw(raw: ffi::git_buf) -> BufVal {
-        CVal::new(Self(raw, PhantomData))
+        // SAFETY: the caller gives up `raw`, which owns what it points at (this
+        // function's contract).
+        unsafe { CVal::new(Self(raw, PhantomData)) }
     }
 
     /// The raw `git_buf`, ownership included: C code releases it with `git_buf_dispose`

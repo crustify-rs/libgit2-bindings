@@ -146,7 +146,8 @@ impl StrArray {
     /// An empty array: no strings, nothing allocated, as `git_strarray array = {0}`.
     /// The storage libgit2 fills a result into.
     pub fn new() -> StrArrayVal {
-        CVal::new(Self(EMPTY, PhantomData))
+        // SAFETY: an empty value owns nothing, which `git_strarray_dispose` accepts.
+        unsafe { CVal::new(Self(EMPTY, PhantomData)) }
     }
 
     /// An array owning `strings`, as libgit2 hands one out: the run becomes the

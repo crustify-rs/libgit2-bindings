@@ -1228,13 +1228,16 @@ impl<'r> CommitArray<'r> {
     /// An empty array: no commits, nothing allocated, as `git_commitarray array = {0}`.
     /// The storage libgit2 fills a result into.
     pub fn new() -> CommitArrayVal<'r> {
-        CVal::new(Self(
-            ffi::git_commitarray {
-                commits: ptr::null(),
-                count: 0,
-            },
-            PhantomData,
-        ))
+        // SAFETY: an empty array owns nothing, which `git_commitarray_dispose` accepts.
+        unsafe {
+            CVal::new(Self(
+                ffi::git_commitarray {
+                    commits: ptr::null(),
+                    count: 0,
+                },
+                PhantomData,
+            ))
+        }
     }
 
     /// An array of `commits`, in order, moved into a fresh buffer of libgit2's
@@ -1268,7 +1271,9 @@ impl<'r> CommitArray<'r> {
     /// nothing else may free the buffer or release those references, nor write the
     /// buffer while the result lives. With `raw.commits` NULL there is no requirement.
     pub unsafe fn from_raw(raw: ffi::git_commitarray) -> CommitArrayVal<'r> {
-        CVal::new(Self(raw, PhantomData))
+        // SAFETY: the caller gives up `raw`, which owns what it points at (this
+        // function's contract).
+        unsafe { CVal::new(Self(raw, PhantomData)) }
     }
 
     /// The raw `git_commitarray`, ownership included: C code releases it with
