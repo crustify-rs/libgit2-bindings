@@ -117,13 +117,16 @@ impl OidArray {
     /// An empty array: no ids, nothing allocated, as `git_oidarray array = {0}`. The
     /// storage libgit2 fills a result into.
     pub fn new() -> OidArrayVal {
-        CVal::new(Self(
-            ffi::git_oidarray {
-                ids: ptr::null_mut(),
-                count: 0,
-            },
-            PhantomData,
-        ))
+        // SAFETY: an empty array owns nothing, which `git_oidarray_dispose` accepts.
+        unsafe {
+            CVal::new(Self(
+                ffi::git_oidarray {
+                    ids: ptr::null_mut(),
+                    count: 0,
+                },
+                PhantomData,
+            ))
+        }
     }
 
     /// An array owning `ids`, as libgit2 hands one out: the buffer becomes the array's,

@@ -10,7 +10,7 @@
 use std::sync::Barrier;
 use std::thread;
 
-use ffibox::{CVal, CZeroable};
+use ffibox::CZeroable;
 use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
 use libgit2::libgit2::oid::oidarray::{OidArray, OidArrayMut, OidArrayRef, OidArrayVal};
 use libgit2::libgit2::raw::OdbDataVec;
@@ -216,12 +216,8 @@ fn buffers_move_between_arrays_and_owners() {
     assert_eq!(contents(first.as_ref()), expected(&src));
     assert_eq!(contents(second.as_ref())[5].1, [7; 32]);
 
-    // The bare value leaves its owner and is adopted by a new one, which releases it.
-    let bare = first.into_inner();
-    assert_eq!(bare.as_ref().len(), 6);
-    let again: OidArrayVal = CVal::new(bare);
-    assert_eq!(contents(again.as_ref()), expected(&src));
-    drop(again);
+    assert_eq!(contents(first.as_ref()), expected(&src));
+    drop(first);
     drop(second);
 }
 

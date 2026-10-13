@@ -571,7 +571,8 @@ impl MessageTrailerArray {
     /// An empty array: no trailer, nothing allocated, as
     /// `git_message_trailer_array arr = {0}`.
     pub fn new() -> MessageTrailerArrayVal {
-        CVal::new(Self(EMPTY, PhantomData))
+        // SAFETY: an empty value owns nothing, which `git_message_trailer_array_free` accepts.
+        unsafe { CVal::new(Self(EMPTY, PhantomData)) }
     }
 
     /// The trailers of `message`, as git finds them: the last paragraph after the
@@ -625,7 +626,9 @@ impl MessageTrailerArray {
     /// live, and that nothing writes, until the result releases the trailers (strings
     /// in `raw._trailer_block` qualify, as libgit2's do).
     pub unsafe fn from_raw(raw: ffi::git_message_trailer_array) -> MessageTrailerArrayVal {
-        CVal::new(Self(raw, PhantomData))
+        // SAFETY: the caller gives up `raw`, which owns what it points at (this
+        // function's contract).
+        unsafe { CVal::new(Self(raw, PhantomData)) }
     }
 
     /// The raw `git_message_trailer_array`, ownership included: C code releases it

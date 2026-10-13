@@ -8,15 +8,15 @@
     "windows_sys"
   ],
   "counts": {
-    "code_lines": 15690,
-    "total_stmts": 3693,
+    "code_lines": 15692,
+    "total_stmts": 3694,
     "safe_fns_pub": 1276,
     "safe_fns_priv": 371,
-    "unsafe_blocks": 1541,
+    "unsafe_blocks": 1550,
     "unsafe_block_stmts": 82,
-    "unsafe_block_lines": 2641,
-    "unsafe_block_code_lines": 2593,
-    "unsafe_blocks_wrapper_impl": 1151,
+    "unsafe_block_lines": 2666,
+    "unsafe_block_code_lines": 2618,
+    "unsafe_blocks_wrapper_impl": 1160,
     "unsafe_blocks_ffi_export": 79,
     "unsafe_fns": 237,
     "unsafe_fns_pub": 48,
@@ -283,8 +283,8 @@
     }
   },
   "undocumented_unsafe": {
-    "sites": 4389,
-    "documented": 4344,
+    "sites": 4400,
+    "documented": 4355,
     "undocumented": 45,
     "per_file": {
       "libgit2/libgit2/core/common.rs": 3,
@@ -324,7 +324,7 @@
     "unsafe_fn_share_of_pub_fns": 0.0363,
     "raw_ptr_pub": 10,
     "raw_ptr_pub_safe_interface": 5,
-    "unsafe_loc_ratio": 0.1653,
-    "loc_per_unsafe_block": 10.2
+    "unsafe_loc_ratio": 0.1668,
+    "loc_per_unsafe_block": 10.1
   }
 }
