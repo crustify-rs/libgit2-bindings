@@ -1,0 +1,12 @@
+{
+  "level": "campaign",
+  "branch": "crustify/campaigns/20261008-170008",
+  "scan": "4f1c7aa50cbbf0ba32bb772ef12f3b3f247dc1bf",
+  "base": null,
+  "base_from": "-",
+  "crustify": "1a7d4341901fd962d54e979178941898547b09e7",
+  "command": "crustify ffimap <workdir> --json --ffibox",
+  "ffibox": "654fe31",
+  "ffibox_base": null,
+  "ffibox_rule": "latest ffibox commit at or before the scanned commit's committer time"
+}

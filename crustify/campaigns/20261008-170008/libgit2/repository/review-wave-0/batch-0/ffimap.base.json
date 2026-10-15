@@ -1,0 +1,239 @@
+{
+  "crate_path": "/target/crustify/rust",
+  "sys_crates": [
+    "clang_sys",
+    "libgit2_sys",
+    "prettyplease",
+    "windows_sys"
+  ],
+  "counts": {
+    "code_lines": 5146,
+    "total_stmts": 1187,
+    "safe_fns_pub": 432,
+    "safe_fns_priv": 113,
+    "unsafe_blocks": 480,
+    "unsafe_block_stmts": 30,
+    "unsafe_block_lines": 674,
+    "unsafe_block_code_lines": 636,
+    "unsafe_blocks_wrapper_impl": 284,
+    "unsafe_blocks_ffi_export": 9,
+    "unsafe_fns": 126,
+    "unsafe_fns_pub": 44,
+    "unsafe_fns_priv": 82,
+    "unsafe_impls": 124,
+    "unsafe_traits": 1,
+    "ty_wrapper": 23,
+    "ty_wrapper_borrow_sanctioned": 58,
+    "ty_wrapper_borrow_non_sanctioned": 0,
+    "ty_wrapper_by_val_fn_sig_pub": 16,
+    "ty_wrapper_by_val_fn_sig_priv": 2,
+    "ty_wrapper_by_val_ty_pub_fields_pub": 0,
+    "ty_wrapper_by_val_ty_pub_fields_priv": 2,
+    "ty_wrapper_by_val_ty_priv": 0,
+    "ty_wrapper_std_owner_fn_sig_pub": 0,
+    "ty_wrapper_std_owner_fn_sig_priv": 0,
+    "ty_wrapper_std_owner_ty_pub_fields_pub": 0,
+    "ty_wrapper_std_owner_ty_pub_fields_priv": 0,
+    "ty_wrapper_std_owner_ty_priv": 0,
+    "ty_non_wrapper_borrow_pub_safe": 273,
+    "ty_non_wrapper_borrow_pub_unsafe": 13,
+    "ty_non_wrapper_borrow_priv_safe": 90,
+    "ty_non_wrapper_borrow_priv_unsafe": 4,
+    "raw_ptr_ty_pub_fields_pub": 0,
+    "raw_ptr_ty_pub_fields_priv": 1,
+    "raw_ptr_ty_priv": 0,
+    "raw_ptr_fn_pub_safe": 7,
+    "raw_ptr_fn_pub_unsafe": 5,
+    "raw_ptr_fn_priv_safe": 82,
+    "raw_ptr_fn_priv_unsafe": 82,
+    "raw_ptr_has_ty_wrapper": 93,
+    "raw_ptr_derefs": 116,
+    "raw_ptr_derefs_outside_impl": 5,
+    "void_ptr_ty_pub_fields_pub": 0,
+    "void_ptr_ty_pub_fields_priv": 0,
+    "void_ptr_ty_priv": 0,
+    "void_ptr_fn_pub_safe": 3,
+    "void_ptr_fn_pub_unsafe": 3,
+    "void_ptr_fn_priv_safe": 34,
+    "void_ptr_fn_priv_unsafe": 21,
+    "ty_field_proj_wrapped": 111,
+    "ty_field_proj_outside_impl": 4,
+    "ty_field_borrow_wrapped": 0,
+    "deref_impl_on_wrapper": 0,
+    "ffi_calls": 114
+  },
+  "counts_unavailable": null,
+  "ffibox": {
+    "counts": {
+      "fn_sig_ffibox_owner_pub": 63,
+      "fn_sig_ffibox_owner_priv": 16,
+      "fn_sig_ffibox_handle_pub": 273,
+      "fn_sig_ffibox_handle_priv": 144,
+      "fn_sig_non_ffibox_owner_pub": 10,
+      "fn_sig_non_ffibox_owner_priv": 1,
+      "fn_sig_non_ffibox_handle_pub": 0,
+      "fn_sig_non_ffibox_handle_priv": 0,
+      "ty_pub_fields_pub_ffibox_owner": 0,
+      "ty_pub_fields_priv_ffibox_owner": 2,
+      "ty_priv_ffibox_owner": 0,
+      "ty_pub_fields_pub_ffibox_handle": 0,
+      "ty_pub_fields_priv_ffibox_handle": 45,
+      "ty_priv_ffibox_handle": 0,
+      "ty_pub_fields_pub_non_ffibox_owner": 0,
+      "ty_pub_fields_priv_non_ffibox_owner": 0,
+      "ty_priv_non_ffibox_owner": 0,
+      "ty_pub_fields_pub_non_ffibox_handle": 0,
+      "ty_pub_fields_priv_non_ffibox_handle": 0,
+      "ty_priv_non_ffibox_handle": 0,
+      "ffibox_impl_macro": 29,
+      "ffibox_impl_manual": 22,
+      "ffibox_define_ctype_macro": 17,
+      "ffibox_define_ctype_manual": 5,
+      "ffibox_ccell_not_layout": 0,
+      "ffibox_layout_not_ccell": 1,
+      "drop_impl": 3,
+      "clone_impl": 2
+    },
+    "by": {
+      "fn_sig_ffibox_owner_pub": {
+        "CArc": 4,
+        "CBox": 23,
+        "CStrBox": 13,
+        "CVal": 17,
+        "CVec": 6
+      },
+      "fn_sig_ffibox_owner_priv": {
+        "CArc": 1,
+        "CBox": 10,
+        "CStrBox": 4,
+        "CVec": 1
+      },
+      "fn_sig_ffibox_handle_pub": {
+        "CSlice": 3,
+        "CSliceMut": 2,
+        "Mut": 138,
+        "Ref": 130
+      },
+      "fn_sig_ffibox_handle_priv": {
+        "Mut": 61,
+        "Ref": 83
+      },
+      "fn_sig_non_ffibox_owner_pub": {
+        "libgit2::core::global::Runtime": 1,
+        "libgit2::core::types::RustWriteStream": 1,
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 8
+      },
+      "fn_sig_non_ffibox_owner_priv": {
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      },
+      "fn_sig_non_ffibox_handle_pub": {},
+      "fn_sig_non_ffibox_handle_priv": {},
+      "ty_pub_fields_pub_ffibox_owner": {},
+      "ty_pub_fields_priv_ffibox_owner": {
+        "CStrBox": 1,
+        "CVec": 1
+      },
+      "ty_priv_ffibox_owner": {},
+      "ty_pub_fields_pub_ffibox_handle": {},
+      "ty_pub_fields_priv_ffibox_handle": {
+        "CBorrowedPtr": 22,
+        "Ref": 23
+      },
+      "ty_priv_ffibox_handle": {},
+      "ty_pub_fields_pub_non_ffibox_owner": {},
+      "ty_pub_fields_priv_non_ffibox_owner": {},
+      "ty_priv_non_ffibox_owner": {},
+      "ty_pub_fields_pub_non_ffibox_handle": {},
+      "ty_pub_fields_priv_non_ffibox_handle": {},
+      "ty_priv_non_ffibox_handle": {},
+      "ffibox_impl_macro": {
+        "CCell": 17,
+        "CDrop": 8,
+        "CDupClone": 2,
+        "CLenClone": 1,
+        "CLenDrop": 1
+      },
+      "ffibox_impl_manual": {
+        "CAlloc": 1,
+        "CAllocZeroed": 1,
+        "CCell": 5,
+        "CDispose": 4,
+        "CDrop": 5,
+        "CDupClone": 1,
+        "CNew": 3,
+        "CZeroable": 2
+      },
+      "ffibox_define_ctype_macro": {
+        "libgit2::config::config::Config": 1,
+        "libgit2::core::buffer::Buf": 1,
+        "libgit2::core::strarray::StrArray": 1,
+        "libgit2::core::types::Signature": 1,
+        "libgit2::core::types::Time": 1,
+        "libgit2::core::types::WriteStream": 1,
+        "libgit2::index::index::Index": 1,
+        "libgit2::object::commit::CommitArray": 1,
+        "libgit2::odb::odb::Odb": 1,
+        "libgit2::oid::oid::Oid": 1,
+        "libgit2::oid::oidarray::OidArray": 1,
+        "libgit2::refs::refs::UnattachedReference": 1,
+        "libgit2::repository::repository::Repository": 1,
+        "libgit2::repository::worktree::PruneOptions": 1,
+        "libgit2::repository::worktree::Worktree": 1,
+        "libgit2::util::errors::Error": 1,
+        "libgit2::util::sys::alloc::Allocator": 1
+      },
+      "ffibox_define_ctype_manual": {
+        "libgit2::oid::oid::OidShortener": 1,
+        "libgit2::refs::annotated_commit::AnnotatedCommit": 1,
+        "libgit2::refs::refdb::Refdb": 1,
+        "libgit2::refs::refs::Reference": 1,
+        "libgit2::workdir::checkout::CheckoutOptions": 1
+      },
+      "ffibox_ccell_not_layout": {},
+      "ffibox_layout_not_ccell": {
+        "libgit2::core::types::Repr": 1
+      },
+      "drop_impl": {
+        "libgit2::core::global::Runtime": 1,
+        "libgit2::core::types::RustWriteStream": 1,
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      },
+      "clone_impl": {
+        "libgit2::core::types::SignatureView": 1,
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      }
+    }
+  },
+  "undocumented_unsafe": {
+    "sites": 1772,
+    "documented": 1745,
+    "undocumented": 27,
+    "per_file": {
+      "libgit2/libgit2/core/common.rs": 3,
+      "libgit2/libgit2/oid/oid.rs": 3,
+      "libgit2/libgit2/core/strarray.rs": 2,
+      "libgit2/libgit2/refs/refdb.rs": 2,
+      "libgit2/libgit2/refs/refs.rs": 2,
+      "libgit2/libgit2/util/sys/alloc.rs": 2,
+      "libgit2/tests/equiv/buffer.rs": 2,
+      "libgit2/tests/equiv/common.rs": 2,
+      "libgit2/tests/equiv/oid.rs": 2,
+      "libgit2/tests/equiv/types.rs": 2,
+      "libgit2/tests/equiv/oidarray.rs": 1,
+      "libgit2/tests/equiv/refdb.rs": 1,
+      "libgit2/tests/equiv/strarray.rs": 1,
+      "libgit2/tests/equiv/sys_odb_backend.rs": 1,
+      "libgit2/tests/ub_safe/fixture.rs": 1
+    }
+  },
+  "derived": {
+    "fns_pub": 476,
+    "fns_priv": 195,
+    "unsafe_fn_pub_ratio": 0.3492,
+    "unsafe_fn_share_of_pub_fns": 0.0924,
+    "raw_ptr_pub": 13,
+    "raw_ptr_pub_safe_interface": 7,
+    "unsafe_loc_ratio": 0.1236,
+    "loc_per_unsafe_block": 10.7
+  }
+}

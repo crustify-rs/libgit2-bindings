@@ -1,46 +1,177 @@
 {
-  "crate_path": "/target/crustify/.worktrees/rescan/0/crustify/rust",
+  "crate_path": "/target/crustify/rust",
+  "sys_crates": [
+    "clang_sys",
+    "libgit2_sys",
+    "prettyplease",
+    "windows_sys"
+  ],
   "counts": {
+    "code_lines": 817,
+    "total_stmts": 293,
+    "safe_fns_pub": 74,
+    "safe_fns_priv": 22,
     "unsafe_blocks": 84,
     "unsafe_block_stmts": 2,
     "unsafe_block_lines": 97,
     "unsafe_block_code_lines": 93,
-    "unsafe_blocks_wrapper_impl": 47,
+    "unsafe_blocks_wrapper_impl": 36,
     "unsafe_blocks_ffi_export": 4,
-    "unsafe_fns": 26,
-    "unsafe_fns_seam": 19,
-    "unsafe_fns_pub_smell": 1,
-    "unsafe_fns_priv_smell": 6,
+    "unsafe_fns": 20,
+    "unsafe_fns_pub": 2,
+    "unsafe_fns_priv": 18,
     "unsafe_impls": 27,
     "unsafe_traits": 1,
-    "ffi_calls": 16,
-    "wrapper_newtypes": 5,
-    "wrapper_newtypes_declared": 4,
-    "wrapper_declared_nonconformant": 0,
-    "wrapper_newtypes_undeclared": 1,
-    "raw_ptr_args": 22,
-    "raw_ptr_rets": 22,
-    "raw_ptr_seam": 34,
-    "raw_ptr_wrapped": 0,
-    "raw_ptr_pub_smell": 0,
-    "raw_ptr_priv_smell": 10,
-    "ref_to_type_wrapper_sanctioned": 12,
-    "ref_to_type_wrapper_smell": 8,
-    "ref_to_type_wrapper_body_smell": 0,
-    "deref_impl_on_wrapper": 0,
-    "raw_ptr_fields": 0,
-    "field_ref_wrapped": 0,
-    "field_proj_wrapped": 14,
-    "field_proj_outside_impl": 0,
-    "void_ptr_seam": 13,
-    "void_ptr_pub_smell": 0,
-    "void_ptr_priv_smell": 0,
+    "ty_wrapper": 4,
+    "ty_wrapper_borrow_sanctioned": 10,
+    "ty_wrapper_borrow_non_sanctioned": 0,
+    "ty_wrapper_by_val_fn_sig_pub": 6,
+    "ty_wrapper_by_val_fn_sig_priv": 2,
+    "ty_wrapper_by_val_ty_pub_fields_pub": 0,
+    "ty_wrapper_by_val_ty_pub_fields_priv": 0,
+    "ty_wrapper_by_val_ty_priv": 0,
+    "ty_wrapper_std_owner_fn_sig_pub": 0,
+    "ty_wrapper_std_owner_fn_sig_priv": 0,
+    "ty_wrapper_std_owner_ty_pub_fields_pub": 0,
+    "ty_wrapper_std_owner_ty_pub_fields_priv": 0,
+    "ty_wrapper_std_owner_ty_priv": 0,
+    "ty_non_wrapper_borrow_pub_safe": 48,
+    "ty_non_wrapper_borrow_pub_unsafe": 0,
+    "ty_non_wrapper_borrow_priv_safe": 17,
+    "ty_non_wrapper_borrow_priv_unsafe": 1,
+    "raw_ptr_ty_pub_fields_pub": 0,
+    "raw_ptr_ty_pub_fields_priv": 0,
+    "raw_ptr_ty_priv": 0,
+    "raw_ptr_fn_pub_safe": 2,
+    "raw_ptr_fn_pub_unsafe": 1,
+    "raw_ptr_fn_priv_safe": 16,
+    "raw_ptr_fn_priv_unsafe": 23,
+    "raw_ptr_has_ty_wrapper": 14,
     "raw_ptr_derefs": 14,
     "raw_ptr_derefs_outside_impl": 0,
-    "total_stmts": 293,
-    "code_lines": 817
+    "void_ptr_ty_pub_fields_pub": 0,
+    "void_ptr_ty_pub_fields_priv": 0,
+    "void_ptr_ty_priv": 0,
+    "void_ptr_fn_pub_safe": 0,
+    "void_ptr_fn_pub_unsafe": 0,
+    "void_ptr_fn_priv_safe": 6,
+    "void_ptr_fn_priv_unsafe": 7,
+    "ty_field_proj_wrapped": 14,
+    "ty_field_proj_outside_impl": 0,
+    "ty_field_borrow_wrapped": 0,
+    "deref_impl_on_wrapper": 0,
+    "ffi_calls": 16
   },
   "counts_unavailable": null,
+  "ffibox": {
+    "counts": {
+      "fn_sig_ffibox_owner_pub": 9,
+      "fn_sig_ffibox_owner_priv": 3,
+      "fn_sig_ffibox_handle_pub": 45,
+      "fn_sig_ffibox_handle_priv": 23,
+      "fn_sig_non_ffibox_owner_pub": 5,
+      "fn_sig_non_ffibox_owner_priv": 1,
+      "fn_sig_non_ffibox_handle_pub": 0,
+      "fn_sig_non_ffibox_handle_priv": 0,
+      "ty_pub_fields_pub_ffibox_owner": 0,
+      "ty_pub_fields_priv_ffibox_owner": 2,
+      "ty_priv_ffibox_owner": 0,
+      "ty_pub_fields_pub_ffibox_handle": 0,
+      "ty_pub_fields_priv_ffibox_handle": 8,
+      "ty_priv_ffibox_handle": 0,
+      "ty_pub_fields_pub_non_ffibox_owner": 0,
+      "ty_pub_fields_priv_non_ffibox_owner": 0,
+      "ty_priv_non_ffibox_owner": 0,
+      "ty_pub_fields_pub_non_ffibox_handle": 0,
+      "ty_pub_fields_priv_non_ffibox_handle": 0,
+      "ty_priv_non_ffibox_handle": 0,
+      "ffibox_impl_macro": 7,
+      "ffibox_impl_manual": 6,
+      "ffibox_define_ctype_macro": 3,
+      "ffibox_define_ctype_manual": 1,
+      "ffibox_ccell_not_layout": 0,
+      "ffibox_layout_not_ccell": 0,
+      "drop_impl": 1,
+      "clone_impl": 1
+    },
+    "by": {
+      "fn_sig_ffibox_owner_pub": {
+        "CBox": 1,
+        "CStrBox": 6,
+        "CVec": 2
+      },
+      "fn_sig_ffibox_owner_priv": {
+        "CStrBox": 2,
+        "CVec": 1
+      },
+      "fn_sig_ffibox_handle_pub": {
+        "CSlice": 1,
+        "CSliceMut": 1,
+        "Mut": 23,
+        "Ref": 20
+      },
+      "fn_sig_ffibox_handle_priv": {
+        "Mut": 10,
+        "Ref": 13
+      },
+      "fn_sig_non_ffibox_owner_pub": {
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 5
+      },
+      "fn_sig_non_ffibox_owner_priv": {
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      },
+      "fn_sig_non_ffibox_handle_pub": {},
+      "fn_sig_non_ffibox_handle_priv": {},
+      "ty_pub_fields_pub_ffibox_owner": {},
+      "ty_pub_fields_priv_ffibox_owner": {
+        "CStrBox": 1,
+        "CVec": 1
+      },
+      "ty_priv_ffibox_owner": {},
+      "ty_pub_fields_pub_ffibox_handle": {},
+      "ty_pub_fields_priv_ffibox_handle": {
+        "CBorrowedPtr": 4,
+        "Ref": 4
+      },
+      "ty_priv_ffibox_handle": {},
+      "ty_pub_fields_pub_non_ffibox_owner": {},
+      "ty_pub_fields_priv_non_ffibox_owner": {},
+      "ty_priv_non_ffibox_owner": {},
+      "ty_pub_fields_pub_non_ffibox_handle": {},
+      "ty_pub_fields_priv_non_ffibox_handle": {},
+      "ty_priv_non_ffibox_handle": {},
+      "ffibox_impl_macro": {
+        "CCell": 3,
+        "CDrop": 1,
+        "CDupClone": 1,
+        "CLenClone": 1,
+        "CLenDrop": 1
+      },
+      "ffibox_impl_manual": {
+        "CAlloc": 1,
+        "CAllocZeroed": 1,
+        "CCell": 1,
+        "CDrop": 2,
+        "CZeroable": 1
+      },
+      "ffibox_define_ctype_macro": {
+        "libgit2::oid::oid::Oid": 1,
+        "libgit2::util::errors::Error": 1,
+        "libgit2::util::sys::alloc::Allocator": 1
+      },
+      "ffibox_define_ctype_manual": {
+        "libgit2::oid::oid::OidShortener": 1
+      },
+      "ffibox_ccell_not_layout": {},
+      "ffibox_layout_not_ccell": {},
+      "drop_impl": {
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      },
+      "clone_impl": {
+        "libgit2::odb::sys::odb_backend::OdbDataStrVec": 1
+      }
+    }
+  },
   "undocumented_unsafe": {
     "sites": 379,
     "documented": 369,
@@ -54,10 +185,12 @@
     }
   },
   "derived": {
-    "unsafe_fn_pub_ratio": 0.0385,
-    "unsafe_fn_smell": 7,
-    "raw_ptr_smell": 10,
-    "raw_ptr_seam_ratio": 0.7727,
+    "fns_pub": 76,
+    "fns_priv": 40,
+    "unsafe_fn_pub_ratio": 0.1,
+    "unsafe_fn_share_of_pub_fns": 0.0263,
+    "raw_ptr_pub": 3,
+    "raw_ptr_pub_safe_interface": 2,
     "unsafe_loc_ratio": 0.1138,
     "loc_per_unsafe_block": 9.7
   }

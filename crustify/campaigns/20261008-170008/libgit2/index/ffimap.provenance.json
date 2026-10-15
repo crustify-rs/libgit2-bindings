@@ -1,0 +1,12 @@
+{
+  "level": "subcampaign",
+  "branch": "crustify/subcampaigns/20261008-170008/libgit2/index",
+  "scan": "70936502dc0f813bed6bd0cfff811794f8f7b0f0",
+  "base": "3ceea44fb6b11b64a7a6c284d46ca62059ddf437",
+  "base_from": "reflog creation (first wave base d8c416f228)",
+  "crustify": "1a7d4341901fd962d54e979178941898547b09e7",
+  "command": "crustify ffimap <workdir> --json --ffibox",
+  "ffibox": "5a98173",
+  "ffibox_base": "630f4a5",
+  "ffibox_rule": "latest ffibox commit at or before the scanned commit's committer time"
+}
