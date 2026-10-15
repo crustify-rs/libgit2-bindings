@@ -1,0 +1,12 @@
+{
+  "level": "subcampaign",
+  "branch": "crustify/subcampaigns/20261008-170008/libgit2/raw-lifetime-void",
+  "scan": "99533715fcf40c18eb228ac83381bf74b4cf32b2",
+  "base": "cdbe98f53e3c4383a190f1f72d058eee5bf5e75d",
+  "base_from": "reflog creation (first wave base 513dae0b2b)",
+  "crustify": "1a7d4341901fd962d54e979178941898547b09e7",
+  "command": "crustify ffimap <workdir> --json --ffibox",
+  "ffibox": "695d52d",
+  "ffibox_base": null,
+  "ffibox_rule": "latest ffibox commit at or before the scanned commit's committer time"
+}

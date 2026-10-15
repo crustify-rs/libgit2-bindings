@@ -1,0 +1,12 @@
+{
+  "level": "batch",
+  "branch": "crustify/batches/20261008-170008/libgit2/index/wave-1/batch-2",
+  "scan": "05a56b56931e4b7251b4046d0abc1296ecb3c6b1",
+  "base": "7f4d85bd7c7ce2b3a40de2c4715b1c5582b336a7",
+  "base_from": "previous landed tip",
+  "crustify": "1a7d4341901fd962d54e979178941898547b09e7",
+  "command": "crustify ffimap <workdir> --json --ffibox",
+  "ffibox": "630f4a5",
+  "ffibox_base": "630f4a5",
+  "ffibox_rule": "latest ffibox commit at or before the scanned commit's committer time"
+}
