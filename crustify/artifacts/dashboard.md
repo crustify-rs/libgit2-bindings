@@ -17,7 +17,7 @@ Copy this template into the campaign checkout, then fill it as work lands.
 - **`--max-loc`** — `500`
 - **`--min-fields`** — `20`
 - **orchestrator parallelism** — `10` concurrent batch processes through `libgit2/core`; `16` from `libgit2/repository`
-- **branch** — `crustify/campaigns/20261008-170008`, tip `<sha>`
+- **branch** — `crustify/main`, tip `<sha>`
 - **deps** — crustify `0fcfcae` (`main`, from `libgit2/core`; through `libgit2/oid` `7912683` with `ffimap` from a local driver port, since superseded by upstream's nightly pin `4efc0cc`; batch and wave `ffimap` records through `libgit2/config` from `4771856`, later ones and every sub-campaign and campaign scan from `cbf6fbc`), ffibox `695d52d` (`main`)
 - **build version** — `1`
 - **C test baseline** — `3443/3498, 55 skipped, and ctest targets invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online, online_customcert, proxy, auth_clone, auth_clone_and_push disabled`
@@ -76,7 +76,7 @@ the campaign's.
   translation batches and of its review batches; `—` where it ran none
 - `total` — `batch` + `review`; for the orchestrator, its own cost
 - `orchestrator` — the Overview row for every orchestrator session of the campaign, priced
-  from the `orchestrator-*.usage.json` records in its campaign dir; `total` is their sum. A
+  from the `orchestrator-*.usage.json` records in `crustify/artifacts/orchestrator/`; `total` is their sum. A
   session that died before writing its record is recovered from its transcript (Notes)
 - `Σ recorded agents` / `Σ campaign` — the batch and review agents alone, then those plus the
   orchestrator. `$/type` and `$/sym` are given for the agents only, since the orchestrator's
@@ -1058,7 +1058,7 @@ plain `offline`/`util` ctest pass after it. Union coverage fell from `43.17`% to
 The two functions had been the only working way to build a backend, so the operator had
 `git_config_backend` translated again in one `claude-opus-5.5` batch, shown as the second
 `libgit2/config` wave `4` batch `0` row. Its `batch.json` is the scheduled entry verbatim,
-landed through `crustify/waves/20261008-170008/libgit2/config/wave-4-followup`. Shared
+landed through `crustify/waves/libgit2/config/wave-4-followup`. Shared
 memory told it why the batch was rerun. It added the public constructor through the
 author's path. A `CustomBackend` trait puts a Rust store behind every slot.
 `UnopenedBackend::new`/`new_readonly` box it after a `git_config_init_backend`-initialized
@@ -1120,7 +1120,7 @@ pauses (the refusal decision, then a pause after review wave 1).
 ### Orchestrator cost
 
 The Overview's orchestrator row sums the 10 `orchestrator-*.usage.json` records in
-`crustify/artifacts/`: `$438.96` for `337.45M` tokens over `98.0h` of session wall,
+`crustify/artifacts/orchestrator/`: `$438.96` for `337.45M` tokens over `98.0h` of session wall,
 all `openrouter/anthropic/claude-opus-5.5`. Three of them were recovered from the session
 transcripts under the container's `/work/.claude/projects/-target/`, each marked with
 `recovered_from`:
