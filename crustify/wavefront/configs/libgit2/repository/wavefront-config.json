@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Subsystem libgit2/repository of campaign 20261008-170008; mirrors crustify/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/repository of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
