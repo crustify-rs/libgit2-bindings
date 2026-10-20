@@ -1,6 +1,5 @@
 # Example <repo>/crustify/.gitignore.
 
-.providers
 tmp
 .worktrees
 # Prebuilt variants of the target (see build.json).
@@ -8,25 +7,13 @@ builds
 rust/target
 rust.bak
 
-# Campaign plans, the batches projected from them and each batch agent's usage
-# record are tracked: the records are the evidence behind dashboard.md's cost cells, and
-# the transcripts they are recovered from do not outlive the container. The
-# agent streams, and for now the orchestrator's records, are not.
-artifacts/**/binder.log
-artifacts/**/translator.log
-artifacts/**/reviewer.log
-artifacts/orchestrator/*.log
-artifacts/orchestrator/*.usage.json
+# Campaign plans, the tasks written from them, and each agent's session and usage
+# records are tracked: the usage records are the evidence behind dashboard.md's cost
+# cells. The transcripts they are derived from live in crustify's home, outside the
+# checkout.
 
 # Review reproducers are tracked; the cargo trees their builds leave are not.
 reviews/**/target
-
-# The UB auditor's working area, and the cargo trees under its reproducers --
-# typically ~99% of the directory's bytes. Advisories, their reproducer
-# sources and the logs are the deliverable and stay tracked.
-audit/scratch
-audit/**/target
-audit/**/target-*
 
 bak
 stats.md
@@ -35,3 +22,10 @@ evaluation/**/manifests/
 # Wavefront-owned CodeQL database/tables and disposable caches.
 wavefront/codeql
 wavefront/.cache
+
+# Left by the campaign's earlier layout. The provider home now lives in crustify's
+# home, and session records replace the agents' streams; neither is tracked.
+.providers
+artifacts/**/binder.log
+artifacts/**/translator.log
+artifacts/**/reviewer.log

@@ -7,7 +7,7 @@
      revision
 
 2. **Should this campaign port the C implementation to Rust, or create safe
-   Rust wrappers?** (`id: objective`)
+   Rust wrappers?** (`id: campaign`)
    - Answer: `wrap`
 
 3. **What should this campaign target: a named subset of subsystems, or a named
@@ -34,10 +34,9 @@ Unanswered optional questions use their defaults.
 ## Campaign execution
 
 7. **Which model and billing should plan the campaign, and how many planner runs
-   should it make? The first run emits the plan; each later run reviews and amends
-   what the runs before it committed.** (`id: plan-agent`)
-   - Answer: the translation model and billing, 2 runs. The subsystems already
-     planned were planned by the orchestrator, before planners existed.
+   should it make? Each run emits what the plan lacks and corrects what the runs
+   before it committed.** (`id: plan-agent`)
+   - Answer: `anthropic/claude-opus-5-5` and subscription, 2 runs.
 
 8. **Should the campaign use the default batching and parallelism settings, or
    customize them?** (`id: workload`)
@@ -70,7 +69,7 @@ Unanswered optional questions use their defaults.
 Answer these approval-gate questions only if question 6 is answered `no`.
 
 13. **Should I wait for your approval before starting the setup phase?** (`id: gates.setup`)
-   - Answer: `no`
+    - Answer: `no`
 14. **Should I wait for your approval before starting the translation phase?**
     (`id: gates.translation`)
     - Answer: `yes`
@@ -81,9 +80,14 @@ Answer these approval-gate questions only if question 6 is answered `no`.
 
 # Benchmark recording questions
 
-17. **Where and in what format should the dashboard be recorded?** (`id: dashboard`)
+17. **Where and in what format should the dashboard be recorded? By default, at
+    `crustify/artifacts/dashboard.md`, from the standard template.** (`id: dashboard`)
     - Answer: `<repo-checkout>/crustify/artifacts/dashboard.md`, `standard` template
 
 # Additional instructions
 
 Unless otherwise stated, preserve the format of the dashboard exactly.
+
+You are resuming an existing campaign where many steps of the Setup and translation
+phase have been completed. In this session we just want to run the planner agent to
+update the planning step and observe how it affects schedule.json, and then pause.
