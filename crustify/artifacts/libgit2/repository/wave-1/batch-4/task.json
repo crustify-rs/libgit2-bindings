@@ -1,0 +1,134 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-1",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_repository_state_cleanup",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_submodule_cache_all",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_submodule_cache_clear",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_workdir",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_wrap_odb",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_worktree_free",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_is_locked",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_is_prunable",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_list",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_lock",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_lookup",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_name",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_open_from_repository",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_path",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_prune",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_prune_options_init",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_unlock",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_validate",
+      "defined_in": "src/libgit2/worktree.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/object/wave-2",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_commit_create_options",
+      "defined_in": "include/git2/commit.h",
+      "kind": "type",
+      "field_anchors": [
+        "payload",
+        "version",
+        "sign",
+        "extra_headers_len",
+        "extra_headers",
+        "message_encoding",
+        "committer",
+        "author",
+        "allow_empty_commit"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    }
+  ]
+}

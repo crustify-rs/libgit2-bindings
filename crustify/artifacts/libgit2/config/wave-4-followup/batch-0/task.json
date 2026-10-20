@@ -1,0 +1,30 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/config/wave-4-followup",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_config_backend",
+      "defined_in": "include/git2/sys/config.h",
+      "kind": "type",
+      "field_anchors": [
+        "free",
+        "version",
+        "iterator",
+        "cfg",
+        "unlock",
+        "open",
+        "lock",
+        "snapshot",
+        "del_multivar",
+        "del",
+        "set_multivar",
+        "set",
+        "get",
+        "readonly"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/config/sys/config.rs"
+    }
+  ]
+}

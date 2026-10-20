@@ -1,0 +1,15 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_index",
+      "defined_in": "src/libgit2/index.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    }
+  ]
+}

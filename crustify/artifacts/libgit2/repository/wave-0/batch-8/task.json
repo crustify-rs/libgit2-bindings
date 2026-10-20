@@ -1,0 +1,22 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_repository_init_flag_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_init_mode_t",
+      "defined_in": "include/git2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    }
+  ]
+}

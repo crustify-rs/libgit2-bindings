@@ -1,0 +1,9 @@
+{
+  "commits": [
+    "cb77d2e9b",
+    "2b8ec7e2c"
+  ],
+  "base_branch": "crustify/reviews/libgit2/index/wave-2",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

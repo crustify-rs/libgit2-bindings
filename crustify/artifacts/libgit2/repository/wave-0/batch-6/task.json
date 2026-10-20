@@ -1,0 +1,22 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_refdb_t",
+      "defined_in": "include/git2/refdb.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/refdb.rs"
+    },
+    {
+      "name": "git_reference",
+      "defined_in": "src/libgit2/refs.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/refs.rs"
+    }
+  ]
+}

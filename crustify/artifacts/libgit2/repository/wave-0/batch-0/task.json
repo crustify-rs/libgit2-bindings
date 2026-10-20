@@ -1,0 +1,15 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_annotated_commit",
+      "defined_in": "src/libgit2/annotated_commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/refs/annotated_commit.rs"
+    }
+  ]
+}

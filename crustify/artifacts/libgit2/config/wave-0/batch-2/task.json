@@ -1,0 +1,29 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/config/wave-0",
+  "model": "openrouter/openai/gpt-6.1-sol",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_config_parse_bool",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_config_parse_int32",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_config_parse_int64",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    }
+  ]
+}

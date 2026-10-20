@@ -1,0 +1,8 @@
+{
+  "commits": [
+    "9468d5210"
+  ],
+  "base_branch": "crustify/reviews/libgit2/repository/wave-2",
+  "model": "openrouter/anthropic/claude-fable-5.1",
+  "billing": "api"
+}

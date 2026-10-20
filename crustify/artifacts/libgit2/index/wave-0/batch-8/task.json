@@ -1,0 +1,15 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/index/wave-0",
+  "model": "openrouter/openai/gpt-6-astra",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_index_matched_path_cb",
+      "defined_in": "include/git2/index.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    }
+  ]
+}

@@ -1,3 +1,0 @@
-stage             model                                 $      tokens     wall
-wrap-symbol       anthropic/claude-opus-5.5         15.01  42,852,379    0h55m
-  /target/crustify/campaigns/20261008-170008/libgit2/index/wave-1/batch-3/translator.usage.json

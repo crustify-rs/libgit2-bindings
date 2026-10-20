@@ -1,0 +1,25 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/oid/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_oid",
+      "defined_in": "include/git2/oid.h",
+      "kind": "type",
+      "field_anchors": [
+        "type",
+        "id"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    },
+    {
+      "name": "git_oid_shorten",
+      "defined_in": "src/libgit2/oid.c",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/oid/oid.rs"
+    }
+  ]
+}

@@ -1,3 +1,0 @@
-stage             model                                 $      tokens     wall
-review-raw-lifetimeanthropic/claude-fable-5.1         7.89  10,781,448    0h18m
-  /target/crustify/.worktrees/crustify/subcampaigns/20261008-170008/libgit2/raw-lifetime-void/crustify/campaigns/20261008-170008/libgit2/raw-lifetime-void/review-wave-0/batch-0/translator.usage.json

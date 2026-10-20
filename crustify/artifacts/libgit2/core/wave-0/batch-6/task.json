@@ -1,0 +1,26 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/core/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_time",
+      "defined_in": "include/git2/types.h",
+      "kind": "type",
+      "field_anchors": [
+        "offset",
+        "sign",
+        "time"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/core/types.rs"
+    },
+    {
+      "name": "git_trace_level_t",
+      "defined_in": "include/git2/trace.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/trace.rs"
+    }
+  ]
+}

@@ -1,3 +1,0 @@
-stage             model                                 $      tokens     wall
-wrap-type         openai/gpt-6-astra                 5.76   2,625,810    0h07m
-  /target/crustify/campaigns/20261008-170008/libgit2/index/wave-0/batch-1/translator.usage.json

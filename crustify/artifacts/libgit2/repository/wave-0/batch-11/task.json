@@ -1,0 +1,25 @@
+{
+  "objective": "wrap",
+  "base_branch": "crustify/waves/libgit2/repository/wave-0",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "items": [
+    {
+      "name": "git_worktree_prune_options",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [
+        "flags",
+        "version"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    },
+    {
+      "name": "git_worktree_prune_t",
+      "defined_in": "include/git2/worktree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
+    }
+  ]
+}
