@@ -727,7 +727,7 @@ a campaign could not fill, said once rather than left as a field of em-dashes.
 ### C test baseline
 
 Every offline `libgit2_tests` suite and every `util_tests` suite ran in isolation
-(`crustify/scripts/c-suites.sh`) against each prebuild; the per-variant record is
+(`crustify/tmp/scripts/c-suites.sh`, untracked scratch) against each prebuild; the per-variant record is
 `crustify/artifacts/c-baseline.json`. Plain, coverage and ASan+UBSan pass
 every case they run (`3443/3498`; coverage `3444/3498`). The 55 skips are clar's own
 environment guards, not disabled tests: `checkout::icase` (12), `index::bypath` (6),

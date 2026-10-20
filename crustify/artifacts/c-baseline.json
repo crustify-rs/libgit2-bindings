@@ -1,7 +1,7 @@
 {
  "_comment": [
   "C test baseline of campaign 20261008-170008 at the campaign base revision,",
-  "one record per crustify/build.json variant (version 1), from crustify/scripts/c-suites.sh:",
+  "one record per crustify/build.json variant (version 1), from crustify/tmp/scripts/c-suites.sh (untracked scratch):",
   "every offline libgit2 clar suite and every util suite run in isolation. Excluded ctest",
   "targets: invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online,",
   "online_customcert, proxy, auth_clone, auth_clone_and_push (network, servers or",
