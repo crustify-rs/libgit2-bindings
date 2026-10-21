@@ -1,6 +1,9 @@
 {
   "_comment": [
-    "Subsystem libgit2/merge of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/merge of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config.",
+    "out_of_scope.items: repository.h is shared; repository, its first-scheduled sharer, owns what it defines.",
+    "out_of_scope.items: types.h is shared; core, its first-scheduled sharer, owns what it defines.",
+    "schedule --skip git_commit_create_cb git_repository_fetchhead_foreach_cb git_repository_mergehead_foreach_cb: wavefront schedules a callback an API struct field names even where another config owns it."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
@@ -24,6 +27,80 @@
   ],
   "out_of_scope": {
     "paths": [],
-    "features": []
-  }
+    "items": [
+      {
+        "name": "git_branch_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_filemode_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_object_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_reference_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_repository_fetchhead_foreach_cb",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_init_flag_t",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_init_mode_t",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_init_options",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_item_t",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_mergehead_foreach_cb",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_open_flag_t",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_repository_state_t",
+        "defined_in": "include/git2/repository.h"
+      },
+      {
+        "name": "git_signature",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_ignore_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_recurse_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_update_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_time",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_writestream",
+        "defined_in": "include/git2/types.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
 }

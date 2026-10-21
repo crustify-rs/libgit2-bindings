@@ -11,7 +11,7 @@
   ],
   "api_headers": [],
   "out_of_scope": {
-    "paths": [],
-    "features": []
-  }
+    "paths": []
+  },
+  "t3_dir": "t3"
 }

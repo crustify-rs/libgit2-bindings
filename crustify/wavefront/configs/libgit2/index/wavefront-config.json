@@ -1,6 +1,9 @@
 {
   "_comment": [
-    "Subsystem libgit2/index of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/index of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config.",
+    "out_of_scope.items: notes.h is shared; its callback stays with history, which implements notes.c and its only consumer, git_note_foreach.",
+    "out_of_scope.items: types.h is shared; core, its first-scheduled sharer, owns what it defines.",
+    "schedule --skip git_note_foreach_cb: wavefront schedules it although out_of_scope.items names it."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
@@ -24,6 +27,52 @@
   ],
   "out_of_scope": {
     "paths": [],
-    "features": []
-  }
+    "items": [
+      {
+        "name": "git_branch_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_filemode_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_note_foreach_cb",
+        "defined_in": "include/git2/notes.h"
+      },
+      {
+        "name": "git_object_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_reference_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_signature",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_ignore_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_recurse_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_update_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_time",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_writestream",
+        "defined_in": "include/git2/types.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
 }

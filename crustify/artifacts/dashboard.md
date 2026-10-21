@@ -114,14 +114,14 @@ tracked in the campaign's artifact dir and in each subsystem's, wave's and batch
 
 ## Planning
 
-`<provider>/<model>` via `<backend>`. One row per planner run, in order; its reports are
+`anthropic/claude-opus-5-5` via `claude`. One row per planner run, in order; its reports are
 the corrections it made to what earlier runs committed.
 
 | run | subsystems changed | items moved | wavefront artifacts changed | reports | $ | tokens | wall |
 |---|---:|---:|---|---:|---|---|---|
+| 0 | `12` | `167` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (22), `t3/chased_casts.csv`, `t3/type_generators.csv` | `8` | `$<n>` | `<n>M` | `<n>m<n>s` |
 | 1 | `<n>` | `<n>` | `<files>` | `<n>` | `$<n>` | `<n>M` | `<n>m<n>s` |
-| 2 | `<n>` | `<n>` | `<files>` | `<n>` | `$<n>` | `<n>M` | `<n>m<n>s` |
-| **Σ** | **`<n>`** | **`<n>`** | | **`<n>`** | **`$<n>`** | **`<n>M`** | **`<n>m<n>s`** |
+| **Σ** | **`12`** | **`167`** | | **`8`** | **`$<n>`** | **`<n>M`** | **`<n>m<n>s`** |
 
 ## Types
 

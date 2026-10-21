@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "string",
+              "defined_in": null,
+              "kind": "raw-lifetime",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/raw.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

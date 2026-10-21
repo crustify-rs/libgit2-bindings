@@ -1,0 +1,309 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter_flag_t",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter_mode_t",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_source",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter_unregister",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "stream",
+                "reserved",
+                "cleanup",
+                "attributes",
+                "shutdown",
+                "initialize",
+                "check"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_options",
+              "defined_in": "include/git2/filter.h",
+              "kind": "type",
+              "field_anchors": [
+                "flags",
+                "version",
+                "reserved",
+                "attr_commit_id"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter_list_apply_to_blob",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_apply_to_buffer",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_apply_to_file",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_contains",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_free",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_length",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_list_load",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_new",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_list_stream_blob",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_stream_buffer",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_stream_file",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_source_filemode",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_source_flags",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_source_id",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_source_mode",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_source_path",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_source_repo",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_filter_check_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_cleanup_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_init",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_init_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_list_load_ext",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_list_push",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_lookup",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_options_init",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/filter.rs"
+            },
+            {
+              "name": "git_filter_register",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_shutdown_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            },
+            {
+              "name": "git_filter_stream_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/filter/sys/filter.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

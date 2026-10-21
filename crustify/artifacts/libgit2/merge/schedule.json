@@ -1,0 +1,633 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_analysis_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source",
+              "defined_in": "src/libgit2/merge_driver.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_file_favor_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_file_flag_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_file_input",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [
+                "size",
+                "version",
+                "path",
+                "mode",
+                "ptr"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_file_result",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [
+                "len",
+                "path",
+                "mode",
+                "ptr",
+                "automergeable"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_flag_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_preference_t",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_rebase",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_rebase_operation_t",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_driver_unregister",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_driver",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "apply",
+                "shutdown",
+                "initialize"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_file_options",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [
+                "flags",
+                "version",
+                "favor",
+                "marker_size",
+                "their_label",
+                "our_label",
+                "ancestor_label"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_options",
+              "defined_in": "include/git2/merge.h",
+              "kind": "type",
+              "field_anchors": [
+                "flags",
+                "version",
+                "metric",
+                "rename_threshold",
+                "default_driver",
+                "file_flags",
+                "file_favor",
+                "recursion_limit",
+                "target_limit"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_rebase_operation",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "field_anchors": [
+                "type",
+                "id",
+                "exec"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_merge_analysis",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_analysis_for_ref",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_base",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_base_many",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_base_octopus",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_bases",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_bases_many",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source_ancestor",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source_ours",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source_repo",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source_theirs",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_file_input_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_file_result_free",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_rebase_abort",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_free",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_inmemory_index",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_onto_id",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_onto_name",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_operation_current",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_operation_entrycount",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_orig_head_id",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_orig_head_name",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cherrypick_options",
+              "defined_in": "include/git2/cherrypick.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "mainline",
+                "merge_opts"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/cherrypick.rs"
+            },
+            {
+              "name": "git_revert_options",
+              "defined_in": "include/git2/revert.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "mainline",
+                "merge_opts"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/revert.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cherrypick_commit",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/cherrypick.rs"
+            },
+            {
+              "name": "git_merge",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_commits",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_apply_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_init_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_lookup",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_register",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_shutdown_fn",
+              "defined_in": "include/git2/sys/merge.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_driver_source_file_options",
+              "defined_in": "src/libgit2/merge_driver.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/sys/merge.rs"
+            },
+            {
+              "name": "git_merge_file",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_file_from_index",
+              "defined_in": "src/libgit2/merge_file.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_file_options_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_options_init",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_merge_trees",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/merge.rs"
+            },
+            {
+              "name": "git_rebase_commit",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_finish",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_next",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_operation_byindex",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_repository_mergehead_foreach",
+              "defined_in": "src/libgit2/merge.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/repository.rs"
+            },
+            {
+              "name": "git_revert_commit",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/revert.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_rebase_options",
+              "defined_in": "include/git2/rebase.h",
+              "kind": "type",
+              "field_anchors": [
+                "payload",
+                "version",
+                "reserved",
+                "commit_create_cb",
+                "inmemory",
+                "quiet",
+                "merge_options",
+                "checkout_options",
+                "rewrite_notes_ref"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cherrypick",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/cherrypick.rs"
+            },
+            {
+              "name": "git_cherrypick_options_init",
+              "defined_in": "src/libgit2/cherrypick.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/cherrypick.rs"
+            },
+            {
+              "name": "git_revert",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/revert.rs"
+            },
+            {
+              "name": "git_revert_options_init",
+              "defined_in": "src/libgit2/revert.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/revert.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_rebase_init",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_open",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            },
+            {
+              "name": "git_rebase_options_init",
+              "defined_in": "src/libgit2/rebase.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/merge/rebase.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

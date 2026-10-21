@@ -1,0 +1,783 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_clone_local_t",
+              "defined_in": "include/git2/clone.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            },
+            {
+              "name": "git_direction",
+              "defined_in": "include/git2/net.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/net.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_fetch_depth_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_fetch_prune_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_proxy_t",
+              "defined_in": "include/git2/proxy.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/proxy.rs"
+            },
+            {
+              "name": "git_push",
+              "defined_in": "src/libgit2/push.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/types.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote",
+              "defined_in": "src/libgit2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_autotag_option_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_capability_t",
+              "defined_in": "include/git2/sys/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/sys/remote.rs"
+            },
+            {
+              "name": "git_remote_completion_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_create_flags",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_redirect_t",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_update_flags",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_push_transfer_progress_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_push_update_reference_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_name_is_valid",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_proxy_options",
+              "defined_in": "include/git2/proxy.h",
+              "kind": "type",
+              "field_anchors": [
+                "payload",
+                "version",
+                "type",
+                "certificate_check",
+                "credentials",
+                "url"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/proxy.rs"
+            },
+            {
+              "name": "git_push_update",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "src",
+                "dst",
+                "dst_refname",
+                "src_refname"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_create_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "flags",
+                "name",
+                "version",
+                "repository",
+                "fetchspec"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_head",
+              "defined_in": "include/git2/net.h",
+              "kind": "type",
+              "field_anchors": [
+                "oid",
+                "name",
+                "local",
+                "loid",
+                "symref_target"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/net.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_add_fetch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_add_push",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_autotag",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_connected",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create_anonymous",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create_cb",
+              "defined_in": "include/git2/clone.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            },
+            {
+              "name": "git_remote_create_detached",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create_with_fetchspec",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_default_branch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_delete",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_disconnect",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_dup",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_free",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_get_fetch_refspecs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_get_push_refspecs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_get_refspec",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_list",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_lookup",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_name",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_oid_type",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_owner",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_prune_refs",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_ready_cb",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_refspec_count",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_rename",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_set_autotag",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_set_instance_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_set_instance_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_set_pushurl",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_set_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_stats",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_stop",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_url",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_repository_create_cb",
+              "defined_in": "include/git2/clone.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_proxy_options_init",
+              "defined_in": "src/libgit2/proxy.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/proxy.rs"
+            },
+            {
+              "name": "git_push_negotiation",
+              "defined_in": "include/git2/remote.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create_options_init",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_create_with_opts",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_ls",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_callbacks",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "payload",
+                "version",
+                "reserved",
+                "update_refs",
+                "remote_ready",
+                "transport",
+                "push_negotiation",
+                "push_update_reference",
+                "push_transfer_progress",
+                "pack_progress",
+                "reserved_update_tips",
+                "transfer_progress",
+                "certificate_check",
+                "credentials",
+                "completion",
+                "sideband_progress"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_fetch_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "depth",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks",
+                "download_tags",
+                "update_fetchhead",
+                "prune"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_push_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "remote_push_options",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks",
+                "pb_parallelism"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_connect_options",
+              "defined_in": "include/git2/remote.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "custom_headers",
+                "follow_redirects",
+                "proxy_opts",
+                "callbacks"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_remote_connect",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_init_callbacks",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_prune",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_update_tips",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_clone_options",
+              "defined_in": "include/git2/clone.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "checkout_opts",
+                "local",
+                "remote_cb_payload",
+                "remote_cb",
+                "repository_cb_payload",
+                "repository_cb",
+                "checkout_branch",
+                "bare",
+                "fetch_opts"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_fetch_options_init",
+              "defined_in": "src/libgit2/fetch.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_push_options_init",
+              "defined_in": "src/libgit2/push.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_connect_ext",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_connect_options_dispose",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/sys/remote.rs"
+            },
+            {
+              "name": "git_remote_connect_options_init",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_download",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_fetch",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_push",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            },
+            {
+              "name": "git_remote_upload",
+              "defined_in": "src/libgit2/remote.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/remote.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_clone",
+              "defined_in": "src/libgit2/clone.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            },
+            {
+              "name": "git_clone_options_init",
+              "defined_in": "src/libgit2/clone.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/remote/clone.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

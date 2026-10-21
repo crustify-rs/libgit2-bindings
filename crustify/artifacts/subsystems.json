@@ -2,11 +2,91 @@
   "version": "cdbe98f53e3c4383a190f1f72d058eee5bf5e75d",
   "link_units": [
     {
+      "index": 0,
       "name": "libgit2",
       "kind": "library",
       "linkage": "shared",
       "subsystems": [
         {
+          "index": 0,
+          "name": "raw-lifetime-void",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": []
+          },
+          "implementation_files": [],
+          "api_headers": [],
+          "counters": {
+            "implementation": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            },
+            "api": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "opaque_structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            }
+          },
+          "imported_deps": {
+            "in_tree": [],
+            "out_of_tree": []
+          }
+        },
+        {
+          "index": 1,
+          "name": "raw-lifetime-string",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": []
+          },
+          "implementation_files": [],
+          "api_headers": [],
+          "counters": {
+            "implementation": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            },
+            "api": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "opaque_structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            }
+          },
+          "imported_deps": {
+            "in_tree": [],
+            "out_of_tree": []
+          }
+        },
+        {
+          "index": 2,
           "name": "llhttp",
           "objective": {
             "objective": "wrap",
@@ -30,8 +110,8 @@
               "global_variables": 58,
               "enums": 9,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 6
+              "callbacks": 3,
+              "macros": 19
             },
             "api": {
               "files": 0,
@@ -57,14 +137,15 @@
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 2,
-                  "macros": 2
+                  "callbacks": 0,
+                  "macros": 1
                 }
               }
             ]
           }
         },
         {
+          "index": 3,
           "name": "ntlmclient",
           "objective": {
             "objective": "wrap",
@@ -93,9 +174,9 @@
               "functions": 112,
               "global_variables": 7,
               "enums": 9,
-              "unions": 0,
+              "unions": 1,
               "callbacks": 0,
-              "macros": 17
+              "macros": 51
             },
             "api": {
               "files": 0,
@@ -116,7 +197,7 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 3,
+                  "structs": 0,
                   "functions": 13,
                   "global_variables": 0,
                   "enums": 0,
@@ -128,7 +209,7 @@
               {
                 "library": "libcrypto",
                 "counters": {
-                  "structs": 1,
+                  "structs": 4,
                   "functions": 13,
                   "global_variables": 0,
                   "enums": 0,
@@ -141,12 +222,13 @@
           }
         },
         {
+          "index": 4,
           "name": "util",
           "objective": {
             "objective": "wrap",
             "rust_native_equivalent": [
               "std",
-              "sha1_smol",
+              "sha1-checked",
               "sha2",
               "flate2",
               "regex"
@@ -242,13 +324,13 @@
             "implementation": {
               "files": 79,
               "loc": 14759,
-              "structs": 40,
+              "structs": 42,
               "functions": 605,
               "global_variables": 66,
-              "enums": 11,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 80
+              "enums": 20,
+              "unions": 3,
+              "callbacks": 10,
+              "macros": 350
             },
             "api": {
               "files": 3,
@@ -260,7 +342,7 @@
               "enums": 2,
               "unions": 0,
               "callbacks": 0,
-              "macros": 0
+              "macros": 3
             }
           },
           "imported_deps": {
@@ -272,12 +354,12 @@
                 "incoming_edges": 114,
                 "counters": {
                   "structs": 0,
-                  "functions": 2,
+                  "functions": 0,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               }
             ],
@@ -285,37 +367,25 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 18,
-                  "functions": 114,
+                  "structs": 12,
+                  "functions": 113,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 8,
+                  "callbacks": 0,
                   "macros": 100
                 }
               },
               {
                 "library": "libcrypto",
                 "counters": {
-                  "structs": 0,
+                  "structs": 1,
                   "functions": 3,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
-                }
-              },
-              {
-                "library": "libpcre2-8",
-                "counters": {
-                  "structs": 0,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 14
                 }
               },
               {
@@ -329,11 +399,24 @@
                   "callbacks": 0,
                   "macros": 11
                 }
+              },
+              {
+                "library": "libpcre2-8",
+                "counters": {
+                  "structs": 5,
+                  "functions": 7,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 14
+                }
               }
             ]
           }
         },
         {
+          "index": 5,
           "name": "oid",
           "objective": {
             "objective": "wrap",
@@ -355,13 +438,13 @@
             "implementation": {
               "files": 4,
               "loc": 566,
-              "structs": 3,
+              "structs": 2,
               "functions": 47,
               "global_variables": 4,
               "enums": 0,
-              "unions": 0,
+              "unions": 1,
               "callbacks": 0,
-              "macros": 0
+              "macros": 4
             },
             "api": {
               "files": 2,
@@ -373,7 +456,7 @@
               "enums": 1,
               "unions": 0,
               "callbacks": 0,
-              "macros": 8
+              "macros": 14
             }
           },
           "imported_deps": {
@@ -381,16 +464,16 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 32,
+                "outgoing_edges": 33,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 0,
-                  "functions": 16,
+                  "functions": 12,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
                 }
               }
             ],
@@ -411,6 +494,223 @@
           }
         },
         {
+          "index": 6,
+          "name": "reftable",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": []
+          },
+          "implementation_files": [
+            "deps/reftable/basics.c",
+            "deps/reftable/basics.h",
+            "deps/reftable/block.c",
+            "deps/reftable/block.h",
+            "deps/reftable/blocksource.c",
+            "deps/reftable/blocksource.h",
+            "deps/reftable/error.c",
+            "deps/reftable/fsck.c",
+            "deps/reftable/iter.c",
+            "deps/reftable/iter.h",
+            "deps/reftable/merged.c",
+            "deps/reftable/merged.h",
+            "deps/reftable/pq.c",
+            "deps/reftable/pq.h",
+            "deps/reftable/record.c",
+            "deps/reftable/record.h",
+            "deps/reftable/reftable-basics.h",
+            "deps/reftable/reftable-block.h",
+            "deps/reftable/reftable-blocksource.h",
+            "deps/reftable/reftable-error.h",
+            "deps/reftable/reftable-fsck.h",
+            "deps/reftable/reftable-iterator.h",
+            "deps/reftable/reftable-merged.h",
+            "deps/reftable/reftable-record.h",
+            "deps/reftable/reftable-stack.h",
+            "deps/reftable/reftable-table.h",
+            "deps/reftable/reftable-writer.h",
+            "deps/reftable/stack.c",
+            "deps/reftable/stack.h",
+            "deps/reftable/system.c",
+            "deps/reftable/system.h",
+            "deps/reftable/table.c",
+            "deps/reftable/table.h",
+            "deps/reftable/tree.c",
+            "deps/reftable/tree.h",
+            "deps/reftable/writer.c",
+            "deps/reftable/writer.h"
+          ],
+          "api_headers": [],
+          "counters": {
+            "implementation": {
+              "files": 37,
+              "loc": 6289,
+              "structs": 51,
+              "functions": 312,
+              "global_variables": 15,
+              "enums": 7,
+              "unions": 3,
+              "callbacks": 3,
+              "macros": 46
+            },
+            "api": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "opaque_structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 33,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 16,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 6
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 4,
+                  "functions": 30,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 22
+                }
+              },
+              {
+                "library": "libz",
+                "counters": {
+                  "structs": 1,
+                  "functions": 10,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 6
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 7,
+          "name": "xdiff",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": [
+              "similar",
+              "imara-diff"
+            ]
+          },
+          "implementation_files": [
+            "deps/xdiff/git-xdiff.h",
+            "deps/xdiff/xdiff.h",
+            "deps/xdiff/xdiffi.c",
+            "deps/xdiff/xdiffi.h",
+            "deps/xdiff/xemit.c",
+            "deps/xdiff/xemit.h",
+            "deps/xdiff/xhistogram.c",
+            "deps/xdiff/xmerge.c",
+            "deps/xdiff/xpatience.c",
+            "deps/xdiff/xprepare.c",
+            "deps/xdiff/xprepare.h",
+            "deps/xdiff/xtypes.h",
+            "deps/xdiff/xutils.c",
+            "deps/xdiff/xutils.h"
+          ],
+          "api_headers": [],
+          "counters": {
+            "implementation": {
+              "files": 14,
+              "loc": 2746,
+              "structs": 28,
+              "functions": 99,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 3,
+              "macros": 76
+            },
+            "api": {
+              "files": 0,
+              "loc": 0,
+              "structs": 0,
+              "opaque_structs": 0,
+              "functions": 0,
+              "global_variables": 0,
+              "enums": 0,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 0
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 34,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 0,
+                  "functions": 7,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 10
+                }
+              },
+              {
+                "library": "libpcre2-8",
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 8,
           "name": "core",
           "objective": {
             "objective": "wrap",
@@ -453,7 +753,7 @@
               "enums": 2,
               "unions": 0,
               "callbacks": 0,
-              "macros": 1
+              "macros": 16
             },
             "api": {
               "files": 9,
@@ -465,7 +765,7 @@
               "enums": 11,
               "unions": 0,
               "callbacks": 1,
-              "macros": 14
+              "macros": 28
             }
           },
           "imported_deps": {
@@ -477,42 +777,12 @@
                 "incoming_edges": 4,
                 "counters": {
                   "structs": 2,
-                  "functions": 38,
+                  "functions": 33,
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 14,
-                "incoming_edges": 112,
-                "counters": {
-                  "structs": 0,
-                  "functions": 2,
-                  "global_variables": 12,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "transport",
-                "outgoing_edges": 11,
-                "incoming_edges": 37,
-                "counters": {
-                  "structs": 0,
-                  "functions": 7,
-                  "global_variables": 4,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
                 }
               },
               {
@@ -547,24 +817,9 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 2,
-                "incoming_edges": 103,
-                "counters": {
-                  "structs": 0,
-                  "functions": 1,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
                 "subsystem": "object",
                 "outgoing_edges": 1,
-                "incoming_edges": 168,
+                "incoming_edges": 169,
                 "counters": {
                   "structs": 0,
                   "functions": 0,
@@ -594,7 +849,7 @@
                 "link_unit": "libgit2",
                 "subsystem": "filter",
                 "outgoing_edges": 1,
-                "incoming_edges": 38,
+                "incoming_edges": 39,
                 "counters": {
                   "structs": 0,
                   "functions": 1,
@@ -607,13 +862,58 @@
               },
               {
                 "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 2,
+                "incoming_edges": 103,
+                "counters": {
+                  "structs": 0,
+                  "functions": 1,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "odb",
+                "outgoing_edges": 14,
+                "incoming_edges": 112,
+                "counters": {
+                  "structs": 0,
+                  "functions": 2,
+                  "global_variables": 12,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
                 "subsystem": "merge",
                 "outgoing_edges": 1,
-                "incoming_edges": 49,
+                "incoming_edges": 50,
                 "counters": {
                   "structs": 0,
                   "functions": 1,
                   "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "transport",
+                "outgoing_edges": 11,
+                "incoming_edges": 37,
+                "counters": {
+                  "structs": 0,
+                  "functions": 7,
+                  "global_variables": 4,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
@@ -625,19 +925,32 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 3,
+                  "structs": 2,
                   "functions": 11,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 1,
-                  "macros": 11
+                  "callbacks": 0,
+                  "macros": 9
+                }
+              },
+              {
+                "library": "libcrypto",
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
                 }
               }
             ]
           }
         },
         {
+          "index": 9,
           "name": "repository",
           "objective": {
             "objective": "wrap",
@@ -666,14 +979,14 @@
           "counters": {
             "implementation": {
               "files": 9,
-              "loc": 4367,
-              "structs": 8,
+              "loc": 4371,
+              "structs": 12,
               "functions": 183,
               "global_variables": 13,
-              "enums": 2,
+              "enums": 3,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 8
+              "callbacks": 1,
+              "macros": 39
             },
             "api": {
               "files": 5,
@@ -685,7 +998,7 @@
               "enums": 8,
               "unions": 0,
               "callbacks": 2,
-              "macros": 8
+              "macros": 12
             }
           },
           "imported_deps": {
@@ -697,57 +1010,27 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 7,
-                  "functions": 121,
+                  "functions": 93,
                   "global_variables": 1,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 151,
-                "incoming_edges": 129,
-                "counters": {
-                  "structs": 5,
-                  "functions": 51,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 102,
-                "incoming_edges": 29,
-                "counters": {
-                  "structs": 2,
-                  "functions": 31,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 28
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "oid",
-                "outgoing_edges": 55,
+                "outgoing_edges": 57,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 3,
-                  "functions": 13,
+                  "structs": 2,
+                  "functions": 9,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 4
                 }
               },
               {
@@ -757,82 +1040,67 @@
                 "incoming_edges": 5,
                 "counters": {
                   "structs": 2,
-                  "functions": 10,
+                  "functions": 5,
                   "global_variables": 0,
                   "enums": 2,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 101,
+                "incoming_edges": 28,
+                "counters": {
+                  "structs": 2,
+                  "functions": 29,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "object",
                 "outgoing_edges": 36,
-                "incoming_edges": 107,
+                "incoming_edges": 108,
                 "counters": {
                   "structs": 7,
-                  "functions": 14,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 26,
-                "incoming_edges": 21,
-                "counters": {
-                  "structs": 3,
                   "functions": 12,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "index",
-                "outgoing_edges": 14,
+                "outgoing_edges": 12,
                 "incoming_edges": 50,
                 "counters": {
                   "structs": 2,
-                  "functions": 5,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "workdir",
-                "outgoing_edges": 7,
-                "incoming_edges": 82,
+                "subsystem": "attr",
+                "outgoing_edges": 3,
+                "incoming_edges": 87,
                 "counters": {
                   "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "submodule",
-                "outgoing_edges": 7,
-                "incoming_edges": 113,
-                "counters": {
-                  "structs": 2,
-                  "functions": 4,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -857,32 +1125,17 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "remote",
-                "outgoing_edges": 4,
-                "incoming_edges": 97,
+                "subsystem": "refs",
+                "outgoing_edges": 149,
+                "incoming_edges": 128,
                 "counters": {
-                  "structs": 1,
-                  "functions": 3,
+                  "structs": 4,
+                  "functions": 31,
                   "global_variables": 0,
-                  "enums": 0,
+                  "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "attr",
-                "outgoing_edges": 3,
-                "incoming_edges": 87,
-                "counters": {
-                  "structs": 1,
-                  "functions": 1,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 19
                 }
               },
               {
@@ -902,12 +1155,42 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "merge",
-                "outgoing_edges": 3,
-                "incoming_edges": 93,
+                "subsystem": "odb",
+                "outgoing_edges": 25,
+                "incoming_edges": 21,
+                "counters": {
+                  "structs": 3,
+                  "functions": 8,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "workdir",
+                "outgoing_edges": 7,
+                "incoming_edges": 82,
+                "counters": {
+                  "structs": 1,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "history",
+                "outgoing_edges": 1,
+                "incoming_edges": 66,
                 "counters": {
                   "structs": 0,
-                  "functions": 2,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -917,12 +1200,42 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "history",
-                "outgoing_edges": 1,
-                "incoming_edges": 65,
+                "subsystem": "merge",
+                "outgoing_edges": 3,
+                "incoming_edges": 95,
                 "counters": {
                   "structs": 0,
                   "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "remote",
+                "outgoing_edges": 4,
+                "incoming_edges": 100,
+                "counters": {
+                  "structs": 1,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "submodule",
+                "outgoing_edges": 7,
+                "incoming_edges": 113,
+                "counters": {
+                  "structs": 2,
+                  "functions": 4,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -940,7 +1253,7 @@
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 2,
+                  "callbacks": 0,
                   "macros": 28
                 }
               }
@@ -948,6 +1261,150 @@
           }
         },
         {
+          "index": 10,
+          "name": "config",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": [
+              "gix-config"
+            ]
+          },
+          "implementation_files": [
+            "src/libgit2/config.c",
+            "src/libgit2/config.h",
+            "src/libgit2/config_backend.h",
+            "src/libgit2/config_cache.c",
+            "src/libgit2/config_file.c",
+            "src/libgit2/config_list.c",
+            "src/libgit2/config_list.h",
+            "src/libgit2/config_mem.c",
+            "src/libgit2/config_parse.c",
+            "src/libgit2/config_parse.h",
+            "src/libgit2/config_snapshot.c"
+          ],
+          "api_headers": [
+            "include/git2/config.h",
+            "include/git2/sys/config.h",
+            "include/git2/types.h"
+          ],
+          "counters": {
+            "implementation": {
+              "files": 11,
+              "loc": 3411,
+              "structs": 25,
+              "functions": 217,
+              "global_variables": 9,
+              "enums": 1,
+              "unions": 0,
+              "callbacks": 4,
+              "macros": 11
+            },
+            "api": {
+              "files": 3,
+              "loc": 356,
+              "structs": 6,
+              "opaque_structs": 1,
+              "functions": 48,
+              "global_variables": 0,
+              "enums": 2,
+              "unions": 0,
+              "callbacks": 1,
+              "macros": 6
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 602,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 67,
+                  "global_variables": 1,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 42
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 59,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 14,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 28,
+                "incoming_edges": 101,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 12,
+                "incoming_edges": 21,
+                "counters": {
+                  "structs": 3,
+                  "functions": 6,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 3,
+                  "functions": 22,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 15
+                }
+              },
+              {
+                "library": "libpcre2-8",
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 11,
           "name": "object",
           "objective": {
             "objective": "wrap",
@@ -992,13 +1449,13 @@
             "implementation": {
               "files": 19,
               "loc": 5293,
-              "structs": 24,
+              "structs": 29,
               "functions": 314,
               "global_variables": 3,
               "enums": 2,
-              "unions": 0,
+              "unions": 1,
               "callbacks": 0,
-              "macros": 13
+              "macros": 24
             },
             "api": {
               "files": 10,
@@ -1010,7 +1467,7 @@
               "enums": 3,
               "unions": 0,
               "callbacks": 6,
-              "macros": 8
+              "macros": 18
             }
           },
           "imported_deps": {
@@ -1018,86 +1475,71 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 669,
+                "outgoing_edges": 670,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 7,
-                  "functions": 120,
+                  "functions": 81,
                   "global_variables": 1,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 40
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "oid",
-                "outgoing_edges": 190,
+                "outgoing_edges": 193,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 3,
-                  "functions": 21,
+                  "structs": 2,
+                  "functions": 16,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "core",
-                "outgoing_edges": 168,
+                "outgoing_edges": 169,
                 "incoming_edges": 1,
                 "counters": {
-                  "structs": 8,
-                  "functions": 14,
+                  "structs": 6,
+                  "functions": 10,
                   "global_variables": 0,
                   "enums": 2,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 127,
-                "incoming_edges": 95,
-                "counters": {
-                  "structs": 4,
-                  "functions": 25,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 4
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "repository",
-                "outgoing_edges": 107,
+                "outgoing_edges": 108,
                 "incoming_edges": 36,
                 "counters": {
                   "structs": 1,
-                  "functions": 15,
+                  "functions": 14,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 1
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 39,
-                "incoming_edges": 64,
+                "subsystem": "config",
+                "outgoing_edges": 10,
+                "incoming_edges": 0,
                 "counters": {
                   "structs": 1,
-                  "functions": 13,
+                  "functions": 4,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -1127,27 +1569,27 @@
                 "incoming_edges": 16,
                 "counters": {
                   "structs": 2,
-                  "functions": 10,
+                  "functions": 7,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 10,
-                "incoming_edges": 0,
+                "subsystem": "refs",
+                "outgoing_edges": 39,
+                "incoming_edges": 64,
                 "counters": {
                   "structs": 1,
-                  "functions": 4,
+                  "functions": 11,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               },
               {
@@ -1163,6 +1605,21 @@
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "odb",
+                "outgoing_edges": 127,
+                "incoming_edges": 95,
+                "counters": {
+                  "structs": 4,
+                  "functions": 22,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
                 }
               },
               {
@@ -1186,11 +1643,11 @@
                 "library": "libc",
                 "counters": {
                   "structs": 2,
-                  "functions": 19,
+                  "functions": 18,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 4,
+                  "callbacks": 0,
                   "macros": 22
                 }
               }
@@ -1198,136 +1655,7 @@
           }
         },
         {
-          "name": "config",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": [
-              "gix-config"
-            ]
-          },
-          "implementation_files": [
-            "src/libgit2/config.c",
-            "src/libgit2/config.h",
-            "src/libgit2/config_backend.h",
-            "src/libgit2/config_cache.c",
-            "src/libgit2/config_file.c",
-            "src/libgit2/config_list.c",
-            "src/libgit2/config_list.h",
-            "src/libgit2/config_mem.c",
-            "src/libgit2/config_parse.c",
-            "src/libgit2/config_parse.h",
-            "src/libgit2/config_snapshot.c"
-          ],
-          "api_headers": [
-            "include/git2/config.h",
-            "include/git2/sys/config.h",
-            "include/git2/types.h"
-          ],
-          "counters": {
-            "implementation": {
-              "files": 11,
-              "loc": 3411,
-              "structs": 22,
-              "functions": 217,
-              "global_variables": 9,
-              "enums": 0,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 2
-            },
-            "api": {
-              "files": 3,
-              "loc": 356,
-              "structs": 6,
-              "opaque_structs": 1,
-              "functions": 48,
-              "global_variables": 0,
-              "enums": 2,
-              "unions": 0,
-              "callbacks": 1,
-              "macros": 4
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 601,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 5,
-                  "functions": 109,
-                  "global_variables": 1,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 59,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 19,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 29,
-                "incoming_edges": 102,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 12,
-                "incoming_edges": 21,
-                "counters": {
-                  "structs": 3,
-                  "functions": 9,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 4,
-                  "functions": 22,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 5,
-                  "macros": 15
-                }
-              }
-            ]
-          }
-        },
-        {
+          "index": 12,
           "name": "index",
           "objective": {
             "objective": "wrap",
@@ -1358,13 +1686,13 @@
             "implementation": {
               "files": 10,
               "loc": 5920,
-              "structs": 35,
+              "structs": 40,
               "functions": 329,
               "global_variables": 11,
-              "enums": 4,
+              "enums": 6,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 21
+              "callbacks": 2,
+              "macros": 33
             },
             "api": {
               "files": 5,
@@ -1376,7 +1704,7 @@
               "enums": 6,
               "unions": 0,
               "callbacks": 1,
-              "macros": 7
+              "macros": 11
             }
           },
           "imported_deps": {
@@ -1384,13 +1712,73 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 824,
+                "outgoing_edges": 832,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 10,
-                  "functions": 145,
+                  "functions": 94,
                   "global_variables": 1,
                   "enums": 1,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 52
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 65,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 8,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 24,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 2,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 3,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 50,
+                "incoming_edges": 12,
+                "counters": {
+                  "structs": 1,
+                  "functions": 10,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 2,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 0,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -1403,102 +1791,27 @@
                 "incoming_edges": 23,
                 "counters": {
                   "structs": 3,
-                  "functions": 22,
+                  "functions": 20,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 64,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 11,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 50,
-                "incoming_edges": 14,
-                "counters": {
-                  "structs": 1,
-                  "functions": 13,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 24,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 2,
-                  "functions": 4,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "attr",
-                "outgoing_edges": 23,
+                "outgoing_edges": 22,
                 "incoming_edges": 11,
                 "counters": {
                   "structs": 2,
-                  "functions": 12,
+                  "functions": 6,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 19,
-                "incoming_edges": 138,
-                "counters": {
-                  "structs": 3,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "submodule",
-                "outgoing_edges": 4,
-                "incoming_edges": 33,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
                 }
               },
               {
@@ -1518,12 +1831,200 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 2,
+                "subsystem": "diff",
+                "outgoing_edges": 18,
+                "incoming_edges": 138,
+                "counters": {
+                  "structs": 3,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "submodule",
+                "outgoing_edges": 4,
+                "incoming_edges": 33,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 2,
+                  "functions": 21,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 28
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 13,
+          "name": "attr",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": [
+              "gix-attributes",
+              "gix-ignore"
+            ]
+          },
+          "implementation_files": [
+            "src/libgit2/attr.c",
+            "src/libgit2/attr.h",
+            "src/libgit2/attr_file.c",
+            "src/libgit2/attr_file.h",
+            "src/libgit2/attrcache.c",
+            "src/libgit2/attrcache.h",
+            "src/libgit2/ignore.c",
+            "src/libgit2/ignore.h"
+          ],
+          "api_headers": [
+            "include/git2/attr.h",
+            "include/git2/ignore.h"
+          ],
+          "counters": {
+            "implementation": {
+              "files": 8,
+              "loc": 2315,
+              "structs": 15,
+              "functions": 109,
+              "global_variables": 3,
+              "enums": 3,
+              "unions": 1,
+              "callbacks": 1,
+              "macros": 29
+            },
+            "api": {
+              "files": 2,
+              "loc": 100,
+              "structs": 1,
+              "opaque_structs": 0,
+              "functions": 13,
+              "global_variables": 0,
+              "enums": 1,
+              "unions": 0,
+              "callbacks": 1,
+              "macros": 14
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 402,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 6,
+                  "functions": 64,
+                  "global_variables": 1,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 25
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 9,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 12,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 0,
-                  "functions": 1,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 87,
+                "incoming_edges": 3,
+                "counters": {
+                  "structs": 1,
+                  "functions": 10,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 9,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 25,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 13,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 11,
+                "incoming_edges": 22,
+                "counters": {
+                  "structs": 2,
+                  "functions": 4,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -1537,18 +2038,202 @@
                 "library": "libc",
                 "counters": {
                   "structs": 4,
-                  "functions": 21,
+                  "functions": 16,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 4,
-                  "macros": 28
+                  "callbacks": 0,
+                  "macros": 12
                 }
               }
             ]
           }
         },
         {
+          "index": 14,
+          "name": "filter",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": [
+              "gix-filter"
+            ]
+          },
+          "implementation_files": [
+            "src/libgit2/crlf.c",
+            "src/libgit2/filter.c",
+            "src/libgit2/filter.h",
+            "src/libgit2/ident.c"
+          ],
+          "api_headers": [
+            "include/git2/filter.h",
+            "include/git2/sys/filter.h"
+          ],
+          "counters": {
+            "implementation": {
+              "files": 4,
+              "loc": 1443,
+              "structs": 11,
+              "functions": 75,
+              "global_variables": 1,
+              "enums": 1,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 3
+            },
+            "api": {
+              "files": 2,
+              "loc": 156,
+              "structs": 2,
+              "opaque_structs": 2,
+              "functions": 24,
+              "global_variables": 0,
+              "enums": 2,
+              "unions": 0,
+              "callbacks": 5,
+              "macros": 11
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 192,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 38,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 25
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 11,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 39,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 2,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 17,
+                "incoming_edges": 4,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 1,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 0,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 16,
+                "incoming_edges": 20,
+                "counters": {
+                  "structs": 1,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 3,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "attr",
+                "outgoing_edges": 21,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 2,
+                  "global_variables": 3,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 8
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 3,
+                  "functions": 14,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 9
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 15,
           "name": "refs",
           "objective": {
             "objective": "wrap",
@@ -1590,14 +2275,14 @@
           "counters": {
             "implementation": {
               "files": 17,
-              "loc": 6649,
+              "loc": 6704,
               "structs": 27,
               "functions": 317,
               "global_variables": 1,
-              "enums": 3,
-              "unions": 0,
+              "enums": 7,
+              "unions": 2,
               "callbacks": 0,
-              "macros": 7
+              "macros": 53
             },
             "api": {
               "files": 10,
@@ -1609,7 +2294,7 @@
               "enums": 3,
               "unions": 0,
               "callbacks": 2,
-              "macros": 2
+              "macros": 11
             }
           },
           "imported_deps": {
@@ -1621,12 +2306,27 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 10,
-                  "functions": 137,
+                  "functions": 101,
                   "global_variables": 2,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 36
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 137,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 11,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
                 }
               },
               {
@@ -1646,59 +2346,29 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 137,
-                "incoming_edges": 0,
+                "subsystem": "core",
+                "outgoing_edges": 103,
+                "incoming_edges": 2,
                 "counters": {
-                  "structs": 3,
-                  "functions": 15,
+                  "structs": 5,
+                  "functions": 10,
                   "global_variables": 0,
-                  "enums": 1,
+                  "enums": 3,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 4
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "repository",
-                "outgoing_edges": 129,
-                "incoming_edges": 151,
+                "outgoing_edges": 128,
+                "incoming_edges": 149,
                 "counters": {
                   "structs": 1,
                   "functions": 11,
                   "global_variables": 1,
                   "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 103,
-                "incoming_edges": 2,
-                "counters": {
-                  "structs": 6,
-                  "functions": 14,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 64,
-                "incoming_edges": 39,
-                "counters": {
-                  "structs": 4,
-                  "functions": 25,
-                  "global_variables": 0,
-                  "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -1721,14 +2391,14 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "remote",
-                "outgoing_edges": 15,
-                "incoming_edges": 162,
+                "subsystem": "object",
+                "outgoing_edges": 64,
+                "incoming_edges": 39,
                 "counters": {
-                  "structs": 2,
-                  "functions": 5,
+                  "structs": 4,
+                  "functions": 25,
                   "global_variables": 0,
-                  "enums": 1,
+                  "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -1741,12 +2411,12 @@
                 "incoming_edges": 3,
                 "counters": {
                   "structs": 4,
-                  "functions": 5,
+                  "functions": 4,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 1
                 }
               },
               {
@@ -1763,18 +2433,33 @@
                   "callbacks": 0,
                   "macros": 0
                 }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "remote",
+                "outgoing_edges": 15,
+                "incoming_edges": 162,
+                "counters": {
+                  "structs": 2,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
               }
             ],
             "out_of_tree": [
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 4,
+                  "structs": 3,
                   "functions": 21,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 2,
+                  "callbacks": 0,
                   "macros": 19
                 }
               }
@@ -1782,226 +2467,7 @@
           }
         },
         {
-          "name": "odb",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": [
-              "gix-odb",
-              "gix-pack"
-            ]
-          },
-          "implementation_files": [
-            "src/libgit2/cache.c",
-            "src/libgit2/cache.h",
-            "src/libgit2/commit_graph.c",
-            "src/libgit2/commit_graph.h",
-            "src/libgit2/delta.c",
-            "src/libgit2/delta.h",
-            "src/libgit2/hashmap_oid.h",
-            "src/libgit2/indexer.c",
-            "src/libgit2/indexer.h",
-            "src/libgit2/midx.c",
-            "src/libgit2/midx.h",
-            "src/libgit2/mwindow.c",
-            "src/libgit2/mwindow.h",
-            "src/libgit2/odb.c",
-            "src/libgit2/odb.h",
-            "src/libgit2/odb_loose.c",
-            "src/libgit2/odb_mempack.c",
-            "src/libgit2/odb_pack.c",
-            "src/libgit2/pack-objects.c",
-            "src/libgit2/pack-objects.h",
-            "src/libgit2/pack.c",
-            "src/libgit2/pack.h"
-          ],
-          "api_headers": [
-            "include/git2/indexer.h",
-            "include/git2/odb.h",
-            "include/git2/odb_backend.h",
-            "include/git2/pack.h",
-            "include/git2/sys/commit_graph.h",
-            "include/git2/sys/mempack.h",
-            "include/git2/sys/midx.h",
-            "include/git2/sys/odb_backend.h",
-            "include/git2/types.h"
-          ],
-          "counters": {
-            "implementation": {
-              "files": 22,
-              "loc": 10070,
-              "structs": 68,
-              "functions": 496,
-              "global_variables": 18,
-              "enums": 3,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 50
-            },
-            "api": {
-              "files": 9,
-              "loc": 534,
-              "structs": 12,
-              "opaque_structs": 7,
-              "functions": 86,
-              "global_variables": 0,
-              "enums": 5,
-              "unions": 0,
-              "callbacks": 4,
-              "macros": 16
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 1380,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 11,
-                  "functions": 185,
-                  "global_variables": 1,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 386,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 27,
-                  "global_variables": 1,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 112,
-                "incoming_edges": 14,
-                "counters": {
-                  "structs": 2,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 95,
-                "incoming_edges": 127,
-                "counters": {
-                  "structs": 6,
-                  "functions": 30,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 21,
-                "incoming_edges": 26,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 1,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "history",
-                "outgoing_edges": 7,
-                "incoming_edges": 71,
-                "counters": {
-                  "structs": 3,
-                  "functions": 2,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "xdiff",
-                "outgoing_edges": 6,
-                "incoming_edges": 8,
-                "counters": {
-                  "structs": 1,
-                  "functions": 0,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 5,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 10,
-                  "functions": 37,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 7,
-                  "macros": 24
-                }
-              },
-              {
-                "library": "libz",
-                "counters": {
-                  "structs": 0,
-                  "functions": 1,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 2
-                }
-              }
-            ]
-          }
-        },
-        {
+          "index": 16,
           "name": "diff",
           "objective": {
             "objective": "wrap",
@@ -2056,13 +2522,13 @@
             "implementation": {
               "files": 31,
               "loc": 8195,
-              "structs": 38,
+              "structs": 41,
               "functions": 330,
               "global_variables": 5,
-              "enums": 3,
+              "enums": 7,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 25
+              "callbacks": 4,
+              "macros": 54
             },
             "api": {
               "files": 7,
@@ -2074,7 +2540,7 @@
               "enums": 12,
               "unions": 0,
               "callbacks": 8,
-              "macros": 12
+              "macros": 22
             }
           },
           "imported_deps": {
@@ -2082,46 +2548,16 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 805,
+                "outgoing_edges": 807,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 9,
-                  "functions": 153,
+                  "functions": 105,
                   "global_variables": 1,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 138,
-                "incoming_edges": 19,
-                "counters": {
-                  "structs": 7,
-                  "functions": 39,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 127,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 7,
-                  "functions": 18,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 48
                 }
               },
               {
@@ -2130,28 +2566,43 @@
                 "outgoing_edges": 120,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 2,
-                  "functions": 15,
+                  "structs": 1,
+                  "functions": 10,
                   "global_variables": 1,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 5
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 91,
-                "incoming_edges": 6,
+                "subsystem": "xdiff",
+                "outgoing_edges": 26,
+                "incoming_edges": 0,
                 "counters": {
-                  "structs": 6,
-                  "functions": 31,
+                  "structs": 5,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 10
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 127,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 13,
+                  "global_variables": 0,
+                  "enums": 3,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
                 }
               },
               {
@@ -2161,27 +2612,12 @@
                 "incoming_edges": 3,
                 "counters": {
                   "structs": 1,
-                  "functions": 8,
+                  "functions": 7,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "submodule",
-                "outgoing_edges": 25,
-                "incoming_edges": 10,
-                "counters": {
-                  "structs": 2,
-                  "functions": 14,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 1
                 }
               },
               {
@@ -2201,17 +2637,47 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "xdiff",
-                "outgoing_edges": 20,
-                "incoming_edges": 0,
+                "subsystem": "object",
+                "outgoing_edges": 91,
+                "incoming_edges": 6,
                 "counters": {
-                  "structs": 5,
-                  "functions": 11,
+                  "structs": 6,
+                  "functions": 28,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 138,
+                "incoming_edges": 18,
+                "counters": {
+                  "structs": 6,
+                  "functions": 35,
+                  "global_variables": 0,
+                  "enums": 3,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "attr",
+                "outgoing_edges": 11,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
                 }
               },
               {
@@ -2221,12 +2687,12 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 1,
-                  "functions": 5,
+                  "functions": 4,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 1
                 }
               },
               {
@@ -2246,32 +2712,32 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "attr",
-                "outgoing_edges": 11,
-                "incoming_edges": 0,
+                "subsystem": "workdir",
+                "outgoing_edges": 4,
+                "incoming_edges": 105,
                 "counters": {
-                  "structs": 2,
-                  "functions": 7,
+                  "structs": 1,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 2
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "workdir",
-                "outgoing_edges": 4,
-                "incoming_edges": 104,
+                "subsystem": "submodule",
+                "outgoing_edges": 24,
+                "incoming_edges": 10,
                 "counters": {
-                  "structs": 1,
-                  "functions": 3,
+                  "structs": 2,
+                  "functions": 10,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
                 }
               }
             ],
@@ -2279,64 +2745,98 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 4,
-                  "functions": 23,
+                  "structs": 3,
+                  "functions": 21,
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 10,
-                  "macros": 29
+                  "callbacks": 0,
+                  "macros": 28
+                }
+              },
+              {
+                "library": "libpcre2-8",
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
                 }
               }
             ]
           }
         },
         {
-          "name": "attr",
+          "index": 17,
+          "name": "odb",
           "objective": {
             "objective": "wrap",
             "rust_native_equivalent": [
-              "gix-attributes",
-              "gix-ignore"
+              "gix-odb",
+              "gix-pack"
             ]
           },
           "implementation_files": [
-            "src/libgit2/attr.c",
-            "src/libgit2/attr.h",
-            "src/libgit2/attr_file.c",
-            "src/libgit2/attr_file.h",
-            "src/libgit2/attrcache.c",
-            "src/libgit2/attrcache.h",
-            "src/libgit2/ignore.c",
-            "src/libgit2/ignore.h"
+            "src/libgit2/cache.c",
+            "src/libgit2/cache.h",
+            "src/libgit2/commit_graph.c",
+            "src/libgit2/commit_graph.h",
+            "src/libgit2/delta.c",
+            "src/libgit2/delta.h",
+            "src/libgit2/hashmap_oid.h",
+            "src/libgit2/indexer.c",
+            "src/libgit2/indexer.h",
+            "src/libgit2/midx.c",
+            "src/libgit2/midx.h",
+            "src/libgit2/mwindow.c",
+            "src/libgit2/mwindow.h",
+            "src/libgit2/odb.c",
+            "src/libgit2/odb.h",
+            "src/libgit2/odb_loose.c",
+            "src/libgit2/odb_mempack.c",
+            "src/libgit2/odb_pack.c",
+            "src/libgit2/pack-objects.c",
+            "src/libgit2/pack-objects.h",
+            "src/libgit2/pack.c",
+            "src/libgit2/pack.h"
           ],
           "api_headers": [
-            "include/git2/attr.h",
-            "include/git2/ignore.h"
+            "include/git2/indexer.h",
+            "include/git2/odb.h",
+            "include/git2/odb_backend.h",
+            "include/git2/pack.h",
+            "include/git2/sys/commit_graph.h",
+            "include/git2/sys/mempack.h",
+            "include/git2/sys/midx.h",
+            "include/git2/sys/odb_backend.h",
+            "include/git2/types.h"
           ],
           "counters": {
             "implementation": {
-              "files": 8,
-              "loc": 2315,
-              "structs": 15,
-              "functions": 109,
-              "global_variables": 3,
-              "enums": 2,
+              "files": 22,
+              "loc": 10070,
+              "structs": 70,
+              "functions": 496,
+              "global_variables": 18,
+              "enums": 4,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 2
+              "callbacks": 3,
+              "macros": 84
             },
             "api": {
-              "files": 2,
-              "loc": 100,
-              "structs": 1,
-              "opaque_structs": 0,
-              "functions": 13,
+              "files": 9,
+              "loc": 534,
+              "structs": 12,
+              "opaque_structs": 7,
+              "functions": 86,
               "global_variables": 0,
-              "enums": 1,
+              "enums": 5,
               "unions": 0,
-              "callbacks": 1,
-              "macros": 11
+              "callbacks": 4,
+              "macros": 24
             }
           },
           "imported_deps": {
@@ -2344,41 +2844,41 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 402,
+                "outgoing_edges": 1384,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 6,
-                  "functions": 89,
+                  "structs": 12,
+                  "functions": 118,
+                  "global_variables": 1,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 68
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 388,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 20,
                   "global_variables": 1,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 7
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 87,
-                "incoming_edges": 3,
-                "counters": {
-                  "structs": 1,
-                  "functions": 11,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 25,
+                "subsystem": "xdiff",
+                "outgoing_edges": 6,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 4,
-                  "functions": 14,
+                  "structs": 1,
+                  "functions": 0,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -2389,43 +2889,28 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "core",
-                "outgoing_edges": 12,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 0,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 11,
-                "incoming_edges": 23,
-                "counters": {
-                  "structs": 2,
-                  "functions": 4,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 9,
-                "incoming_edges": 0,
+                "outgoing_edges": 112,
+                "incoming_edges": 14,
                 "counters": {
                   "structs": 1,
-                  "functions": 2,
+                  "functions": 3,
                   "global_variables": 0,
-                  "enums": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 21,
+                "incoming_edges": 25,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 1,
+                  "enums": 2,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -2434,11 +2919,41 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "config",
-                "outgoing_edges": 9,
+                "outgoing_edges": 5,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 2,
-                  "functions": 4,
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 95,
+                "incoming_edges": 127,
+                "counters": {
+                  "structs": 6,
+                  "functions": 27,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "history",
+                "outgoing_edges": 7,
+                "incoming_edges": 71,
+                "counters": {
+                  "structs": 3,
+                  "functions": 2,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -2451,19 +2966,32 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 4,
-                  "functions": 16,
+                  "structs": 9,
+                  "functions": 37,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 2,
-                  "macros": 12
+                  "callbacks": 0,
+                  "macros": 24
+                }
+              },
+              {
+                "library": "libz",
+                "counters": {
+                  "structs": 0,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
                 }
               }
             ]
           }
         },
         {
+          "index": 18,
           "name": "workdir",
           "objective": {
             "objective": "wrap",
@@ -2495,10 +3023,10 @@
               "structs": 6,
               "functions": 143,
               "global_variables": 0,
-              "enums": 0,
+              "enums": 1,
               "unions": 0,
               "callbacks": 0,
-              "macros": 6
+              "macros": 8
             },
             "api": {
               "files": 6,
@@ -2510,7 +3038,7 @@
               "enums": 9,
               "unions": 0,
               "callbacks": 6,
-              "macros": 9
+              "macros": 13
             }
           },
           "imported_deps": {
@@ -2522,24 +3050,69 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 7,
-                  "functions": 79,
+                  "functions": 55,
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 24
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 224,
+                "subsystem": "oid",
+                "outgoing_edges": 37,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 8,
-                  "functions": 54,
+                  "structs": 1,
+                  "functions": 7,
                   "global_variables": 0,
                   "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 63,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 3,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 82,
+                "incoming_edges": 7,
+                "counters": {
+                  "structs": 1,
+                  "functions": 13,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 7,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -2562,137 +3135,17 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 104,
-                "incoming_edges": 4,
+                "subsystem": "index",
+                "outgoing_edges": 224,
+                "incoming_edges": 0,
                 "counters": {
-                  "structs": 6,
-                  "functions": 19,
+                  "structs": 8,
+                  "functions": 51,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 82,
-                "incoming_edges": 7,
-                "counters": {
-                  "structs": 1,
-                  "functions": 17,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 67,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 5,
-                  "functions": 26,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 63,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 36,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 10,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "filter",
-                "outgoing_edges": 18,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "submodule",
-                "outgoing_edges": 12,
-                "incoming_edges": 10,
-                "counters": {
-                  "structs": 1,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "merge",
-                "outgoing_edges": 11,
-                "incoming_edges": 35,
-                "counters": {
-                  "structs": 3,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 7,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
                 }
               },
               {
@@ -2709,6 +3162,81 @@
                   "callbacks": 0,
                   "macros": 0
                 }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "filter",
+                "outgoing_edges": 18,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 67,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 22,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "diff",
+                "outgoing_edges": 105,
+                "incoming_edges": 4,
+                "counters": {
+                  "structs": 6,
+                  "functions": 14,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "merge",
+                "outgoing_edges": 11,
+                "incoming_edges": 35,
+                "counters": {
+                  "structs": 3,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "submodule",
+                "outgoing_edges": 12,
+                "incoming_edges": 10,
+                "counters": {
+                  "structs": 1,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
               }
             ],
             "out_of_tree": [
@@ -2720,7 +3248,7 @@
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 6,
+                  "callbacks": 0,
                   "macros": 18
                 }
               }
@@ -2728,6 +3256,7 @@
           }
         },
         {
+          "index": 19,
           "name": "history",
           "objective": {
             "objective": "wrap",
@@ -2763,14 +3292,14 @@
           "counters": {
             "implementation": {
               "files": 13,
-              "loc": 4008,
-              "structs": 15,
+              "loc": 4264,
+              "structs": 18,
               "functions": 229,
               "global_variables": 0,
               "enums": 0,
               "unions": 0,
               "callbacks": 0,
-              "macros": 3
+              "macros": 20
             },
             "api": {
               "files": 7,
@@ -2782,7 +3311,7 @@
               "enums": 4,
               "unions": 0,
               "callbacks": 2,
-              "macros": 8
+              "macros": 13
             }
           },
           "imported_deps": {
@@ -2790,136 +3319,31 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 347,
+                "outgoing_edges": 348,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 4,
-                  "functions": 79,
+                  "functions": 55,
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 268,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 9,
-                  "functions": 59,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 24
                 }
               },
               {
                 "link_unit": "libgit2",
                 "subsystem": "oid",
-                "outgoing_edges": 154,
+                "outgoing_edges": 155,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 1,
-                  "functions": 14,
+                  "functions": 11,
                   "global_variables": 0,
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 81,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 5,
-                  "functions": 27,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 71,
-                "incoming_edges": 7,
-                "counters": {
-                  "structs": 4,
-                  "functions": 11,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 65,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 62,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 3,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 33,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 6,
-                  "functions": 11,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 21,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
                 }
               },
               {
@@ -2929,37 +3353,37 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 4,
-                  "functions": 2,
+                  "functions": 1,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 1
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "workdir",
-                "outgoing_edges": 7,
+                "subsystem": "core",
+                "outgoing_edges": 62,
                 "incoming_edges": 0,
                 "counters": {
-                  "structs": 2,
-                  "functions": 5,
+                  "structs": 4,
+                  "functions": 3,
                   "global_variables": 0,
-                  "enums": 0,
+                  "enums": 3,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
+                  "macros": 3
                 }
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "attr",
-                "outgoing_edges": 4,
-                "incoming_edges": 0,
+                "subsystem": "repository",
+                "outgoing_edges": 66,
+                "incoming_edges": 1,
                 "counters": {
                   "structs": 1,
-                  "functions": 1,
+                  "functions": 3,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -2984,6 +3408,111 @@
               },
               {
                 "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 268,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 9,
+                  "functions": 58,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 22,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "attr",
+                "outgoing_edges": 4,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 81,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 5,
+                  "functions": 24,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "diff",
+                "outgoing_edges": 33,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 6,
+                  "functions": 6,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "odb",
+                "outgoing_edges": 71,
+                "incoming_edges": 7,
+                "counters": {
+                  "structs": 4,
+                  "functions": 8,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "workdir",
+                "outgoing_edges": 7,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
                 "subsystem": "merge",
                 "outgoing_edges": 1,
                 "incoming_edges": 90,
@@ -3002,19 +3531,312 @@
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 1,
+                  "structs": 0,
                   "functions": 13,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 2,
+                  "callbacks": 0,
                   "macros": 15
+                }
+              },
+              {
+                "library": "libpcre2-8",
+                "counters": {
+                  "structs": 1,
+                  "functions": 0,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
                 }
               }
             ]
           }
         },
         {
+          "index": 20,
+          "name": "merge",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": []
+          },
+          "implementation_files": [
+            "src/libgit2/cherrypick.c",
+            "src/libgit2/merge.c",
+            "src/libgit2/merge.h",
+            "src/libgit2/merge_driver.c",
+            "src/libgit2/merge_driver.h",
+            "src/libgit2/merge_file.c",
+            "src/libgit2/rebase.c",
+            "src/libgit2/revert.c"
+          ],
+          "api_headers": [
+            "include/git2/cherrypick.h",
+            "include/git2/merge.h",
+            "include/git2/rebase.h",
+            "include/git2/repository.h",
+            "include/git2/revert.h",
+            "include/git2/sys/merge.h",
+            "include/git2/types.h"
+          ],
+          "counters": {
+            "implementation": {
+              "files": 8,
+              "loc": 4966,
+              "structs": 16,
+              "functions": 205,
+              "global_variables": 8,
+              "enums": 3,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 32
+            },
+            "api": {
+              "files": 7,
+              "loc": 672,
+              "structs": 9,
+              "opaque_structs": 2,
+              "functions": 47,
+              "global_variables": 0,
+              "enums": 6,
+              "unions": 0,
+              "callbacks": 3,
+              "macros": 23
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 489,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 57,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 42
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 141,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 12,
+                  "global_variables": 1,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "xdiff",
+                "outgoing_edges": 17,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 12
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 50,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 3,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 95,
+                "incoming_edges": 3,
+                "counters": {
+                  "structs": 1,
+                  "functions": 10,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 13,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 8,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 126,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 23,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 156,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 7,
+                  "functions": 25,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "attr",
+                "outgoing_edges": 5,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 0,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 115,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 15,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 8
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "diff",
+                "outgoing_edges": 40,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 9,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "odb",
+                "outgoing_edges": 56,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 7,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "workdir",
+                "outgoing_edges": 35,
+                "incoming_edges": 11,
+                "counters": {
+                  "structs": 1,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "history",
+                "outgoing_edges": 90,
+                "incoming_edges": 1,
+                "counters": {
+                  "structs": 4,
+                  "functions": 18,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 5
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 2,
+                  "functions": 19,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 20
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 21,
           "name": "remote",
           "objective": {
             "objective": "wrap",
@@ -3045,14 +3867,14 @@
           "counters": {
             "implementation": {
               "files": 10,
-              "loc": 3522,
+              "loc": 3642,
               "structs": 6,
               "functions": 164,
               "global_variables": 1,
               "enums": 0,
               "unions": 0,
               "callbacks": 0,
-              "macros": 8
+              "macros": 15
             },
             "api": {
               "files": 6,
@@ -3064,7 +3886,7 @@
               "enums": 11,
               "unions": 0,
               "callbacks": 6,
-              "macros": 15
+              "macros": 20
             }
           },
           "imported_deps": {
@@ -3072,76 +3894,16 @@
               {
                 "link_unit": "libgit2",
                 "subsystem": "util",
-                "outgoing_edges": 508,
+                "outgoing_edges": 510,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 4,
-                  "functions": 59,
+                  "functions": 50,
                   "global_variables": 1,
                   "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 162,
-                "incoming_edges": 15,
-                "counters": {
-                  "structs": 3,
-                  "functions": 42,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 97,
-                "incoming_edges": 4,
-                "counters": {
-                  "structs": 2,
-                  "functions": 23,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 64,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 16,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 62,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 9,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "macros": 9
                 }
               },
               {
@@ -3156,6 +3918,51 @@
                   "enums": 1,
                   "unions": 0,
                   "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 62,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 100,
+                "incoming_edges": 4,
+                "counters": {
+                  "structs": 2,
+                  "functions": 23,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 65,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 16,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 1,
                   "macros": 0
                 }
               },
@@ -3176,47 +3983,32 @@
               },
               {
                 "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 162,
+                "incoming_edges": 15,
+                "counters": {
+                  "structs": 3,
+                  "functions": 35,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 7
+                }
+              },
+              {
+                "link_unit": "libgit2",
                 "subsystem": "odb",
-                "outgoing_edges": 17,
+                "outgoing_edges": 19,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 3,
-                  "functions": 9,
+                  "functions": 8,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "transport",
-                "outgoing_edges": 17,
-                "incoming_edges": 88,
-                "counters": {
-                  "structs": 2,
-                  "functions": 1,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "history",
-                "outgoing_edges": 9,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
+                  "callbacks": 2,
+                  "macros": 1
                 }
               },
               {
@@ -3226,7 +4018,22 @@
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 1,
-                  "functions": 3,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "history",
+                "outgoing_edges": 10,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 7,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
@@ -3248,6 +4055,21 @@
                   "callbacks": 0,
                   "macros": 0
                 }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "transport",
+                "outgoing_edges": 23,
+                "incoming_edges": 95,
+                "counters": {
+                  "structs": 2,
+                  "functions": 1,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 4,
+                  "macros": 0
+                }
               }
             ],
             "out_of_tree": [
@@ -3255,11 +4077,11 @@
                 "library": "libc",
                 "counters": {
                   "structs": 1,
-                  "functions": 8,
+                  "functions": 7,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 5,
+                  "callbacks": 0,
                   "macros": 3
                 }
               }
@@ -3267,909 +4089,7 @@
           }
         },
         {
-          "name": "xdiff",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": [
-              "similar",
-              "imara-diff"
-            ]
-          },
-          "implementation_files": [
-            "deps/xdiff/git-xdiff.h",
-            "deps/xdiff/xdiff.h",
-            "deps/xdiff/xdiffi.c",
-            "deps/xdiff/xdiffi.h",
-            "deps/xdiff/xemit.c",
-            "deps/xdiff/xemit.h",
-            "deps/xdiff/xhistogram.c",
-            "deps/xdiff/xmerge.c",
-            "deps/xdiff/xpatience.c",
-            "deps/xdiff/xprepare.c",
-            "deps/xdiff/xprepare.h",
-            "deps/xdiff/xtypes.h",
-            "deps/xdiff/xutils.c",
-            "deps/xdiff/xutils.h"
-          ],
-          "api_headers": [],
-          "counters": {
-            "implementation": {
-              "files": 14,
-              "loc": 2746,
-              "structs": 28,
-              "functions": 99,
-              "global_variables": 0,
-              "enums": 0,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 35
-            },
-            "api": {
-              "files": 0,
-              "loc": 0,
-              "structs": 0,
-              "opaque_structs": 0,
-              "functions": 0,
-              "global_variables": 0,
-              "enums": 0,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 0
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 34,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 8,
-                "incoming_edges": 6,
-                "counters": {
-                  "structs": 1,
-                  "functions": 0,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 1,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 3,
-                  "macros": 10
-                }
-              }
-            ]
-          }
-        },
-        {
-          "name": "filter",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": [
-              "gix-filter"
-            ]
-          },
-          "implementation_files": [
-            "src/libgit2/crlf.c",
-            "src/libgit2/filter.c",
-            "src/libgit2/filter.h",
-            "src/libgit2/ident.c"
-          ],
-          "api_headers": [
-            "include/git2/filter.h",
-            "include/git2/sys/filter.h"
-          ],
-          "counters": {
-            "implementation": {
-              "files": 4,
-              "loc": 1443,
-              "structs": 10,
-              "functions": 75,
-              "global_variables": 1,
-              "enums": 1,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 0
-            },
-            "api": {
-              "files": 2,
-              "loc": 156,
-              "structs": 2,
-              "opaque_structs": 2,
-              "functions": 24,
-              "global_variables": 0,
-              "enums": 2,
-              "unions": 0,
-              "callbacks": 5,
-              "macros": 8
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 192,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 63,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 38,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 2,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "attr",
-                "outgoing_edges": 21,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 10,
-                  "global_variables": 3,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 17,
-                "incoming_edges": 4,
-                "counters": {
-                  "structs": 1,
-                  "functions": 3,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 16,
-                "incoming_edges": 20,
-                "counters": {
-                  "structs": 1,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 11,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 3,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 1,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 1,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 0,
-                  "functions": 1,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 3,
-                  "functions": 16,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 3,
-                  "macros": 9
-                }
-              }
-            ]
-          }
-        },
-        {
-          "name": "merge",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": []
-          },
-          "implementation_files": [
-            "src/libgit2/cherrypick.c",
-            "src/libgit2/merge.c",
-            "src/libgit2/merge.h",
-            "src/libgit2/merge_driver.c",
-            "src/libgit2/merge_driver.h",
-            "src/libgit2/merge_file.c",
-            "src/libgit2/rebase.c",
-            "src/libgit2/revert.c"
-          ],
-          "api_headers": [
-            "include/git2/cherrypick.h",
-            "include/git2/merge.h",
-            "include/git2/rebase.h",
-            "include/git2/repository.h",
-            "include/git2/revert.h",
-            "include/git2/sys/merge.h",
-            "include/git2/types.h"
-          ],
-          "counters": {
-            "implementation": {
-              "files": 8,
-              "loc": 4966,
-              "structs": 12,
-              "functions": 205,
-              "global_variables": 8,
-              "enums": 3,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 25
-            },
-            "api": {
-              "files": 7,
-              "loc": 672,
-              "structs": 9,
-              "opaque_structs": 2,
-              "functions": 47,
-              "global_variables": 0,
-              "enums": 6,
-              "unions": 0,
-              "callbacks": 3,
-              "macros": 15
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 490,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 99,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 156,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 7,
-                  "functions": 30,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 141,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 15,
-                  "global_variables": 1,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 124,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 23,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 115,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 23,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 93,
-                "incoming_edges": 3,
-                "counters": {
-                  "structs": 1,
-                  "functions": 10,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "history",
-                "outgoing_edges": 90,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 4,
-                  "functions": 23,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 56,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 10,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 49,
-                "incoming_edges": 1,
-                "counters": {
-                  "structs": 3,
-                  "functions": 4,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 40,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 6,
-                  "functions": 12,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "workdir",
-                "outgoing_edges": 35,
-                "incoming_edges": 11,
-                "counters": {
-                  "structs": 1,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "xdiff",
-                "outgoing_edges": 17,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 13,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 13,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 8,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "attr",
-                "outgoing_edges": 5,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 0,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 3,
-                  "functions": 20,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 4,
-                  "macros": 20
-                }
-              }
-            ]
-          }
-        },
-        {
-          "name": "reftable",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": []
-          },
-          "implementation_files": [
-            "deps/reftable/basics.c",
-            "deps/reftable/basics.h",
-            "deps/reftable/block.c",
-            "deps/reftable/block.h",
-            "deps/reftable/blocksource.c",
-            "deps/reftable/blocksource.h",
-            "deps/reftable/error.c",
-            "deps/reftable/fsck.c",
-            "deps/reftable/iter.c",
-            "deps/reftable/iter.h",
-            "deps/reftable/merged.c",
-            "deps/reftable/merged.h",
-            "deps/reftable/pq.c",
-            "deps/reftable/pq.h",
-            "deps/reftable/record.c",
-            "deps/reftable/record.h",
-            "deps/reftable/reftable-basics.h",
-            "deps/reftable/reftable-block.h",
-            "deps/reftable/reftable-blocksource.h",
-            "deps/reftable/reftable-error.h",
-            "deps/reftable/reftable-fsck.h",
-            "deps/reftable/reftable-iterator.h",
-            "deps/reftable/reftable-merged.h",
-            "deps/reftable/reftable-record.h",
-            "deps/reftable/reftable-stack.h",
-            "deps/reftable/reftable-table.h",
-            "deps/reftable/reftable-writer.h",
-            "deps/reftable/stack.c",
-            "deps/reftable/stack.h",
-            "deps/reftable/system.c",
-            "deps/reftable/system.h",
-            "deps/reftable/table.c",
-            "deps/reftable/table.h",
-            "deps/reftable/tree.c",
-            "deps/reftable/tree.h",
-            "deps/reftable/writer.c",
-            "deps/reftable/writer.h"
-          ],
-          "api_headers": [],
-          "counters": {
-            "implementation": {
-              "files": 37,
-              "loc": 6289,
-              "structs": 49,
-              "functions": 312,
-              "global_variables": 15,
-              "enums": 4,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 2
-            },
-            "api": {
-              "files": 0,
-              "loc": 0,
-              "structs": 0,
-              "opaque_structs": 0,
-              "functions": 0,
-              "global_variables": 0,
-              "enums": 0,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 0
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 33,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 22,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 4,
-                  "functions": 30,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 3,
-                  "macros": 22
-                }
-              },
-              {
-                "library": "libz",
-                "counters": {
-                  "structs": 1,
-                  "functions": 10,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 6
-                }
-              }
-            ]
-          }
-        },
-        {
-          "name": "submodule",
-          "objective": {
-            "objective": "wrap",
-            "rust_native_equivalent": [
-              "gix-submodule"
-            ]
-          },
-          "implementation_files": [
-            "src/libgit2/submodule.c",
-            "src/libgit2/submodule.h"
-          ],
-          "api_headers": [
-            "include/git2/submodule.h",
-            "include/git2/types.h"
-          ],
-          "counters": {
-            "implementation": {
-              "files": 2,
-              "loc": 1892,
-              "structs": 5,
-              "functions": 114,
-              "global_variables": 3,
-              "enums": 0,
-              "unions": 0,
-              "callbacks": 0,
-              "macros": 1
-            },
-            "api": {
-              "files": 2,
-              "loc": 260,
-              "structs": 1,
-              "opaque_structs": 1,
-              "functions": 34,
-              "global_variables": 0,
-              "enums": 1,
-              "unions": 0,
-              "callbacks": 1,
-              "macros": 7
-            }
-          },
-          "imported_deps": {
-            "in_tree": [
-              {
-                "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 345,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 59,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 113,
-                "incoming_edges": 7,
-                "counters": {
-                  "structs": 3,
-                  "functions": 24,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "config",
-                "outgoing_edges": 61,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 5,
-                  "functions": 17,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "remote",
-                "outgoing_edges": 46,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 3,
-                  "functions": 13,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 34,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 5,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 4,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "index",
-                "outgoing_edges": 33,
-                "incoming_edges": 4,
-                "counters": {
-                  "structs": 4,
-                  "functions": 15,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 19,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 2,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 19,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 10,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 10,
-                "incoming_edges": 25,
-                "counters": {
-                  "structs": 2,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "workdir",
-                "outgoing_edges": 10,
-                "incoming_edges": 12,
-                "counters": {
-                  "structs": 1,
-                  "functions": 4,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 8,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              }
-            ],
-            "out_of_tree": [
-              {
-                "library": "libc",
-                "counters": {
-                  "structs": 1,
-                  "functions": 7,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 1,
-                  "macros": 7
-                }
-              }
-            ]
-          }
-        },
-        {
+          "index": 22,
           "name": "transport",
           "objective": {
             "objective": "wrap",
@@ -4240,14 +4160,14 @@
           "counters": {
             "implementation": {
               "files": 47,
-              "loc": 11765,
-              "structs": 36,
+              "loc": 11826,
+              "structs": 38,
               "functions": 279,
               "global_variables": 27,
-              "enums": 10,
+              "enums": 11,
               "unions": 0,
-              "callbacks": 0,
-              "macros": 16
+              "callbacks": 1,
+              "macros": 75
             },
             "api": {
               "files": 8,
@@ -4259,156 +4179,21 @@
               "enums": 6,
               "unions": 0,
               "callbacks": 14,
-              "macros": 3
+              "macros": 11
             }
           },
           "imported_deps": {
             "in_tree": [
               {
                 "link_unit": "libgit2",
-                "subsystem": "util",
-                "outgoing_edges": 758,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 5,
-                  "functions": 107,
-                  "global_variables": 1,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "remote",
-                "outgoing_edges": 88,
-                "incoming_edges": 17,
-                "counters": {
-                  "structs": 8,
-                  "functions": 6,
-                  "global_variables": 0,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "oid",
-                "outgoing_edges": 76,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 16,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "core",
-                "outgoing_edges": 37,
-                "incoming_edges": 11,
-                "counters": {
-                  "structs": 2,
-                  "functions": 8,
-                  "global_variables": 2,
-                  "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "odb",
-                "outgoing_edges": 33,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 4,
-                  "functions": 11,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "refs",
-                "outgoing_edges": 33,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 15,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
                 "subsystem": "llhttp",
-                "outgoing_edges": 27,
+                "outgoing_edges": 29,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 2,
                   "functions": 9,
                   "global_variables": 0,
                   "enums": 2,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "repository",
-                "outgoing_edges": 19,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 1,
-                  "functions": 4,
-                  "global_variables": 0,
-                  "enums": 1,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "history",
-                "outgoing_edges": 15,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 9,
-                  "global_variables": 0,
-                  "enums": 0,
-                  "unions": 0,
-                  "callbacks": 0,
-                  "macros": 0
-                }
-              },
-              {
-                "link_unit": "libgit2",
-                "subsystem": "object",
-                "outgoing_edges": 14,
-                "incoming_edges": 0,
-                "counters": {
-                  "structs": 2,
-                  "functions": 5,
-                  "global_variables": 0,
-                  "enums": 0,
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 0
@@ -4431,11 +4216,101 @@
               },
               {
                 "link_unit": "libgit2",
-                "subsystem": "diff",
-                "outgoing_edges": 4,
+                "subsystem": "util",
+                "outgoing_edges": 758,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 67,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 40
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 76,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 12,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 4
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 37,
+                "incoming_edges": 11,
+                "counters": {
+                  "structs": 2,
+                  "functions": 5,
+                  "global_variables": 2,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 19,
                 "incoming_edges": 0,
                 "counters": {
                   "structs": 1,
+                  "functions": 4,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 14,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 33,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 14,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "diff",
+                "outgoing_edges": 3,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 0,
                   "functions": 0,
                   "global_variables": 0,
                   "enums": 1,
@@ -4443,25 +4318,70 @@
                   "callbacks": 0,
                   "macros": 0
                 }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "odb",
+                "outgoing_edges": 37,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 11,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "history",
+                "outgoing_edges": 15,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 8,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "remote",
+                "outgoing_edges": 95,
+                "incoming_edges": 23,
+                "counters": {
+                  "structs": 8,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 1,
+                  "macros": 1
+                }
               }
             ],
             "out_of_tree": [
               {
                 "library": "libc",
                 "counters": {
-                  "structs": 19,
+                  "structs": 7,
                   "functions": 35,
                   "global_variables": 0,
                   "enums": 0,
                   "unions": 0,
-                  "callbacks": 17,
+                  "callbacks": 0,
                   "macros": 36
                 }
               },
               {
                 "library": "libcrypto",
                 "counters": {
-                  "structs": 2,
+                  "structs": 12,
                   "functions": 35,
                   "global_variables": 0,
                   "enums": 0,
@@ -4480,6 +4400,232 @@
                   "unions": 0,
                   "callbacks": 0,
                   "macros": 24
+                }
+              }
+            ]
+          }
+        },
+        {
+          "index": 23,
+          "name": "submodule",
+          "objective": {
+            "objective": "wrap",
+            "rust_native_equivalent": [
+              "gix-submodule"
+            ]
+          },
+          "implementation_files": [
+            "src/libgit2/submodule.c",
+            "src/libgit2/submodule.h"
+          ],
+          "api_headers": [
+            "include/git2/submodule.h",
+            "include/git2/types.h"
+          ],
+          "counters": {
+            "implementation": {
+              "files": 2,
+              "loc": 1892,
+              "structs": 5,
+              "functions": 114,
+              "global_variables": 3,
+              "enums": 3,
+              "unions": 0,
+              "callbacks": 0,
+              "macros": 3
+            },
+            "api": {
+              "files": 2,
+              "loc": 260,
+              "structs": 1,
+              "opaque_structs": 1,
+              "functions": 34,
+              "global_variables": 0,
+              "enums": 1,
+              "unions": 0,
+              "callbacks": 1,
+              "macros": 10
+            }
+          },
+          "imported_deps": {
+            "in_tree": [
+              {
+                "link_unit": "libgit2",
+                "subsystem": "util",
+                "outgoing_edges": 345,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 42,
+                  "global_variables": 1,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 17
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "oid",
+                "outgoing_edges": 19,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "core",
+                "outgoing_edges": 34,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 2,
+                  "functions": 3,
+                  "global_variables": 0,
+                  "enums": 4,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "repository",
+                "outgoing_edges": 113,
+                "incoming_edges": 7,
+                "counters": {
+                  "structs": 3,
+                  "functions": 21,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 3
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "config",
+                "outgoing_edges": 61,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 5,
+                  "functions": 17,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "object",
+                "outgoing_edges": 19,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 4,
+                  "functions": 10,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "index",
+                "outgoing_edges": 33,
+                "incoming_edges": 4,
+                "counters": {
+                  "structs": 4,
+                  "functions": 15,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 0
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "refs",
+                "outgoing_edges": 8,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 1,
+                  "functions": 6,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 1
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "diff",
+                "outgoing_edges": 10,
+                "incoming_edges": 24,
+                "counters": {
+                  "structs": 2,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 1,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "workdir",
+                "outgoing_edges": 10,
+                "incoming_edges": 12,
+                "counters": {
+                  "structs": 1,
+                  "functions": 2,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 2
+                }
+              },
+              {
+                "link_unit": "libgit2",
+                "subsystem": "remote",
+                "outgoing_edges": 46,
+                "incoming_edges": 0,
+                "counters": {
+                  "structs": 3,
+                  "functions": 5,
+                  "global_variables": 0,
+                  "enums": 2,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 8
+                }
+              }
+            ],
+            "out_of_tree": [
+              {
+                "library": "libc",
+                "counters": {
+                  "structs": 1,
+                  "functions": 7,
+                  "global_variables": 0,
+                  "enums": 0,
+                  "unions": 0,
+                  "callbacks": 0,
+                  "macros": 7
                 }
               }
             ]

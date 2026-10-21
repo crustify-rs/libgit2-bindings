@@ -1,0 +1,701 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "_LIBSSH2_SESSION",
+              "defined_in": "include/git2/credential.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "_LIBSSH2_USERAUTH_KBDINT_PROMPT",
+              "defined_in": "include/git2/credential.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "_LIBSSH2_USERAUTH_KBDINT_RESPONSE",
+              "defined_in": "include/git2/credential.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_cert_ssh_raw_type_t",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cert_ssh_t",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            },
+            {
+              "name": "git_cert_t",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_t",
+              "defined_in": "include/git2/credential.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_userpass_payload",
+              "defined_in": "include/git2/credential_helpers.h",
+              "kind": "type",
+              "field_anchors": [
+                "username",
+                "password"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential_helpers.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_smart_service_t",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_smart_subtransport_stream",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [
+                "free",
+                "write",
+                "read",
+                "subtransport"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_stream",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "type",
+              "field_anchors": [
+                "close",
+                "free",
+                "version",
+                "write",
+                "read",
+                "connect",
+                "timeout",
+                "set_proxy",
+                "certificate",
+                "connect_timeout",
+                "proxy_support",
+                "encrypted"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_t",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_openssl_set_locking",
+              "defined_in": "src/libgit2/streams/openssl.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/openssl.rs"
+            },
+            {
+              "name": "git_transport_message_cb",
+              "defined_in": "include/git2/transport.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/transport.rs"
+            },
+            {
+              "name": "git_transport_unregister",
+              "defined_in": "src/libgit2/transport.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cert",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [
+                "cert_type"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            },
+            {
+              "name": "git_credential",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "free",
+                "credtype"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_fetch_negotiation",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [
+                "refs",
+                "depth",
+                "shallow_roots",
+                "shallow_roots_len",
+                "refs_len"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_smart_subtransport",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [
+                "close",
+                "free",
+                "action"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_stream_registration",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "init",
+                "wrap"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_sign_cb",
+              "defined_in": "include/git2/credential.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_interactive_cb",
+              "defined_in": "include/git2/credential.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_stream_close_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_connect_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_free_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_read_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_set_proxy_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_write_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_cert_hostkey",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [
+                "type",
+                "parent",
+                "hostkey_len",
+                "hostkey",
+                "raw_type",
+                "hash_sha256",
+                "hash_sha1",
+                "hash_md5"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            },
+            {
+              "name": "git_cert_x509",
+              "defined_in": "include/git2/cert.h",
+              "kind": "type",
+              "field_anchors": [
+                "len",
+                "data",
+                "parent"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_ssh_custom",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "payload",
+                "username",
+                "parent",
+                "publickey",
+                "publickey_len",
+                "sign_callback"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_interactive",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "payload",
+                "username",
+                "parent",
+                "prompt_callback"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_ssh_key",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "username",
+                "parent",
+                "publickey",
+                "privatekey",
+                "passphrase"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            },
+            {
+              "name": "git_credential_username",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "username",
+                "parent"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_userpass_plaintext",
+              "defined_in": "include/git2/sys/credential.h",
+              "kind": "type",
+              "field_anchors": [
+                "username",
+                "password",
+                "parent"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/credential.rs"
+            },
+            {
+              "name": "git_transport",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [
+                "close",
+                "free",
+                "version",
+                "oid_type",
+                "cancel",
+                "is_connected",
+                "download_pack",
+                "shallow_roots",
+                "negotiate_fetch",
+                "push",
+                "ls",
+                "capabilities",
+                "set_connect_opts",
+                "connect"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_credential_acquire_cb",
+              "defined_in": "include/git2/credential.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_default_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_free",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_get_username",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_has_username",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_custom_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_interactive_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_key_from_agent",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_key_memory_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_ssh_key_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_username_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_credential_userpass",
+              "defined_in": "src/libgit2/transports/credential_helpers.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential_helpers.rs"
+            },
+            {
+              "name": "git_credential_userpass_plaintext_new",
+              "defined_in": "src/libgit2/transports/credential.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/credential.rs"
+            },
+            {
+              "name": "git_stream_certificate_cb",
+              "defined_in": "include/git2/sys/stream.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_stream_register",
+              "defined_in": "src/libgit2/streams/registry.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/stream.rs"
+            },
+            {
+              "name": "git_transport_certificate_check_cb",
+              "defined_in": "include/git2/cert.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/cert.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_smart_subtransport_cb",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_smart_subtransport_git",
+              "defined_in": "src/libgit2/transports/git.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_smart_subtransport_http",
+              "defined_in": "src/libgit2/transports/http.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_smart_subtransport_ssh",
+              "defined_in": "src/libgit2/transports/ssh.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_cb",
+              "defined_in": "include/git2/transport.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/transport.rs"
+            },
+            {
+              "name": "git_transport_init",
+              "defined_in": "src/libgit2/transport.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_local",
+              "defined_in": "src/libgit2/transports/local.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_new",
+              "defined_in": "src/libgit2/transport.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_remote_connect_options",
+              "defined_in": "src/libgit2/transports/smart.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_smart_certificate_check",
+              "defined_in": "src/libgit2/transports/smart.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_smart_credentials",
+              "defined_in": "src/libgit2/transports/smart.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            },
+            {
+              "name": "git_transport_ssh_with_paths",
+              "defined_in": "src/libgit2/transports/ssh.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_smart_subtransport_definition",
+              "defined_in": "include/git2/sys/transport.h",
+              "kind": "type",
+              "field_anchors": [
+                "callback",
+                "param",
+                "rpc"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_transport_register",
+              "defined_in": "src/libgit2/transport.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_transport_smart",
+              "defined_in": "src/libgit2/transports/smart.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/transport/sys/transport.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

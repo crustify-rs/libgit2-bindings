@@ -1,6 +1,7 @@
 {
   "_comment": [
-    "Subsystem libgit2/util of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/util of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config.",
+    "schedule --skip git_stdalloc_init_allocator git_win32_crtdbg_init_allocator: libgit2.so does not export them (nm -D)."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
@@ -90,7 +91,7 @@
     "include/git2/sys/errors.h"
   ],
   "out_of_scope": {
-    "paths": [],
-    "features": []
-  }
+    "paths": []
+  },
+  "t3_dir": "t3"
 }

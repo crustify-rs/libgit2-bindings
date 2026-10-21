@@ -1,6 +1,7 @@
 {
   "_comment": [
-    "Subsystem libgit2/transport of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/transport of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config.",
+    "schedule --skip git_transport_dummy: declared in include/git2/sys/transport.h, defined nowhere, not exported."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
@@ -63,7 +64,7 @@
     "include/git2/transport.h"
   ],
   "out_of_scope": {
-    "paths": [],
-    "features": []
-  }
+    "paths": []
+  },
+  "t3_dir": "t3"
 }

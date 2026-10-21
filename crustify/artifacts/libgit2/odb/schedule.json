@@ -1,0 +1,1006 @@
+{
+  "schema_version": 2,
+  "waves": [
+    {
+      "index": 0,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_commit_graph",
+              "defined_in": "src/libgit2/commit_graph.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_split_strategy_t",
+              "defined_in": "include/git2/sys/commit_graph.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_commit_graph_writer",
+              "defined_in": "src/libgit2/commit_graph.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_indexer",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_indexer_progress",
+              "defined_in": "include/git2/indexer.h",
+              "kind": "type",
+              "field_anchors": [
+                "received_bytes",
+                "indexed_deltas",
+                "total_deltas",
+                "local_objects",
+                "received_objects",
+                "indexed_objects",
+                "total_objects"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_midx_writer",
+              "defined_in": "src/libgit2/midx.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb",
+              "defined_in": "src/libgit2/odb.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_backend_loose_flag_t",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_lookup_flags_t",
+              "defined_in": "include/git2/odb.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object",
+              "defined_in": "src/libgit2/odb.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_stream_t",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_packbuilder",
+              "defined_in": "src/libgit2/pack-objects.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_packbuilder_stage_t",
+              "defined_in": "include/git2/pack.h",
+              "kind": "type",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_packbuilder_foreach_cb",
+              "defined_in": "include/git2/pack.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_progress",
+              "defined_in": "include/git2/pack.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_commit_graph_open_options",
+              "defined_in": "include/git2/sys/commit_graph.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_options",
+              "defined_in": "include/git2/sys/commit_graph.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type",
+                "max_commits",
+                "size_multiple",
+                "split_strategy"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_midx_writer_options",
+              "defined_in": "include/git2/sys/midx.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_odb_backend_loose_options",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [
+                "flags",
+                "version",
+                "oid_type",
+                "file_mode",
+                "dir_mode",
+                "compression_level"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_backend_pack_options",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_expand_id",
+              "defined_in": "include/git2/odb.h",
+              "kind": "type",
+              "field_anchors": [
+                "type",
+                "id",
+                "length"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_options",
+              "defined_in": "include/git2/odb.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_stream",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [
+                "free",
+                "write",
+                "read",
+                "mode",
+                "oid_type",
+                "backend",
+                "received_bytes",
+                "hash_ctx",
+                "finalize_write",
+                "declared_size"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_writepack",
+              "defined_in": "include/git2/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [
+                "free",
+                "commit",
+                "backend",
+                "append"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_commit_graph_free",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_add_index_file",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_add_revwalk",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_commit",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_dump",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_free",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_indexer_append",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_indexer_commit",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_indexer_free",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_indexer_name",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_indexer_progress_cb",
+              "defined_in": "include/git2/indexer.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_midx_writer_add",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_midx_writer_commit",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_midx_writer_dump",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_midx_writer_free",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_odb_add_disk_alternate",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_exists",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_exists_ext",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_exists_prefix",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_foreach_cb",
+              "defined_in": "include/git2/odb.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_free",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_new",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_num_backends",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_data",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_dup",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_free",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_id",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_size",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_object_type",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_open",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_read",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_read_header",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_read_prefix",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_refresh",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_set_commit_graph",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_write",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_write_multi_pack_index",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_packbuilder_foreach",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_free",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_insert",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_packbuilder_insert_commit",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_insert_recur",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_insert_tree",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_insert_walk",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_name",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_new",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_object_count",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_set_callbacks",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_set_threads",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_write_buf",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            },
+            {
+              "name": "git_packbuilder_written",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_indexer_options",
+              "defined_in": "include/git2/indexer.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "mode",
+                "odb",
+                "oid_type",
+                "progress_cb",
+                "verify",
+                "progress_cb_payload"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_odb_backend",
+              "defined_in": "include/git2/sys/odb_backend.h",
+              "kind": "type",
+              "field_anchors": [
+                "free",
+                "version",
+                "write",
+                "read",
+                "odb",
+                "exists",
+                "read_header",
+                "freshen",
+                "writemidx",
+                "writepack",
+                "foreach",
+                "refresh",
+                "exists_prefix",
+                "readstream",
+                "writestream",
+                "read_prefix"
+              ],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/odb_backend.rs"
+            }
+          ]
+        },
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_commit_graph_open",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_open_options_init",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_new",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_commit_graph_writer_options_init",
+              "defined_in": "src/libgit2/commit_graph.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/commit_graph.rs"
+            },
+            {
+              "name": "git_midx_writer_new",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_midx_writer_options_init",
+              "defined_in": "src/libgit2/midx.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/midx.rs"
+            },
+            {
+              "name": "git_odb_backend_loose_options_init",
+              "defined_in": "src/libgit2/odb_loose.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_backend_pack_options_init",
+              "defined_in": "src/libgit2/odb_pack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_expand_ids",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_foreach",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_new_ext",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_open_ext",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_open_rstream",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_open_wstream",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_options_init",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_stream_finalize_write",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_stream_free",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_stream_read",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_stream_write",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_write_pack",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_packbuilder_write",
+              "defined_in": "src/libgit2/pack-objects.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/pack.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "batches": [
+        {
+          "objective": "wrap",
+          "items": [
+            {
+              "name": "git_indexer_new",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_indexer_options_init",
+              "defined_in": "src/libgit2/indexer.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/indexer.rs"
+            },
+            {
+              "name": "git_mempack_dump",
+              "defined_in": "src/libgit2/odb_mempack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/mempack.rs"
+            },
+            {
+              "name": "git_mempack_new",
+              "defined_in": "src/libgit2/odb_mempack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/mempack.rs"
+            },
+            {
+              "name": "git_mempack_object_count",
+              "defined_in": "src/libgit2/odb_mempack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/mempack.rs"
+            },
+            {
+              "name": "git_mempack_reset",
+              "defined_in": "src/libgit2/odb_mempack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/mempack.rs"
+            },
+            {
+              "name": "git_mempack_write_thin_pack",
+              "defined_in": "src/libgit2/odb_mempack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/mempack.rs"
+            },
+            {
+              "name": "git_odb_add_alternate",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_add_backend",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_backend_data_alloc",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_backend_data_free",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_backend_loose",
+              "defined_in": "src/libgit2/odb_loose.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_backend_one_pack",
+              "defined_in": "src/libgit2/odb_pack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_backend_pack",
+              "defined_in": "src/libgit2/odb_pack.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb_backend.rs"
+            },
+            {
+              "name": "git_odb_get_backend",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/odb.rs"
+            },
+            {
+              "name": "git_odb_init_backend",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "crustify/rust/libgit2/libgit2/odb/sys/odb_backend.rs"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

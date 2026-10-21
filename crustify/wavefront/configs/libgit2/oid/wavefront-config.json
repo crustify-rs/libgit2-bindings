@@ -14,7 +14,7 @@
     "include/git2/oidarray.h"
   ],
   "out_of_scope": {
-    "paths": [],
-    "features": []
-  }
+    "paths": []
+  },
+  "t3_dir": "t3"
 }

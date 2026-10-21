@@ -1,6 +1,8 @@
 {
   "_comment": [
-    "Subsystem libgit2/history of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config."
+    "Subsystem libgit2/history of campaign 20261008-170008; mirrors crustify/artifacts/subsystems.json and narrows the campaign-wide config.",
+    "out_of_scope.items: types.h is shared; core, its first-scheduled sharer, owns what it defines.",
+    "schedule --skip git_blame_file_from_buffer: declared in include/git2/blame.h, defined nowhere, not exported."
   ],
   "state_dir": "crustify/wavefront",
   "impl_files": [
@@ -29,6 +31,48 @@
   ],
   "out_of_scope": {
     "paths": [],
-    "features": []
-  }
+    "items": [
+      {
+        "name": "git_branch_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_filemode_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_object_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_reference_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_signature",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_ignore_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_recurse_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_update_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_time",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_writestream",
+        "defined_in": "include/git2/types.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
 }
