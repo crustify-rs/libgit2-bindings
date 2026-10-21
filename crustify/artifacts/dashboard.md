@@ -119,9 +119,9 @@ the corrections it made to what earlier runs committed.
 
 | run | subsystems changed | items moved | wavefront artifacts changed | reports | $ | tokens | wall |
 |---|---:|---:|---|---:|---|---|---|
-| 0 | `12` | `167` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (22), `t3/chased_casts.csv`, `t3/type_generators.csv` | `8` | `$<n>` | `<n>M` | `<n>m<n>s` |
+| 0 | `12` | `167` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (22), `t3/chased_casts.csv`, `t3/type_generators.csv` | `8` | `$13.36` | `37.11M` | `32m23s` |
 | 1 | `<n>` | `<n>` | `<files>` | `<n>` | `$<n>` | `<n>M` | `<n>m<n>s` |
-| **Σ** | **`12`** | **`167`** | | **`8`** | **`$<n>`** | **`<n>M`** | **`<n>m<n>s`** |
+| **Σ** | **`12`** | **`167`** | | **`8`** | **`$13.36`** | **`37.11M`** | **`32m23s`** |
 
 ## Types
 
