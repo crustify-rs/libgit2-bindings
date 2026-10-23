@@ -1236,8 +1236,9 @@ rewritten onto `c/`, keeping every commit; the old hashes map to the new ones in
   to its agent's run dir, `binder/run-1` … `binder/run-92` and `reviewer/run-1` …
   `reviewer/run-44`, numbered in launch order; each `task.json` gains its `wave`, `batch`,
   `link_unit`, `module` (`null`), `foundational` and new `base_branch`, its reviewed
-  `commits` are the rewritten hashes, and a `migration.json` beside it names its old record
-  and branch.
+  `commits` are the rewritten hashes. The migration commit, `436d4f2f9`, records each run
+  dir's old location as the renames of its files (`git show -M --name-status 436d4f2f9`), and
+  the old batch branch is named from it.
   Planning run 0 is `planner/run-1`. Each wave's records are under `waves/wave-<index>/`,
   and each subsystem's end-of-sub-campaign scan, as `subsystem-ffimap*.json`, under its
   last wave's.
