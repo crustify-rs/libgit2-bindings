@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "Module 180 of link unit libgit2, `src/libgit2/transports/local.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/transports/local.c"
+  ],
+  "api_headers": [
+    "include/git2/sys/transport.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_fetch_negotiation",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_service_t",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_cb",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_definition",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_stream",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_transport",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_transport_dummy",
+        "defined_in": "include/git2/sys/transport.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

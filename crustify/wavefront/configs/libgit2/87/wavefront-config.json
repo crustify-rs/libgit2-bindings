@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "Module 87 of link unit libgit2, `src/libgit2/config_cache.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/config.h",
+    "src/libgit2/config_cache.c",
+    "src/libgit2/repository.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_config",
+        "defined_in": "src/libgit2/config.h"
+      },
+      {
+        "name": "git_config__find_programdata",
+        "defined_in": "src/libgit2/config.h"
+      },
+      {
+        "name": "git_configmap_item",
+        "defined_in": "src/libgit2/repository.h"
+      },
+      {
+        "name": "git_configmap_value",
+        "defined_in": "src/libgit2/repository.h"
+      },
+      {
+        "name": "git_repository",
+        "defined_in": "src/libgit2/repository.h"
+      },
+      {
+        "name": "git_repository__ensure_not_bare",
+        "defined_in": "src/libgit2/repository.h"
+      },
+      {
+        "name": "git_repository_attr_cache",
+        "defined_in": "src/libgit2/repository.h"
+      },
+      {
+        "name": "git_repository_foreach_worktree_cb",
+        "defined_in": "src/libgit2/repository.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

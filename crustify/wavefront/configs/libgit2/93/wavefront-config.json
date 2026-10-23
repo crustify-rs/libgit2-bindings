@@ -1,0 +1,77 @@
+{
+  "_comment": [
+    "Module 93 of link unit libgit2, `src/libgit2/object_api.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/object_api.c"
+  ],
+  "api_headers": [
+    "include/git2/blob.h",
+    "include/git2/commit.h",
+    "include/git2/tag.h",
+    "include/git2/tree.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_blob_filter_flag_t",
+        "defined_in": "include/git2/blob.h"
+      },
+      {
+        "name": "git_blob_filter_options",
+        "defined_in": "include/git2/blob.h"
+      },
+      {
+        "name": "git_commit_create_cb",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_commit_create_ext_options",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_commit_create_options",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_commit_header",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_commit_signature_cb",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_commitarray",
+        "defined_in": "include/git2/commit.h"
+      },
+      {
+        "name": "git_tag_foreach_cb",
+        "defined_in": "include/git2/tag.h"
+      },
+      {
+        "name": "git_tree_update",
+        "defined_in": "include/git2/tree.h"
+      },
+      {
+        "name": "git_tree_update_t",
+        "defined_in": "include/git2/tree.h"
+      },
+      {
+        "name": "git_treebuilder_filter_cb",
+        "defined_in": "include/git2/tree.h"
+      },
+      {
+        "name": "git_treewalk_cb",
+        "defined_in": "include/git2/tree.h"
+      },
+      {
+        "name": "git_treewalk_mode",
+        "defined_in": "include/git2/tree.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Module 90 of link unit libgit2, `src/libgit2/config_mem.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/config_mem.c"
+  ],
+  "api_headers": [
+    "include/git2/sys/config.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_config_backend",
+        "defined_in": "include/git2/sys/config.h"
+      },
+      {
+        "name": "git_config_backend_entry",
+        "defined_in": "include/git2/sys/config.h"
+      },
+      {
+        "name": "git_config_iterator",
+        "defined_in": "include/git2/sys/config.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

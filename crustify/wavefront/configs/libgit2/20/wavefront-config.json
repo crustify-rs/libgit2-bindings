@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "Module 20 of link unit libgit2, `deps/xdiff/xprepare.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/xdiff/xprepare.c",
+    "deps/xdiff/xprepare.h",
+    "deps/xdiff/xtypes.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "s_chanode",
+        "defined_in": "deps/xdiff/xtypes.h"
+      },
+      {
+        "name": "s_chastore",
+        "defined_in": "deps/xdiff/xtypes.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

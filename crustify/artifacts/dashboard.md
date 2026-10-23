@@ -123,8 +123,8 @@ the corrections it made to what earlier runs committed.
 | run | modules changed | items moved | wavefront artifacts changed | reports | $ | tokens | wall |
 |---|---:|---:|---|---:|---|---|---|
 | 1 | `12` | `167` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (22), `t3/chased_casts.csv`, `t3/type_generators.csv` | `8` | `$13.36` | `37.11M` | `32m23s` |
-| 2 | `<n>` | `<n>` | `<files>` | `<n>` | `$<n>` | `<n>M` | `<n>m<n>s` |
-| **Σ** | **`12`** | **`167`** | | **`8`** | **`$13.36`** | **`37.11M`** | **`32m23s`** |
+| 2 | `196` | `1144` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (196, replacing 22), `t3/chased_casts.csv`, `ownership-store.json` | `1` | `$<n>` | `<n>M` | `<n>m<n>s` |
+| **Σ** | **`208`** | **`1311`** | | **`9`** | **`$13.36`** | **`37.11M`** | **`32m23s`** |
 
 ## Side campaigns
 

@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Module 7 of link unit libgit2, `deps/llhttp/llhttp.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/llhttp/llhttp.c",
+    "deps/llhttp/llhttp.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "llhttp_alloc",
+        "defined_in": "deps/llhttp/llhttp.h"
+      },
+      {
+        "name": "llhttp_free",
+        "defined_in": "deps/llhttp/llhttp.h"
+      },
+      {
+        "name": "llhttp_settings_s",
+        "defined_in": "deps/llhttp/llhttp.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

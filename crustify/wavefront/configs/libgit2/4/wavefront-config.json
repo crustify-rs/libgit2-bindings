@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Module 4 of link unit libgit2, `src/util/allocators/stdalloc.c` (foundational): its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/util/allocators/stdalloc.c",
+    "src/util/allocators/stdalloc.h"
+  ],
+  "api_headers": [
+    "include/git2/sys/alloc.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_allocator",
+        "defined_in": "include/git2/sys/alloc.h"
+      },
+      {
+        "name": "git_win32_crtdbg_init_allocator",
+        "defined_in": "include/git2/sys/alloc.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

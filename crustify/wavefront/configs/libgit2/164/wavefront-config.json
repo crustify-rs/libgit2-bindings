@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "Module 164 of link unit libgit2, `src/libgit2/pack.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/mwindow.h",
+    "src/libgit2/pack.c",
+    "src/libgit2/pack.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_mwindow",
+        "defined_in": "src/libgit2/mwindow.h"
+      },
+      {
+        "name": "git_mwindow_ctl",
+        "defined_in": "src/libgit2/mwindow.h"
+      },
+      {
+        "name": "git_mwindow_file",
+        "defined_in": "src/libgit2/mwindow.h"
+      },
+      {
+        "name": "git_mwindow_packmap",
+        "defined_in": "src/libgit2/mwindow.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

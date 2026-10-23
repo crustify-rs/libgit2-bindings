@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Module 98 of link unit libgit2, `src/libgit2/refs.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/refs.c",
+    "src/libgit2/refs.h"
+  ],
+  "api_headers": [
+    "include/git2/refs.h",
+    "include/git2/sys/refs.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_branch_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_filemode_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_object_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_remote_callbacks",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_signature",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_ignore_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_recurse_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_update_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_time",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_writestream",
+        "defined_in": "include/git2/types.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

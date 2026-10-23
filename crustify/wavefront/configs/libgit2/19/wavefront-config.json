@@ -1,0 +1,59 @@
+{
+  "_comment": [
+    "Module 19 of link unit libgit2, `deps/xdiff/xutils.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/xdiff/xdiff.h",
+    "deps/xdiff/xtypes.h",
+    "deps/xdiff/xutils.c",
+    "deps/xdiff/xutils.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "find_func_t",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_bdiffparam",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_xdemitcb",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_xdemitconf",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_xdfenv",
+        "defined_in": "deps/xdiff/xtypes.h"
+      },
+      {
+        "name": "s_xdfile",
+        "defined_in": "deps/xdiff/xtypes.h"
+      },
+      {
+        "name": "s_xmparam",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_xpparam",
+        "defined_in": "deps/xdiff/xdiff.h"
+      },
+      {
+        "name": "s_xrecord",
+        "defined_in": "deps/xdiff/xtypes.h"
+      },
+      {
+        "name": "xdl_emit_hunk_consume_func_t",
+        "defined_in": "deps/xdiff/xdiff.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

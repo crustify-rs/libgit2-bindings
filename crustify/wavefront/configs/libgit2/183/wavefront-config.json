@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Module 183 of link unit libgit2, `src/libgit2/streams/registry.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/streams/registry.c",
+    "src/libgit2/streams/registry.h"
+  ],
+  "api_headers": [
+    "include/git2/sys/stream.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_stream",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_certificate_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_close_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_connect_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_free_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_read_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_set_proxy_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      },
+      {
+        "name": "git_stream_write_cb",
+        "defined_in": "include/git2/sys/stream.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

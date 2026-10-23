@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Module 76 of link unit libgit2, `deps/reftable/table.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/reftable/iter.h",
+    "deps/reftable/merged.h",
+    "deps/reftable/reftable-merged.h",
+    "deps/reftable/reftable-table.h",
+    "deps/reftable/stack.h",
+    "deps/reftable/table.c",
+    "deps/reftable/table.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "filtering_ref_iterator",
+        "defined_in": "deps/reftable/iter.h"
+      },
+      {
+        "name": "indexed_table_ref_iter",
+        "defined_in": "deps/reftable/iter.h"
+      },
+      {
+        "name": "reftable_iterator_vtable",
+        "defined_in": "deps/reftable/iter.h"
+      },
+      {
+        "name": "reftable_merged_table",
+        "defined_in": "deps/reftable/merged.h"
+      },
+      {
+        "name": "reftable_stack",
+        "defined_in": "deps/reftable/stack.h"
+      },
+      {
+        "name": "segment",
+        "defined_in": "deps/reftable/stack.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

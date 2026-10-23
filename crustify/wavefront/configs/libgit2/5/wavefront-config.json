@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Module 5 of link unit libgit2, `src/util/allocators/win32_leakcheck.c` (foundational): its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/util/allocators/win32_leakcheck.c",
+    "src/util/allocators/win32_leakcheck.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": []
+  },
+  "t3_dir": "t3"
+}

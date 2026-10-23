@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Module 77 of link unit libgit2, `deps/reftable/merged.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/reftable/merged.c",
+    "deps/reftable/merged.h",
+    "deps/reftable/reftable-merged.h",
+    "deps/reftable/reftable-stack.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "reftable_compaction_stats",
+        "defined_in": "deps/reftable/reftable-stack.h"
+      },
+      {
+        "name": "reftable_log_expiry_config",
+        "defined_in": "deps/reftable/reftable-stack.h"
+      },
+      {
+        "name": "reftable_stack_options",
+        "defined_in": "deps/reftable/reftable-stack.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

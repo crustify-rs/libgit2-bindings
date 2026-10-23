@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Module 163 of link unit libgit2, `src/libgit2/odb_loose.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/odb.h",
+    "src/libgit2/odb_loose.c"
+  ],
+  "api_headers": [
+    "include/git2/odb_backend.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_odb",
+        "defined_in": "src/libgit2/odb.h"
+      },
+      {
+        "name": "git_odb_backend_pack_options",
+        "defined_in": "include/git2/odb_backend.h"
+      },
+      {
+        "name": "git_odb_cap_t",
+        "defined_in": "src/libgit2/odb.h"
+      },
+      {
+        "name": "git_odb_object",
+        "defined_in": "src/libgit2/odb.h"
+      },
+      {
+        "name": "git_odb_stream",
+        "defined_in": "include/git2/odb_backend.h"
+      },
+      {
+        "name": "git_odb_stream_t",
+        "defined_in": "include/git2/odb_backend.h"
+      },
+      {
+        "name": "git_odb_writepack",
+        "defined_in": "include/git2/odb_backend.h"
+      },
+      {
+        "name": "git_rawobj",
+        "defined_in": "src/libgit2/odb.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Module 10 of link unit libgit2, `deps/ntlmclient/utf8.h`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/ntlmclient/utf8.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "utf8coll",
+        "defined_in": "deps/ntlmclient/utf8.h"
+      },
+      {
+        "name": "utf8fry",
+        "defined_in": "deps/ntlmclient/utf8.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

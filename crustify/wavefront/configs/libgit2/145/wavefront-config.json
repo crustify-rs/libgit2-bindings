@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Module 145 of link unit libgit2, `src/libgit2/clone.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/clone.c",
+    "src/libgit2/clone.h"
+  ],
+  "api_headers": [
+    "include/git2/clone.h"
+  ],
+  "out_of_scope": {
+    "paths": []
+  },
+  "t3_dir": "t3"
+}

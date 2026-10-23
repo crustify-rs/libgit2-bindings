@@ -1,0 +1,169 @@
+{
+  "_comment": [
+    "Module 181 of link unit libgit2, `src/libgit2/transports/smart.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/transports/smart.c",
+    "src/libgit2/transports/smart.h"
+  ],
+  "api_headers": [
+    "include/git2/cert.h",
+    "include/git2/sys/transport.h",
+    "include/git2/types.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_branch_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_cert_hostkey",
+        "defined_in": "include/git2/cert.h"
+      },
+      {
+        "name": "git_cert_ssh_raw_type_t",
+        "defined_in": "include/git2/cert.h"
+      },
+      {
+        "name": "git_cert_ssh_t",
+        "defined_in": "include/git2/cert.h"
+      },
+      {
+        "name": "git_cert_x509",
+        "defined_in": "include/git2/cert.h"
+      },
+      {
+        "name": "git_fetch_negotiation",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_filemode_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_object_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_pkt",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ack",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_comment",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_data",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_err",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ng",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ok",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_parse_data",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_progress",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ref",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_send_flush",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_shallow",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_type",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_unpack",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_reference_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_remote_callbacks",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_signature",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_smart_service_t",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_cb",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_definition",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_smart_subtransport_stream",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_submodule_ignore_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_recurse_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_submodule_update_t",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_time",
+        "defined_in": "include/git2/types.h"
+      },
+      {
+        "name": "git_transport",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_transport_dummy",
+        "defined_in": "include/git2/sys/transport.h"
+      },
+      {
+        "name": "git_writestream",
+        "defined_in": "include/git2/types.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

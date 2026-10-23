@@ -1,0 +1,235 @@
+{
+  "_comment": "The out-of-tree libraries libgit2.so links (readelf -d crustify/builds/plain/libgit2.so.1.9.0: libssl.so.3, libcrypto.so.3, libpcre2-8.so.0, libz.so.1, libc.so.6; the link line's -lrt is glibc's), one entry each, as specs/artifacts/dependencies.md describes. resolved is what the plain build's CMake found (crustify/builds/plain/CMakeCache.txt and its configure log; PCRE2's version from pkg-config --modversion libpcre2-8) and the Ubuntu 24.04 package that installed it (dpkg -S). Each library is wrapped in its own side campaign: libc by the existing crustify-rs/glibc-bindings, the others by new crustify-rs/<source>-bindings repositories, OpenSSL's libssl and libcrypto sharing openssl-bindings; none is adopted from crates.io. rust_equivalent judges each crate against every entity the campaign's dependency records count from the library.",
+  "version": "0551dfd4ad989b6a3d5683c0d4cf326c6efef929",
+  "libraries": [
+    {
+      "name": "libc",
+      "resolved": {
+        "path": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "version": "2.39",
+        "package": "libc6-dev 2.39-0ubuntu8.9"
+      },
+      "source": {
+        "repository": "https://sourceware.org/git/glibc.git",
+        "tag": "glibc-2.39",
+        "patches": "glibc 2.39-0ubuntu8.9"
+      },
+      "linked_from": "system",
+      "wrapper": {
+        "repository": "crustify-rs/glibc-bindings",
+        "pin": null
+      },
+      "rust_equivalent": {
+        "ported": [],
+        "bindings": [
+          {
+            "crate": "nix",
+            "sys": "libc",
+            "feature_parity": "partial",
+            "license": "MIT",
+            "notes": "safe wrappers over the process, signal, socket, directory, stat and file-descriptor calls the campaign consumes (fork, execve, waitpid, pipe, poll, sigwait, getaddrinfo, opendir, fstat, ...); no stdio (fprintf, snprintf), string (str*, mem*), qsort or pthread mutex/rwlock/condvar/key API, which std covers with different types"
+          },
+          {
+            "crate": "rustix",
+            "sys": null,
+            "feature_parity": "partial",
+            "license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+            "notes": "safe syscalls for files, directories, sockets, mmap and processes; no stdio, string, allocator, qsort, getaddrinfo or pthread API"
+          },
+          {
+            "crate": "libc",
+            "sys": null,
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "raw FFI: every entity the campaign consumes is declared, but as unsafe extern functions over raw pointers, with no safe API; the crate the workspace already depends on"
+          }
+        ]
+      }
+    },
+    {
+      "name": "libcrypto",
+      "resolved": {
+        "path": "/usr/lib/x86_64-linux-gnu/libcrypto.so.3",
+        "version": "3.0.13",
+        "package": "libssl-dev 3.0.13-0ubuntu3.16"
+      },
+      "source": {
+        "repository": "https://github.com/openssl/openssl",
+        "tag": "openssl-3.0.13",
+        "patches": "openssl 3.0.13-0ubuntu3.16"
+      },
+      "linked_from": "side-campaign",
+      "wrapper": {
+        "repository": "crustify-rs/openssl-bindings",
+        "pin": null
+      },
+      "rust_equivalent": {
+        "ported": [
+          {
+            "crate": "sha2",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "SHA256_Init/Update/Final only"
+          },
+          {
+            "crate": "hmac",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "HMAC_CTX_* only, with md-5 for EVP_md5"
+          },
+          {
+            "crate": "md4",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "MD4 only"
+          },
+          {
+            "crate": "des",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "DES_set_key/DES_ecb_encrypt only"
+          },
+          {
+            "crate": "rand",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "RAND_bytes only, from the operating system RNG rather than OpenSSL's DRBG"
+          }
+        ],
+        "bindings": [
+          {
+            "crate": "openssl",
+            "sys": "openssl-sys",
+            "feature_parity": "partial",
+            "license": "Apache-2.0",
+            "notes": "covers X509 names, subject alternative names and DER encoding, SHA-256, HMAC, RAND_bytes and the error queue; MD4 and DES need OpenSSL 3's legacy provider through openssl::provider; no BIO_meth_* custom-BIO API (it builds its own BIO over Read + Write) and no CRYPTO_malloc/CRYPTO_free"
+          }
+        ]
+      }
+    },
+    {
+      "name": "libssl",
+      "resolved": {
+        "path": "/usr/lib/x86_64-linux-gnu/libssl.so.3",
+        "version": "3.0.13",
+        "package": "libssl-dev 3.0.13-0ubuntu3.16"
+      },
+      "source": {
+        "repository": "https://github.com/openssl/openssl",
+        "tag": "openssl-3.0.13",
+        "patches": "openssl 3.0.13-0ubuntu3.16"
+      },
+      "linked_from": "side-campaign",
+      "wrapper": {
+        "repository": "crustify-rs/openssl-bindings",
+        "pin": null
+      },
+      "rust_equivalent": {
+        "ported": [
+          {
+            "crate": "rustls",
+            "feature_parity": "partial",
+            "license": "Apache-2.0 OR ISC OR MIT",
+            "notes": "a TLS client in Rust: no OpenSSL cipher-list strings (SSL_CTX_set_cipher_list), no SSL_CTX_load_verify_locations or default verify paths without rustls-native-certs, and certificate verification through webpki rather than X509_STORE"
+          }
+        ],
+        "bindings": [
+          {
+            "crate": "openssl",
+            "sys": "openssl-sys",
+            "feature_parity": "partial",
+            "license": "Apache-2.0",
+            "notes": "SslContextBuilder and SslStream cover SSL_CTX_new/free, options, cipher list, verify locations and paths, SSL_new/connect/read/write/shutdown, the peer certificate and verify result; SSL_set_bio over a custom BIO has no counterpart, the stream being any Read + Write instead"
+          },
+          {
+            "crate": "native-tls",
+            "sys": "openssl-sys",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "a platform-TLS facade: no cipher-list control, no X509_STORE access and no verify result codes"
+          }
+        ]
+      }
+    },
+    {
+      "name": "libpcre2-8",
+      "resolved": {
+        "path": "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.11.2",
+        "version": "10.42",
+        "package": "libpcre2-dev 10.42-4ubuntu2.1"
+      },
+      "source": {
+        "repository": "https://github.com/PCRE2Project/pcre2",
+        "tag": "pcre2-10.42",
+        "patches": "pcre2 10.42-4ubuntu2.1"
+      },
+      "linked_from": "side-campaign",
+      "wrapper": {
+        "repository": "crustify-rs/pcre2-bindings",
+        "pin": null
+      },
+      "rust_equivalent": {
+        "ported": [],
+        "bindings": [
+          {
+            "crate": "pcre2",
+            "sys": "pcre2-sys",
+            "feature_parity": "partial",
+            "license": "Unlicense OR MIT",
+            "notes": "RegexBuilder::caseless, Regex::is_match and captures_read cover pcre2_compile, pcre2_match, the match data and its ovector, and Error the error messages; patterns are &str, so the non-UTF-8 patterns the C compiles are rejected, and it vendors its own PCRE2 unless told to link the system one"
+          },
+          {
+            "crate": "pcre2-sys",
+            "sys": null,
+            "feature_parity": "partial",
+            "license": "Unlicense OR MIT",
+            "notes": "raw FFI: declares every function the campaign consumes as unsafe extern functions over raw pointers, with no safe API; the crate the workspace already depends on"
+          }
+        ]
+      }
+    },
+    {
+      "name": "libz",
+      "resolved": {
+        "path": "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+        "version": "1.3",
+        "package": "zlib1g-dev 1:1.3.dfsg-3.1ubuntu2.2"
+      },
+      "source": {
+        "repository": "https://github.com/madler/zlib",
+        "tag": "v1.3",
+        "patches": "zlib 1:1.3.dfsg-3.1ubuntu2.2"
+      },
+      "linked_from": "side-campaign",
+      "wrapper": {
+        "repository": "crustify-rs/zlib-bindings",
+        "pin": null
+      },
+      "rust_equivalent": {
+        "ported": [
+          {
+            "crate": "zlib-rs",
+            "feature_parity": "partial",
+            "license": "Zlib",
+            "notes": "implements the zlib API the campaign consumes, crc32 and deflateBound included, but deflate output is not byte-identical to zlib 1.3's at every level and its Rust API is the C-shaped, unsafe one"
+          },
+          {
+            "crate": "miniz_oxide",
+            "feature_parity": "partial",
+            "license": "MIT OR Zlib OR Apache-2.0",
+            "notes": "raw deflate and zlib streams only: no crc32, no deflateBound, and different compressed bytes"
+          }
+        ],
+        "bindings": [
+          {
+            "crate": "flate2",
+            "sys": "libz-sys",
+            "feature_parity": "partial",
+            "license": "MIT OR Apache-2.0",
+            "notes": "Compress and Decompress cover deflateInit/deflate/deflateReset/deflateEnd and their inflate counterparts, and Crc covers crc32; no deflateBound and no access to z_stream"
+          }
+        ]
+      }
+    }
+  ]
+}

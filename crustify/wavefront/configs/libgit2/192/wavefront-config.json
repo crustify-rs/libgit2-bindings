@@ -1,0 +1,93 @@
+{
+  "_comment": [
+    "Module 192 of link unit libgit2, `src/libgit2/transports/smart_protocol.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/transports/smart.h",
+    "src/libgit2/transports/smart_protocol.c"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_ack_status",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ack",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_cmd",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_comment",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_data",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_err",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ng",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ok",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_parse_data",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_progress",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_ref",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_send_flush",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_shallow",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_type",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "git_pkt_unpack",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "packetsize_cb",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "transport_smart",
+        "defined_in": "src/libgit2/transports/smart.h"
+      },
+      {
+        "name": "transport_smart_caps",
+        "defined_in": "src/libgit2/transports/smart.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

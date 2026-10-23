@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Module 121 of link unit libgit2, `src/libgit2/attrcache.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/attrcache.c",
+    "src/libgit2/attrcache.h"
+  ],
+  "api_headers": [
+    "include/git2/attr.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_attr_foreach_cb",
+        "defined_in": "include/git2/attr.h"
+      },
+      {
+        "name": "git_attr_options",
+        "defined_in": "include/git2/attr.h"
+      },
+      {
+        "name": "git_attr_t",
+        "defined_in": "include/git2/deprecated.h"
+      },
+      {
+        "name": "git_attr_value_t",
+        "defined_in": "include/git2/attr.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

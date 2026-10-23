@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "Module 43 of link unit libgit2, `deps/xdiff/xpatience.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "deps/xdiff/xdiffi.h",
+    "deps/xdiff/xpatience.c"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "s_diffdata",
+        "defined_in": "deps/xdiff/xdiffi.h"
+      },
+      {
+        "name": "s_xdalgoenv",
+        "defined_in": "deps/xdiff/xdiffi.h"
+      },
+      {
+        "name": "s_xdchange",
+        "defined_in": "deps/xdiff/xdiffi.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

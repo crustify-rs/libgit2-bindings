@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "Module 120 of link unit libgit2, `src/libgit2/attr.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/attr.c",
+    "src/libgit2/attr_file.h"
+  ],
+  "api_headers": [
+    "include/git2/attr.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_attr_assignment",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_file",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_file_entry",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_file_parser",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_file_source",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_file_source_t",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_fnmatch",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_name",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_path",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_rule",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_session",
+        "defined_in": "src/libgit2/attr_file.h"
+      },
+      {
+        "name": "git_attr_t",
+        "defined_in": "include/git2/deprecated.h"
+      },
+      {
+        "name": "git_dir_flag",
+        "defined_in": "src/libgit2/attr_file.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

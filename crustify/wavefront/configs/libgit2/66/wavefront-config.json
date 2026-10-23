@@ -1,0 +1,93 @@
+{
+  "_comment": [
+    "Module 66 of link unit libgit2, `src/util/tsort.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/util/tsort.c",
+    "src/util/util.h"
+  ],
+  "api_headers": [],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "from_hex",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__fromhex",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__ishex",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__isspace_nonlf",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__iswildcard",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__memrchr",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__memzero",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__next_line",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__noop",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__noop_args",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__signum",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__size_t_bitmask",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__size_t_powerof2",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__sort_r_cmp",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__strlcmp",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git__tsort_cmp",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git_refcount",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git_refcount_freeptr",
+        "defined_in": "src/util/util.h"
+      },
+      {
+        "name": "git_time_monotonic",
+        "defined_in": "src/util/util.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}

@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Module 100 of link unit libgit2, `src/libgit2/diff.c`: its files and the entities its modules.json record owns, as wavefront finds its dependency edges and schedules it. Paths are below the C root, c/; out_of_scope.items names the entities its files define or declare that other modules own, or that the scope excludes (deprecated or never defined in the configured build)."
+  ],
+  "state_dir": "../crustify/wavefront",
+  "impl_files": [
+    "src/libgit2/diff.c",
+    "src/libgit2/diff.h",
+    "src/libgit2/diff_generate.h"
+  ],
+  "api_headers": [
+    "include/git2/diff.h",
+    "include/git2/sys/diff.h"
+  ],
+  "out_of_scope": {
+    "paths": [],
+    "items": [
+      {
+        "name": "git_diff__merge_cb",
+        "defined_in": "src/libgit2/diff_generate.h"
+      },
+      {
+        "name": "git_diff_file__resolve_zero_size",
+        "defined_in": "src/libgit2/diff_generate.h"
+      },
+      {
+        "name": "git_diff_parse_options",
+        "defined_in": "include/git2/diff.h"
+      },
+      {
+        "name": "git_diff_stats_format_t",
+        "defined_in": "include/git2/diff.h"
+      }
+    ]
+  },
+  "t3_dir": "t3"
+}
