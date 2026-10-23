@@ -1,15 +1,15 @@
 #!/bin/bash
 # Run cargo against one crustify prebuild of libgit2, instrumenting Rust to match.
 #
-#   crustify/rust/scripts/cargo-variant.sh <variant> <cargo subcommand> [args...]
+#   crustify/scripts/cargo-variant.sh <variant> <cargo subcommand> [args...]
 #
-# <variant> is a `variants` key of crustify/build.json: plain, coverage, asan-ubsan,
-# tsan or bsan. Each variant uses its own target dir under crustify/rust/target/.
+# <variant> is a `variants` key of crustify/artifacts/build.json: plain, coverage, asan-ubsan,
+# tsan or bsan. Each variant uses its own target dir under target/.
 # Set CRUSTIFY_LIBGIT2_BUILD_DIR to link a private build instead of the shared one.
 set -euo pipefail
 variant=${1:?usage: cargo-variant.sh <variant> <cargo subcommand> [args...]}
 shift
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 host=x86_64-unknown-linux-gnu
 export CRUSTIFY_BUILD_VARIANT=$variant
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$here/target/$variant}

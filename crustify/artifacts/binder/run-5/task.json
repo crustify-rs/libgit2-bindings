@@ -1,0 +1,41 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_error_clear",
+      "defined_in": "src/util/errors.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/util/sys/errors.rs"
+    },
+    {
+      "name": "git_error_set",
+      "defined_in": "src/util/errors.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/util/sys/errors.rs"
+    },
+    {
+      "name": "git_error_set_oom",
+      "defined_in": "src/util/errors.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/util/sys/errors.rs"
+    },
+    {
+      "name": "git_error_set_str",
+      "defined_in": "src/util/errors.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/util/sys/errors.rs"
+    }
+  ],
+  "wave": 4,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-4",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

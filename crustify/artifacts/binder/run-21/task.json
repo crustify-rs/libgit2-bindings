@@ -1,0 +1,24 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_signature",
+      "defined_in": "include/git2/types.h",
+      "kind": "type",
+      "field_anchors": [
+        "name",
+        "when",
+        "email"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/core/types.rs"
+    }
+  ],
+  "wave": 16,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-16",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

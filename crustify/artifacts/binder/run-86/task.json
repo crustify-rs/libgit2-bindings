@@ -1,0 +1,43 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_index_entry",
+      "defined_in": "include/git2/index.h",
+      "kind": "type",
+      "field_anchors": [
+        "flags",
+        "id",
+        "path",
+        "file_size",
+        "mode",
+        "ctime",
+        "mtime",
+        "gid",
+        "uid",
+        "flags_extended",
+        "ino",
+        "dev"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "git_index_options",
+      "defined_in": "include/git2/index.h",
+      "kind": "type",
+      "field_anchors": [
+        "version",
+        "oid_type"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    }
+  ],
+  "wave": 50,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-50",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

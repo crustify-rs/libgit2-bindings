@@ -1,0 +1,35 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_config_backend",
+      "defined_in": "include/git2/sys/config.h",
+      "kind": "type",
+      "field_anchors": [
+        "free",
+        "version",
+        "iterator",
+        "cfg",
+        "unlock",
+        "open",
+        "lock",
+        "snapshot",
+        "del_multivar",
+        "del",
+        "set_multivar",
+        "set",
+        "get",
+        "readonly"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/config/sys/config.rs"
+    }
+  ],
+  "wave": 42,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-42",
+  "model": "openrouter/openai/gpt-6.1-sol",
+  "billing": "api"
+}

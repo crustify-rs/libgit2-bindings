@@ -1,0 +1,34 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_config_foreach",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_config_foreach_match",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_config_get_multivar_foreach",
+      "defined_in": "src/libgit2/config.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    }
+  ],
+  "wave": 40,
+  "batch": 1,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-40",
+  "model": "openrouter/openai/gpt-6.1-sol",
+  "billing": "api"
+}

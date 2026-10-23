@@ -1,0 +1,27 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_commitarray",
+      "defined_in": "include/git2/commit.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_config",
+      "defined_in": "src/libgit2/config.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    }
+  ],
+  "wave": 20,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-20",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

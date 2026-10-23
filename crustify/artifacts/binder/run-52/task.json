@@ -1,0 +1,27 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_tag",
+      "defined_in": "src/libgit2/tag.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tag.rs"
+    },
+    {
+      "name": "git_tree",
+      "defined_in": "src/libgit2/tree.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    }
+  ],
+  "wave": 28,
+  "batch": 3,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-28",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

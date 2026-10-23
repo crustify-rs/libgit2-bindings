@@ -1,0 +1,20 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "string",
+      "defined_in": null,
+      "kind": "raw-lifetime",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/raw.rs"
+    }
+  ],
+  "wave": 2,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": true,
+  "base_branch": "crustify/waves/wave-2",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

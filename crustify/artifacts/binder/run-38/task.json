@@ -1,0 +1,188 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_path_is_gitfile",
+      "defined_in": "src/libgit2/path.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/path.rs"
+    },
+    {
+      "name": "git_repository__cleanup",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_commit_parents",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_commondir",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_config",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_config_snapshot",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_detach_head",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_discover",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_fetchhead_foreach_cb",
+      "defined_in": "include/git2/repository.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_free",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_get_namespace",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_hashfile",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_head",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_head_detached",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_head_detached_for_worktree",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_head_for_worktree",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_head_unborn",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_ident",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_index",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_init",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_is_bare",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_is_empty",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_is_shallow",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_is_worktree",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_item_path",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    }
+  ],
+  "wave": 22,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-22",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

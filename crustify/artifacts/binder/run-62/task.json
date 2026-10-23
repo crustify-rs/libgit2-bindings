@@ -1,0 +1,55 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_commit_amend_from_stage",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_amend_from_tree",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_from_stage",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_from_tree",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commit_create_options_init",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    },
+    {
+      "name": "git_commitarray_dispose",
+      "defined_in": "src/libgit2/commit.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
+    }
+  ],
+  "wave": 32,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-32",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

@@ -1,0 +1,7 @@
+{
+  "subsystem": "config",
+  "wave": "wave-1",
+  "batch": 2,
+  "record": "crustify/artifacts/libgit2/config/wave-1/batch-2",
+  "branch": "crustify/batches/libgit2/config/wave-1/batch-2"
+}

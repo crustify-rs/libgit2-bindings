@@ -1,0 +1,188 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_repository_mergehead_foreach_cb",
+      "defined_in": "include/git2/repository.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_message",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_message_remove",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_new",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_odb",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_oid_type",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_open",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_open_bare",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_open_ext",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_open_from_worktree",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_path",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_refdb",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_reinit_filesystem",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_bare",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_config",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_head",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_set_head_detached",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_set_head_detached_from_annotated",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_set_ident",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_set_index",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_namespace",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_set_odb",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_refdb",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/sys/repository.rs"
+    },
+    {
+      "name": "git_repository_set_workdir",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    },
+    {
+      "name": "git_repository_state",
+      "defined_in": "src/libgit2/repository.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    }
+  ],
+  "wave": 22,
+  "batch": 3,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-22",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

@@ -1,0 +1,30 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_mailmap",
+      "defined_in": "src/libgit2/mailmap.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/object/mailmap.rs"
+    },
+    {
+      "name": "git_message_trailer",
+      "defined_in": "include/git2/message.h",
+      "kind": "type",
+      "field_anchors": [
+        "key",
+        "value"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/message.rs"
+    }
+  ],
+  "wave": 26,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-26",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

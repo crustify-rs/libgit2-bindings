@@ -1,0 +1,27 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "GIT_INDEX_ENTRY_STAGE",
+      "defined_in": "include/git2/index.h",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    },
+    {
+      "name": "GIT_INDEX_ENTRY_STAGE_SET",
+      "defined_in": "include/git2/index.h",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/index.rs"
+    }
+  ],
+  "wave": 52,
+  "batch": 1,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-52",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

@@ -1,0 +1,11 @@
+error[E0599]: no method named `set_seconds` found for struct `TimeRef<'a>` in the current scope
+ --> tests/ub_safe/compile_fail/time_ref_has_no_setters.rs:8:7
+  |
+8 |     r.set_seconds(1);
+  |       ^^^^^^^^^^^
+  |
+help: there is a method `seconds` with a similar name, but with different arguments
+ --> src/libgit2/core/types.rs
+  |
+  |     pub fn seconds(&self) -> i64 {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

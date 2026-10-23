@@ -1,0 +1,31 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_branch_t",
+      "defined_in": "include/git2/types.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/types.rs"
+    },
+    {
+      "name": "git_buf",
+      "defined_in": "include/git2/buffer.h",
+      "kind": "type",
+      "field_anchors": [
+        "size",
+        "reserved",
+        "ptr"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/core/buffer.rs"
+    }
+  ],
+  "wave": 14,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-14",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

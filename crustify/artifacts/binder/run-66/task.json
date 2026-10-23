@@ -1,0 +1,38 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_config_entry",
+      "defined_in": "include/git2/config.h",
+      "kind": "type",
+      "field_anchors": [
+        "name",
+        "level",
+        "value",
+        "backend_type",
+        "origin_path",
+        "include_depth"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    },
+    {
+      "name": "git_configmap",
+      "defined_in": "include/git2/config.h",
+      "kind": "type",
+      "field_anchors": [
+        "type",
+        "map_value",
+        "str_match"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/config/config.rs"
+    }
+  ],
+  "wave": 36,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-36",
+  "model": "openrouter/openai/gpt-6.1-sol",
+  "billing": "api"
+}

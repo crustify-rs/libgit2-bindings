@@ -1,0 +1,13 @@
+{
+  "commits": [
+    "2e2163861"
+  ],
+  "wave": 6,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-6",
+  "model": "openrouter/anthropic/claude-fable-5.1",
+  "billing": "api"
+}

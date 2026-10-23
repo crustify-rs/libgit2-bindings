@@ -1,0 +1,18 @@
+error[E0597]: `out` does not live long enough
+ --> tests/ub_safe/compile_fail/writestream_box_borrows_local.rs:6:26
+  |
+5 |     let mut out = Vec::new();
+  |         ------- binding `out` declared here
+6 |     RustWriteStream::new(&mut out).into_box()
+  |     ---------------------^^^^^^^^------------
+  |     |                    |
+  |     |                    borrowed value does not live long enough
+  |     argument requires that `out` is borrowed for `'static`
+7 | }
+  | - `out` dropped here while still borrowed
+  |
+note: requirement that the value outlives `'static` introduced here
+ --> src/libgit2/core/types.rs
+  |
+  |         W: 'static,
+  |            ^^^^^^^

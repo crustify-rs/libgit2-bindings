@@ -1,0 +1,48 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_buf_dispose",
+      "defined_in": "src/libgit2/buf.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/buffer.rs"
+    },
+    {
+      "name": "git_libgit2_buildinfo",
+      "defined_in": "src/libgit2/settings.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    },
+    {
+      "name": "git_libgit2_feature_backend",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    },
+    {
+      "name": "git_strarray_dispose",
+      "defined_in": "src/libgit2/strarray.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/strarray.rs"
+    },
+    {
+      "name": "git_trace_cb",
+      "defined_in": "include/git2/trace.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/trace.rs"
+    }
+  ],
+  "wave": 16,
+  "batch": 1,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-16",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

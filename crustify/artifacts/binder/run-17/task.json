@@ -1,0 +1,27 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_submodule_recurse_t",
+      "defined_in": "include/git2/types.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/types.rs"
+    },
+    {
+      "name": "git_submodule_update_t",
+      "defined_in": "include/git2/types.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/types.rs"
+    }
+  ],
+  "wave": 14,
+  "batch": 5,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-14",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

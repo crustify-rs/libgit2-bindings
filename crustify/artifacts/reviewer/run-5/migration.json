@@ -1,0 +1,7 @@
+{
+  "subsystem": "util",
+  "wave": "review-wave-0",
+  "batch": 2,
+  "record": "crustify/artifacts/libgit2/util/review-wave-0/batch-2",
+  "branch": "crustify/review-batches/libgit2/util/wave-0/batch-2"
+}

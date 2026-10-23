@@ -1,0 +1,20 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_pathspec_match_list",
+      "defined_in": "src/libgit2/pathspec.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/index/pathspec.rs"
+    }
+  ],
+  "wave": 48,
+  "batch": 7,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-48",
+  "model": "openrouter/openai/gpt-6-astra",
+  "billing": "api"
+}

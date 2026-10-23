@@ -1,7 +1,7 @@
 //! Generates the allowlisted libgit2 bindings, compiles the macro shims and links the
 //! crustify prebuild selected by `CRUSTIFY_BUILD_VARIANT`.
 //!
-//! - `CRUSTIFY_BUILD_VARIANT`: a `variants` key of `crustify/build.json` (`plain`,
+//! - `CRUSTIFY_BUILD_VARIANT`: a `variants` key of `crustify/artifacts/build.json` (`plain`,
 //!   `coverage`, `asan-ubsan`, `tsan`, `bsan`); default `plain`.
 //! - `CRUSTIFY_LIBGIT2_BUILD_DIR`: an explicit libgit2 build directory, for a private
 //!   build; overrides the variant's directory.
@@ -24,8 +24,8 @@ fn allowlist(dir: &Path, kind: &str) -> Vec<String> {
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let repo = manifest.join("../../..").canonicalize().unwrap();
-    let include = repo.join("include");
+    let repo = manifest.join("..").canonicalize().unwrap();
+    let include = repo.join("c/include");
     let bindgen_dir = manifest.join("bindgen");
 
     println!("cargo:rerun-if-env-changed=CRUSTIFY_BUILD_VARIANT");
@@ -38,7 +38,7 @@ fn main() {
     let lib = build_dir.join("libgit2.so");
     assert!(
         lib.exists(),
-        "{} is missing: build the `{variant}` variant from crustify/build.json first",
+        "{} is missing: build the `{variant}` variant from crustify/artifacts/build.json first",
         lib.display()
     );
     println!("cargo:rerun-if-changed={}", lib.display());

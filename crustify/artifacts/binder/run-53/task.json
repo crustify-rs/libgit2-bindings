@@ -1,0 +1,25 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_tree_update",
+      "defined_in": "include/git2/tree.h",
+      "kind": "type",
+      "field_anchors": [
+        "action",
+        "id",
+        "path",
+        "filemode"
+      ],
+      "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
+    }
+  ],
+  "wave": 28,
+  "batch": 4,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-28",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

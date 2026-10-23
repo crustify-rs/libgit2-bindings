@@ -1,0 +1,11 @@
+[package]
+name = "format-cstr-empty-buffer-told-by-address"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libgit2 = { path = "../../../../../.." }
+libgit2-sys = { path = "../../../../../../libgit2-sys" }

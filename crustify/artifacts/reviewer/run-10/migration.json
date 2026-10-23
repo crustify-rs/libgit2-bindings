@@ -1,0 +1,7 @@
+{
+  "subsystem": "oid",
+  "wave": "review-wave-1",
+  "batch": 1,
+  "record": "crustify/artifacts/libgit2/oid/review-wave-1/batch-1",
+  "branch": "crustify/review-batches/libgit2/oid/wave-1/batch-1"
+}

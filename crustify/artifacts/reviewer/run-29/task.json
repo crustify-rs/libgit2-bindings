@@ -1,0 +1,13 @@
+{
+  "commits": [
+    "da8073d67"
+  ],
+  "wave": 35,
+  "batch": 1,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-35",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

@@ -1,0 +1,27 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_diff",
+      "defined_in": "src/libgit2/diff.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/diff/diff.rs"
+    },
+    {
+      "name": "git_diff_delta",
+      "defined_in": "include/git2/diff.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/diff/diff.rs"
+    }
+  ],
+  "wave": 48,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-48",
+  "model": "openrouter/openai/gpt-6-astra",
+  "billing": "api"
+}

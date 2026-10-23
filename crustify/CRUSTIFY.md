@@ -1,16 +1,20 @@
+
+Fill in as many answers as you want before starting Crustify. It will ask only
+for campaign decisions that remain unresolved.
+
 # Mandatory questions
 
 ## Campaign
 
 1. **Which repository and revision should this campaign use?** (`id: source`)
-   - Answer: libgit2's existing checkout mounted at `/target`, at its current checked-out
-     revision
+   - Answer: `https://github.com/libgit2/libgit2.git`, `0551dfd4a` (the `c/` submodule):
+     the revision of the checkout at `/target` the campaign started from
 
 2. **Should this campaign port the C implementation to Rust, or create safe
    Rust wrappers?** (`id: campaign`)
    - Answer: `wrap`
 
-3. **What should this campaign target: a named subset of subsystems, or a named
+3. **What should this campaign target: a named subset of modules, or a named
    subset of functions and types, or the whole target repo? You can define them
    now or we can brainstorm them during the live session. You can also let the
    orchestrator decide.** (`id: scope`)
@@ -73,7 +77,7 @@ Answer these approval-gate questions only if question 6 is answered `no`.
 14. **Should I wait for your approval before starting the translation phase?**
     (`id: gates.translation`)
     - Answer: `yes`
-15. **Should I wait for your approval between subsystems?** (`id: gates.subsystem`)
+15. **Should I wait for your approval between modules?** (`id: gates.module`)
     - Answer: `no`
 16. **Should I wait for your approval before starting review passes?** (`id: gates.review`)
     - Answer: `no`
@@ -89,5 +93,8 @@ Answer these approval-gate questions only if question 6 is answered `no`.
 Unless otherwise stated, preserve the format of the dashboard exactly.
 
 You are resuming an existing campaign where many steps of the Setup and translation
-phase have been completed. In this session we just want to run the planner agent to
-update the planning step and observe how it affects schedule.json, and then pause.
+phase have been completed. It started in a libgit2 checkout at `/target`, with the
+campaign under `crustify/` and the Rust under `crustify/rust/`, and moved to this
+repository, with the C under `c/` and the Rust at its root, on 2026-10-23. In this
+session we re-plan the whole campaign, the work that has landed included, to observe how
+the current specs would have planned it, and then pause.

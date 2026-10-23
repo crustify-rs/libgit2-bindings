@@ -1,0 +1,55 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_libgit2_features",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    },
+    {
+      "name": "git_libgit2_init",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/global.rs"
+    },
+    {
+      "name": "git_libgit2_opts",
+      "defined_in": "src/libgit2/settings.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    },
+    {
+      "name": "git_libgit2_prerelease",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    },
+    {
+      "name": "git_libgit2_shutdown",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/global.rs"
+    },
+    {
+      "name": "git_libgit2_version",
+      "defined_in": "src/libgit2/libgit2.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/core/common.rs"
+    }
+  ],
+  "wave": 14,
+  "batch": 8,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-14",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}

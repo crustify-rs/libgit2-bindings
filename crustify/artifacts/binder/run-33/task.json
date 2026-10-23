@@ -1,0 +1,20 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_repository",
+      "defined_in": "src/libgit2/repository.h",
+      "kind": "type",
+      "field_anchors": [],
+      "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
+    }
+  ],
+  "wave": 20,
+  "batch": 7,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-20",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api"
+}
