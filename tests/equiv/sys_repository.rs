@@ -36,10 +36,14 @@ mod new_options {
     fn c_options(version: u32) -> (c_int, ffi::git_repository_new_options) {
         let mut opts = ffi::git_repository_new_options::default();
         // SAFETY: `opts` is a live options struct the call may overwrite.
-        let rc = unsafe { ffi::git_repository_new_options_init(&mut opts, version) };
+        let rc = unsafe { ffi::git_repository_new_options_init(&raw mut opts, version) };
         (rc, opts)
     }
 
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers hold a reference to the value"
+    )]
     fn fields(o: &NewOptions) -> (u32, u32) {
         let r = o.as_ref();
         (r.version(), r.oid_type().map_or(0, OidType::raw))
@@ -90,23 +94,22 @@ mod new_options {
     fn new_ext(opts: *mut ffi::git_repository_new_options) -> Call {
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a live slot and `opts` live options, only read.
-        let rc = unsafe { ffi::git_repository_new_ext(&mut repo, opts) };
+        let rc = unsafe { ffi::git_repository_new_ext(&raw mut repo, opts) };
         let error = (rc != 0).then(|| {
-            // SAFETY: after a failure `git_error_last` is this thread's error, live
-            // until the next libgit2 call on this thread; it is copied out first.
-            let e = unsafe { &*ffi::git_error_last() };
+            // SAFETY: after a failure `git_error_last` is this thread's error, live until
+            // the next libgit2 call on this thread.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above, non-NULL; it is copied out first.
+            let e = unsafe { &*e };
             // SAFETY: a set error's message is a NUL-terminated string.
             let message = unsafe { CStr::from_ptr(e.message) }.to_string_lossy();
             (e.klass, message.into_owned())
         });
         let repo_state = (!repo.is_null()).then(|| {
             // SAFETY: `repo` is the live repository the call built, only read.
-            unsafe {
-                (
-                    ffi::git_repository_oid_type(repo),
-                    ffi::git_repository_is_bare(repo),
-                )
-            }
+            let repository_oid_type = unsafe { ffi::git_repository_oid_type(repo) };
+            // SAFETY: as above.
+            unsafe { (repository_oid_type, ffi::git_repository_is_bare(repo)) }
         });
         // SAFETY: `repo` is NULL or the fresh repository, released once here.
         unsafe { ffi::git_repository_free(repo) };
@@ -133,6 +136,10 @@ mod new_options {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn new_ext_reads_rust_options_as_c_options() {
         init();
         type Change = (
@@ -185,7 +192,7 @@ mod new_options {
             c_change(&mut c);
             rust_change(&mut rust);
             assert_eq!(fields(&rust), (c.version, c.oid_type), "{tag}: fields");
-            let c_call = new_ext(&mut c);
+            let c_call = new_ext(&raw mut c);
             let rust_call = rust_new_ext(rust.as_ref());
             assert_eq!(rust_call, c_call, "{tag}");
             assert_eq!(
@@ -219,13 +226,15 @@ mod new_options {
         for kind in [OidType::Sha1, OidType::Sha256] {
             let mut c = c_options(ffi::GIT_REPOSITORY_NEW_OPTIONS_VERSION).1;
             c.oid_type = kind.raw();
-            let (rc, error, repo) = new_ext(&mut c);
+            let (rc, error, repo) = new_ext(&raw mut c);
             assert_eq!((rc, error), (0, None));
             let rust = Repository::with_oid_type(kind).unwrap();
             // SAFETY: the live repository, only read.
+            let repository_oid_type = unsafe { ffi::git_repository_oid_type(rust.as_c_ptr()) };
+            // SAFETY: as above.
             let rust_state = unsafe {
                 (
-                    ffi::git_repository_oid_type(rust.as_c_ptr()),
+                    repository_oid_type,
                     ffi::git_repository_is_bare(rust.as_c_ptr()),
                 )
             };
@@ -278,12 +287,16 @@ mod submodule_cache {
 
     /// The thread's last error as C reports it.
     fn c_last() -> (c_int, String) {
-        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
-        // its message is a C string, live until the next libgit2 call on this thread.
-        unsafe {
-            let e = ffi::git_error_last();
-            let message = CStr::from_ptr((*e).message).to_string_lossy().into_owned();
-            ((*e).klass, message)
+        {
+            // SAFETY: the runtime is initialised; `git_error_last` never returns NULL, and
+            // its message is a C string, live until the next libgit2 call on this thread.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            let message = unsafe { CStr::from_ptr(message2).to_string_lossy().into_owned() };
+            // SAFETY: as above.
+            unsafe { ((*e).klass, message) }
         }
     }
 
@@ -297,7 +310,7 @@ mod submodule_cache {
                 "crustify-sys-repository-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             Self(path)
         }
 
@@ -327,22 +340,24 @@ mod submodule_cache {
 
     impl Drop for Root {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            drop(fs::remove_dir_all(&self.0));
         }
     }
 
     /// `git_submodule_lookup(name)`: the submodule's `ignore` setting, or the code.
     fn lookup(repo: *mut ffi::git_repository, name: &CStr) -> Lookup {
         let mut sm = ptr::null_mut();
-        // SAFETY: a writable slot, a live repository on this thread and a
-        // NUL-terminated name; the submodule reference is released once.
-        unsafe {
-            let rc = ffi::git_submodule_lookup(&mut sm, repo, name.as_ptr());
+        {
+            // SAFETY: a writable slot, a live repository on this thread and a
+            // NUL-terminated name; the submodule reference is released once.
+            let rc = unsafe { ffi::git_submodule_lookup(&raw mut sm, repo, name.as_ptr()) };
             if rc != 0 {
                 return Err(rc);
             }
-            let ignore = ffi::git_submodule_ignore(sm);
-            ffi::git_submodule_free(sm);
+            // SAFETY: as above.
+            let ignore = unsafe { ffi::git_submodule_ignore(sm) };
+            // SAFETY: as above.
+            unsafe { ffi::git_submodule_free(sm) };
             Ok(ignore)
         }
     }
@@ -367,7 +382,7 @@ mod submodule_cache {
         let path = c_root.c_path();
         // SAFETY: a writable slot and a NUL-terminated path; the repository is freed at
         // the end.
-        let rc = unsafe { ffi::git_repository_init(&mut c, path.as_ptr(), 0) };
+        let rc = unsafe { ffi::git_repository_init(&raw mut c, path.as_ptr(), 0) };
         assert_eq!(rc, 0);
         let mut rust: RepositoryBox = Repository::init(&rust_root.c_path(), false).unwrap();
         for (k, &step) in steps.iter().enumerate() {
@@ -375,13 +390,12 @@ mod submodule_cache {
                 Step::Cache | Step::Clear => {
                     // SAFETY: no arguments; clears this thread's error state.
                     unsafe { ffi::git_error_clear() };
-                    // SAFETY: the C side's live repository, on this thread.
-                    let rc = unsafe {
-                        if matches!(step, Step::Cache) {
-                            ffi::git_repository_submodule_cache_all(c)
-                        } else {
-                            ffi::git_repository_submodule_cache_clear(c)
-                        }
+                    let rc = if matches!(step, Step::Cache) {
+                        // SAFETY: the C side's live repository, on this thread.
+                        unsafe { ffi::git_repository_submodule_cache_all(c) }
+                    } else {
+                        // SAFETY: as above.
+                        unsafe { ffi::git_repository_submodule_cache_clear(c) }
                     };
                     let c_out = observe(&c_root, c, rc, (rc < 0).then(c_last));
                     let (rc, error) = if matches!(step, Step::Cache) {

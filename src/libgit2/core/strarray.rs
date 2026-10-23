@@ -49,7 +49,7 @@ use core::fmt;
 use core::iter::FusedIterator;
 use core::marker::PhantomData;
 use core::ops::Range;
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull};
 
 use ffibox::{CDispose, CVal, define_ctype};
 
@@ -105,7 +105,7 @@ unsafe impl Sync for StrArrayMut<'_> {}
 /// Nothing orders such an array after that initialisation, since nothing allocated for
 /// it. A non-NULL array is passed even when empty: libgit2 allocated it.
 ///
-/// Wraps: git_strarray_dispose
+/// Wraps: `git_strarray_dispose`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StrArrayDispose;
@@ -121,8 +121,11 @@ unsafe impl CDispose<StrArray> for StrArrayDispose {
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<StrArray>) {
         let raw: *mut ffi::git_strarray = ptr.as_ptr().cast();
-        // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_strarray`.
-        let strings = unsafe { addr_of!((*raw).strings).read() };
+        // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_strarray`; the projection
+        // forms no reference to it.
+        let strings_ptr = unsafe { &raw const (*raw).strings };
+        // SAFETY: as above, the field is initialised.
+        let strings = unsafe { strings_ptr.read() };
         if strings.is_null() {
             return;
         }
@@ -172,21 +175,24 @@ impl<'a> StrArrayRef<'a> {
     /// The number of strings; 0 without a buffer, whatever `count` says, as
     /// [`get`](Self::get) and [`iter`](Self::iter) read it.
     ///
-    /// Field: git_strarray.count
+    /// Field: `git_strarray.count`
+    #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
-        // SAFETY: reads through the shared handle's pointer to a live `git_strarray`;
-        // any `size_t` is a valid `usize`.
-        let (strings, count) = unsafe {
-            (
-                addr_of!((*array).strings).read(),
-                addr_of!((*array).count).read(),
-            )
-        };
+        // SAFETY: the shared handle's pointer addresses a live `git_strarray`; the projection forms
+        // no reference to it.
+        let strings_ptr = unsafe { &raw const (*array).strings };
+        // SAFETY: as above.
+        let count_ptr = unsafe { &raw const (*array).count };
+        // SAFETY: reads the initialised field.
+        let strings = unsafe { strings_ptr.read() };
+        // SAFETY: as above; any `size_t` is a valid `usize`.
+        let count = unsafe { count_ptr.read() };
         if strings.is_null() { 0 } else { count }
     }
 
     /// Whether the array holds no strings.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -194,14 +200,20 @@ impl<'a> StrArrayRef<'a> {
     /// The string at `index`, borrowed in place for as long as the array is; `None`
     /// past the end.
     ///
-    /// Field: git_strarray.strings
+    /// Field: `git_strarray.strings`
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<&'a CStr> {
         (index < self.len()).then(|| self.at(index))
     }
 
     /// The strings, in order, each borrowed in place for as long as the array is.
     ///
-    /// Field: git_strarray.strings
+    /// Field: `git_strarray.strings`
+    #[must_use]
+    #[expect(
+        clippy::iter_without_into_iter,
+        reason = "the handle is Copy, and its iterator borrows the C object for the handle's lifetime, not the handle"
+    )]
     pub fn iter(&self) -> Iter<'a> {
         Iter {
             array: *self,
@@ -223,6 +235,7 @@ impl<'a> StrArrayRef<'a> {
     /// let array = StrArray::new();
     /// let copy: StrArrayVal = array.clone();
     /// ```
+    #[must_use]
     pub fn to_str_array(&self) -> Option<StrArrayVal> {
         let copies: Vec<&'a CStr> = self.iter().collect();
         StrArray::from_strs(&copies)
@@ -231,19 +244,27 @@ impl<'a> StrArrayRef<'a> {
     /// Whether the array has a buffer (`strings` is not NULL), even an empty one: the
     /// mark of a result libgit2 handed over, where a failing producer leaves NULL.
     pub(crate) fn has_buffer(&self) -> bool {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let strings_ptr2 = unsafe { &raw const (*self.as_ptr()).strings };
         // SAFETY: a read through the shared handle's pointer to a live `git_strarray`.
-        let strings = unsafe { addr_of!((*self.as_ptr()).strings).read() };
+        let strings = unsafe { strings_ptr2.read() };
         !strings.is_null()
     }
 
     /// The string at `index`, which must be below [`len`](Self::len).
     fn at(&self, index: usize) -> &'a CStr {
         debug_assert!(index < self.len());
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let strings_ptr = unsafe { &raw const (*self.as_ptr()).strings };
         // SAFETY: a read through the shared handle's pointer to a live `git_strarray`.
-        let strings = unsafe { addr_of!((*self.as_ptr()).strings).read() };
-        // SAFETY: `index < len`, so `strings` is non-NULL and, per the handles'
-        // invariant, addresses at least `count > index` initialised elements.
-        let s = unsafe { strings.add(index).read() };
+        let strings = unsafe { strings_ptr.read() };
+        // SAFETY: `index < len`, so `strings` is non-NULL and, per the handles' invariant,
+        // addresses at least `count > index` initialised elements: the offset stays within them.
+        let slot = unsafe { strings.add(index) };
+        // SAFETY: `slot` addresses one of those initialised elements.
+        let s = unsafe { slot.read() };
         // SAFETY: per the handles' invariant every element below `count` is a non-NULL
         // NUL-terminated string that outlives the handle, i.e. `'a`; nothing writes it
         // while a shared handle lives, since writes need the exclusive one.
@@ -316,37 +337,37 @@ impl fmt::Debug for Iter<'_> {
 impl StrArrayMut<'_> {
     /// Replaces the strings, and with them the count, releasing the ones held before.
     ///
-    /// Field: git_strarray.strings
-    /// Field: git_strarray.count
+    /// Field: `git_strarray.strings`
+    /// Field: `git_strarray.count`
     pub fn set_strings(&mut self, strings: OdbDataStrVec) {
         drop(self.take_strings());
         let (strings, count) = strings.into_raw_parts();
         let array = self.as_mut_ptr();
-        // SAFETY: writes through the exclusive handle's pointer to a live
-        // `git_strarray`, whose previous strings `take_strings` released. `strings` is
-        // NULL with `count == 0`, or `count` non-NULL strings in an array of libgit2's
-        // allocator whose ownership the array takes over, which keeps the handles'
-        // invariant.
-        unsafe {
-            addr_of_mut!((*array).strings).write(strings);
-            addr_of_mut!((*array).count).write(count);
-        }
+        // SAFETY: the exclusive handle's pointer addresses a live `git_strarray`; the projection
+        // forms no reference to it.
+        let strings_ptr = unsafe { &raw mut (*array).strings };
+        // SAFETY: as above.
+        let count_ptr = unsafe { &raw mut (*array).count };
+        // SAFETY: `take_strings` released the previous strings. `strings` is NULL with `count ==
+        // 0`, or `count` non-NULL strings in an array of libgit2's allocator whose ownership the
+        // array takes over, which keeps the handles' invariant.
+        unsafe { strings_ptr.write(strings) };
+        // SAFETY: as above, the count of those strings.
+        unsafe { count_ptr.write(count) };
     }
 
     /// Takes the strings out, leaving the array empty and without a buffer: what
     /// `git_strarray_dispose` would release, owned. Edit them there (sort, push,
     /// remove) and [`set_strings`](Self::set_strings) them back.
     ///
-    /// Field: git_strarray.strings
+    /// Field: `git_strarray.strings`
     pub fn take_strings(&mut self) -> OdbDataStrVec {
         let array = self.as_mut_ptr();
-        // SAFETY: reads, then writes the array without a buffer, through the exclusive
-        // handle's pointer to a live `git_strarray`.
-        let (strings, count) = unsafe {
-            let taken = addr_of!(*array).read();
-            addr_of_mut!(*array).write(EMPTY);
-            (taken.strings, taken.count)
-        };
+        // SAFETY: reads the array through the exclusive handle's pointer to a live `git_strarray`.
+        let taken = unsafe { array.read() };
+        // SAFETY: then writes the array without a buffer, which takes over nothing.
+        unsafe { array.write(EMPTY) };
+        let (strings, count) = (taken.strings, taken.count);
         // SAFETY: per the handles' invariant `strings` is NULL (owning nothing, which
         // `from_raw_parts` reads as the empty run only when `count == 0`; otherwise it
         // gives `None`, the empty run below, and nothing is lost), or an array of
@@ -361,25 +382,30 @@ impl StrArrayMut<'_> {
     /// changes when it holds no more than that. The array buffer is kept, and released
     /// whole on dispose.
     ///
-    /// Field: git_strarray.count
+    /// Field: `git_strarray.count`
     pub fn truncate(&mut self, len: usize) {
         let old = self.as_ref().len();
         if len >= old {
             return;
         }
         let array = self.as_mut_ptr();
-        // SAFETY: reads, then writes the shorter count, through the exclusive handle's
-        // pointer to a live `git_strarray`; `len < old` means `strings` is non-NULL, and
-        // a smaller count keeps it at least `count` long.
-        let strings = unsafe {
-            addr_of_mut!((*array).count).write(len);
-            addr_of!((*array).strings).read()
-        };
+        // SAFETY: the exclusive handle's pointer addresses a live `git_strarray`; the projection
+        // forms no reference to it.
+        let count_ptr = unsafe { &raw mut (*array).count };
+        // SAFETY: as above.
+        let strings_ptr = unsafe { &raw const (*array).strings };
+        // SAFETY: writes the shorter count; `len < old` keeps the array at least `count` long.
+        unsafe { count_ptr.write(len) };
+        // SAFETY: reads the initialised field, non-NULL since `len < old`.
+        let strings = unsafe { strings_ptr.read() };
         for i in len..old {
-            // SAFETY: `i < old`, the count before, so per the handles' invariant the
-            // element is a non-NULL string of libgit2's allocator the array owned; the
-            // array's count no longer covers it, so it is released here, once.
-            drop(unsafe { OdbDataStr::from_raw(strings.add(i).read()) });
+            // SAFETY: `i < old`, the count before, so the offset stays within the array.
+            let slot = unsafe { strings.add(i) };
+            // SAFETY: per the handles' invariant the element is a non-NULL string of libgit2's
+            // allocator the array owned.
+            let s = unsafe { slot.read() };
+            // SAFETY: the array's count no longer covers the string, so it is released here, once.
+            drop(unsafe { OdbDataStr::from_raw(s) });
         }
     }
 }
@@ -402,7 +428,7 @@ impl StrArrayMut<'_> {
 /// view.as_mut().truncate(0);
 /// ```
 ///
-/// Wraps: git_strarray
+/// Wraps: `git_strarray`
 /// Handwritten
 pub struct StrArrayView<'a> {
     /// `strings` addresses `_ptrs`' buffer, or is NULL when empty.
@@ -427,6 +453,7 @@ impl<'a> StrArrayView<'a> {
     }
 
     /// The shared handle, for reading the strings or passing the array to C.
+    #[must_use]
     pub fn as_ref(&self) -> StrArrayRef<'_> {
         self.array.as_ref()
     }
@@ -557,7 +584,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -631,7 +658,7 @@ mod unit_tests {
         assert_eq!(format!("{m:?}"), "[]");
         assert_eq!(format!("{:?}", bare.as_ref()), "[]");
         // SAFETY: a read of the value Rust holds: still the array without a buffer.
-        let raw = unsafe { addr_of!(bare.0).read() };
+        let raw = unsafe { (&raw const bare.0).read() };
         assert!(raw.strings.is_null() && raw.count == 0);
     }
 
@@ -652,7 +679,7 @@ mod unit_tests {
             count: 3,
         };
         // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
-        let mut m = unsafe { StrArrayMut::from_ptr(&mut broken) }.unwrap();
+        let mut m = unsafe { StrArrayMut::from_ptr(&raw mut broken) }.unwrap();
         assert_eq!(m.as_ref().len(), 0);
         assert!(m.as_ref().get(0).is_none() && m.as_ref().iter().len() == 0);
         assert_eq!(format!("{m:?}"), "[]");
@@ -673,7 +700,7 @@ mod unit_tests {
         let mut raw = strings.raw();
         // SAFETY: `raw` is live for the handle's use and addresses 3 strings the test
         // keeps alive; the handle only reads.
-        let r = unsafe { StrArrayRef::from_ptr(&mut raw) }.unwrap();
+        let r = unsafe { StrArrayRef::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(r.len(), 3);
         assert!(!r.is_empty());
         assert_eq!(r.get(0), Some(c"src/*.c"));
@@ -692,7 +719,7 @@ mod unit_tests {
         // A non-NULL array with no count is empty, as libgit2's eager vectors leave it.
         raw.count = 0;
         // SAFETY: as above.
-        let r = unsafe { StrArrayRef::from_ptr(&mut raw) }.unwrap();
+        let r = unsafe { StrArrayRef::from_ptr(&raw mut raw) }.unwrap();
         assert!(r.is_empty() && r.get(0).is_none());
         assert!(r.has_buffer());
         assert!(!StrArray::new().as_ref().has_buffer());
@@ -746,8 +773,10 @@ mod unit_tests {
         let raw = unsafe { moved.as_ref().as_ptr().read() };
         assert_eq!(raw.count, 2);
         for (i, s) in owned.iter().enumerate() {
-            // SAFETY: the view's array holds `count` pointers.
-            let element = unsafe { raw.strings.add(i).read() };
+            // SAFETY: the view's array holds `count` pointers, and `i < count`.
+            let slot = unsafe { raw.strings.add(i) };
+            // SAFETY: `slot` addresses one of those initialised pointers.
+            let element = unsafe { slot.read() };
             assert_eq!(element.cast_const(), s.as_ptr());
         }
         assert_eq!(contents(moved.as_ref()), expected(&["one", "two"]));
@@ -767,7 +796,7 @@ mod unit_tests {
         // SAFETY: `raw` is live for the handle's use and addresses 3 strings, which the
         // test keeps alive; no other handle reaches it meanwhile. The strings are never
         // released through the handle: every take below hands them back raw.
-        let mut m = unsafe { StrArrayMut::from_ptr(&mut raw) }.unwrap();
+        let mut m = unsafe { StrArrayMut::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(contents(m.as_ref()), expected(&["x", "y", "z"]));
         let (taken, count) = m.take_strings().into_raw_parts();
         assert_eq!((taken, count), (base, 3));
@@ -782,8 +811,8 @@ mod unit_tests {
         assert_eq!((raw.strings, raw.count), (ptr::null_mut(), 0));
     }
 
-    /// Copies, edits and replacements each release every string once (LSan, in the
-    /// asan variant, flags a leak, ASan a double free).
+    /// Copies, edits and replacements each release every string once (`LSan`, in the
+    /// asan variant, flags a leak, `ASan` a double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn owned_arrays_copy_edit_and_release() {
@@ -850,7 +879,7 @@ mod unit_tests {
     }
 
     /// The dispose policy, driven by hand on a bare value: its strings are freed once
-    /// (LSan flags a leak otherwise) and the struct is zeroed.
+    /// (`LSan` flags a leak otherwise) and the struct is zeroed.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn dispose_policy_releases_the_strings() {
@@ -859,7 +888,7 @@ mod unit_tests {
         // SAFETY: `bare` is a live array Rust owns, disposed once.
         unsafe { StrArrayDispose.c_dispose(NonNull::from(&mut bare)) };
         // SAFETY: a read of the value Rust holds, which C zeroed.
-        let raw = unsafe { addr_of!(bare.0).read() };
+        let raw = unsafe { (&raw const bare.0).read() };
         assert!(raw.strings.is_null() && raw.count == 0);
     }
 
@@ -872,13 +901,13 @@ mod unit_tests {
     unsafe fn get_extensions(ptr: *mut ffi::git_strarray) {
         // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it overwrites;
         // per this function's contract it held nothing to leak.
-        let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, ptr) };
+        let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS.cast_signed(), ptr) };
         assert_eq!(rc, 0);
     }
 
     /// libgit2 fills an owner's storage in place, as its producers' wrappers will
     /// through the crate-internal seam: the array it hands over is read through the
-    /// handles, edited, and released by the owner's drop (LSan flags a leak, ASan an
+    /// handles, edited, and released by the owner's drop (`LSan` flags a leak, `ASan` an
     /// allocator mismatch).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -904,7 +933,7 @@ mod unit_tests {
 
     /// libgit2's eager vectors hand out a non-NULL array with no strings when there is
     /// nothing to list (every builtin extension disabled): the owner reads it as empty
-    /// and still releases the array (LSan flags a leak otherwise).
+    /// and still releases the array (`LSan` flags a leak otherwise).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn allocated_empty_results_are_released() {
@@ -925,7 +954,7 @@ mod unit_tests {
                 // it copies; this child owns libgit2's globals.
                 let rc = unsafe {
                     ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+                        ffi::GIT_OPT_SET_EXTENSIONS.cast_signed(),
                         ptrs.as_ptr(),
                         ptrs.len(),
                     )
@@ -952,36 +981,36 @@ mod unit_tests {
 
     /// Handles over a C-owned `git_strarray`, as libgit2 hands a callback one: the
     /// setters' strings are what `git_strarray_dispose` releases, and C's strings what
-    /// they release (ASan flags an allocator mismatch, LSan a leak).
+    /// they release (`ASan` flags an allocator mismatch, `LSan` a leak).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn handles_over_a_c_owned_array() {
         assert!(runtime_pinned());
         let mut raw = EMPTY;
         // SAFETY: `raw` is live and owns nothing.
-        unsafe { get_extensions(&mut raw) };
+        unsafe { get_extensions(&raw mut raw) };
         let count = raw.count;
         // SAFETY: `raw` is live for the handle's use and owns its strings (libgit2's
         // result); no other handle reaches it meanwhile.
-        let mut m = unsafe { StrArrayMut::from_ptr(&mut raw) }.unwrap();
+        let mut m = unsafe { StrArrayMut::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(m.as_ref().len(), count);
         m.truncate(count - 1);
         // Replacing frees C's array and its strings through `git__free`.
         m.set_strings(OdbDataStrVec::dup_all(&[c"1", c"2", c"3"]).unwrap());
         assert_eq!(raw.count, 3);
         // SAFETY: `raw` is live and only read here.
-        let r = unsafe { StrArrayRef::from_ptr(&mut raw) }.unwrap();
+        let r = unsafe { StrArrayRef::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(contents(r), expected(&["1", "2", "3"]));
         // C releases the strings Rust stored.
         // SAFETY: `raw` owns its strings, from libgit2's allocator, released once.
-        unsafe { ffi::git_strarray_dispose(&mut raw) };
+        unsafe { ffi::git_strarray_dispose(&raw mut raw) };
         assert_eq!((raw.strings, raw.count), (ptr::null_mut(), 0));
     }
 
     /// libgit2 reads a view, through the handle a `const git_strarray *` wrapper will
     /// pass, exactly as it reads an argument array C code builds: `git_pathspec_new`
     /// compiles the same patterns from both (and the owned copy), NULL for the empty
-    /// view; it neither writes nor frees the view's array (ASan flags a Rust-allocated
+    /// view; it neither writes nor frees the view's array (`ASan` flags a Rust-allocated
     /// array freed by `git__free`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -999,19 +1028,17 @@ mod unit_tests {
             let mut ps = ptr::null_mut();
             // SAFETY: `ps` is a live slot; `spec` is NULL or a live array of live
             // strings, read for the call only.
-            let rc = unsafe { ffi::git_pathspec_new(&mut ps, spec) };
+            let rc = unsafe { ffi::git_pathspec_new(&raw mut ps, spec) };
             assert_eq!(rc, 0);
             let out = paths
                 .iter()
                 .map(|p| {
                     let flags = ffi::GIT_PATHSPEC_IGNORE_CASE;
                     // SAFETY: `ps` is a live pathspec and `p` NUL-terminated.
-                    unsafe {
-                        (
-                            ffi::git_pathspec_matches_path(ps, 0, p.as_ptr()),
-                            ffi::git_pathspec_matches_path(ps, flags, p.as_ptr()),
-                        )
-                    }
+                    let exact = unsafe { ffi::git_pathspec_matches_path(ps, 0, p.as_ptr()) };
+                    // SAFETY: as above.
+                    let folded = unsafe { ffi::git_pathspec_matches_path(ps, flags, p.as_ptr()) };
+                    (exact, folded)
                 })
                 .collect();
             // SAFETY: `ps` is live and released once.
@@ -1023,18 +1050,19 @@ mod unit_tests {
             paths
                 .iter()
                 .map(|p| {
-                    // SAFETY: the safe constructor's owner keeps the compiled pathspec
-                    // alive; matching only reads it and the terminated input path.
-                    unsafe {
-                        (
-                            ffi::git_pathspec_matches_path(ps.as_c_ptr(), 0, p.as_ptr()),
-                            ffi::git_pathspec_matches_path(
-                                ps.as_c_ptr(),
-                                ffi::GIT_PATHSPEC_IGNORE_CASE,
-                                p.as_ptr(),
-                            ),
+                    // SAFETY: the safe constructor's owner keeps the compiled pathspec alive;
+                    // matching only reads it and the terminated input path.
+                    let exact =
+                        unsafe { ffi::git_pathspec_matches_path(ps.as_c_ptr(), 0, p.as_ptr()) };
+                    // SAFETY: as above.
+                    let folded = unsafe {
+                        ffi::git_pathspec_matches_path(
+                            ps.as_c_ptr(),
+                            ffi::GIT_PATHSPEC_IGNORE_CASE,
+                            p.as_ptr(),
                         )
-                    }
+                    };
+                    (exact, folded)
                 })
                 .collect()
         };
@@ -1043,7 +1071,7 @@ mod unit_tests {
         let view = StrArrayView::new(&patterns);
         let mut by_hand = RustStrings::new(&text);
         let raw = by_hand.raw();
-        let expected_matches = matches(&raw);
+        let expected_matches = matches(&raw const raw);
         assert!(
             expected_matches.iter().any(|m| m.0 == 1) && expected_matches.iter().any(|m| m.0 == 0)
         );
@@ -1061,7 +1089,7 @@ mod unit_tests {
     }
 
     /// A failed allocation is `None` from every copying constructor, releases the
-    /// partial copy (LSan), and leaves the source untouched.
+    /// partial copy (`LSan`), and leaves the source untouched.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn copies_out_of_memory_are_none() {

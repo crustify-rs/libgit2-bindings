@@ -88,7 +88,11 @@ fn init() {
 fn last_message() -> String {
     // SAFETY: `git_error_last` never returns NULL, and its message is a NUL-terminated
     // string, both live until the next libgit2 call on this thread, after the copy.
-    unsafe { CStr::from_ptr((*ffi::git_error_last()).message) }
+    let error_last = unsafe { ffi::git_error_last() };
+    // SAFETY: as above.
+    let message2 = unsafe { (*error_last).message };
+    // SAFETY: as above.
+    unsafe { CStr::from_ptr(message2) }
         .to_string_lossy()
         .into_owned()
 }
@@ -166,16 +170,13 @@ fn git_oid_from_raw_accepts_exactly_the_named_types() {
     for raw in probes() {
         let mut out = ffi::git_oid::default();
         let ret = from_raw(&mut out, raw);
-        match OidType::from_raw(raw) {
-            Some(ty) => {
-                assert_eq!(ret, 0, "{raw}");
-                assert!(same(&out, &expected_from_raw(ty)), "{raw}: {out:?}");
-            }
-            None => {
-                assert_eq!(ret, -1, "{raw}");
-                assert_eq!(last_message(), "unable to parse OID - unknown type");
-                assert!(same(&out, &ffi::git_oid::default()), "{raw}: {out:?}");
-            }
+        if let Some(ty) = OidType::from_raw(raw) {
+            assert_eq!(ret, 0, "{raw}");
+            assert!(same(&out, &expected_from_raw(ty)), "{raw}: {out:?}");
+        } else {
+            assert_eq!(ret, -1, "{raw}");
+            assert_eq!(last_message(), "unable to parse OID - unknown type");
+            assert!(same(&out, &ffi::git_oid::default()), "{raw}: {out:?}");
         }
     }
 }
@@ -186,21 +187,18 @@ fn git_oid_from_prefix_takes_hex_size_digits() {
     init();
     for raw in probes() {
         let mut out = ffi::git_oid::default();
-        match OidType::from_raw(raw) {
-            Some(ty) => {
-                assert_eq!(from_prefix(&mut out, ty.hex_size(), raw), 0, "{raw}");
-                assert_eq!(out.type_ as ffi::git_oid_t, ty.raw());
-                // Every digit landed: the bytes past the id stay zero.
-                assert!(out.id[..ty.size()].iter().any(|&b| b != 0), "{ty:?}");
-                assert!(out.id[ty.size()..].iter().all(|&b| b == 0), "{ty:?}");
+        if let Some(ty) = OidType::from_raw(raw) {
+            assert_eq!(from_prefix(&mut out, ty.hex_size(), raw), 0, "{raw}");
+            assert_eq!(ffi::git_oid_t::from(out.type_), ty.raw());
+            // Every digit landed: the bytes past the id stay zero.
+            assert!(out.id[..ty.size()].iter().any(|&b| b != 0), "{ty:?}");
+            assert!(out.id[ty.size()..].iter().all(|&b| b == 0), "{ty:?}");
 
-                assert_eq!(from_prefix(&mut out, ty.hex_size() + 1, raw), -1);
-                assert_eq!(last_message(), "unable to parse OID - too long");
-            }
-            None => {
-                assert_eq!(from_prefix(&mut out, 1, raw), -1, "{raw}");
-                assert_eq!(last_message(), "unable to parse OID - unknown type");
-            }
+            assert_eq!(from_prefix(&mut out, ty.hex_size() + 1, raw), -1);
+            assert_eq!(last_message(), "unable to parse OID - too long");
+        } else {
+            assert_eq!(from_prefix(&mut out, 1, raw), -1, "{raw}");
+            assert_eq!(last_message(), "unable to parse OID - unknown type");
         }
     }
 }
@@ -212,30 +210,27 @@ fn git_oid_from_string_takes_exactly_hex_size_digits() {
     let digits = HEX.to_bytes();
     for raw in probes() {
         let mut out = ffi::git_oid::default();
-        match OidType::from_raw(raw) {
-            Some(ty) => {
-                for (len, ret, message) in [
-                    (ty.hex_size(), 0, None),
-                    (ty.hex_size() + 1, -1, Some("too long")),
-                ] {
-                    let str = CString::new(&digits[..len]).unwrap();
-                    assert_eq!(from_string(&mut out, &str, raw), ret, "{ty:?} {len}");
-                    if let Some(message) = message {
-                        assert_eq!(last_message(), format!("unable to parse OID - {message}"));
-                    }
+        if let Some(ty) = OidType::from_raw(raw) {
+            for (len, ret, message) in [
+                (ty.hex_size(), 0, None),
+                (ty.hex_size() + 1, -1, Some("too long")),
+            ] {
+                let str = CString::new(&digits[..len]).unwrap();
+                assert_eq!(from_string(&mut out, &str, raw), ret, "{ty:?} {len}");
+                if let Some(message) = message {
+                    assert_eq!(last_message(), format!("unable to parse OID - {message}"));
                 }
-                // The NUL ends a shorter string inside the hex size: an invalid digit.
-                let short = CString::new(&digits[..ty.hex_size() - 1]).unwrap();
-                assert_eq!(from_string(&mut out, &short, raw), -1, "{ty:?}");
-                assert_eq!(
-                    last_message(),
-                    "unable to parse OID - contains invalid characters"
-                );
             }
-            None => {
-                assert_eq!(from_string(&mut out, HEX, raw), -1, "{raw}");
-                assert_eq!(last_message(), "unable to parse OID - unknown type");
-            }
+            // The NUL ends a shorter string inside the hex size: an invalid digit.
+            let short = CString::new(&digits[..ty.hex_size() - 1]).unwrap();
+            assert_eq!(from_string(&mut out, &short, raw), -1, "{ty:?}");
+            assert_eq!(
+                last_message(),
+                "unable to parse OID - contains invalid characters"
+            );
+        } else {
+            assert_eq!(from_string(&mut out, HEX, raw), -1, "{raw}");
+            assert_eq!(last_message(), "unable to parse OID - unknown type");
         }
     }
 }
@@ -278,7 +273,7 @@ impl TempRepo {
     fn new(tag: &str) -> Self {
         let path =
             std::env::temp_dir().join(format!("crustify-oid-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         Self { path, c_path }
     }
@@ -291,7 +286,7 @@ impl TempRepo {
 
 impl Drop for TempRepo {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -304,7 +299,10 @@ fn init_repo(repo: &TempRepo, oid_type: ffi::git_oid_t) -> Reported {
     let mut opts = ffi::git_repository_init_options::default();
     // SAFETY: `opts` is a live options struct, filled with the version's defaults.
     let rc = unsafe {
-        ffi::git_repository_init_options_init(&mut opts, ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION)
+        ffi::git_repository_init_options_init(
+            &raw mut opts,
+            ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
+        )
     };
     assert_eq!(rc, 0);
     opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
@@ -312,7 +310,8 @@ fn init_repo(repo: &TempRepo, oid_type: ffi::git_oid_t) -> Reported {
     let mut out = ptr::null_mut();
     // SAFETY: `out` is a live slot, `path` NUL-terminated and `opts` a live options
     // struct, all read for the call only; the result is NULL or a fresh repository.
-    let rc = unsafe { ffi::git_repository_init_ext(&mut out, repo.c_path.as_ptr(), &mut opts) };
+    let rc =
+        unsafe { ffi::git_repository_init_ext(&raw mut out, repo.c_path.as_ptr(), &raw mut opts) };
     oid_type_of(rc, out)
 }
 
@@ -323,7 +322,7 @@ fn open_repo(repo: &TempRepo) -> Reported {
     // no ceiling directories. The result is NULL or a fresh repository.
     let rc = unsafe {
         ffi::git_repository_open_ext(
-            &mut out,
+            &raw mut out,
             repo.c_path.as_ptr(),
             ffi::GIT_REPOSITORY_OPEN_NO_SEARCH | ffi::GIT_REPOSITORY_OPEN_BARE,
             ptr::null(),
@@ -336,11 +335,12 @@ fn open_repo(repo: &TempRepo) -> Reported {
 /// which `git_repository_oid_type` itself answers.
 fn oid_type_of(rc: c_int, repo: *mut ffi::git_repository) -> Reported {
     let last = c_last();
-    // SAFETY: `repo` is NULL, which `git_repository_oid_type` accepts, or the live
-    // repository the call produced, released here exactly once.
-    let oid_type = unsafe {
-        let oid_type = ffi::git_repository_oid_type(repo);
-        ffi::git_repository_free(repo);
+    let oid_type = {
+        // SAFETY: `repo` is NULL, which `git_repository_oid_type` accepts, or the live
+        // repository the call produced, released here exactly once.
+        let oid_type = unsafe { ffi::git_repository_oid_type(repo) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(repo) };
         oid_type
     };
     (rc, oid_type, last)
@@ -405,7 +405,7 @@ fn repository_oid_types_follow_the_rust_type() {
             let (rc, oid_type, (class, message)) = open_repo(&repo);
             assert_eq!(rc, ffi::GIT_EINVALID);
             assert_eq!(OidType::from_raw(oid_type), None);
-            assert_eq!(class, ffi::GIT_ERROR_REPOSITORY as c_int);
+            assert_eq!(class, ffi::GIT_ERROR_REPOSITORY.cast_signed());
             assert_eq!(message, c"unknown object format 'sha512'".to_owned());
             rewrite("sha1");
             assert_eq!(produced(open_repo(&repo)), (0, OidType::default().raw()));
@@ -428,7 +428,7 @@ fn repository_oid_types_follow_the_rust_type() {
     let (rc, oid_type, (class, message)) = init_repo(&repo, 3);
     assert_eq!(rc, ffi::GIT_EINVALID);
     assert_eq!(OidType::from_raw(oid_type), None);
-    assert_eq!(class, ffi::GIT_ERROR_REPOSITORY as c_int);
+    assert_eq!(class, ffi::GIT_ERROR_REPOSITORY.cast_signed());
     assert_eq!(message, c"unknown object format 'unknown'".to_owned());
     assert_eq!(
         objectformat(&repo).as_deref(),
@@ -459,15 +459,19 @@ fn c_last() -> (c_int, CString) {
     // thread's, live until the next libgit2 call on this thread.
     let e = unsafe { ffi::git_error_last() };
     assert!(!e.is_null());
-    // SAFETY: `e` is a live `git_error` whose message is NULL or a C string.
-    unsafe {
-        let message = (*e).message;
-        let message = if message.is_null() {
-            c""
-        } else {
-            CStr::from_ptr(message)
+    {
+        // SAFETY: `e` is a live `git_error` whose message is NULL or a C string.
+        let message = unsafe { (*e).message };
+        // SAFETY: as above.
+        let message = unsafe {
+            if message.is_null() {
+                c""
+            } else {
+                CStr::from_ptr(message)
+            }
         };
-        ((*e).klass, message.to_owned())
+        // SAFETY: as above.
+        unsafe { ((*e).klass, message.to_owned()) }
     }
 }
 
@@ -511,6 +515,10 @@ fn run<T: Send + 'static, O: Send + 'static>(steps: Vec<T>, step: fn(&T) -> O) -
     .unwrap()
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the helper consumes what it reports, as its callers hand it over"
+)]
 fn assert_same<O: PartialEq + Debug>(c: Vec<Record<O>>, rust: Vec<Record<O>>, what: &str) {
     assert_eq!(c.len(), rust.len());
     for (i, (c, r)) in c.iter().zip(&rust).enumerate() {
@@ -551,7 +559,7 @@ fn from_string_parses_as_c() {
     let c = run(steps.clone(), |(s, kind)| {
         let mut out = ffi::git_oid::default();
         // SAFETY: `out` is a live `git_oid`; `s` a C string read for the call.
-        let rc = unsafe { ffi::git_oid_from_string(&mut out, s.as_ptr(), kind.raw()) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut out, s.as_ptr(), kind.raw()) };
         c_outcome(rc, &out)
     });
     let rust = run(steps, |(s, kind)| rust_outcome(Oid::from_string(s, *kind)));
@@ -569,8 +577,9 @@ fn from_prefix_parses_as_c() {
     let c = run(steps.clone(), |(s, kind)| {
         let mut out = ffi::git_oid::default();
         // SAFETY: `out` is a live `git_oid`; `s` is valid for `s.len()` bytes.
-        let rc =
-            unsafe { ffi::git_oid_from_prefix(&mut out, s.as_ptr().cast(), s.len(), kind.raw()) };
+        let rc = unsafe {
+            ffi::git_oid_from_prefix(&raw mut out, s.as_ptr().cast(), s.len(), kind.raw())
+        };
         c_outcome(rc, &out)
     });
     let rust = run(steps, |(s, kind)| rust_outcome(Oid::from_prefix(s, *kind)));
@@ -592,7 +601,7 @@ fn from_raw_parses_as_c() {
     let c = run(steps.clone(), |(raw, kind)| {
         let mut out = ffi::git_oid::default();
         // SAFETY: `out` is a live `git_oid`; `raw` holds the type's size in bytes.
-        let rc = unsafe { ffi::git_oid_from_raw(&mut out, raw.as_ptr(), kind.raw()) };
+        let rc = unsafe { ffi::git_oid_from_raw(&raw mut out, raw.as_ptr(), kind.raw()) };
         c_outcome(rc, &out)
     });
     let rust = run(steps, |(raw, kind)| rust_outcome(Oid::from_raw(raw, *kind)));
@@ -605,7 +614,8 @@ fn from_raw_parses_as_c() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn field_writes_and_copies_match_c() {
     init();
-    let id = |seed: u8| std::array::from_fn::<u8, 32, _>(|i| seed ^ (i as u8).wrapping_mul(7));
+    let id =
+        |seed: u8| std::array::from_fn::<u8, 32, _>(|i| seed ^ i.to_le_bytes()[0].wrapping_mul(7));
 
     let mut c_a = ffi::git_oid::default();
     let mut c_b = ffi::git_oid::default();
@@ -626,7 +636,7 @@ fn field_writes_and_copies_match_c() {
     check(&c_a, &c_b, &r_a, &r_b, 2);
 
     // SAFETY: two distinct live `git_oid`s.
-    assert_eq!(unsafe { ffi::git_oid_cpy(&mut c_b, &c_a) }, 0);
+    assert_eq!(unsafe { ffi::git_oid_cpy(&raw mut c_b, &raw const c_a) }, 0);
     r_b.as_mut().copy_from(r_a.as_ref());
     check(&c_a, &c_b, &r_a, &r_b, 3);
 
@@ -645,7 +655,7 @@ fn field_writes_and_copies_match_c() {
     check(&c_a, &c_b, &r_a, &r_b, 5);
 
     // SAFETY: two distinct live `git_oid`s.
-    assert_eq!(unsafe { ffi::git_oid_cpy(&mut c_a, &c_b) }, 0);
+    assert_eq!(unsafe { ffi::git_oid_cpy(&raw mut c_a, &raw const c_b) }, 0);
     r_a = r_b.as_ref().to_oid();
     check(&c_a, &c_b, &r_a, &r_b, 6);
 
@@ -653,7 +663,7 @@ fn field_writes_and_copies_match_c() {
     let mut c_p = ffi::git_oid::default();
     let hex = CString::new(SHA256_HEX).unwrap();
     // SAFETY: `c_p` is a live `git_oid`; `hex` a C string.
-    let rc = unsafe { ffi::git_oid_from_string(&mut c_p, hex.as_ptr(), OidType::Sha256.raw()) };
+    let rc = unsafe { ffi::git_oid_from_string(&raw mut c_p, hex.as_ptr(), OidType::Sha256.raw()) };
     assert_eq!(rc, 0);
     let r_p = Oid::from_string(&hex, OidType::Sha256).unwrap();
     assert_eq!(c_bytes(&c_p), rust_bytes(&r_p));
@@ -673,13 +683,17 @@ fn shortener_new_matches_c() {
     // Every length that survives C's `(size_t)((int)min_length)` round trip: up to
     // `i32::MAX`, and the sign extensions of negative `int`s.
     let mut lengths = vec![0usize, 1, 4, 40, 64, 1000, c_int::MAX as usize];
-    lengths.extend([c_int::MIN as usize, -2i32 as usize, usize::MAX]);
+    lengths.extend([
+        isize::try_from(c_int::MIN).unwrap().cast_unsigned(),
+        isize::try_from(-2i32).unwrap().cast_unsigned(),
+        usize::MAX,
+    ]);
     if !c_asserts_abort() {
         lengths.extend([
             c_int::MAX as usize + 1,
             u32::MAX as usize,
             usize::MAX / 2,
-            c_int::MIN as usize - 1,
+            isize::try_from(c_int::MIN).unwrap().cast_unsigned() - 1,
         ]);
     }
     let c = run(lengths.clone(), |&min_length| {
@@ -730,13 +744,15 @@ fn mixed_sequences_leave_the_same_error_state() {
         let mut out = ffi::git_oid::default();
         let rc = match s {
             // SAFETY: `out` is a live `git_oid`; `s` a C string read for the call.
-            Step::Str(s, k) => unsafe { ffi::git_oid_from_string(&mut out, s.as_ptr(), k.raw()) },
+            Step::Str(s, k) => unsafe {
+                ffi::git_oid_from_string(&raw mut out, s.as_ptr(), k.raw())
+            },
             // SAFETY: `out` is a live `git_oid`; `p` is valid for `p.len()` bytes.
             Step::Prefix(p, k) => unsafe {
-                ffi::git_oid_from_prefix(&mut out, p.as_ptr().cast(), p.len(), k.raw())
+                ffi::git_oid_from_prefix(&raw mut out, p.as_ptr().cast(), p.len(), k.raw())
             },
             // SAFETY: `out` is a live `git_oid`; `r` holds the type's size in bytes.
-            Step::Raw(r, k) => unsafe { ffi::git_oid_from_raw(&mut out, r.as_ptr(), k.raw()) },
+            Step::Raw(r, k) => unsafe { ffi::git_oid_from_raw(&raw mut out, r.as_ptr(), k.raw()) },
             Step::Shorten(n) => {
                 // SAFETY: a length that round-trips through an `int`; the result is
                 // NULL or a fresh shortener owned here.
@@ -910,18 +926,21 @@ fn zero_ids_match_c() {
     let (c_hex, rust_hex) = hex_cstrings();
     for kind in [OidType::Sha1, OidType::Sha256] {
         let c_zero = ffi::git_oid {
-            type_: kind.raw() as u8,
+            type_: u8::try_from(kind.raw()).unwrap(),
             id: [0; 32],
         };
         let r_zero = Oid::zero(kind);
         assert_eq!(c_bytes(&c_zero), rust_bytes(&r_zero));
 
         // SAFETY: a live `git_oid`, read for the call only.
-        let c_is_zero = unsafe { ffi::git_oid_is_zero(&c_zero) };
+        let c_is_zero = unsafe { ffi::git_oid_is_zero(&raw const c_zero) };
         assert_eq!(c_is_zero != 0, r_zero.as_ref().is_zero());
         // SAFETY: a live `git_oid` of a known type, formatted into this thread's
         // string, which is read before the next libgit2 call on the thread.
-        let c_hexzero = unsafe { CStr::from_ptr(ffi::git_oid_tostr_s(&c_zero)) }.to_owned();
+        // SAFETY: a live id.
+        let c_hexzero = unsafe { ffi::git_oid_tostr_s(&raw const c_zero) };
+        // SAFETY: libgit2's thread-local buffer, NUL-terminated; it is copied.
+        let c_hexzero = unsafe { CStr::from_ptr(c_hexzero) }.to_owned();
         assert_eq!(
             c_hexzero.to_str().unwrap(),
             r_zero.as_ref().to_hex_string().unwrap()
@@ -930,7 +949,8 @@ fn zero_ids_match_c() {
 
         let mut c_parsed = ffi::git_oid::default();
         // SAFETY: `out` is a live `git_oid`; `c_hexzero` is NUL-terminated.
-        let rc = unsafe { ffi::git_oid_from_string(&mut c_parsed, c_hexzero.as_ptr(), kind.raw()) };
+        let rc =
+            unsafe { ffi::git_oid_from_string(&raw mut c_parsed, c_hexzero.as_ptr(), kind.raw()) };
         assert_eq!(rc, 0);
         assert_eq!(c_bytes(&c_parsed), c_bytes(&c_zero));
         assert_eq!(Oid::from_string(&c_hexzero, kind).unwrap(), r_zero);
@@ -1041,31 +1061,31 @@ fn c_format(&(bytes, fmt): &(Bytes, Fmt)) -> Formatted {
         Fmt::Full => {
             // SAFETY: `out` is valid for writes of `GIT_OID_MAX_HEXSIZE` bytes, the most
             // libgit2 writes; `oid` is a live `git_oid`.
-            let rc = unsafe { ffi::git_oid_fmt(out, &oid) };
+            let rc = unsafe { ffi::git_oid_fmt(out, &raw const oid) };
             checked(rc, hex, &buf)
         }
         Fmt::Path => {
             // SAFETY: `out` is valid for writes of `GIT_OID_MAX_HEXSIZE + 1` bytes, the
             // most libgit2 writes; `oid` is a live `git_oid`.
-            let rc = unsafe { ffi::git_oid_pathfmt(out, &oid) };
+            let rc = unsafe { ffi::git_oid_pathfmt(out, &raw const oid) };
             checked(rc, |b| b.is_ascii_hexdigit() || *b == b'/', &buf)
         }
         Fmt::Prefix(n) => {
             // SAFETY: `out` is valid for writes of `n` bytes, the count passed; `oid` is
             // a live `git_oid`.
-            let rc = unsafe { ffi::git_oid_nfmt(out, n, &oid) };
+            let rc = unsafe { ffi::git_oid_nfmt(out, n, &raw const oid) };
             checked(rc, hex, &buf)
         }
         Fmt::CStr(n) => {
             // SAFETY: as for `Prefix`.
-            let s = unsafe { ffi::git_oid_tostr(out, n, &oid) };
+            let s = unsafe { ffi::git_oid_tostr(out, n, &raw const oid) };
             // SAFETY: `s` is `out`, NUL-terminated within `n`, or libgit2's static "".
             Ok(unsafe { CStr::from_ptr(s) }.to_bytes().to_vec())
         }
         Fmt::ThreadStr => {
             // SAFETY: `oid` is a live `git_oid`; this thread's string was written by an
             // earlier step, so an unknown type leaves it initialised.
-            let s = unsafe { ffi::git_oid_tostr_s(&oid) };
+            let s = unsafe { ffi::git_oid_tostr_s(&raw const oid) };
             assert!(!s.is_null());
             if OidType::from_raw(bytes.0.into()).is_none() {
                 // Divergence: C returns its string unwritten.
@@ -1206,6 +1226,7 @@ fn assert_adds_match_c(min_length: usize, ids: &[String], what: &str) -> Vec<Add
 
 /// Deterministic 40-digit hex ids.
 fn random_hex_ids(n: usize, mut seed: u64) -> Vec<String> {
+    use std::fmt::Write as _;
     (0..n)
         .map(|_| {
             let mut id = String::new();
@@ -1213,7 +1234,7 @@ fn random_hex_ids(n: usize, mut seed: u64) -> Vec<String> {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
                 seed ^= seed << 17;
-                id.push_str(&format!("{seed:016x}"));
+                let _ = write!(id, "{seed:016x}");
             }
             id.truncate(40);
             id
@@ -1265,7 +1286,7 @@ fn shortener_fills_up_like_c() {
         .expect("the trie fills up");
     assert!(first > 10_000, "{first}");
     let full = (
-        ffi::GIT_ERROR_INVALID as c_int,
+        ffi::GIT_ERROR_INVALID.cast_signed(),
         c"unable to shorten OID - OID set full".to_owned(),
     );
     assert!(added[first..].iter().all(|a| a.as_ref() == Err(&full)));
@@ -1360,7 +1381,7 @@ fn seeded_random_inputs_match_c() {
             _ => rng.below(3),
         };
         // SAFETY: two live `git_oid`s, read for the call; libgit2 caps `len`.
-        let c_ncmp = unsafe { ffi::git_oid_ncmp(&c_a, &c_b, len) == 0 };
+        let c_ncmp = unsafe { ffi::git_oid_ncmp(&raw const c_a, &raw const c_b, len) == 0 };
         assert_eq!(
             c_ncmp,
             r_a.as_ref().eq_prefix(r_b.as_ref(), len),
@@ -1382,12 +1403,13 @@ fn seeded_random_inputs_match_c() {
     let c = run(parse_steps.clone(), |(s, kind)| {
         let mut out = ffi::git_oid::default();
         // SAFETY: `out` is a live `git_oid`; `s` is valid for `s.len()` bytes.
-        let rc =
-            unsafe { ffi::git_oid_from_prefix(&mut out, s.as_ptr().cast(), s.len(), kind.raw()) };
+        let rc = unsafe {
+            ffi::git_oid_from_prefix(&raw mut out, s.as_ptr().cast(), s.len(), kind.raw())
+        };
         let prefix = c_outcome(rc, &out);
         let s = CString::new(s.clone()).unwrap();
         // SAFETY: `out` is a live `git_oid`; `s` a C string read for the call.
-        let rc = unsafe { ffi::git_oid_from_string(&mut out, s.as_ptr(), kind.raw()) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut out, s.as_ptr(), kind.raw()) };
         (prefix, c_outcome(rc, &out))
     });
     let rust = run(parse_steps, |(s, kind)| {

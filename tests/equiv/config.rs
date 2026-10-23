@@ -34,7 +34,7 @@ use libgit2::libgit2::util::errors::last;
 
 /// Pins the process runtime through the safe config constructor before reference C calls.
 fn init() {
-    let _ = Config::new().unwrap();
+    drop(Config::new().unwrap());
 }
 
 /// One step's observation: the return code, the value read (0 unless one was), and
@@ -44,7 +44,9 @@ type Record = (c_int, i32, Option<(c_int, String)>);
 /// The calling thread's last error, read through C.
 fn c_error() -> (c_int, String) {
     // SAFETY: no arguments; libgit2 is initialised, so it returns a live error.
-    let error = unsafe { ffi::git_error_last().read() };
+    let error_last = unsafe { ffi::git_error_last() };
+    // SAFETY: as above.
+    let error = unsafe { error_last.read() };
     // SAFETY: a libgit2 error's message is NUL-terminated, live until the next call.
     let message = unsafe { CStr::from_ptr(error.message) };
     (error.klass, message.to_string_lossy().into_owned())
@@ -73,7 +75,7 @@ fn scratch(test: &str, side: &str) -> PathBuf {
         "crustify-equiv-config-{}-{test}-{side}",
         std::process::id()
     ));
-    let _ = std::fs::remove_file(&path);
+    drop(std::fs::remove_file(&path));
     path
 }
 
@@ -84,7 +86,7 @@ const READS: [&CStr; 3] = [c"crustify.value", c"crustify.other", c"crustify.miss
 fn c_get(config: *mut ffi::git_config, name: &CStr) -> Record {
     let mut value = 0;
     // SAFETY: `config` is live for the call; `value` is writable, `name` NUL-terminated.
-    let rc = unsafe { ffi::git_config_get_int32(&mut value, config, name.as_ptr()) };
+    let rc = unsafe { ffi::git_config_get_int32(&raw mut value, config, name.as_ptr()) };
     record(rc, value, c_error)
 }
 
@@ -165,7 +167,7 @@ fn new_configs_match() {
     let (c_file, rust_file) = (scratch("new", "c"), scratch("new", "rust"));
     let mut c_config = ptr::null_mut();
     // SAFETY: `c_config` is a writable slot.
-    let c_rc = unsafe { ffi::git_config_new(&mut c_config) };
+    let c_rc = unsafe { ffi::git_config_new(&raw mut c_config) };
     let rust_config = Config::new();
     assert_eq!(c_rc == 0, rust_config.is_ok());
     let mut rust_config = rust_config.unwrap();
@@ -187,10 +189,10 @@ fn new_configs_match() {
         std::fs::read(&c_file).unwrap(),
         std::fs::read(&rust_file).unwrap()
     );
-    let _ = (
+    drop((
         std::fs::remove_file(c_file),
         std::fs::remove_file(rust_file),
-    );
+    ));
 }
 
 #[test]
@@ -200,7 +202,7 @@ fn shared_configs_match() {
     let (c_file, rust_file) = (scratch("shared", "c"), scratch("shared", "rust"));
     let mut c_config = ptr::null_mut();
     // SAFETY: `c_config` is a writable slot.
-    assert_eq!(unsafe { ffi::git_config_new(&mut c_config) }, 0);
+    assert_eq!(unsafe { ffi::git_config_new(&raw mut c_config) }, 0);
     let mut rust_box = Config::new().unwrap();
     assert_eq!(
         c_steps(c_config, &c_file),
@@ -217,10 +219,10 @@ fn shared_configs_match() {
     // SAFETY: the C side's only reference, released once.
     unsafe { ffi::git_config_free(c_config) };
     drop(rust_config);
-    let _ = (
+    drop((
         std::fs::remove_file(c_file),
         std::fs::remove_file(rust_file),
-    );
+    ));
 }
 
 #[test]
@@ -236,7 +238,7 @@ fn repository_configs_match() {
     // SAFETY: `c_repo` receives the repository; `path` is NUL-terminated.
     let rc = unsafe {
         ffi::git_repository_open_ext(
-            &mut c_repo,
+            &raw mut c_repo,
             path.as_ptr().cast(),
             ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
             ptr::null(),
@@ -247,7 +249,7 @@ fn repository_configs_match() {
     let rust_repo = rust_repo.unwrap();
     let mut c_config = ptr::null_mut();
     // SAFETY: `c_config` is a writable slot, `c_repo` open.
-    let c_rc = unsafe { ffi::git_repository_config(&mut c_config, c_repo) };
+    let c_rc = unsafe { ffi::git_repository_config(&raw mut c_config, c_repo) };
     let rust_config = rust_repo.as_ref().config();
     assert_eq!(c_rc == 0, rust_config.is_ok());
     let rust_config = rust_config.unwrap();
@@ -287,6 +289,10 @@ mod parsers {
 
     type Observation<T> = (c_int, Option<T>, Option<(c_int, Vec<u8>)>, (c_int, Vec<u8>));
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn error_bytes(error: ErrorBuf) -> (c_int, Vec<u8>) {
         (error.raw_class(), error.message().to_bytes().to_vec())
     }
@@ -303,7 +309,9 @@ mod parsers {
     fn raw_error() -> (c_int, Vec<u8>) {
         // SAFETY: the runtime is pinned before any step; the pointer is live on
         // this thread until its next C call. Read no error through a Rust reference.
-        let error = unsafe { ffi::git_error_last().read() };
+        let error_last = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let error = unsafe { error_last.read() };
         // SAFETY: libgit2's message is NUL-terminated and still live, copied here.
         let bytes = unsafe { CStr::from_ptr(error.message) }.to_bytes().to_vec();
         (error.klass, bytes)
@@ -453,7 +461,7 @@ mod parsers {
         let mut out = 123;
         // SAFETY: one aligned writable i64 and a live NUL-terminated read-only string;
         // neither pointer is retained.
-        let rc = unsafe { ffi::git_config_parse_int64(&mut out, c"1kb".as_ptr()) };
+        let rc = unsafe { ffi::git_config_parse_int64(&raw mut out, c"1kb".as_ptr()) };
         assert_eq!((rc, out), (-1, 123));
         let sentinel = (
             ErrorClass::Invalid.raw(),
@@ -470,7 +478,7 @@ mod parsers {
                     let input = value.as_ref().map_or(ptr::null(), |s| s.as_ptr());
                     // SAFETY: one aligned writable i64 and NULL or a live NUL-terminated
                     // read-only string; neither pointer is retained.
-                    let rc = unsafe { ffi::git_config_parse_int64(&mut out, input) };
+                    let rc = unsafe { ffi::git_config_parse_int64(&raw mut out, input) };
                     if rc < 0 {
                         assert_eq!(out, 123, "C must leave failed output untouched");
                     }
@@ -540,7 +548,12 @@ fn mapping_mode_values_match_c_behavior() {
                 // SAFETY: initialized single-element map with a valid mode and
                 // live matching string, writable output and NUL terminated input.
                 let status = unsafe {
-                    ffi::git_config_lookup_map_value(&mut out, &raw const map, 1, input.as_ptr())
+                    ffi::git_config_lookup_map_value(
+                        &raw mut out,
+                        &raw const map,
+                        1,
+                        input.as_ptr(),
+                    )
                 };
                 observations.push((status, out));
             }
@@ -576,10 +589,14 @@ mod entry_and_map_types {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn entries_match_c_acquisition_fields_errors_and_release() {
         let dir =
             std::env::temp_dir().join(format!("crustify-equiv-entry-b0-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         let rust_path = CString::new(dir.join("rust").to_str().unwrap()).unwrap();
         let rust_repo = Repository::init(&rust_path, false).unwrap();
@@ -595,7 +612,7 @@ mod entry_and_map_types {
         let c_path = CString::new(c_file.to_str().unwrap()).unwrap();
         // SAFETY: writable output and initialized runtime (Repository::init
         // pinned it); C owns this independently constructed config.
-        assert_eq!(unsafe { ffi::git_config_new(&mut c_cfg) }, 0);
+        assert_eq!(unsafe { ffi::git_config_new(&raw mut c_cfg) }, 0);
         assert_eq!(
             // SAFETY: live config; C copies path; no repository; force is false.
             unsafe {
@@ -621,7 +638,7 @@ mod entry_and_map_types {
         ] {
             let mut c_entry = ptr::null_mut();
             // SAFETY: live C config, writable output slot, borrowed NUL key.
-            let rc = unsafe { ffi::git_config_get_entry(&mut c_entry, c_cfg, key.as_ptr()) };
+            let rc = unsafe { ffi::git_config_get_entry(&raw mut c_entry, c_cfg, key.as_ptr()) };
             let c_err = if rc < 0 { Some(last()) } else { None };
             match rust_cfg.as_ref().entry(key) {
                 Err(e) => {
@@ -631,24 +648,50 @@ mod entry_and_map_types {
                 Ok(entry) => {
                     assert_eq!(rc, 0);
                     let r = entry.as_ref();
-                    // SAFETY: acquisition succeeded; entry and its strings stay
-                    // live until entry_free below; project without C references.
-                    unsafe {
-                        assert_eq!(
-                            r.name().map(CStr::to_bytes).map(<[u8]>::to_vec),
-                            bytes(addr_of!((*c_entry).name).read())
-                        );
-                        assert_eq!(
-                            r.value().map(CStr::to_bytes).map(<[u8]>::to_vec),
-                            bytes(addr_of!((*c_entry).value).read())
-                        );
-                        assert_eq!(
-                            r.backend_type().map(CStr::to_bytes).map(<[u8]>::to_vec),
-                            bytes(addr_of!((*c_entry).backend_type).read())
-                        );
-                        assert_eq!(r.level().raw(), addr_of!((*c_entry).level).read());
-                        assert_eq!(r.include_depth(), addr_of!((*c_entry).include_depth).read());
-                        let c_origin = bytes(addr_of!((*c_entry).origin_path).read()).unwrap();
+                    {
+                        // SAFETY: acquisition succeeded; entry and its strings stay
+                        // live until entry_free below; project without C references.
+                        let name_ptr = unsafe { addr_of!((*c_entry).name) };
+                        // SAFETY: as above.
+                        unsafe {
+                            assert_eq!(
+                                r.name().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                                bytes(name_ptr.read())
+                            );
+                        };
+                        // SAFETY: as above.
+                        let value_ptr = unsafe { addr_of!((*c_entry).value) };
+                        // SAFETY: as above.
+                        unsafe {
+                            assert_eq!(
+                                r.value().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                                bytes(value_ptr.read())
+                            );
+                        };
+                        // SAFETY: as above.
+                        let backend_type_ptr = unsafe { addr_of!((*c_entry).backend_type) };
+                        // SAFETY: as above.
+                        unsafe {
+                            assert_eq!(
+                                r.backend_type().map(CStr::to_bytes).map(<[u8]>::to_vec),
+                                bytes(backend_type_ptr.read())
+                            );
+                        };
+                        // SAFETY: as above.
+                        let level_ptr = unsafe { addr_of!((*c_entry).level) };
+                        // SAFETY: as above.
+                        unsafe { assert_eq!(r.level().raw(), level_ptr.read()) };
+                        // SAFETY: as above.
+                        let include_depth_ptr = unsafe { addr_of!((*c_entry).include_depth) };
+                        // SAFETY: as above.
+                        unsafe {
+                            assert_eq!(r.include_depth(), include_depth_ptr.read());
+                        };
+                        // SAFETY: as above.
+                        // SAFETY: as above; the projection forms no reference to the entry.
+                        let origin = unsafe { &raw const (*c_entry).origin_path };
+                        // SAFETY: as above, the initialised field.
+                        let c_origin = unsafe { bytes(origin.read()) }.unwrap();
                         let r_origin = r.origin_path().unwrap().to_bytes();
                         // Independent configs have different origin prefixes.
                         assert_eq!(
@@ -668,12 +711,14 @@ mod entry_and_map_types {
         assert_eq!(
             // SAFETY: live config, output slot and NUL key; acquires one
             // independently releasable entry reference after refresh.
-            unsafe { ffi::git_config_get_entry(&mut fresh, c_cfg, c"test.value".as_ptr()) },
+            unsafe { ffi::git_config_get_entry(&raw mut fresh, c_cfg, c"test.value".as_ptr()) },
             0
         );
         let fresh_rust = rust_cfg.as_ref().entry(c"test.value").unwrap();
         // SAFETY: fresh is a successfully acquired live entry.
-        let fresh_value = unsafe { addr_of!((*fresh).value).read() };
+        let value_ptr = unsafe { addr_of!((*fresh).value) };
+        // SAFETY: as above.
+        let fresh_value = unsafe { value_ptr.read() };
         assert_eq!(
             fresh_rust.as_ref().value().unwrap().to_bytes(),
             bytes(fresh_value).unwrap()
@@ -685,7 +730,9 @@ mod entry_and_map_types {
         drop(rust_repo);
         for (c_entry, entry) in c_kept.into_iter().zip(rust_kept) {
             // SAFETY: the acquired entry still retains its backing storage.
-            let c_value = unsafe { addr_of!((*c_entry).value).read() };
+            let value_ptr = unsafe { addr_of!((*c_entry).value) };
+            // SAFETY: as above.
+            let c_value = unsafe { value_ptr.read() };
             assert_eq!(
                 entry
                     .as_ref()
@@ -748,7 +795,7 @@ mod entry_and_map_types {
                 // C borrows everything only for this call.
                 unsafe {
                     ffi::git_config_lookup_map_value(
-                        &mut c_out,
+                        &raw mut c_out,
                         &raw const c_map,
                         1,
                         input.as_ptr(),
@@ -775,7 +822,7 @@ mod entry_and_map_types {
                     // string; C must ignore it while recognizing the same input.
                     unsafe {
                         ffi::git_config_lookup_map_value(
-                            &mut c_out,
+                            &raw mut c_out,
                             &raw const c_map,
                             1,
                             input.as_ptr(),
@@ -793,7 +840,7 @@ mod entry_and_map_types {
         let mut out = -999;
         // SAFETY: `maps` addresses `n` initialized records whose String rules
         // have live strings; the input is NUL-terminated, the output writable.
-        let rc = unsafe { ffi::git_config_lookup_map_value(&mut out, maps, n, input.as_ptr()) };
+        let rc = unsafe { ffi::git_config_lookup_map_value(&raw mut out, maps, n, input.as_ptr()) };
         record(rc, if rc < 0 { 0 } else { out }, c_error)
     }
 
@@ -802,6 +849,10 @@ mod entry_and_map_types {
     /// C's dispatcher, over every prefix, after each edit.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn rust_map_tables_dispatch_like_c_tables() {
         init();
         static RUST_TABLE: [ConfigMap<'static>; 4] = [
@@ -898,14 +949,36 @@ mod entry_and_map_types {
     fn c_fields(entry: *const ffi::git_config_entry) -> Fields {
         // SAFETY: `entry` is a live acquired entry, whose strings stay live and
         // unchanged until it is released; fields are read by projection.
+        let name_ptr = unsafe { addr_of!((*entry).name) };
+        // SAFETY: as above.
+        let read2 = unsafe { name_ptr.read() };
+        // SAFETY: as above.
+        let value_ptr = unsafe { addr_of!((*entry).value) };
+        // SAFETY: as above.
+        let read3 = unsafe { value_ptr.read() };
+        // SAFETY: as above.
+        let backend_type_ptr = unsafe { addr_of!((*entry).backend_type) };
+        // SAFETY: as above.
+        let read4 = unsafe { backend_type_ptr.read() };
+        // SAFETY: as above.
+        let origin_path_ptr = unsafe { addr_of!((*entry).origin_path) };
+        // SAFETY: as above.
+        let read5 = unsafe { origin_path_ptr.read() };
+        // SAFETY: as above.
+        let level_ptr = unsafe { addr_of!((*entry).level) };
+        // SAFETY: as above.
+        let read6 = unsafe { level_ptr.read() };
+        // SAFETY: as above.
+        let include_depth_ptr = unsafe { addr_of!((*entry).include_depth) };
+        // SAFETY: as above.
         unsafe {
             (
-                bytes(addr_of!((*entry).name).read()),
-                bytes(addr_of!((*entry).value).read()),
-                bytes(addr_of!((*entry).backend_type).read()),
-                file_name(bytes(addr_of!((*entry).origin_path).read())),
-                addr_of!((*entry).level).read(),
-                addr_of!((*entry).include_depth).read(),
+                bytes(read2),
+                bytes(read3),
+                bytes(read4),
+                file_name(bytes(read5)),
+                read6,
+                include_depth_ptr.read(),
             )
         }
     }
@@ -930,13 +1003,17 @@ mod entry_and_map_types {
     /// reads the same after both configs are gone.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn entry_selection_sequences_match_c() {
         init();
         let dir = std::env::temp_dir().join(format!(
             "crustify-equiv-entry-levels-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let files = |side: &str| {
             let side_dir = dir.join(side);
             std::fs::create_dir_all(&side_dir).unwrap();
@@ -952,7 +1029,7 @@ mod entry_and_map_types {
 
         let mut c_cfg = ptr::null_mut();
         // SAFETY: writable slot; the runtime is pinned by `init`.
-        assert_eq!(unsafe { ffi::git_config_new(&mut c_cfg) }, 0);
+        assert_eq!(unsafe { ffi::git_config_new(&raw mut c_cfg) }, 0);
         for (path, level) in [&c_low, &c_high].into_iter().zip(levels) {
             // SAFETY: live config; C copies the path; no repository, no force.
             let rc = unsafe {
@@ -973,7 +1050,7 @@ mod entry_and_map_types {
         let mut c_get = |cfg: *mut ffi::git_config, key: &CStr| -> Lookup {
             let mut entry = ptr::null_mut();
             // SAFETY: live config, writable slot, NUL-terminated key.
-            let rc = unsafe { ffi::git_config_get_entry(&mut entry, cfg, key.as_ptr()) };
+            let rc = unsafe { ffi::git_config_get_entry(&raw mut entry, cfg, key.as_ptr()) };
             if rc < 0 {
                 return Err((rc, c_error()));
             }
@@ -1022,7 +1099,7 @@ mod entry_and_map_types {
 
         let mut c_snapshot = ptr::null_mut();
         // SAFETY: live source config and writable slot.
-        let rc = unsafe { ffi::git_config_snapshot(&mut c_snapshot, c_cfg) };
+        let rc = unsafe { ffi::git_config_snapshot(&raw mut c_snapshot, c_cfg) };
         assert_eq!(rc, 0);
         let rust_snapshot = rust_cfg.as_ref().snapshot().unwrap();
         for key in [c"test.key", c"test.shared", c"multi.v"] {
@@ -1036,7 +1113,7 @@ mod entry_and_map_types {
         let mut c_view = ptr::null_mut();
         let global = ConfigLevel::GLOBAL.raw();
         // SAFETY: live parent config and writable slot.
-        let rc = unsafe { ffi::git_config_open_level(&mut c_view, c_cfg, global) };
+        let rc = unsafe { ffi::git_config_open_level(&raw mut c_view, c_cfg, global) };
         assert_eq!(rc, 0);
         {
             let mut parent = rust_cfg.as_mut();
@@ -1054,7 +1131,7 @@ mod entry_and_map_types {
         let mut c_top = ptr::null_mut();
         let highest = ConfigLevel::HIGHEST.raw();
         // SAFETY: live parent config and writable slot.
-        let rc = unsafe { ffi::git_config_open_level(&mut c_top, c_cfg, highest) };
+        let rc = unsafe { ffi::git_config_open_level(&raw mut c_top, c_cfg, highest) };
         assert_eq!(rc, 0);
         {
             let mut parent = rust_cfg.as_mut();
@@ -1094,12 +1171,13 @@ mod entry_and_map_types {
         }
 
         // SAFETY: each config reference is released once; entries keep their lists.
-        unsafe {
-            ffi::git_config_free(c_top);
-            ffi::git_config_free(c_view);
-            ffi::git_config_free(c_snapshot);
-            ffi::git_config_free(c_cfg);
-        }
+        unsafe { ffi::git_config_free(c_top) };
+        // SAFETY: as above.
+        unsafe { ffi::git_config_free(c_view) };
+        // SAFETY: as above.
+        unsafe { ffi::git_config_free(c_snapshot) };
+        // SAFETY: as above.
+        unsafe { ffi::git_config_free(c_cfg) };
         drop(rust_snapshot);
         drop(rust_cfg);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1143,7 +1221,7 @@ mod file_access {
             assert_eq!(
                 // SAFETY: the independently owned C config and NUL-terminated
                 // inputs are live; output storage is exclusively writable for this call.
-                unsafe { ffi::git_config_open_ondisk(&mut out, path.as_ptr()) },
+                unsafe { ffi::git_config_open_ondisk(&raw mut out, path.as_ptr()) },
                 0
             );
             Self(out)
@@ -1151,14 +1229,13 @@ mod file_access {
 
         fn level(&self, level: ConfigLevel, global: bool) -> Result<Self, Failure> {
             let mut out = ptr::null_mut();
-            // SAFETY: live parent and writable slot. Success returns a fresh
-            // counted config, backend retained; parent outlives this test's view.
-            let rc = unsafe {
-                if global {
-                    ffi::git_config_open_global(&mut out, self.0)
-                } else {
-                    ffi::git_config_open_level(&mut out, self.0, level.raw())
-                }
+            let rc = if global {
+                // SAFETY: live parent and writable slot. Success returns a fresh
+                // counted config, backend retained; parent outlives this test's view.
+                unsafe { ffi::git_config_open_global(&raw mut out, self.0) }
+            } else {
+                // SAFETY: as above.
+                unsafe { ffi::git_config_open_level(&raw mut out, self.0, level.raw()) }
             };
             raw(rc, out).map(Self)
         }
@@ -1193,6 +1270,10 @@ mod file_access {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn file_sequences_match_c() {
         clear();
         let (cfile, rfile) = (scratch("file-api", "c"), scratch("file-api", "rust"));
@@ -1255,7 +1336,7 @@ mod file_access {
                 raw(
                     // SAFETY: the independently owned C config and NUL-terminated
                     // inputs are live; output storage is exclusively writable for this call.
-                    unsafe { ffi::git_config_get_string(&mut out, c.0, key.as_ptr()) },
+                    unsafe { ffi::git_config_get_string(&raw mut out, c.0, key.as_ptr()) },
                     ()
                 ),
                 safe(r.as_ref().get_string(key)).map(|_| ())
@@ -1374,7 +1455,7 @@ mod file_access {
         let mut transaction = ptr::null_mut();
         // SAFETY: live writer config and writable output slot; C transfers one
         // transaction on success, freed once below to abort its staged writes.
-        let rc = unsafe { ffi::git_config_lock(&mut transaction, c.0) };
+        let rc = unsafe { ffi::git_config_lock(&raw mut transaction, c.0) };
         assert_eq!(rc, 0);
         let mut tx = r.as_mut().lock().unwrap();
         clear();
@@ -1493,6 +1574,10 @@ mod file_access {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn snapshot_strings_and_readonly_mutations_match_c() {
         use libgit2::libgit2::repository::repository::Repository;
         clear();
@@ -1502,7 +1587,7 @@ mod file_access {
         ];
         let mut repositories = Vec::new();
         for dir in &dirs {
-            let _ = std::fs::remove_dir_all(dir);
+            drop(std::fs::remove_dir_all(dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let repo = Repository::init(&path, true).unwrap();
             std::fs::write(
@@ -1515,7 +1600,7 @@ mod file_access {
         let (mut out, repo) = (ptr::null_mut(), repositories[0].as_c_ptr());
         // SAFETY: live independently owned repository and writable output slot.
         // A successful snapshot is a fresh config released by Reference's Drop.
-        let rc = unsafe { ffi::git_repository_config_snapshot(&mut out, repo) };
+        let rc = unsafe { ffi::git_repository_config_snapshot(&raw mut out, repo) };
         assert_eq!(rc, 0);
         let c = Reference(out);
         let mut r = repositories[1].as_ref().config_snapshot().unwrap();
@@ -1531,7 +1616,7 @@ mod file_access {
             let mut out = ptr::null();
             // SAFETY: snapshot keeps the borrowed result alive until its release;
             // live name and writable output slot; failure output is never read.
-            let rc = unsafe { ffi::git_config_get_string(&mut out, c.0, name.as_ptr()) };
+            let rc = unsafe { ffi::git_config_get_string(&raw mut out, c.0, name.as_ptr()) };
             let c_result = if rc < 0 {
                 raw(rc, CString::default())
             } else {
@@ -1590,7 +1675,7 @@ mod file_access {
                     c_result,
                     Err((
                         ffi::GIT_EREADONLY,
-                        ffi::GIT_ERROR_NONE as i32,
+                        ffi::GIT_ERROR_NONE.cast_signed(),
                         b"no error".to_vec()
                     ))
                 );
@@ -1598,7 +1683,7 @@ mod file_access {
                     r_result,
                     Err((
                         ffi::GIT_EREADONLY,
-                        ffi::GIT_ERROR_CONFIG as i32,
+                        ffi::GIT_ERROR_CONFIG.cast_signed(),
                         b"cannot delete 'a.flag': the configuration is read-only".to_vec()
                     ))
                 );
@@ -1622,19 +1707,22 @@ mod file_access {
         }
     }
 
+    /// A raw finder of a configuration file, and its safe wrapper.
+    type Find = (
+        unsafe extern "C" fn(*mut ffi::git_buf) -> i32,
+        fn() -> Result<BufVal, ConfigError>,
+    );
+
     #[test]
     fn search_and_path_results_match_c() {
         clear();
-        for (raw_find, safe_find) in [
-            (
-                ffi::git_config_find_global as unsafe extern "C" fn(*mut ffi::git_buf) -> i32,
-                find_global as fn() -> Result<BufVal, ConfigError>,
-            ),
+        let finds: [Find; 3] = [
+            (ffi::git_config_find_global, find_global),
             (ffi::git_config_find_xdg, find_xdg),
             (ffi::git_config_find_system, find_system),
-        ] {
+        ];
+        for (raw_find, safe_find) in finds {
             clear();
-            // SAFETY: initialized exclusive buffer and pinned library runtime.
             let c = buffer(|out| {
                 // SAFETY: out is initialized exclusive buffer storage; C config and
                 // input strings, when used, remain live for this call.
@@ -1645,11 +1733,9 @@ mod file_access {
         }
         for value in [c"", c"relative/\xff", c"~", c"~/child", c"~user/child"] {
             clear();
-            // SAFETY: initialized exclusive buffer; NUL-terminated immutable value
-            // remains live throughout C's expansion and copy; no input retained.
             let c = buffer(|out| {
-                // SAFETY: out is initialized exclusive buffer storage; C config and
-                // input strings, when used, remain live for this call.
+                // SAFETY: `out` is initialized exclusive buffer storage; the NUL-terminated
+                // value stays live through C's expansion and copy, and is not retained.
                 unsafe { ffi::git_config_parse_path(out, value.as_ptr()) }
             });
             clear();
@@ -1657,7 +1743,7 @@ mod file_access {
         }
         let mut out = ptr::null_mut();
         // SAFETY: writable output slot; C builds an owned config loaded for no repo.
-        let rc = unsafe { ffi::git_config_open_default(&mut out) };
+        let rc = unsafe { ffi::git_config_open_default(&raw mut out) };
         let c = raw(rc, out).map(Reference);
         let r = safe(Config::open_default());
         assert_eq!(c.is_ok(), r.is_ok());
@@ -1716,7 +1802,7 @@ mod file_access {
         assert_eq!(cv, r.as_mut().open_global().map(drop).map_err(failure));
         assert_eq!(cv.unwrap_err().0, ffi::GIT_ENOTFOUND);
         drop((c, r));
-        let _ = (std::fs::remove_file(cfile), std::fs::remove_file(rfile));
+        drop((std::fs::remove_file(cfile), std::fs::remove_file(rfile)));
     }
 
     const SEARCH_CHILD: &str = "CRUSTIFY_EQUIV_CONFIG_SEARCH_CHILD";
@@ -1740,20 +1826,18 @@ mod file_access {
             // NUL-terminated path, which libgit2 copies; this child runs one thread.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_SEARCH_PATH as c_int,
+                    ffi::GIT_OPT_SET_SEARCH_PATH.cast_signed(),
                     ffi::GIT_CONFIG_LEVEL_SYSTEM,
                     system.as_ptr(),
                 )
             };
             assert_eq!(rc, 0);
-            for (raw_find, safe_find) in [
-                (
-                    ffi::git_config_find_global as unsafe extern "C" fn(*mut ffi::git_buf) -> i32,
-                    find_global as fn() -> Result<BufVal, ConfigError>,
-                ),
+            let finds: [Find; 3] = [
+                (ffi::git_config_find_global, find_global),
                 (ffi::git_config_find_xdg, find_xdg),
                 (ffi::git_config_find_system, find_system),
-            ] {
+            ];
+            for (raw_find, safe_find) in finds {
                 clear();
                 // SAFETY: out is initialized exclusive buffer storage.
                 let c = buffer(|out| unsafe { raw_find(out) });
@@ -1763,17 +1847,17 @@ mod file_access {
             clear();
             let mut out = ptr::null_mut();
             // SAFETY: writable output slot; on failure C frees what it built.
-            let rc = unsafe { ffi::git_config_open_default(&mut out) };
+            let rc = unsafe { ffi::git_config_open_default(&raw mut out) };
             let c = raw(rc, out).map(Reference);
             clear();
             let r = safe(Config::open_default());
             let (c, r) = (c.map(drop), r.map(drop));
             assert_eq!(c, r);
             let (code, class, _) = c.unwrap_err();
-            assert_eq!((code, class), (-1, ffi::GIT_ERROR_CONFIG as c_int));
+            assert_eq!((code, class), (-1, ffi::GIT_ERROR_CONFIG.cast_signed()));
             return;
         }
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(dir.join("system")).unwrap();
         std::fs::write(dir.join(".gitconfig"), b"[unfinished\n").unwrap();
         let out = std::process::Command::new(std::env::current_exe().unwrap())
@@ -1807,7 +1891,7 @@ mod writes_and_snapshots {
         let _pin = Config::new().unwrap();
         let mut out = ptr::null_mut();
         // SAFETY: runtime pinned, one writable result slot; C creates a sole ref.
-        assert_eq!(unsafe { ffi::git_config_new(&mut out) }, 0);
+        assert_eq!(unsafe { ffi::git_config_new(&raw mut out) }, 0);
         // SAFETY: fresh sole reference, not repository-bound, paired with config_free.
         unsafe { ConfigBox::from_c(out) }.unwrap()
     }
@@ -1860,7 +1944,7 @@ mod writes_and_snapshots {
         if raw {
             let mut out = ptr::null_mut();
             // SAFETY: live source; writable slot; C owns partial construction on failure.
-            let rc = unsafe { ffi::git_config_snapshot(&mut out, config.as_c_ptr()) };
+            let rc = unsafe { ffi::git_config_snapshot(&raw mut out, config.as_c_ptr()) };
             if rc < 0 {
                 assert!(out.is_null());
                 return Err(record(rc, 0, c_error));
@@ -1885,7 +1969,8 @@ mod writes_and_snapshots {
         }
         let mut value = 0;
         // SAFETY: live config, output slot, NUL-terminated key; no retention.
-        let rc = unsafe { ffi::git_config_get_int32(&mut value, config.as_c_ptr(), name.as_ptr()) };
+        let rc =
+            unsafe { ffi::git_config_get_int32(&raw mut value, config.as_c_ptr(), name.as_ptr()) };
         record(rc, value, c_error)
     }
 
@@ -1968,7 +2053,7 @@ mod writes_and_snapshots {
         }
         drop(configs);
         for file in files.iter().flatten() {
-            let _ = std::fs::remove_file(file);
+            drop(std::fs::remove_file(file));
         }
     }
 
@@ -2126,7 +2211,7 @@ mod mapping_callbacks {
                     // immutable strings, exact prefix count, writable output.
                     let rc = unsafe {
                         ffi::git_config_lookup_map_value(
-                            &mut out,
+                            &raw mut out,
                             raw.as_ptr(),
                             n,
                             value.map_or(ptr::null(), CStr::as_ptr),
@@ -2144,16 +2229,13 @@ mod mapping_callbacks {
                     );
                 }
             }
-            match step {
-                0 => {
-                    maps[0].as_mut().set_match(MapMatch::String(c""));
-                    raw[0].type_ = ffi::GIT_CONFIGMAP_STRING;
-                    raw[0].str_match = c"".as_ptr();
-                }
-                _ => {
-                    maps[3].as_mut().set_map_value(42);
-                    raw[3].map_value = 42;
-                }
+            if step == 0 {
+                maps[0].as_mut().set_match(MapMatch::String(c""));
+                raw[0].type_ = ffi::GIT_CONFIGMAP_STRING;
+                raw[0].str_match = c"".as_ptr();
+            } else {
+                maps[3].as_mut().set_map_value(42);
+                raw[3].map_value = 42;
             }
         }
         clear();
@@ -2173,7 +2255,7 @@ mod mapping_callbacks {
         let mut raw_config = ptr::null_mut();
         let c_name = CString::new(c_path.to_str().unwrap()).unwrap();
         // SAFETY: exclusive output slot and live NUL path; C creates one owner.
-        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw_config, c_name.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_ondisk(&raw mut raw_config, c_name.as_ptr()) };
         assert_eq!(rc, 0);
         let maps = [
             ConfigMap::new(MapMatch::String(c"input"), 7),
@@ -2215,7 +2297,7 @@ mod mapping_callbacks {
                     // and mapping strings are NUL-terminated; exact table count.
                     let rc = unsafe {
                         ffi::git_config_get_mapped(
-                            &mut out,
+                            &raw mut out,
                             raw_config,
                             name.as_ptr(),
                             raw_maps.as_ptr(),
@@ -2238,7 +2320,7 @@ mod mapping_callbacks {
         let snapshot = rust_config.as_ref().snapshot().unwrap();
         let mut c_snapshot = ptr::null_mut();
         // SAFETY: live config and writable output; successful snapshot owns one reference.
-        let rc = unsafe { ffi::git_config_snapshot(&mut c_snapshot, raw_config) };
+        let rc = unsafe { ffi::git_config_snapshot(&raw mut c_snapshot, raw_config) };
         assert_eq!(rc, 0);
         drop(rust_config);
         // SAFETY: release the owned C config once; its snapshot is independent.
@@ -2248,7 +2330,7 @@ mod mapping_callbacks {
         // SAFETY: independent live C snapshot, writable scalar, valid table/key.
         let rc = unsafe {
             ffi::git_config_get_mapped(
-                &mut out,
+                &raw mut out,
                 c_snapshot,
                 c"a.flag".as_ptr(),
                 raw_maps.as_ptr(),
@@ -2276,7 +2358,9 @@ mod mapping_callbacks {
         payload: *mut c_void,
     ) -> c_int {
         // SAFETY: test caller lends an initialized immutable entry for this call.
-        let value = unsafe { core::ptr::addr_of!((*entry).value).read() };
+        let value_ptr = unsafe { core::ptr::addr_of!((*entry).value) };
+        // SAFETY: as above.
+        let value = unsafe { value_ptr.read() };
         let value = if value.is_null() {
             None
         } else {
@@ -2301,7 +2385,7 @@ mod mapping_callbacks {
         let mut raw_config = ptr::null_mut();
         let path = CString::new(cpath.to_str().unwrap()).unwrap();
         // SAFETY: live path and writable output; creates independently owned config.
-        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw_config, path.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_ondisk(&raw mut raw_config, path.as_ptr()) };
         assert_eq!(rc, 0);
         for code in [0, 1, -7, i32::MIN, i32::MAX, ffi::GIT_ITEROVER] {
             let mut safe_values = Vec::new();
@@ -2320,12 +2404,12 @@ mod mapping_callbacks {
                 // SAFETY: live config, key, and writable output slot; success acquires an entry.
                 let rc = unsafe {
                     // Acquire only the C side's independently owned reference.
-                    ffi::git_config_get_entry(&mut raw_entry, raw_config, key.as_ptr())
+                    ffi::git_config_get_entry(&raw mut raw_entry, raw_config, key.as_ptr())
                 };
                 assert_eq!(rc, 0);
                 // SAFETY: this C callback receives a live acquired entry and
                 // exclusive typed payload, retaining or freeing neither.
-                let c_rc = unsafe { c_callback(raw_entry, core::ptr::from_mut(&mut calls).cast()) };
+                let c_rc = unsafe { c_callback(raw_entry, ptr::from_mut(&mut calls).cast()) };
                 let rc = match callback.call(entry.as_ref()) {
                     ControlFlow::Continue(()) => 0,
                     ControlFlow::Break(code) => code.get(),
@@ -2356,6 +2440,10 @@ mod mapping_callbacks {
     /// `crustify/reviews/.../config/wave-2/batch-1/equiv/spent-backend-failure-reformats-os-error`.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn spent_backend_failures_keep_any_previous_error() {
         init();
         let paths = ["rust-lower", "rust-upper", "c-lower", "c-upper"]
@@ -2371,7 +2459,7 @@ mod mapping_callbacks {
             .unwrap();
         let mut raw = ptr::null_mut();
         // SAFETY: writable slot and live NUL path; success hands out one owned config.
-        let rc = unsafe { ffi::git_config_open_ondisk(&mut raw, paths[2].as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_ondisk(&raw mut raw, paths[2].as_ptr()) };
         assert_eq!(rc, 0);
         // SAFETY: live exclusive config, live NUL path, a free priority, no repository.
         let rc = unsafe {
@@ -2423,9 +2511,9 @@ mod mapping_callbacks {
         };
         for previous in [
             None,
-            Some((ffi::GIT_ERROR_ODB as c_int, c"previous error")),
+            Some((ffi::GIT_ERROR_ODB.cast_signed(), c"previous error")),
             Some((
-                ffi::GIT_ERROR_OS as c_int,
+                ffi::GIT_ERROR_OS.cast_signed(),
                 c"failed to stat '/nowhere': No such file or directory",
             )),
             Some((4242, c"a class libgit2 does not define")),
@@ -2443,10 +2531,13 @@ mod mapping_callbacks {
                 let mut raw_entry = ptr::null_mut();
                 // SAFETY: live config, NUL key, writable slot; success acquires
                 // one entry reference.
-                let rc = unsafe { ffi::git_config_get_entry(&mut raw_entry, raw, name.as_ptr()) };
+                let rc =
+                    unsafe { ffi::git_config_get_entry(&raw mut raw_entry, raw, name.as_ptr()) };
                 assert_eq!(rc, 0);
                 // SAFETY: the acquired entry is live; its value is NULL or a NUL string.
-                let value = unsafe { core::ptr::addr_of!((*raw_entry).value).read() };
+                let value_ptr = unsafe { core::ptr::addr_of!((*raw_entry).value) };
+                // SAFETY: as above.
+                let value = unsafe { value_ptr.read() };
                 let value = (!value.is_null())
                     // SAFETY: non-NULL values are NUL strings live with the entry.
                     .then(|| unsafe { CStr::from_ptr(value) }.to_bytes().to_vec());
@@ -2464,7 +2555,7 @@ mod mapping_callbacks {
                 // with a live string for the String rule.
                 let rc = unsafe {
                     ffi::git_config_get_mapped(
-                        &mut out,
+                        &raw mut out,
                         raw,
                         name.as_ptr(),
                         raw_maps.as_ptr(),
@@ -2555,7 +2646,7 @@ mod enumeration {
         let mut out = ptr::null_mut();
         // SAFETY: writable result slot, immutable NUL path; success constructs one
         // sole config reference, without any borrowed repository.
-        let rc = unsafe { ffi::git_config_open_ondisk(&mut out, path.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_ondisk(&raw mut out, path.as_ptr()) };
         assert_eq!(rc, 0);
         // SAFETY: successful C constructor transfers a sole initialized reference,
         // paired with ConfigFree, and no repository borrow is involved.
@@ -2612,27 +2703,30 @@ mod enumeration {
         };
         // SAFETY: independent live reference config; immutable NUL arguments; the
         // payload is exclusive throughout synchronous C callbacks; C retains nothing.
-        let rc = unsafe {
-            match mode {
-                0 => ffi::git_config_foreach(
-                    c.as_c_ptr(),
-                    Some(collect),
-                    ptr::from_mut(&mut p).cast(),
-                ),
-                1 => ffi::git_config_foreach_match(
+        let rc = match mode {
+            // SAFETY: as above.
+            0 => unsafe {
+                ffi::git_config_foreach(c.as_c_ptr(), Some(collect), ptr::from_mut(&mut p).cast())
+            },
+            // SAFETY: as above.
+            1 => unsafe {
+                ffi::git_config_foreach_match(
                     c.as_c_ptr(),
                     arg.as_ptr(),
                     Some(collect),
                     ptr::from_mut(&mut p).cast(),
-                ),
-                _ => ffi::git_config_get_multivar_foreach(
+                )
+            },
+            // SAFETY: as above.
+            _ => unsafe {
+                ffi::git_config_get_multivar_foreach(
                     c.as_c_ptr(),
                     arg.as_ptr(),
                     regexp.map_or(ptr::null(), CStr::as_ptr),
                     Some(collect),
                     ptr::from_mut(&mut p).cast(),
-                ),
-            }
+                )
+            },
         };
         let c_last = last();
         seed(seeded);
@@ -2867,7 +2961,7 @@ mod enumeration {
 
     /// C's reference leaks the normalized name when a valid name's value pattern
     /// fails to compile (`config.c:1159`), so this comparison runs in a child without
-    /// leak detection. The wrapper's own leak freedom is ub_safe's (LSan) to check.
+    /// leak detection. The wrapper's own leak freedom is `ub_safe`'s (`LSan`) to check.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn enumeration_invalid_value_filters_match_c() {
@@ -2924,7 +3018,7 @@ mod enumeration {
         init();
         let mut out = ptr::null_mut();
         // SAFETY: writable result slot receives one fresh empty config.
-        assert_eq!(unsafe { ffi::git_config_new(&mut out) }, 0);
+        assert_eq!(unsafe { ffi::git_config_new(&raw mut out) }, 0);
         // SAFETY: the successful constructor transfers a sole reference, without
         // any repository borrow, paired with ConfigFree on drop.
         let c = unsafe { ConfigBox::from_c(out) }.unwrap();
@@ -2967,7 +3061,7 @@ mod iterator_entries {
             let mut out = ptr::null_mut();
             // SAFETY: complete independent live raw iterator; exclusive output
             // slot, with no raw entry retained across this next call.
-            let rc = unsafe { ffi::git_config_next(&mut out, raw) };
+            let rc = unsafe { ffi::git_config_next(&raw mut out, raw) };
             let raw_error = (rc != 0 && rc != ffi::GIT_ITEROVER).then(last);
             let mut m = rust.as_mut();
             match m.advance_entry() {
@@ -3002,7 +3096,7 @@ mod iterator_entries {
                     assert_eq!(rc, ffi::GIT_ITEROVER);
                     assert!(out.is_null(), "C leaves output untouched on ITEROVER");
                     // SAFETY: C permits repeated advancement of an exhausted iterator.
-                    let repeated = unsafe { ffi::git_config_next(&mut out, raw) };
+                    let repeated = unsafe { ffi::git_config_next(&raw mut out, raw) };
                     assert_eq!(repeated, rc);
                     assert!(m.advance_entry().unwrap().is_none());
                     break;
@@ -3030,14 +3124,14 @@ mod iterator_entries {
         let raw_cfg = Config::open(&path).unwrap(); // Independently allocated backend/list.
         let mut raw = ptr::null_mut();
         // SAFETY: live reference-side config; writable output; success gives sole owner.
-        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg.as_c_ptr()) };
+        let rc = unsafe { ffi::git_config_iterator_new(&raw mut raw, raw_cfg.as_c_ptr()) };
         assert_eq!(rc, 0);
         assert_eq!(compare(rust_cfg.as_ref().iterator().unwrap(), raw), 5);
         for regexp in [None, Some(c"^a\\.x$"), Some(c"nomatch")] {
             // SAFETY: config remains live; regex borrowed only during construction.
             let rc = unsafe {
                 ffi::git_config_iterator_glob_new(
-                    &mut raw,
+                    &raw mut raw,
                     raw_cfg.as_c_ptr(),
                     regexp.map_or(ptr::null(), CStr::as_ptr),
                 )
@@ -3058,7 +3152,7 @@ mod iterator_entries {
             // config remains live until compare releases the complete returned owner.
             let rc = unsafe {
                 ffi::git_config_multivar_iterator_new(
-                    &mut raw,
+                    &raw mut raw,
                     raw_cfg.as_c_ptr(),
                     key.as_ptr(),
                     regex.map_or(ptr::null(), CStr::as_ptr),
@@ -3075,7 +3169,7 @@ mod iterator_entries {
         }
         let rust = rust_cfg.as_ref().iterator().unwrap();
         // SAFETY: independent live config, writable output; backend opens lazily.
-        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg.as_c_ptr()) };
+        let rc = unsafe { ffi::git_config_iterator_new(&raw mut raw, raw_cfg.as_c_ptr()) };
         assert_eq!(rc, 0);
         std::fs::write(&file, b"[unterminated\n").unwrap();
         assert_eq!(compare(rust, raw), 0); // Refresh failure, then exhaustion.
@@ -3103,7 +3197,7 @@ mod iterator_entries {
         let mut out = ptr::null_mut();
         // SAFETY: exclusive live raw iterator and a writable slot; no entry of
         // an earlier step is read after this advance.
-        let rc = unsafe { ffi::git_config_next(&mut out, raw) };
+        let rc = unsafe { ffi::git_config_next(&raw mut out, raw) };
         let string = |p: *const std::ffi::c_char| {
             // SAFETY: a lent entry's non-NULL strings are immutable and
             // NUL-terminated until the next raw advance; copied immediately.
@@ -3134,7 +3228,7 @@ mod iterator_entries {
     fn raw_config(files: &[(&CStr, ConfigLevel)]) -> *mut ffi::git_config {
         let mut config = ptr::null_mut();
         // SAFETY: writable slot; success returns the only reference.
-        assert_eq!(unsafe { ffi::git_config_new(&mut config) }, 0);
+        assert_eq!(unsafe { ffi::git_config_new(&raw mut config) }, 0);
         for (path, level) in files {
             // SAFETY: live config; NUL-terminated path copied; no repository.
             let rc = unsafe {
@@ -3152,13 +3246,21 @@ mod iterator_entries {
     /// view shares the repository's backend.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
+    #[expect(
+        clippy::similar_names,
+        reason = "the names pair each value with its counterpart on the other side"
+    )]
     fn public_entries_across_levels_interleaved_match_c() {
         init();
         let dir = std::env::temp_dir().join(format!(
             "crustify-equiv-config-{}-public-levels",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         let write = |name: &str, body: &[u8]| {
             let path = dir.join(name);
@@ -3187,26 +3289,40 @@ mod iterator_entries {
         let raw_cfg = raw_config(&files);
 
         let mut raws = [ptr::null_mut(); 4];
-        // SAFETY: live independent config, writable slots; the regexes are
-        // borrowed for construction. No a.x value is missing, so C's own
-        // value filter never reaches its strlen(NULL).
-        unsafe {
-            assert_eq!(ffi::git_config_iterator_new(&mut raws[0], raw_cfg), 0);
+        {
+            // SAFETY: live independent config, writable slots; the regexes are
+            // borrowed for construction. No a.x value is missing, so C's own
+            // value filter never reaches its strlen(NULL).
+            unsafe { assert_eq!(ffi::git_config_iterator_new(&raw mut raws[0], raw_cfg), 0) };
             let glob = c"^b\\.".as_ptr();
-            assert_eq!(
-                ffi::git_config_iterator_glob_new(&mut raws[1], raw_cfg, glob),
-                0
-            );
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_config_iterator_glob_new(&raw mut raws[1], raw_cfg, glob),
+                    0
+                );
+            };
             let (name, value) = (c"A.X".as_ptr(), c"l".as_ptr());
-            assert_eq!(
-                ffi::git_config_multivar_iterator_new(&mut raws[2], raw_cfg, name, value),
-                0
-            );
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_config_multivar_iterator_new(&raw mut raws[2], raw_cfg, name, value),
+                    0
+                );
+            };
             let name = c"b.Sub.key".as_ptr();
-            assert_eq!(
-                ffi::git_config_multivar_iterator_new(&mut raws[3], raw_cfg, name, ptr::null()),
-                0
-            );
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_config_multivar_iterator_new(
+                        &raw mut raws[3],
+                        raw_cfg,
+                        name,
+                        ptr::null()
+                    ),
+                    0
+                );
+            };
         }
         let mut rusts = [
             rust_cfg.as_ref().iterator().unwrap(),
@@ -3268,7 +3384,7 @@ mod iterator_entries {
         // SAFETY: writable slot; NUL-terminated path read during the call.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut c_repo,
+                &raw mut c_repo,
                 path.as_ptr(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -3276,13 +3392,15 @@ mod iterator_entries {
         };
         assert_eq!(rc, 0);
         let (mut c_cfg, mut c_view, mut raw) = (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
-        // SAFETY: live repository and writable slots; the view upgrades the
-        // repository config's local backend into a fresh config.
-        unsafe {
-            assert_eq!(ffi::git_repository_config(&mut c_cfg, c_repo), 0);
+        {
+            // SAFETY: live repository and writable slots; the view upgrades the
+            // repository config's local backend into a fresh config.
+            unsafe { assert_eq!(ffi::git_repository_config(&raw mut c_cfg, c_repo), 0) };
             let level = ffi::GIT_CONFIG_LEVEL_LOCAL;
-            assert_eq!(ffi::git_config_open_level(&mut c_view, c_cfg, level), 0);
-            assert_eq!(ffi::git_config_iterator_new(&mut raw, c_view), 0);
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_config_open_level(&raw mut c_view, c_cfg, level), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_config_iterator_new(&raw mut raw, c_view), 0) };
         }
         let rust_cfg = rust_repo.as_ref().config().unwrap();
         let rust_view = rust_cfg.as_ref().open_level(ConfigLevel::LOCAL).unwrap();
@@ -3291,11 +3409,11 @@ mod iterator_entries {
         drop(rust_cfg);
         drop(rust_repo);
         // SAFETY: each C reference is released once, the repository last.
-        unsafe {
-            ffi::git_config_free(c_view);
-            ffi::git_config_free(c_cfg);
-            ffi::git_repository_free(c_repo);
-        }
+        unsafe { ffi::git_config_free(c_view) };
+        // SAFETY: as above.
+        unsafe { ffi::git_config_free(c_cfg) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -3328,8 +3446,9 @@ mod iterator_entries {
         for regexp in [c"[", c"(", c"a{2,1}", c"\\", c""] {
             let mut raw = ptr::null_mut();
             // SAFETY: live config, writable slot; regex read during the call.
-            let rc =
-                unsafe { ffi::git_config_iterator_glob_new(&mut raw, raw_cfg, regexp.as_ptr()) };
+            let rc = unsafe {
+                ffi::git_config_iterator_glob_new(&raw mut raw, raw_cfg, regexp.as_ptr())
+            };
             let expected = record(rc, raw);
             if rc == 0 {
                 assert_eq!(raw_step(raw), Ok(None));
@@ -3353,7 +3472,7 @@ mod iterator_entries {
             // every failing name fails before C compiles a value regex.
             let rc = unsafe {
                 ffi::git_config_multivar_iterator_new(
-                    &mut raw,
+                    &raw mut raw,
                     raw_cfg,
                     name.as_ptr(),
                     regexp.map_or(ptr::null(), CStr::as_ptr),
@@ -3370,16 +3489,15 @@ mod iterator_entries {
         }
         let mut raw = ptr::null_mut();
         // SAFETY: live config and writable slot.
-        let rc = unsafe { ffi::git_config_iterator_new(&mut raw, raw_cfg) };
+        let rc = unsafe { ffi::git_config_iterator_new(&raw mut raw, raw_cfg) };
         assert_eq!(rc, 0);
         let mut rust = rust_cfg.as_ref().iterator().unwrap();
         for _ in 0..2 {
             assert_eq!(rust_step(&mut rust), raw_step(raw));
         }
         // SAFETY: each C object released once, the iterator first.
-        unsafe {
-            ffi::git_config_iterator_free(raw);
-            ffi::git_config_free(raw_cfg);
-        }
+        unsafe { ffi::git_config_iterator_free(raw) };
+        // SAFETY: as above.
+        unsafe { ffi::git_config_free(raw_cfg) };
     }
 }

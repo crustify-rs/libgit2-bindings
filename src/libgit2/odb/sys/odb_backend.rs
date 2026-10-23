@@ -119,8 +119,8 @@ unsafe fn data_free(data: *mut u8) {
 /// let _ = OdbDataBox::<Frame>::new_zeroed();
 /// ```
 ///
-/// Wraps: git_odb_backend_data_alloc
-/// Wraps: git_odb_backend_data_free
+/// Wraps: `git_odb_backend_data_alloc`
+/// Wraps: `git_odb_backend_data_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataFree;
@@ -149,7 +149,7 @@ unsafe impl<T: CCell> CAlloc<T> for OdbDataFree {
             assert!(
                 align_of::<T>() <= DATA_ALIGN,
                 "libgit2's allocator cannot align T"
-            )
+            );
         };
         data_alloc(size_of::<T>()).map(NonNull::cast)
     }
@@ -164,7 +164,7 @@ unsafe impl<T: CZeroable> CAllocZeroed<T> for OdbDataFree {
             assert!(
                 align_of::<T>() <= DATA_ALIGN,
                 "libgit2's allocator cannot align T"
-            )
+            );
         };
         let data = data_alloc(size_of::<T>())?;
         // SAFETY: `data` is a fresh allocation of at least `size_of::<T>()` bytes.
@@ -199,8 +199,8 @@ unsafe impl<T: CZeroable> CAllocZeroed<T> for OdbDataFree {
 /// [`new_uninit`]: Self::new_uninit
 /// [`new_zeroed`]: Self::new_zeroed
 ///
-/// Wraps: git_odb_backend_data_alloc
-/// Wraps: git_odb_backend_data_free
+/// Wraps: `git_odb_backend_data_alloc`
+/// Wraps: `git_odb_backend_data_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataArrayFree;
@@ -240,6 +240,7 @@ impl_clenclone!(OdbDataArrayFree, data_dup_len, align = DATA_ALIGN);
 impl OdbDataArrayFree {
     /// `len` uninitialised elements; `None` when the allocation fails or its size
     /// overflows. An empty request allocates nothing.
+    #[must_use]
     pub fn new_uninit<T>(len: usize) -> Option<OdbDataVec<MaybeUninit<T>>> {
         let data = Self::alloc_run::<T>(len)?;
         // SAFETY: `data` is NULL with `len == 0`, or fresh, uniquely-owned storage of
@@ -251,6 +252,7 @@ impl OdbDataArrayFree {
 
     /// `len` zeroed elements; `None` when the allocation fails or its size
     /// overflows. An empty request allocates nothing.
+    #[must_use]
     pub fn new_zeroed<T: CPlainElem>(len: usize) -> Option<OdbDataVec<T>> {
         let data = Self::alloc_run::<T>(len)?;
         if !data.is_null() {
@@ -278,7 +280,7 @@ impl OdbDataArrayFree {
         // A slice spans at most `isize::MAX` bytes.
         let byte_len = len
             .checked_mul(size_of::<T>())
-            .filter(|&n| n <= isize::MAX as usize)?;
+            .filter(|&n| isize::try_from(n).is_ok())?;
         data_alloc(byte_len).map(|data| data.as_ptr().cast())
     }
 }
@@ -329,8 +331,8 @@ unsafe fn str_dup_raw(s: *mut c_char) -> *mut c_char {
 ///
 /// [`BufMut::take_str`]: crate::libgit2::core::buffer::BufMut::take_str
 ///
-/// Wraps: git_odb_backend_data_alloc
-/// Wraps: git_odb_backend_data_free
+/// Wraps: `git_odb_backend_data_alloc`
+/// Wraps: `git_odb_backend_data_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataStrFree;
@@ -343,6 +345,7 @@ impl_cdupclone_str!(OdbDataStrFree, str_dup_raw);
 
 impl OdbDataStrFree {
     /// A copy of `s` in libgit2's allocator; `None` when the allocation fails.
+    #[must_use]
     pub fn dup(s: &CStr) -> Option<OdbDataStr> {
         let copy = str_dup(s)?;
         // SAFETY: `copy` is fresh, uniquely-owned `git__malloc` storage holding `s`
@@ -371,8 +374,8 @@ const _: () = assert!(
 /// does; [`from_vec`](Self::from_vec) and [`into_vec`](Self::into_vec) move them
 /// between the run and a `Vec`, which is where a run grows or shrinks.
 ///
-/// Wraps: git_odb_backend_data_alloc
-/// Wraps: git_odb_backend_data_free
+/// Wraps: `git_odb_backend_data_alloc`
+/// Wraps: `git_odb_backend_data_free`
 /// Handwritten
 #[repr(transparent)]
 pub struct OdbDataStrVec(OdbDataVec<OdbDataStr>);
@@ -392,6 +395,7 @@ impl OdbDataStrVec {
 
     /// `strs` moved into a run in libgit2's allocator; `None`, dropping them, when the
     /// array cannot be allocated.
+    #[must_use]
     pub fn from_vec(strs: Vec<OdbDataStr>) -> Option<Self> {
         let mut run = OdbDataArrayFree::new_uninit::<OdbDataStr>(strs.len())?;
         for (slot, s) in run.as_mut_slice().iter_mut().zip(strs) {
@@ -407,9 +411,11 @@ impl OdbDataStrVec {
         let mut out = Vec::with_capacity(self.len());
         let (strings, count) = self.into_storage().into_raw_parts();
         for i in 0..count {
-            // SAFETY: `strings` holds `count` live strings that the run gave up; each
-            // is moved out exactly once.
-            out.push(unsafe { strings.add(i).read() });
+            // SAFETY: `i < count`, and `strings` holds `count` elements, so the offset stays within
+            // them.
+            let slot = unsafe { strings.add(i) };
+            // SAFETY: each of those is a live string the run gave up, moved out exactly once.
+            out.push(unsafe { slot.read() });
         }
         if !strings.is_null() {
             // SAFETY: `strings` is the run's `git__malloc` array, now emptied of its
@@ -439,9 +445,11 @@ impl OdbDataStrVec {
             return (count == 0).then(Self::new);
         }
         for i in 0..count {
-            // SAFETY: per this function's contract `strings` holds `count` initialised
+            // SAFETY: `i < count`, and per this function's contract `strings` holds `count`
             // elements.
-            if unsafe { strings.add(i).read() }.is_null() {
+            let slot = unsafe { strings.add(i) };
+            // SAFETY: as above, the element is initialised.
+            if unsafe { slot.read() }.is_null() {
                 return None;
             }
         }
@@ -512,7 +520,7 @@ impl OdbDataStrVec {
     fn into_storage(self) -> OdbDataVec<OdbDataStr> {
         let this = ManuallyDrop::new(self);
         // SAFETY: the storage is read out exactly once and `self` is never dropped.
-        unsafe { ptr::read(&this.0) }
+        unsafe { ptr::read(&raw const this.0) }
     }
 
     /// Copies of every item's string in `git_strarray_copy`'s order: the array first,
@@ -577,6 +585,10 @@ mod unit_tests {
     use super::*;
 
     #[repr(C)]
+    #[expect(
+        unreachable_pub,
+        reason = "`define_ctype!` makes its newtype `pub`, which names this layout"
+    )]
     pub struct pair_st {
         a: u64,
         b: u32,
@@ -586,12 +598,16 @@ mod unit_tests {
     impl PairRef<'_> {
         fn a(&self) -> u64 {
             // SAFETY: a read through the shared handle's pointer to a live `pair_st`.
-            unsafe { ptr::addr_of!((*self.as_ptr()).a).read() }
+            let value = unsafe { ptr::addr_of!((*self.as_ptr()).a) };
+            // SAFETY: as above.
+            unsafe { value.read() }
         }
 
         fn b(&self) -> u32 {
             // SAFETY: as above.
-            unsafe { ptr::addr_of!((*self.as_ptr()).b).read() }
+            let value = unsafe { ptr::addr_of!((*self.as_ptr()).b) };
+            // SAFETY: as above.
+            unsafe { value.read() }
         }
     }
 
@@ -632,10 +648,10 @@ mod unit_tests {
     const REFUSED: usize = 12_345;
 
     unsafe extern "C" fn refusing_malloc(n: usize, _: *const c_char, _: c_int) -> *mut c_void {
-        // SAFETY: plain libc allocation.
         if n == REFUSED {
             ptr::null_mut()
         } else {
+            // SAFETY: plain libc allocation.
             unsafe { malloc(n) }
         }
     }
@@ -656,7 +672,7 @@ mod unit_tests {
     }
 
     /// Corrects C: `git_odb_backend_data_alloc` before `git_libgit2_init` reports its
-    /// failure through TLS key 0, which ASan flags as a wild write.
+    /// failure through TLS key 0, which `ASan` flags as a wild write.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn failure_before_init_lands_on_live_thread_state() {
@@ -674,23 +690,26 @@ mod unit_tests {
                 // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
                 // nothing is allocated yet, so no storage changes allocator.
                 let rc = unsafe {
-                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
+                        &raw mut allocator,
+                    )
                 };
                 assert_eq!(rc, 0);
 
                 assert!(OdbDataArrayFree::new_uninit::<u8>(REFUSED).is_none());
                 // SAFETY: `git_error_last` never returns NULL.
-                let klass = unsafe { (*ffi::git_error_last()).klass };
+                let error_last = unsafe { ffi::git_error_last() };
+                // SAFETY: as above.
+                let klass = unsafe { (*error_last).klass };
                 assert_eq!(
                     klass,
-                    ffi::GIT_ERROR_NOMEMORY as c_int,
+                    ffi::GIT_ERROR_NOMEMORY.cast_signed(),
                     "reported on this thread's state"
                 );
                 // SAFETY: no arguments; the extra reference dies with the process.
-                assert!(
-                    unsafe { ffi::git_libgit2_init() } >= 2,
-                    "the strategy holds a reference"
-                );
+                let ret = unsafe { ffi::git_libgit2_init() };
+                assert!(ret >= 2, "the strategy holds a reference");
                 assert!(OdbDataVec::<u8>::from_slice(b"pinned").is_some());
             },
         );
@@ -728,7 +747,7 @@ mod unit_tests {
         init();
         let mut v = OdbDataArrayFree::new_uninit::<u32>(4).unwrap();
         for (i, slot) in v.as_mut_slice().iter_mut().enumerate() {
-            slot.write(i as u32 * 7);
+            slot.write(u32::try_from(i).unwrap() * 7);
         }
         // SAFETY: every element was written above.
         let v = unsafe { v.assume_init() };
@@ -775,10 +794,8 @@ mod unit_tests {
         let copy = unsafe { data_dup_len(src.as_mut_ptr(), src.len()) };
         assert!(!copy.is_null() && copy != src.as_mut_ptr());
         // SAFETY: `copy` holds `src.len()` bytes copied from `src`.
-        assert_eq!(
-            unsafe { core::slice::from_raw_parts(copy, src.len()) },
-            &src
-        );
+        let ret = unsafe { core::slice::from_raw_parts(copy, src.len()) };
+        assert_eq!(ret, &src);
         // SAFETY: `copy` is a live allocation owned here.
         unsafe { data_free(copy) };
 
@@ -976,7 +993,10 @@ mod unit_tests {
                 // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
                 // nothing is allocated yet, and nothing reallocates between the counts.
                 let rc = unsafe {
-                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
+                        &raw mut allocator,
+                    )
                 };
                 assert_eq!(rc, 0);
                 init();
@@ -1029,7 +1049,7 @@ mod unit_tests {
             // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
             // nothing is allocated yet.
             let rc = unsafe {
-                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
             };
             assert_eq!(rc, 0);
             init();

@@ -64,6 +64,13 @@ pub struct Runtime {
 /// Returns the reference, which knows how many references were live once it was
 /// taken, itself included ([`Runtime::count`]): 1 when this call set libgit2 up.
 ///
+/// No libgit2 error is set or reported: after a failed initialisation, the per-thread
+/// error state may have no TLS key to be looked up under.
+///
+/// Wraps: `git_libgit2_init`
+///
+/// # Errors
+///
 /// Fails when libgit2 cannot be initialised ([`InitError::Failed`]), or when an
 /// unbalanced C `git_libgit2_shutdown` had driven the count negative, so that this
 /// call only brought it to 0 and set nothing up; from then on every call fails
@@ -71,11 +78,6 @@ pub struct Runtime {
 /// half-initialised state. It also refuses to let the count grow past `c_int::MAX / 2`
 /// ([`InitError::TooManyReferences`]), so a program leaking references cannot wrap it
 /// around.
-///
-/// No libgit2 error is set or reported: after a failed initialisation, the per-thread
-/// error state may have no TLS key to be looked up under.
-///
-/// Wraps: git_libgit2_init
 pub fn init() -> Result<Runtime, InitError> {
     let mut failed = INIT.lock().unwrap_or_else(PoisonError::into_inner);
     if *failed {
@@ -90,12 +92,11 @@ pub fn init() -> Result<Runtime, InitError> {
         unsafe { ffi::git_libgit2_shutdown() };
         return Err(InitError::TooManyReferences);
     }
-    match usize::try_from(count).ok().and_then(NonZeroUsize::new) {
-        Some(count) => Ok(Runtime { count }),
-        None => {
-            *failed = true;
-            Err(InitError::Failed)
-        }
+    if let Some(count) = usize::try_from(count).ok().and_then(NonZeroUsize::new) {
+        Ok(Runtime { count })
+    } else {
+        *failed = true;
+        Err(InitError::Failed)
     }
 }
 
@@ -104,6 +105,7 @@ impl Runtime {
     /// `git_libgit2_init` returned it: 1 when taking it set libgit2 up.
     ///
     /// A snapshot: other references come and go independently.
+    #[must_use]
     pub fn count(&self) -> NonZeroUsize {
         self.count
     }
@@ -112,15 +114,18 @@ impl Runtime {
     /// remain, as `git_libgit2_shutdown` returns it: 0 when this one was the last and
     /// libgit2 tore its global state down.
     ///
+    /// Wraps: `git_libgit2_shutdown`
+    ///
+    /// # Errors
+    ///
     /// Fails when libgit2 cannot take or release its initialisation mutex, in which
     /// case the reference may stay counted, which keeps the state alive rather than
     /// tearing it down under another holder; or when an unbalanced C
     /// `git_libgit2_shutdown` had already released this reference's count, so that
     /// libgit2 reports a negative one.
-    ///
-    /// Wraps: git_libgit2_shutdown
     pub fn shutdown(self) -> Result<usize, ShutdownError> {
-        core::mem::forget(self);
+        // The reference is released here, not again by `Drop`.
+        let _ = core::mem::ManuallyDrop::new(self);
         release()
     }
 }
@@ -128,7 +133,7 @@ impl Runtime {
 /// Releases the reference with `git_libgit2_shutdown`, ignoring a mutex failure as
 /// [`Runtime::shutdown`] would report it.
 ///
-/// Wraps: git_libgit2_shutdown
+/// Wraps: `git_libgit2_shutdown`
 impl Drop for Runtime {
     fn drop(&mut self) {
         let _ = release();
@@ -310,7 +315,7 @@ mod unit_tests {
                 let held: Vec<Runtime> = (1..=MAX_REFERENCES)
                     .map(|n| {
                         let r = init().unwrap();
-                        assert_eq!(r.count().get(), n as usize);
+                        assert_eq!(r.count().get(), usize::try_from(n).unwrap());
                         r
                     })
                     .collect();
@@ -352,7 +357,7 @@ mod unit_tests {
                 // SAFETY: `GIT_OPT_GET_USER_AGENT` fills the zeroed `git_buf *` it is
                 // given; libgit2 is initialised; disposed below.
                 let rc = unsafe {
-                    ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT as c_int, &raw mut buf)
+                    ffi::git_libgit2_opts(ffi::GIT_OPT_GET_USER_AGENT.cast_signed(), &raw mut buf)
                 };
                 assert_eq!(rc, 0);
                 // SAFETY: libgit2 filled the buffer with a NUL-terminated string.

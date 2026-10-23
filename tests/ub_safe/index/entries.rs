@@ -39,7 +39,13 @@ fn entry(path: &CStr, stage: u16, kind: u8, byte: u8, mode: FileMode) -> IndexEn
 }
 
 fn blob(path: &CStr, byte: u8) -> IndexEntry<'_> {
-    entry(path, 0, OidType::Sha1.raw() as u8, byte, FileMode::Blob)
+    entry(
+        path,
+        0,
+        u8::try_from(OidType::Sha1.raw()).unwrap(),
+        byte,
+        FileMode::Blob,
+    )
 }
 
 /// `(path, stage)` of every entry, through the lending routines.
@@ -64,18 +70,17 @@ fn tree<'r>(repo: RepositoryRef<'r>, files: &[&str]) -> TreeArc<'r> {
     let mut root = TreeBuilder::new(repo).unwrap();
     let mut dirs: Vec<(&str, Vec<&str>)> = Vec::new();
     for file in files {
-        match file.split_once('/') {
-            Some((dir, name)) => match dirs.iter_mut().find(|(d, _)| *d == dir) {
+        if let Some((dir, name)) = file.split_once('/') {
+            match dirs.iter_mut().find(|(d, _)| *d == dir) {
                 Some((_, names)) => names.push(name),
                 None => dirs.push((dir, vec![name])),
-            },
-            None => {
-                let id = create_from_buffer(repo, file.as_bytes()).unwrap();
-                let name = CString::new(*file).unwrap();
-                root.as_mut()
-                    .insert(&name, id.as_ref(), FileMode::Blob)
-                    .unwrap();
             }
+        } else {
+            let id = create_from_buffer(repo, file.as_bytes()).unwrap();
+            let name = CString::new(*file).unwrap();
+            root.as_mut()
+                .insert(&name, id.as_ref(), FileMode::Blob)
+                .unwrap();
         }
     }
     for (dir, names) in dirs {
@@ -99,7 +104,7 @@ fn tree<'r>(repo: RepositoryRef<'r>, files: &[&str]) -> TreeArc<'r> {
 
 /// Entries, lookups and conflicts lent by an exclusive handle stay readable across
 /// shared reborrows and the write that rewrites every entry's flags in place; their
-/// paths and ids are read after it. BSan targets this test.
+/// paths and ids are read after it. `BSan` targets this test.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn lent_entries_survive_reborrows_and_in_place_rewrites() {
@@ -227,7 +232,10 @@ fn additions_free_what_they_replace_once() {
             handle.add(blob(&path, 1).as_ref()).unwrap();
             let lent = handle.entry_by_path(&path, Stage::Normal).unwrap();
             assert_eq!(lent.path().to_bytes().len(), len);
-            assert_eq!(lent.flags().bits() & 0xFFF, len.min(0xFFF) as u32);
+            assert_eq!(
+                lent.flags().bits() & 0xFFF,
+                u32::try_from(len.min(0xFFF)).unwrap()
+            );
         }
         // Refusals free the copy they made.
         for mode in [FileMode::Tree, FileMode::Unreadable] {
@@ -260,6 +268,10 @@ fn additions_free_what_they_replace_once() {
 /// replace and resolve conflicts, freeing what they move.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::large_stack_arrays,
+    reason = "the test needs a buffer past the size the code under test treats specially"
+)]
 fn owned_index_additions_fail_and_resolve_without_leaks() {
     init();
     let scratch = Scratch::new("entries-owned");
@@ -278,7 +290,7 @@ fn owned_index_additions_fail_and_resolve_without_leaks() {
     assert_eq!(error.unwrap_err().raw_code(), -1);
     let conflict = handle.conflict(c"f").unwrap();
     assert!(conflict.ancestor.is_some() && conflict.ours.is_none() && conflict.theirs.is_none());
-    for kind in [OidType::Sha256.raw() as u8, 0, 3, u8::MAX] {
+    for kind in [u8::try_from(OidType::Sha256.raw()).unwrap(), 0, 3, u8::MAX] {
         let foreign = entry(c"g", 0, kind, 1, FileMode::Blob);
         assert_eq!(handle.add(foreign.as_ref()).unwrap_err().raw_code(), -1);
         let refused = handle.add_conflict(None, Some(foreign.as_ref()), None);
@@ -292,7 +304,13 @@ fn owned_index_additions_fail_and_resolve_without_leaks() {
     }
     assert!(handle.conflict(c"f").unwrap().ancestor.is_some());
     // The buffer's blob replaces any id, foreign ones included.
-    let foreign = entry(c"f", 0, OidType::Sha256.raw() as u8, 1, FileMode::Blob);
+    let foreign = entry(
+        c"f",
+        0,
+        u8::try_from(OidType::Sha256.raw()).unwrap(),
+        1,
+        FileMode::Blob,
+    );
     handle
         .add_from_buffer(foreign.as_ref(), b"resolved")
         .unwrap();
@@ -304,7 +322,10 @@ fn owned_index_additions_fail_and_resolve_without_leaks() {
             .unwrap();
         let lent = handle.entry_by_path(c"g", Stage::Normal).unwrap();
         assert_eq!(lent.file_size() as usize, data.len());
-        assert_eq!(lent.id().raw_kind(), OidType::Sha1.raw() as u8);
+        assert_eq!(
+            lent.id().raw_kind(),
+            u8::try_from(OidType::Sha1.raw()).unwrap()
+        );
     }
     let link = entry(c"l", 0, 1, 0, FileMode::Link);
     handle.add_from_buffer(link.as_ref(), b"target").unwrap();
@@ -422,7 +443,7 @@ fn tree_reads_free_previous_contents_once() {
     index.as_mut().read_tree(foreign.as_ref()).unwrap();
     assert_eq!(
         index.as_mut().entry(0).unwrap().id().raw_kind(),
-        OidType::Sha256.raw() as u8
+        u8::try_from(OidType::Sha256.raw()).unwrap()
     );
     let mut typed = Index::with_oid_type(OidType::Sha256).unwrap();
     typed.as_mut().read_tree(foreign.as_ref()).unwrap();
@@ -436,7 +457,7 @@ fn tree_reads_free_previous_contents_once() {
 
 /// A tree entry whose name an index cannot hold (`.git`) fails the read, leaving the
 /// index as it was. libgit2 leaks the entry's joined path (`read_tree_cb`), so the test
-/// runs in a child with LeakSanitizer off.
+/// runs in a child with `LeakSanitizer` off.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn refused_tree_entry_names_leave_the_index_as_it_was() {
@@ -482,7 +503,7 @@ fn refused_tree_entry_names_leave_the_index_as_it_was() {
 /// A walk that fails after reading entries (a subtree whose object is gone, after a
 /// blob) leaves the index as it was. libgit2 leaks the entries it read
 /// (`git_index_read_tree` disposes of their vector alone), so the test runs in a child
-/// with LeakSanitizer off.
+/// with `LeakSanitizer` off.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn failed_tree_reads_after_entries_leave_the_index_as_it_was() {
@@ -522,21 +543,21 @@ fn failed_tree_reads_after_entries_leave_the_index_as_it_was() {
 
 /// Snapshot copies outlive later steps, the index's changes behind the snapshot (an
 /// entry replaced in place, removed, the index cleared) and the index itself; a
-/// drained iterator stays drained. BSan targets this test.
+/// drained iterator stays drained. `BSan` targets this test.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn snapshot_copies_outlive_index_changes_and_the_index() {
     init();
     let index: IndexArc = Index::new().unwrap().into();
     for (n, path) in [c"b", c"a", c"c/d"].into_iter().enumerate() {
-        add_staged(&index, path, 0, 1, n as u8 + 1, 0o100644);
+        add_staged(&index, path, 0, 1, u8::try_from(n).unwrap() + 1, 0o100_644);
     }
     let mut iterator = IndexIterator::new(&index).unwrap();
     let mut steps = iterator.as_mut();
     let first: IndexEntryBuf = steps.next().unwrap();
     // Replaced in place, behind the snapshot.
-    add_staged(&index, c"b", 0, 1, 0x7F, 0o100755);
-    add_staged(&index, c"new", 0, 1, 1, 0o100644);
+    add_staged(&index, c"b", 0, 1, 0x7F, 0o100_755);
+    add_staged(&index, c"new", 0, 1, 1, 0o100_644);
     let second = steps.next().unwrap();
     assert_eq!(second.as_ref().path(), c"b");
     assert_eq!(second.as_ref().id().id()[0], 0x7F);
@@ -616,7 +637,7 @@ fn conflicts_outlive_their_cursor() {
     assert_eq!(index.as_ref().entry_count(), 9);
 }
 
-/// Threads fill, read and iterate their own indexes at once; TSan watches libgit2's
+/// Threads fill, read and iterate their own indexes at once; `TSan` watches libgit2's
 /// shared state on the way.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -646,7 +667,7 @@ fn threads_add_and_read_their_own_indexes() {
 
 /// Snapshot copies cross threads, as their `Send` and `Sync` say: shared by reference
 /// with readers that clone them, then moved, compared and dropped on other threads,
-/// after the index they were copied from is gone. TSan watches.
+/// after the index they were copied from is gone. `TSan` watches.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn snapshot_copies_cross_threads() {

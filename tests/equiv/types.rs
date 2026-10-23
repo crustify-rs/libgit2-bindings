@@ -58,7 +58,7 @@
 //! hours and minutes from the offset's magnitude, the seconds truncated to 32 bits).
 //!
 //! Documented divergences: `i32::MIN` minutes is not probed, since negating it in the
-//! C writer is undefined behaviour (an abort under UBSan); the [`Time`] docs record it.
+//! C writer is undefined behaviour (an abort under `UBSan`); the [`Time`] docs record it.
 //! A `Time` is a plain value, so the comparisons are field by field
 //! (`git_signature__equal`'s rule) and never cover padding.
 //!
@@ -169,15 +169,22 @@ fn init() {
 
 /// The calling thread's last error class and message.
 fn c_last() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-    // NUL-terminated string, both live until the next libgit2 call on this thread,
-    // after the copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -194,13 +201,13 @@ impl Superproject {
         init();
         let path =
             std::env::temp_dir().join(format!("crustify-types-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut opts = ffi::git_repository_init_options::default();
         // SAFETY: `opts` is a live options struct, filled with the version's defaults.
         let rc = unsafe {
             ffi::git_repository_init_options_init(
-                &mut opts,
+                &raw mut opts,
                 ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
             )
         };
@@ -210,7 +217,8 @@ impl Superproject {
         // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
         // options struct, all read for the call only; the result is NULL or a fresh
         // repository, which `Drop` releases.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        let rc =
+            unsafe { ffi::git_repository_init_ext(&raw mut repo, c_path.as_ptr(), &raw mut opts) };
         assert_eq!(rc, 0, "{:?}", c_last());
         let this = Self { path, repo };
         this.write_gitmodules(extra);
@@ -251,18 +259,23 @@ impl Superproject {
         // SAFETY: `sm` is a live slot, `self.repo` a live repository and `NAME`
         // NUL-terminated, read for the call only; the result is NULL or a fresh
         // submodule.
-        let rc = unsafe { ffi::git_submodule_lookup(&mut sm, self.repo, NAME.as_ptr()) };
+        let rc = unsafe { ffi::git_submodule_lookup(&raw mut sm, self.repo, NAME.as_ptr()) };
         if rc != 0 {
             return Err((rc, c_last()));
         }
-        // SAFETY: `sm` is the live submodule the lookup produced, released here
-        // exactly once after both reads.
-        unsafe {
-            let read = (
-                ffi::git_submodule_update_strategy(sm),
-                ffi::git_submodule_fetch_recurse_submodules(sm),
-            );
-            ffi::git_submodule_free(sm);
+        {
+            // SAFETY: `sm` is the live submodule the lookup produced, released here
+            // exactly once after both reads.
+            let submodule_update_strategy = unsafe { ffi::git_submodule_update_strategy(sm) };
+            // SAFETY: as above.
+            let read = unsafe {
+                (
+                    submodule_update_strategy,
+                    ffi::git_submodule_fetch_recurse_submodules(sm),
+                )
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_submodule_free(sm) };
             Ok(read)
         }
     }
@@ -273,15 +286,16 @@ impl Superproject {
     fn init_submodule(&self) -> Result<(), (c_int, (c_int, String))> {
         let mut sm = ptr::null_mut();
         // SAFETY: as in `lookup`.
-        let rc = unsafe { ffi::git_submodule_lookup(&mut sm, self.repo, NAME.as_ptr()) };
+        let rc = unsafe { ffi::git_submodule_lookup(&raw mut sm, self.repo, NAME.as_ptr()) };
         if rc != 0 {
             return Err((rc, c_last()));
         }
-        // SAFETY: `sm` is the live submodule the lookup produced, released here
-        // exactly once after the call.
-        let rc = unsafe {
-            let rc = ffi::git_submodule_init(sm, 1);
-            ffi::git_submodule_free(sm);
+        let rc = {
+            // SAFETY: `sm` is the live submodule the lookup produced, released here
+            // exactly once after the call.
+            let rc = unsafe { ffi::git_submodule_init(sm, 1) };
+            // SAFETY: as above.
+            unsafe { ffi::git_submodule_free(sm) };
             rc
         };
         if rc == 0 { Ok(()) } else { Err((rc, c_last())) }
@@ -323,7 +337,7 @@ impl Drop for Superproject {
     fn drop(&mut self) {
         // SAFETY: `self.repo` is the live repository `new` produced, released once.
         unsafe { ffi::git_repository_free(self.repo) };
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -332,7 +346,7 @@ fn refused(var: &str) -> (c_int, (c_int, String)) {
     (
         -1,
         (
-            ffi::GIT_ERROR_SUBMODULE as c_int,
+            ffi::GIT_ERROR_SUBMODULE.cast_signed(),
             format!("invalid value for {var}"),
         ),
     )
@@ -489,7 +503,7 @@ fn recurse_writes_round_trip() {
             Some(SubmoduleRecurse::No) if unset => {
                 assert_eq!(current, SubmoduleRecurse::No);
                 let missing = (
-                    ffi::GIT_ERROR_CONFIG as c_int,
+                    ffi::GIT_ERROR_CONFIG.cast_signed(),
                     "could not find key 'submodule.sm.fetchRecurseSubmodules' to delete".to_owned(),
                 );
                 assert_eq!(result, Err((ffi::GIT_ENOTFOUND, missing)), "step {step}");
@@ -539,7 +553,7 @@ fn unreadable_settings_fail_the_lookup() {
             sp.lookup(),
             Err((
                 ffi::GIT_EINVALID,
-                (ffi::GIT_ERROR_SUBMODULE as c_int, message)
+                (ffi::GIT_ERROR_SUBMODULE.cast_signed(), message)
             )),
             "{key}"
         );
@@ -577,7 +591,13 @@ impl Signature {
         // SAFETY: `out` is a writable slot; the name and email are NUL-terminated,
         // without angle brackets, and not retained (libgit2 copies them).
         let rc = unsafe {
-            ffi::git_signature_new(&mut out, c"n".as_ptr(), c"e@x".as_ptr(), seconds, offset)
+            ffi::git_signature_new(
+                &raw mut out,
+                c"n".as_ptr(),
+                c"e@x".as_ptr(),
+                seconds,
+                offset,
+            )
         };
         assert_eq!(rc, 0);
         assert!(!out.is_null());
@@ -589,7 +609,7 @@ impl Signature {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `buf` NUL-terminated; neither is
         // retained.
-        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        let rc = unsafe { ffi::git_signature_from_buffer(&raw mut out, buf.as_ptr()) };
         assert_eq!(rc, 0, "{buf:?}");
         assert!(!out.is_null());
         Signature(out)
@@ -599,7 +619,7 @@ impl Signature {
     fn dup(&self) -> Signature {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `self.0` a live signature, only read.
-        let rc = unsafe { ffi::git_signature_dup(&mut out, self.0) };
+        let rc = unsafe { ffi::git_signature_dup(&raw mut out, self.0) };
         assert_eq!(rc, 0);
         assert!(!out.is_null());
         Signature(out)
@@ -634,7 +654,7 @@ fn fields(time: &Time) -> (i64, i32, u8) {
 
 /// `raw`'s fields, as C reads them.
 fn c_fields(raw: &ffi::git_time) -> (i64, i32, u8) {
-    (raw.time, raw.offset, raw.sign as u8)
+    (raw.time, raw.offset, raw.sign.cast_unsigned())
 }
 
 const SECONDS: [i64; 7] = [i64::MIN, -86_400, -1, 0, 1, 1_700_000_000, i64::MAX];
@@ -728,7 +748,7 @@ fn setters_write_what_git_signature_dup_copies() {
                 handle.set_offset_minutes(v);
             }
             Step::Sign(v) => {
-                when.sign = v as c_char;
+                when.sign = v.cast_signed();
                 handle.set_sign(v);
             }
         }
@@ -759,7 +779,7 @@ fn c_author_line(repo: &TreeRepo, time: &Time) -> String {
     let mut tree = ptr::null_mut();
     // SAFETY: `tree` is a live slot, `repo.repo` a live repository and `empty_tree`
     // the id of a tree it holds.
-    let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.repo, &repo.empty_tree) };
+    let rc = unsafe { ffi::git_tree_lookup(&raw mut tree, repo.repo, &raw const repo.empty_tree) };
     assert_eq!(rc, 0);
     let mut raw = ffi::git_buf {
         ptr: ptr::null_mut(),
@@ -770,7 +790,7 @@ fn c_author_line(repo: &TreeRepo, time: &Time) -> String {
     // message are live and only read; no parents.
     let rc = unsafe {
         ffi::git_commit_create_buffer(
-            &mut raw,
+            &raw mut raw,
             repo.repo,
             sig.0,
             sig.0,
@@ -807,7 +827,7 @@ fn predicted_author_line(time: &Time) -> String {
     let magnitude = t.offset_minutes().unsigned_abs();
     format!(
         "n <e@x> {} {sign}{:02}{:02}",
-        t.seconds() as u32,
+        u32::try_from(t.seconds() & 0xFFFF_FFFF).unwrap(),
         magnitude / 60,
         magnitude % 60
     )
@@ -817,7 +837,7 @@ fn predicted_author_line(time: &Time) -> String {
 /// questionable `-0000`, a `'+'` over a negative offset and a foreign sign byte
 /// included; the seconds are written through a 32-bit cast, so negative and far
 /// future times wrap. `i32::MIN` is left out: negating it in `git_signature__writebuf`
-/// overflows, which the UBSan build aborts on.
+/// overflows, which the `UBSan` build aborts on.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn signature_zones_are_written_from_offset_and_sign() {
@@ -879,7 +899,9 @@ fn object_probes() -> impl Iterator<Item = ffi::git_object_t> {
 fn type_name(raw: ffi::git_object_t) -> CString {
     // SAFETY: `git_object_type2string` takes any value and returns a static string,
     // "" for a value it does not name.
-    unsafe { CStr::from_ptr(ffi::git_object_type2string(raw)) }.to_owned()
+    let object_type2string = unsafe { ffi::git_object_type2string(raw) };
+    // SAFETY: as above.
+    unsafe { CStr::from_ptr(object_type2string) }.to_owned()
 }
 
 /// `git_object_string2type(name)`.
@@ -947,13 +969,13 @@ impl TempRepo {
     fn new(tag: &str) -> Self {
         let path =
             std::env::temp_dir().join(format!("crustify-types-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut opts = ffi::git_repository_init_options::default();
         // SAFETY: `opts` is a live options struct, filled with the version's defaults.
         let rc = unsafe {
             ffi::git_repository_init_options_init(
-                &mut opts,
+                &raw mut opts,
                 ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
             )
         };
@@ -963,7 +985,8 @@ impl TempRepo {
         // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
         // options struct, all read for the call only; the result is a fresh
         // repository on success.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        let rc =
+            unsafe { ffi::git_repository_init_ext(&raw mut repo, c_path.as_ptr(), &raw mut opts) };
         assert_eq!(rc, 0, "{:?}", c_last());
         assert!(!repo.is_null());
         Self { path, repo }
@@ -973,7 +996,7 @@ impl TempRepo {
     fn odb(&self) -> Odb {
         let mut odb = ptr::null_mut();
         // SAFETY: `self.repo` is live; the result is a new reference to its odb.
-        let rc = unsafe { ffi::git_repository_odb(&mut odb, self.repo) };
+        let rc = unsafe { ffi::git_repository_odb(&raw mut odb, self.repo) };
         assert_eq!(rc, 0);
         assert!(!odb.is_null());
         Odb(odb)
@@ -985,7 +1008,7 @@ impl Drop for TempRepo {
         // SAFETY: `self.repo` is the live repository `new` produced, freed once; every
         // `Odb` taken from it holds its own reference.
         unsafe { ffi::git_repository_free(self.repo) };
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -1019,8 +1042,9 @@ impl Odb {
         let mut id = ffi::git_oid::default();
         // SAFETY: `id` is a writable `git_oid`; `data` is live for its length, read
         // for the call only.
-        let rc =
-            unsafe { ffi::git_odb_write(&mut id, self.0, data.as_ptr().cast(), data.len(), raw) };
+        let rc = unsafe {
+            ffi::git_odb_write(&raw mut id, self.0, data.as_ptr().cast(), data.len(), raw)
+        };
         if rc == 0 {
             OdbStep::Written((id.type_, id.id))
         } else {
@@ -1034,7 +1058,8 @@ impl Odb {
         let (mut len, mut raw) = (usize::MAX, ffi::git_object_t::MAX);
         // SAFETY: `len` and `raw` are writable slots; `id` is a live `git_oid`, read
         // for the call only.
-        let rc = unsafe { ffi::git_odb_read_header(&mut len, &mut raw, self.0, &id) };
+        let rc =
+            unsafe { ffi::git_odb_read_header(&raw mut len, &raw mut raw, self.0, &raw const id) };
         if rc == 0 {
             OdbStep::Header(raw, len)
         } else {
@@ -1048,7 +1073,7 @@ fn invalid_object_type() -> OdbStep {
     OdbStep::Failed(
         -1,
         (
-            ffi::GIT_ERROR_INVALID as c_int,
+            ffi::GIT_ERROR_INVALID.cast_signed(),
             "invalid object type".to_owned(),
         ),
     )
@@ -1125,7 +1150,7 @@ fn lookup_reference(repo: &TempRepo, name: &CStr) -> Reference {
     let mut out = ptr::null_mut();
     // SAFETY: `out` is a live slot, `repo.repo` live, `name` NUL-terminated and read
     // for the call only; the result is a fresh reference on success.
-    let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.repo, name.as_ptr()) };
+    let rc = unsafe { ffi::git_reference_lookup(&raw mut out, repo.repo, name.as_ptr()) };
     assert_eq!(rc, 0, "lookup {name:?}: {:?}", c_last());
     Reference(out)
 }
@@ -1152,7 +1177,7 @@ impl Drop for Reference {
 /// the variant the reference's kind predicts.
 ///
 /// Alone in a child: writing a reference takes the reflog's time through glibc's
-/// `tzset`, which TSan reports against any concurrent caller.
+/// `tzset`, which `TSan` reports against any concurrent caller.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reference_types_follow_c() {
@@ -1187,10 +1212,10 @@ fn reference_types_follow_c_body() {
     // a live `git_oid`, all read for the call only; no log message.
     let rc = unsafe {
         ffi::git_reference_create(
-            &mut out,
+            &raw mut out,
             repo.repo,
             c"refs/tags/probe".as_ptr(),
-            &id,
+            &raw const id,
             0,
             ptr::null(),
         )
@@ -1215,7 +1240,7 @@ fn reference_types_follow_c_body() {
         // SAFETY: a release build's `git_reference_type` checks its argument and
         // returns -1 for NULL; the debug build, which asserts, is excluded above.
         let raw = unsafe { ffi::git_reference_type(ptr::null()) };
-        assert_eq!(raw, -1i32 as ffi::git_reference_t);
+        assert_eq!(raw, (-1i32).cast_unsigned());
         assert_eq!(
             ReferenceType::try_from(raw).map_err(NotAReferenceType::raw),
             Err(ffi::git_reference_t::MAX)
@@ -1244,15 +1269,19 @@ fn last_error() -> (c_int, CString) {
     // thread's, live until the next libgit2 call on this thread.
     let e = unsafe { ffi::git_error_last() };
     assert!(!e.is_null());
-    // SAFETY: `e` is a live `git_error` whose message is NULL or a C string.
-    unsafe {
-        let message = (*e).message;
-        let message = if message.is_null() {
-            c""
-        } else {
-            CStr::from_ptr(message)
+    {
+        // SAFETY: `e` is a live `git_error` whose message is NULL or a C string.
+        let message = unsafe { (*e).message };
+        // SAFETY: as above.
+        let message = unsafe {
+            if message.is_null() {
+                c""
+            } else {
+                CStr::from_ptr(message)
+            }
         };
-        ((*e).klass, message.to_owned())
+        // SAFETY: as above.
+        unsafe { ((*e).klass, message.to_owned()) }
     }
 }
 
@@ -1272,17 +1301,21 @@ struct TreeRepo {
 }
 
 impl TreeRepo {
+    #[expect(
+        clippy::default_trait_access,
+        reason = "the field's type is the C struct's, spelled by bindgen"
+    )]
     fn new(tag: &str) -> Self {
         init();
         let path =
             std::env::temp_dir().join(format!("crustify-types-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut opts = ffi::git_repository_init_options::default();
         // SAFETY: `opts` is a live options struct, filled with the version's defaults.
         let rc = unsafe {
             ffi::git_repository_init_options_init(
-                &mut opts,
+                &raw mut opts,
                 ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
             )
         };
@@ -1291,7 +1324,8 @@ impl TreeRepo {
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` a live
         // options struct, all read for the call only.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        let rc =
+            unsafe { ffi::git_repository_init_ext(&raw mut repo, c_path.as_ptr(), &raw mut opts) };
         assert_eq!(rc, 0, "{:?}", last_error());
         let mut repo = Self {
             path,
@@ -1308,13 +1342,17 @@ impl TreeRepo {
     fn write(&self, data: &[u8], kind: ffi::git_object_t) -> Result<ffi::git_oid, c_int> {
         let mut odb = ptr::null_mut();
         // SAFETY: `odb` is a live slot and `self.repo` a live repository.
-        assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, self.repo) }, 0);
+        let ret = unsafe { ffi::git_repository_odb(&raw mut odb, self.repo) };
+        assert_eq!(ret, 0);
         let mut id = ffi::git_oid::default();
-        // SAFETY: `id` is a writable oid, `odb` the live database just taken, and
-        // `data` readable for `data.len()` bytes; `odb` is released once, after.
-        let rc = unsafe {
-            let rc = ffi::git_odb_write(&mut id, odb, data.as_ptr().cast(), data.len(), kind);
-            ffi::git_odb_free(odb);
+        let rc = {
+            // SAFETY: `id` is a writable oid, `odb` the live database just taken, and
+            // `data` readable for `data.len()` bytes; `odb` is released once, after.
+            let rc = unsafe {
+                ffi::git_odb_write(&raw mut id, odb, data.as_ptr().cast(), data.len(), kind)
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_odb_free(odb) };
             rc
         };
         if rc == 0 { Ok(id) } else { Err(rc) }
@@ -1335,25 +1373,32 @@ impl TreeRepo {
         clear();
         // SAFETY: `tree` is a live slot, `self.repo` a live repository and `id` a
         // live oid, read for the call only.
-        let rc = unsafe { ffi::git_tree_lookup(&mut tree, self.repo, id) };
+        let rc = unsafe { ffi::git_tree_lookup(&raw mut tree, self.repo, id) };
         if rc != 0 {
             let (class, message) = last_error();
             return Err((rc, class, message));
         }
-        // SAFETY: `tree` is the live tree just looked up; every entry is read while
-        // it lives, and it is released once, after.
-        unsafe {
-            let modes = (0..ffi::git_tree_entrycount(tree))
-                .map(|i| {
-                    let entry = ffi::git_tree_entry_byindex(tree, i);
-                    assert!(!entry.is_null());
-                    (
-                        ffi::git_tree_entry_filemode_raw(entry),
-                        ffi::git_tree_entry_filemode(entry),
-                    )
-                })
-                .collect();
-            ffi::git_tree_free(tree);
+        {
+            // SAFETY: `tree` is the live tree just looked up; every entry is read while
+            // it lives, and it is released once, after.
+            let modes =
+                // SAFETY: as above.
+                (0..unsafe { ffi::git_tree_entrycount(tree) })
+                    .map(|i| {
+                        // SAFETY: as above.
+                        let entry = unsafe { ffi::git_tree_entry_byindex(tree, i) };
+                        assert!(!entry.is_null());
+                        (
+                            // SAFETY: as above.
+                            unsafe { ffi::git_tree_entry_filemode_raw(entry) },
+                            // SAFETY: as above.
+                            unsafe { ffi::git_tree_entry_filemode(entry) },
+                        )
+                    })
+                    .collect()
+            ;
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(tree) };
             Ok(modes)
         }
     }
@@ -1363,7 +1408,7 @@ impl Drop for TreeRepo {
     fn drop(&mut self) {
         // SAFETY: `self.repo` is the live repository this value owns, released once.
         unsafe { ffi::git_repository_free(self.repo) };
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -1381,10 +1426,10 @@ fn from_raw_names_exactly_the_c_modes() {
     // instruments each step and stalls on tens of thousands of them, so it takes a
     // stride; the named modes always.
     let stride = if cfg!(bsan) { 97 } else { 1 };
-    let modes = (0..=0o177777)
+    let modes = (0..=0o177_777)
         .step_by(stride)
         .chain(MODES.iter().map(|&(raw, _)| raw))
-        .chain([0o200000, u32::MAX - 1, u32::MAX]);
+        .chain([0o200_000, u32::MAX - 1, u32::MAX]);
     for raw in modes {
         let c = MODES.iter().find(|(r, _)| *r == raw).map(|&(_, m)| m);
         assert_eq!(FileMode::from_raw(raw), c, "{raw:#o}");
@@ -1418,23 +1463,27 @@ fn insert_naming(
     clear();
     // SAFETY: `out` is a live slot, `bld` a live builder, `name` NUL-terminated and
     // `id` a live oid, read for the call only; `out` is compared, never read through.
-    let rc = unsafe { ffi::git_treebuilder_insert(&mut out, bld, name.as_ptr(), &id, raw) };
+    let rc = unsafe {
+        ffi::git_treebuilder_insert(&raw mut out, bld, name.as_ptr(), &raw const id, raw)
+    };
     let (class, message) = if rc == 0 {
         (0, CString::default())
     } else {
         last_error()
     };
-    // SAFETY: `bld` is live; the entry it returns is read before the builder changes.
-    let held = unsafe {
-        let entry = ffi::git_treebuilder_get(bld, name.as_ptr());
+    let held = {
+        // SAFETY: `bld` is live; the entry it returns is read before the builder changes.
+        let entry = unsafe { ffi::git_treebuilder_get(bld, name.as_ptr()) };
         assert!(
             rc != 0 || entry == out,
             "the inserted entry is the one held"
         );
         (!entry.is_null()).then(|| {
             (
-                ffi::git_tree_entry_filemode_raw(entry),
-                ffi::git_tree_entry_filemode(entry),
+                // SAFETY: as above.
+                unsafe { ffi::git_tree_entry_filemode_raw(entry) },
+                // SAFETY: as above.
+                unsafe { ffi::git_tree_entry_filemode(entry) },
             )
         })
     };
@@ -1445,7 +1494,7 @@ fn insert_naming(
 fn builder(repo: &TreeRepo) -> *mut ffi::git_treebuilder {
     let mut bld = ptr::null_mut();
     // SAFETY: `bld` is a live slot and `repo.repo` a live repository; no source tree.
-    let rc = unsafe { ffi::git_treebuilder_new(&mut bld, repo.repo, ptr::null()) };
+    let rc = unsafe { ffi::git_treebuilder_new(&raw mut bld, repo.repo, ptr::null()) };
     assert_eq!(rc, 0);
     bld
 }
@@ -1459,13 +1508,13 @@ fn treebuilder_accepts_exactly_the_insertable_modes() {
     // Each named mode under a name of its own, then unnamed modes, then each named
     // mode again over the first name, which a refused mode must leave alone.
     let unnamed = [
-        0o100664,
-        0o100600,
-        0o040755,
-        0o160755,
-        0o120777,
+        0o100_664,
+        0o100_600,
+        0o040_755,
+        0o160_755,
+        0o120_777,
         1,
-        0o177777,
+        0o177_777,
         u32::MAX,
     ];
     let mut steps: Vec<(CString, u32)> = MODES
@@ -1504,7 +1553,7 @@ fn treebuilder_accepts_exactly_the_insertable_modes() {
             );
             (
                 -1,
-                ffi::GIT_ERROR_TREE as c_int,
+                ffi::GIT_ERROR_TREE.cast_signed(),
                 CString::new(message).unwrap(),
                 before.map(|r| (r, r)),
             )
@@ -1517,10 +1566,11 @@ fn treebuilder_accepts_exactly_the_insertable_modes() {
     }
 
     let mut id = ffi::git_oid::default();
-    // SAFETY: `id` is a writable oid and `bld` the live builder, released once, after.
-    let rc = unsafe {
-        let rc = ffi::git_treebuilder_write(&mut id, bld);
-        ffi::git_treebuilder_free(bld);
+    let rc = {
+        // SAFETY: `id` is a writable oid and `bld` the live builder, released once, after.
+        let rc = unsafe { ffi::git_treebuilder_write(&raw mut id, bld) };
+        // SAFETY: as above.
+        unsafe { ffi::git_treebuilder_free(bld) };
         rc
     };
     assert_eq!(rc, 0, "{:?}", last_error());
@@ -1560,7 +1610,7 @@ fn treebuilder_checks_the_object_a_mode_names() {
             );
             (
                 -1,
-                ffi::GIT_ERROR_TREE as c_int,
+                ffi::GIT_ERROR_TREE.cast_signed(),
                 CString::new(message).unwrap(),
                 None,
             )
@@ -1589,7 +1639,7 @@ fn parsed_trees_keep_any_16_bit_mode() {
     // Every 16-bit mode, at a stride under BorrowSanitizer, which instruments each
     // step; the named modes always.
     let stride = if cfg!(bsan) { 97 } else { 1 };
-    let mut modes: Vec<u32> = (0..=0o177777).step_by(stride).collect();
+    let mut modes: Vec<u32> = (0..=0o177_777).step_by(stride).collect();
     modes.extend(MODES.iter().map(|&(raw, _)| raw));
 
     let id = repo
@@ -1614,7 +1664,7 @@ fn parsed_trees_keep_any_16_bit_mode() {
     }
 
     // A mode past 16 bits does not parse, nor one that is not octal digits.
-    assert_eq!(FileMode::from_raw(0o200000), None);
+    assert_eq!(FileMode::from_raw(0o200_000), None);
     for spelling in [&b" 100644"[..], b"9", b"x", b"-1"] {
         let mut data = spelling.to_vec();
         data.extend_from_slice(b" e\0");
@@ -1624,7 +1674,7 @@ fn parsed_trees_keep_any_16_bit_mode() {
             repo.tree_modes(&id),
             Err((
                 -1,
-                ffi::GIT_ERROR_TREE as c_int,
+                ffi::GIT_ERROR_TREE.cast_signed(),
                 c"failed to parse tree: can't parse filemode".to_owned()
             )),
             "{}",
@@ -1632,13 +1682,13 @@ fn parsed_trees_keep_any_16_bit_mode() {
         );
     }
     let id = repo
-        .write(&raw_tree(&[0o200000], &repo.blob), ffi::GIT_OBJECT_TREE)
+        .write(&raw_tree(&[0o200_000], &repo.blob), ffi::GIT_OBJECT_TREE)
         .unwrap();
     assert_eq!(
         repo.tree_modes(&id),
         Err((
             -1,
-            ffi::GIT_ERROR_TREE as c_int,
+            ffi::GIT_ERROR_TREE.cast_signed(),
             c"failed to parse tree: can't parse filemode".to_owned()
         ))
     );
@@ -1679,21 +1729,28 @@ mod write_streams {
         assert!(unsafe { ffi::git_libgit2_init() } >= 1);
     }
 
-    /// `len` bytes varying with `seed`; past a page, one repeated byte, since BSan is slow
+    /// `len` bytes varying with `seed`; past a page, one repeated byte, since `BSan` is slow
     /// on per-element loops.
     fn pattern(len: usize, seed: usize) -> Vec<u8> {
         if len > 4097 {
-            return vec![(seed * 7 + 3) as u8; len];
+            return vec![u8::try_from(seed * 7 + 3).unwrap(); len];
         }
-        (0..len).map(|i| (i * 31 + seed * 7 + 3) as u8).collect()
+        (0..len)
+            .map(|i| (i * 31 + seed * 7 + 3).to_le_bytes()[0])
+            .collect()
     }
 
     /// The thread's last error, as `git_error_last` reports it.
     fn c_last() -> (c_int, CString) {
-        // SAFETY: the runtime is initialised; the error is copied before any other call.
-        unsafe {
-            let e = ffi::git_error_last();
-            ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+        {
+            // SAFETY: the runtime is initialised; the error is copied before any other call.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe { (klass, CStr::from_ptr(message).to_owned()) }
         }
     }
 
@@ -1734,13 +1791,13 @@ mod write_streams {
                 "crustify-writestream-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let mut opts = ffi::git_repository_init_options::default();
             // SAFETY: `opts` is a live options struct, filled with the version's defaults.
             let rc = unsafe {
                 ffi::git_repository_init_options_init(
-                    &mut opts,
+                    &raw mut opts,
                     ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
                 )
             };
@@ -1748,7 +1805,9 @@ mod write_streams {
             opts.flags = ffi::GIT_REPOSITORY_INIT_BARE | ffi::GIT_REPOSITORY_INIT_MKDIR;
             let mut repo = ptr::null_mut();
             // SAFETY: a live slot, a NUL-terminated path and live options, read for the call.
-            let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+            let rc = unsafe {
+                ffi::git_repository_init_ext(&raw mut repo, c_path.as_ptr(), &raw mut opts)
+            };
             assert_eq!(rc, 0);
             Self { path, repo }
         }
@@ -1769,7 +1828,7 @@ mod write_streams {
             // SAFETY: a live slot, the live repository and a NULL or live hint path.
             let rc = unsafe {
                 ffi::git_blob_create_from_stream(
-                    &mut out,
+                    &raw mut out,
                     self.repo,
                     hint.map_or(ptr::null(), CStr::as_ptr),
                 )
@@ -1783,7 +1842,7 @@ mod write_streams {
         fn drop(&mut self) {
             // SAFETY: the repository opened above, freed once after its streams.
             unsafe { ffi::git_repository_free(self.repo) };
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -1792,7 +1851,7 @@ mod write_streams {
     fn commit(stream: *mut ffi::git_writestream) -> Result<Vec<u8>, Reported> {
         let mut oid = ffi::git_oid::default();
         // SAFETY: an open, never-closed blob stream, given up to the call.
-        let rc = unsafe { ffi::git_blob_create_from_stream_commit(&mut oid, stream) };
+        let rc = unsafe { ffi::git_blob_create_from_stream_commit(&raw mut oid, stream) };
         if rc < 0 {
             return Err(c_reported(rc));
         }
@@ -1801,8 +1860,10 @@ mod write_streams {
 
     /// A raw `write` member call on a C stream.
     fn c_write(stream: *mut ffi::git_writestream, data: &[u8]) -> Reported {
-        // SAFETY: an open stream and its own member; `data` is live for the call.
-        c_reported(unsafe { (*stream).write.unwrap()(stream, data.as_ptr().cast(), data.len()) })
+        // SAFETY: an open stream.
+        let write = unsafe { (*stream).write }.unwrap();
+        // SAFETY: its own member; `data` is live for the call.
+        c_reported(unsafe { write(stream, data.as_ptr().cast(), data.len()) })
     }
 
     /// Chunk sizes written in order: empty, small, page-crossing, and enough to spill the
@@ -1858,20 +1919,28 @@ mod write_streams {
             let s = repo.open(None);
             states.push(repo.stream_files());
             // SAFETY: an open stream, its own member, never used again.
-            unsafe { (*s).free.unwrap()(s) };
+            let free2 = unsafe { (*s).free };
+            // SAFETY: as above.
+            unsafe { free2.unwrap()(s) };
             states.push(repo.stream_files());
             let s = repo.open(Some(c"x"));
             c_write(s, b"discarded");
             // SAFETY: as above.
-            unsafe { (*s).free.unwrap()(s) };
+            let free2 = unsafe { (*s).free };
+            // SAFETY: as above.
+            unsafe { free2.unwrap()(s) };
             states.push(repo.stream_files());
             let s = repo.open(None);
             c_write(s, b"closed");
-            // SAFETY: an open stream and its own member; afterwards it is only freed.
-            let closed = c_reported(unsafe { (*s).close.unwrap()(s) });
+            // SAFETY: an open stream.
+            let close = unsafe { (*s).close }.unwrap();
+            // SAFETY: its own member; afterwards it is only freed.
+            let closed = c_reported(unsafe { close(s) });
             states.push(repo.stream_files());
             // SAFETY: the closed stream, freed once.
-            unsafe { (*s).free.unwrap()(s) };
+            let free2 = unsafe { (*s).free };
+            // SAFETY: as above.
+            unsafe { free2.unwrap()(s) };
             states.push(repo.stream_files());
             (states, closed)
         })
@@ -1968,8 +2037,10 @@ mod write_streams {
         buf: *const c_char,
         len: usize,
     ) -> c_int {
-        // SAFETY: `s` heads a live `RawStream`; `buf` holds `len` bytes, or is empty.
-        let (rec, data) = unsafe { (&(*s.cast::<RawStream>()).rec, bytes(buf, len).to_vec()) };
+        // SAFETY: `s` heads a live `RawStream`.
+        let rec = unsafe { &(*s.cast::<RawStream>()).rec };
+        // SAFETY: `buf` holds `len` bytes, or is empty.
+        let data = unsafe { bytes(buf, len) }.to_vec();
         rec.log.borrow_mut().push(Call::Write(data));
         raw_fail(rec.plan.write)
     }
@@ -2052,7 +2123,7 @@ mod write_streams {
         if let Some(filter) = filter {
             // SAFETY: a live slot; these filters need no repository.
             let rc = unsafe {
-                ffi::git_filter_list_new(&mut list, ptr::null_mut(), ffi::GIT_FILTER_TO_ODB, 0)
+                ffi::git_filter_list_new(&raw mut list, ptr::null_mut(), ffi::GIT_FILTER_TO_ODB, 0)
             };
             assert_eq!(rc, 0);
             // SAFETY: a fresh list and a registered filter.
@@ -2083,19 +2154,26 @@ mod write_streams {
         buf: *const c_char,
         len: usize,
     ) -> c_int {
-        // SAFETY: `s` heads a live `UpperStream`, whose `next` libgit2 keeps open.
-        unsafe {
-            let next = (*s.cast::<UpperStream>()).next;
-            let data = bytes(buf, len).to_ascii_uppercase();
-            (*next).write.unwrap()(next, data.as_ptr().cast(), data.len())
+        {
+            // SAFETY: `s` heads a live `UpperStream`, whose `next` libgit2 keeps open.
+            let next = unsafe { (*s.cast::<UpperStream>()).next };
+            // SAFETY: as above.
+            let data = unsafe { bytes(buf, len).to_ascii_uppercase() };
+            // SAFETY: as above.
+            let write2 = unsafe { (*next).write };
+            // SAFETY: as above.
+            unsafe { write2.unwrap()(next, data.as_ptr().cast(), data.len()) }
         }
     }
 
     unsafe extern "C" fn upper_close(s: *mut ffi::git_writestream) -> c_int {
-        // SAFETY: as above.
-        unsafe {
-            let next = (*s.cast::<UpperStream>()).next;
-            (*next).close.unwrap()(next)
+        {
+            // SAFETY: as above.
+            let next = unsafe { (*s.cast::<UpperStream>()).next };
+            // SAFETY: as above.
+            let close2 = unsafe { (*next).close };
+            // SAFETY: as above.
+            unsafe { close2.unwrap()(next) }
         }
     }
 
@@ -2134,7 +2212,7 @@ mod write_streams {
         _next: *mut ffi::git_writestream,
     ) -> c_int {
         // SAFETY: a live message, which libgit2 copies; the runtime is initialised.
-        unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_FILTER as c_int, c"refused".as_ptr()) };
+        unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_FILTER.cast_signed(), c"refused".as_ptr()) };
         ffi::GIT_EUSER
     }
 
@@ -2188,7 +2266,7 @@ mod write_streams {
     ];
 
     /// The inputs for a chain, each twice. `ident` gets no empty input: it then computes
-    /// `NULL + 0` in `git_str_is_binary` (UBSan), a libgit2 defect outside these wrappers.
+    /// `NULL + 0` in `git_str_is_binary` (`UBSan`), a libgit2 defect outside these wrappers.
     fn inputs(filters: Filters) -> impl Iterator<Item = &'static [u8]> {
         let skip_empty = matches!(filters, Filters::IdentClean);
         INPUTS
@@ -2212,7 +2290,9 @@ mod write_streams {
             run.push((reported, log.borrow_mut().drain(..).collect()));
         }
         // SAFETY: the target made above, freed once, through its own member.
-        unsafe { (*target).free.unwrap()(target) };
+        let free = unsafe { (*target).free };
+        // SAFETY: as above.
+        unsafe { free.unwrap()(target) };
         run.push(((0, None), log.borrow_mut().drain(..).collect()));
         run
     }
@@ -2298,10 +2378,13 @@ mod write_streams {
                     steps.push(c_write(s, &pattern(len, i)));
                 }
                 // SAFETY: the stream's own members; closed, then freed once.
-                unsafe {
-                    steps.push(c_reported((*s).close.unwrap()(s)));
-                    (*s).free.unwrap()(s);
-                }
+                let close2 = unsafe { (*s).close };
+                // SAFETY: as above.
+                unsafe { steps.push(c_reported(close2.unwrap()(s))) };
+                // SAFETY: as above.
+                let free = unsafe { (*s).free };
+                // SAFETY: as above.
+                unsafe { free.unwrap()(s) };
                 (steps, log.take())
             })
             .join()
@@ -2344,13 +2427,13 @@ impl IgnoreRepo {
             "crustify-types-equiv-ignore-{}-{tag}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut opts = ffi::git_repository_init_options::default();
         // SAFETY: `opts` is a live options struct, filled with the version's defaults.
         let rc = unsafe {
             ffi::git_repository_init_options_init(
-                &mut opts,
+                &raw mut opts,
                 ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
             )
         };
@@ -2359,7 +2442,8 @@ impl IgnoreRepo {
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a live slot, `c_path` NUL-terminated and `opts` live, all
         // read for the call only.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut repo, c_path.as_ptr(), &mut opts) };
+        let rc =
+            unsafe { ffi::git_repository_init_ext(&raw mut repo, c_path.as_ptr(), &raw mut opts) };
         assert_eq!(rc, 0);
         let this = Self { path, repo };
         this.declare("none");
@@ -2386,14 +2470,15 @@ impl IgnoreRepo {
     fn ignore(&self) -> (c_int, Option<ffi::git_submodule_ignore_t>) {
         let mut sm = ptr::null_mut();
         // SAFETY: `sm` is a live slot, `repo` open, the name NUL-terminated.
-        let rc = unsafe { ffi::git_submodule_lookup(&mut sm, self.repo, c"sm".as_ptr()) };
+        let rc = unsafe { ffi::git_submodule_lookup(&raw mut sm, self.repo, c"sm".as_ptr()) };
         if rc != 0 {
             return (rc, None);
         }
-        // SAFETY: `sm` is a live submodule, released once after the read.
-        let value = unsafe {
-            let value = ffi::git_submodule_ignore(sm);
-            ffi::git_submodule_free(sm);
+        let value = {
+            // SAFETY: `sm` is a live submodule, released once after the read.
+            let value = unsafe { ffi::git_submodule_ignore(sm) };
+            // SAFETY: as above.
+            unsafe { ffi::git_submodule_free(sm) };
             value
         };
         (rc, Some(value))
@@ -2410,7 +2495,7 @@ impl Drop for IgnoreRepo {
     fn drop(&mut self) {
         // SAFETY: `repo` is open and released once.
         unsafe { ffi::git_repository_free(self.repo) };
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -2421,7 +2506,11 @@ fn ignore_error() -> (c_int, String) {
     let err = unsafe { ffi::git_error_last() };
     assert!(!err.is_null());
     // SAFETY: as above.
-    let (class, message) = unsafe { ((*err).klass, CStr::from_ptr((*err).message)) };
+    let klass = unsafe { (*err).klass };
+    // SAFETY: as above.
+    let message2 = unsafe { (*err).message };
+    // SAFETY: as above.
+    let (class, message) = unsafe { (klass, CStr::from_ptr(message2)) };
     (class, message.to_string_lossy().into_owned())
 }
 
@@ -2477,31 +2566,28 @@ fn set_ignore_takes_the_variants_values() {
     let sequence: [ffi::git_submodule_ignore_t; 12] = [3, 1, 4, 2, -1, 0, 5, -2, 4, 100, 1, 3];
     for (step, raw) in sequence.into_iter().enumerate() {
         let c_rec = set_record(&c, c.set_ignore(raw));
-        match SubmoduleIgnore::from_raw(raw) {
-            Some(variant) => {
-                let rust_rec = set_record(&rust, rust.set_ignore(variant.raw()));
-                assert_eq!(c_rec, rust_rec, "step {step}: {variant:?}");
-                if variant == SubmoduleIgnore::Unspecified {
-                    assert_eq!(c_rec.0, -1, "C refuses Unspecified");
-                } else {
-                    assert_eq!(c_rec.0, 0);
-                    assert_eq!(c_rec.3, (0, Some(raw)), "read back as written");
-                }
+        if let Some(variant) = SubmoduleIgnore::from_raw(raw) {
+            let rust_rec = set_record(&rust, rust.set_ignore(variant.raw()));
+            assert_eq!(c_rec, rust_rec, "step {step}: {variant:?}");
+            if variant == SubmoduleIgnore::Unspecified {
+                assert_eq!(c_rec.0, -1, "C refuses Unspecified");
+            } else {
+                assert_eq!(c_rec.0, 0);
+                assert_eq!(c_rec.3, (0, Some(raw)), "read back as written");
             }
-            None => {
-                // No variant, no call: C itself refuses the value and leaves the
-                // repository as the other side's.
-                assert_eq!(c_rec.0, -1, "step {step}: {raw}");
-                assert_eq!(
-                    c_rec.1,
-                    Some((
-                        ffi::GIT_ERROR_SUBMODULE as c_int,
-                        "invalid value for ignore".into()
-                    ))
-                );
-                assert_eq!(c_rec.2, rust.gitmodules(), "step {step}");
-                assert_eq!(c_rec.3, rust.ignore(), "step {step}");
-            }
+        } else {
+            // No variant, no call: C itself refuses the value and leaves the
+            // repository as the other side's.
+            assert_eq!(c_rec.0, -1, "step {step}: {raw}");
+            assert_eq!(
+                c_rec.1,
+                Some((
+                    ffi::GIT_ERROR_SUBMODULE.cast_signed(),
+                    "invalid value for ignore".into()
+                ))
+            );
+            assert_eq!(c_rec.2, rust.gitmodules(), "step {step}");
+            assert_eq!(c_rec.3, rust.ignore(), "step {step}");
         }
     }
 }
@@ -2520,7 +2606,7 @@ fn open_fixture() -> *mut ffi::git_repository {
     // directories.
     let rc = unsafe {
         ffi::git_repository_open_ext(
-            &mut repo,
+            &raw mut repo,
             path.as_ptr().cast(),
             ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
             ptr::null(),
@@ -2537,20 +2623,22 @@ fn c_list(
 ) -> Vec<(String, ffi::git_branch_t)> {
     let mut iter = ptr::null_mut();
     // SAFETY: `iter` receives the iterator; `repo` is open; any flags are accepted.
-    let rc = unsafe { ffi::git_branch_iterator_new(&mut iter, repo, flags) };
+    let rc = unsafe { ffi::git_branch_iterator_new(&raw mut iter, repo, flags) };
     assert_eq!(rc, 0);
     let mut out = Vec::new();
     loop {
         let mut reference = ptr::null_mut();
         let mut kind: ffi::git_branch_t = 0;
         // SAFETY: both out-parameters are writable; `iter` is live.
-        let rc = unsafe { ffi::git_branch_next(&mut reference, &mut kind, iter) };
+        let rc = unsafe { ffi::git_branch_next(&raw mut reference, &raw mut kind, iter) };
         if rc == ffi::GIT_ITEROVER {
             break;
         }
         assert_eq!(rc, 0);
         // SAFETY: `reference` is live until freed; its name is copied out first.
-        let name = unsafe { CStr::from_ptr(ffi::git_reference_name(reference)) };
+        let reference_name = unsafe { ffi::git_reference_name(reference) };
+        // SAFETY: as above.
+        let name = unsafe { CStr::from_ptr(reference_name) };
         out.push((name.to_string_lossy().into_owned(), kind));
         // SAFETY: `reference` is the caller's, released once.
         unsafe { ffi::git_reference_free(reference) };
@@ -2615,18 +2703,23 @@ fn c_lookup(
     let mut reference = ptr::null_mut();
     // SAFETY: `reference` receives the reference; `repo` is open and `name`
     // NUL-terminated, read for the call only.
-    let rc = unsafe { ffi::git_branch_lookup(&mut reference, repo, name.as_ptr(), selection) };
+    let rc = unsafe { ffi::git_branch_lookup(&raw mut reference, repo, name.as_ptr(), selection) };
     if rc != 0 {
         let (class, message) = c_last();
         return Err((rc, class, message));
     }
-    // SAFETY: `reference` is live until freed; its name is copied out first, and it
-    // is released once.
-    unsafe {
-        let name = CStr::from_ptr(ffi::git_reference_name(reference))
-            .to_string_lossy()
-            .into_owned();
-        ffi::git_reference_free(reference);
+    {
+        // SAFETY: `reference` is live until freed; its name is copied out first, and it
+        // is released once.
+        let reference_name = unsafe { ffi::git_reference_name(reference) };
+        // SAFETY: as above.
+        let name = unsafe {
+            CStr::from_ptr(reference_name)
+                .to_string_lossy()
+                .into_owned()
+        };
+        // SAFETY: as above.
+        unsafe { ffi::git_reference_free(reference) };
         Ok(name)
     }
 }
@@ -2674,16 +2767,15 @@ fn branch_lookup_takes_exactly_the_named_selections() {
                 .find(|kind| listed(*kind, short))
                 .map(|kind| format!("{}{short}", namespace(kind)));
             let found = c_lookup(repo, &name, selection.raw());
-            match predicted {
-                Some(full) => assert_eq!(found, Ok(full), "{short} as {selection:?}"),
-                None => {
-                    let (rc, class, _) = found.expect_err("not found");
-                    assert_eq!(
-                        (rc, class),
-                        (ffi::GIT_ENOTFOUND, ffi::GIT_ERROR_REFERENCE as c_int),
-                        "{short} as {selection:?}"
-                    );
-                }
+            if let Some(full) = predicted {
+                assert_eq!(found, Ok(full), "{short} as {selection:?}");
+            } else {
+                let (rc, class, _) = found.expect_err("not found");
+                assert_eq!(
+                    (rc, class),
+                    (ffi::GIT_ENOTFOUND, ffi::GIT_ERROR_REFERENCE.cast_signed()),
+                    "{short} as {selection:?}"
+                );
             }
         }
         // `Local | Remote` is `All`.
@@ -2704,7 +2796,7 @@ fn branch_lookup_takes_exactly_the_named_selections() {
                     c_lookup(repo, &name, raw),
                     Err((
                         -1,
-                        ffi::GIT_ERROR_INTERNAL as c_int,
+                        ffi::GIT_ERROR_INTERNAL.cast_signed(),
                         // `GIT_ASSERT(false)`, with `false` expanded before it is spelled.
                         "unrecoverable internal error: '0'".to_owned()
                     )),
@@ -2780,7 +2872,7 @@ mod signatures {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and two NUL-terminated strings, read for the call.
         let rc = unsafe {
-            ffi::git_signature_new(&mut out, name.as_ptr(), email.as_ptr(), seconds, offset)
+            ffi::git_signature_new(&raw mut out, name.as_ptr(), email.as_ptr(), seconds, offset)
         };
         c_outcome(rc, out)
     }
@@ -2789,7 +2881,7 @@ mod signatures {
         clear();
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated line, read for the call.
-        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        let rc = unsafe { ffi::git_signature_from_buffer(&raw mut out, buf.as_ptr()) };
         c_outcome(rc, out)
     }
 
@@ -2797,7 +2889,7 @@ mod signatures {
     fn c_dup(sig: *const ffi::git_signature) -> CSig {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live signature with both strings, only read.
-        let rc = unsafe { ffi::git_signature_dup(&mut out, sig) };
+        let rc = unsafe { ffi::git_signature_dup(&raw mut out, sig) };
         c_outcome(rc, out).unwrap()
     }
 
@@ -2817,7 +2909,7 @@ mod signatures {
             string(raw.email),
             raw.when.time,
             raw.when.offset,
-            raw.when.sign as u8,
+            raw.when.sign.cast_unsigned(),
         )
     }
 
@@ -2833,6 +2925,10 @@ mod signatures {
         )
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn failure(error: libgit2::libgit2::util::errors::ErrorBuf) -> Failure {
         (error.raw_class(), error.message().to_owned())
     }
@@ -2852,7 +2948,8 @@ mod signatures {
     ) -> Result<Vec<u8>, Failure> {
         let mut tree = ptr::null_mut();
         // SAFETY: a live slot, a live repository and the id of a tree it holds.
-        let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.repo, &repo.empty_tree) };
+        let rc =
+            unsafe { ffi::git_tree_lookup(&raw mut tree, repo.repo, &raw const repo.empty_tree) };
         assert_eq!(rc, 0);
         let mut raw = ffi::git_buf {
             ptr: ptr::null_mut(),
@@ -2864,7 +2961,7 @@ mod signatures {
         // message are live and only read; no parents.
         let rc = unsafe {
             ffi::git_commit_create_buffer(
-                &mut raw,
+                &raw mut raw,
                 repo.repo,
                 author,
                 committer,
@@ -2964,7 +3061,7 @@ mod signatures {
     /// everything but the instant, which lies within the clock reads around them.
     ///
     /// Alone in a child: the zone is read through glibc's `mktime` and `gmtime_r`, which
-    /// serialise on a lock of glibc's own that TSan cannot see, so concurrent calls from
+    /// serialise on a lock of glibc's own that `TSan` cannot see, so concurrent calls from
     /// other tests would read as a race on glibc's copy of `TZ`.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2978,10 +3075,11 @@ mod signatures {
     fn now_body() {
         init();
         let clock = || {
-            std::time::SystemTime::now()
+            (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as i64
+                .as_secs())
+            .cast_signed()
         };
         for (name, email) in [
             (c"A U Thor", c"a@b"),
@@ -2993,7 +3091,7 @@ mod signatures {
             let mut out = ptr::null_mut();
             let before = clock();
             // SAFETY: a writable slot and two NUL-terminated strings, read for the call.
-            let rc = unsafe { ffi::git_signature_now(&mut out, name.as_ptr(), email.as_ptr()) };
+            let rc = unsafe { ffi::git_signature_now(&raw mut out, name.as_ptr(), email.as_ptr()) };
             let c = c_outcome(rc, out).map(|s| c_fields(s.0));
             clear();
             let rust = rust_outcome(Signature::now(name, email));
@@ -3078,29 +3176,40 @@ mod signatures {
     /// with `git__free` and replaced by a fresh copy; times are written in place.
     fn c_apply(sig: &mut CSig, step: Step) {
         let raw = sig.0;
-        // SAFETY: `raw` is a live signature owned by `sig`, which is borrowed exclusively;
-        // its strings are libgit2 allocations, released through the same allocator.
-        unsafe {
-            match step {
-                Step::Name(s) => {
-                    ffi::git_odb_backend_data_free(ptr::null_mut(), (*raw).name.cast());
-                    (*raw).name = c_strdup(s);
-                }
-                Step::Email(s) => {
-                    ffi::git_odb_backend_data_free(ptr::null_mut(), (*raw).email.cast());
-                    (*raw).email = c_strdup(s);
-                }
-                Step::When(seconds, offset) => {
-                    (*raw).when = ffi::git_time {
-                        time: seconds,
-                        offset,
-                        sign: if offset < 0 { b'-' } else { b'+' } as c_char,
-                    }
-                }
-                Step::Seconds(v) => (*raw).when.time = v,
-                Step::Offset(v) => (*raw).when.offset = v,
-                Step::Sign(v) => (*raw).when.sign = v as c_char,
+        // `raw` is a live signature owned by `sig`, which is borrowed exclusively; its
+        // strings are libgit2 allocations, released through the same allocator.
+        match step {
+            Step::Name(s) => {
+                // SAFETY: as above.
+                let name = unsafe { (*raw).name };
+                // SAFETY: as above, the old name is released once.
+                unsafe { ffi::git_odb_backend_data_free(ptr::null_mut(), name.cast()) };
+                // SAFETY: as above.
+                unsafe { (*raw).name = c_strdup(s) };
             }
+            Step::Email(s) => {
+                // SAFETY: as above.
+                let email = unsafe { (*raw).email };
+                // SAFETY: as above, the old email is released once.
+                unsafe { ffi::git_odb_backend_data_free(ptr::null_mut(), email.cast()) };
+                // SAFETY: as above.
+                unsafe { (*raw).email = c_strdup(s) };
+            }
+            Step::When(seconds, offset) => {
+                let when = ffi::git_time {
+                    time: seconds,
+                    offset,
+                    sign: (if offset < 0 { b'-' } else { b'+' }).cast_signed(),
+                };
+                // SAFETY: as above.
+                unsafe { (*raw).when = when };
+            }
+            // SAFETY: as above.
+            Step::Seconds(v) => unsafe { (*raw).when.time = v },
+            // SAFETY: as above.
+            Step::Offset(v) => unsafe { (*raw).when.offset = v },
+            // SAFETY: as above.
+            Step::Sign(v) => unsafe { (*raw).when.sign = v.cast_signed() },
         }
     }
 
@@ -3187,13 +3296,21 @@ mod signatures {
                 when: time.into(),
             };
             let view = SignatureView::new(name, email, time);
-            assert_eq!(fields(view.as_ref()), c_fields(&stack), "{name:?}");
+            assert_eq!(
+                fields(view.as_ref()),
+                c_fields(&raw const stack),
+                "{name:?}"
+            );
             let copy = view.as_ref().to_signature().unwrap();
-            assert_eq!(fields(copy.as_ref()), c_fields(c_dup(&stack).0), "{name:?}");
+            assert_eq!(
+                fields(copy.as_ref()),
+                c_fields(c_dup(&raw const stack).0),
+                "{name:?}"
+            );
             assert_eq!(copy.as_ref(), view.as_ref());
             assert_eq!(
                 commit_lines(&repo, copy.as_c_ptr(), copy.as_c_ptr()),
-                commit_lines(&repo, &stack, &stack),
+                commit_lines(&repo, &raw const stack, &raw const stack),
                 "{name:?}"
             );
         }

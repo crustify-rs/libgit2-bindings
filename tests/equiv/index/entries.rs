@@ -52,19 +52,22 @@ struct Fields {
 
 /// The fields of the entry at `e`, NULL for `None`.
 fn c_fields(e: *const ffi::git_index_entry) -> Option<Fields> {
-    // SAFETY: NULL or a live entry, copied before any other call.
-    unsafe {
-        let e = e.as_ref()?;
-        Some(Fields {
-            path: CStr::from_ptr(e.path).to_owned(),
-            times: [
-                (e.ctime.seconds, e.ctime.nanoseconds),
-                (e.mtime.seconds, e.mtime.nanoseconds),
-            ],
-            stat: [e.dev, e.ino, e.mode, e.uid, e.gid, e.file_size],
-            id: (e.id.type_, e.id.id),
-            flags: (e.flags, e.flags_extended),
-        })
+    {
+        // SAFETY: NULL or a live entry, copied before any other call.
+        let e = unsafe { e.as_ref()? };
+        // SAFETY: as above.
+        unsafe {
+            Some(Fields {
+                path: CStr::from_ptr(e.path).to_owned(),
+                times: [
+                    (e.ctime.seconds, e.ctime.nanoseconds),
+                    (e.mtime.seconds, e.mtime.nanoseconds),
+                ],
+                stat: [e.dev, e.ino, e.mode, e.uid, e.gid, e.file_size],
+                id: (e.id.type_, e.id.id),
+                flags: (e.flags, e.flags_extended),
+            })
+        }
     }
 }
 
@@ -79,18 +82,26 @@ fn rust_fields(e: IndexEntryRef<'_, '_>) -> Fields {
         ],
         stat: [e.dev(), e.ino(), e.mode(), e.uid(), e.gid(), e.file_size()],
         id: (id.raw_kind(), id.id()),
-        flags: (e.flags().bits() as u16, e.flags_extended().bits() as u16),
+        flags: (
+            u16::try_from(e.flags().bits()).unwrap(),
+            u16::try_from(e.flags_extended().bits()).unwrap(),
+        ),
     }
 }
 
 /// Every entry and the resolved-conflict count, through C.
 fn c_observe(index: *mut ffi::git_index) -> (Vec<Fields>, usize) {
-    // SAFETY: a live index lending no entry; each is copied before the next call.
-    unsafe {
-        let entries = (0..ffi::git_index_entrycount(index))
-            .map(|n| c_fields(ffi::git_index_get_byindex(index, n)).unwrap())
-            .collect();
-        (entries, ffi::git_index_reuc_entrycount(index))
+    {
+        // SAFETY: a live index lending no entry; each is copied before the next call.
+        let index_entrycount = unsafe { ffi::git_index_entrycount(index) };
+        // SAFETY: as above.
+        let entries = unsafe {
+            (0..index_entrycount)
+                .map(|n| c_fields(ffi::git_index_get_byindex(index, n)).unwrap())
+                .collect()
+        };
+        // SAFETY: as above.
+        unsafe { (entries, ffi::git_index_reuc_entrycount(index)) }
     }
 }
 
@@ -147,30 +158,30 @@ fn add_sequences_match() {
     let mut rust = Index::new().unwrap();
     let long = CString::new(vec![b'l'; 0x1003]).unwrap();
     let rows: &[Row<'_>] = &[
-        (c"a", 0, 1, 1, 0o100644, 0),
-        (c"a", 0, 1, 2, 0o100755, 0),
-        (c"b", 0, 1, 3, 0o120000, 0x2000),
-        (c"b", 0, 1, 3, 0o120000, 0xFFFF),
-        (c"sub", 0, 2, 4, 0o160000, 0),
-        (c"a/b", 0, 1, 5, 0o100644, 0),
-        (c"a/c", 0, 1, 5, 0o100644, 0),
-        (c"a", 0, 1, 6, 0o100644, 0),
-        (c"c", 2, 1, 7, 0o100644, 0),
-        (c"c", 0, 1, 8, 0o100644, 0),
-        (c"c", 3, 1, 9, 0o100644, 0),
-        (c"c/d", 2, 1, 9, 0o100644, 0),
-        (c"t", 0, 1, 1, 0o040000, 0),
-        (c"u", 0, 1, 1, 0o100664, 0),
+        (c"a", 0, 1, 1, 0o100_644, 0),
+        (c"a", 0, 1, 2, 0o100_755, 0),
+        (c"b", 0, 1, 3, 0o120_000, 0x2000),
+        (c"b", 0, 1, 3, 0o120_000, 0xFFFF),
+        (c"sub", 0, 2, 4, 0o160_000, 0),
+        (c"a/b", 0, 1, 5, 0o100_644, 0),
+        (c"a/c", 0, 1, 5, 0o100_644, 0),
+        (c"a", 0, 1, 6, 0o100_644, 0),
+        (c"c", 2, 1, 7, 0o100_644, 0),
+        (c"c", 0, 1, 8, 0o100_644, 0),
+        (c"c", 3, 1, 9, 0o100_644, 0),
+        (c"c/d", 2, 1, 9, 0o100_644, 0),
+        (c"t", 0, 1, 1, 0o040_000, 0),
+        (c"u", 0, 1, 1, 0o100_664, 0),
         (c"u", 0, 1, 1, 0, 0),
-        (c"x", 0, 0, 0, 0o100644, 0),
-        (c".git/config", 0, 1, 1, 0o100644, 0),
-        (c"../up", 0, 1, 1, 0o100644, 0),
-        (c"d/./e", 0, 1, 1, 0o100644, 0),
-        (c"d//e", 0, 1, 1, 0o100644, 0),
-        (c"trailing/", 0, 1, 1, 0o100644, 0),
-        (c"", 0, 1, 1, 0o100644, 0),
-        (&long, 0, 1, 1, 0o100644, 0),
-        (c"\xff\xfe", 1, 3, 0xFF, 0o100644, 0),
+        (c"x", 0, 0, 0, 0o100_644, 0),
+        (c".git/config", 0, 1, 1, 0o100_644, 0),
+        (c"../up", 0, 1, 1, 0o100_644, 0),
+        (c"d/./e", 0, 1, 1, 0o100_644, 0),
+        (c"d//e", 0, 1, 1, 0o100_644, 0),
+        (c"trailing/", 0, 1, 1, 0o100_644, 0),
+        (c"", 0, 1, 1, 0o100_644, 0),
+        (&long, 0, 1, 1, 0o100_644, 0),
+        (c"\xff\xfe", 1, 3, 0xFF, 0o100_644, 0),
     ];
     for row in rows {
         let entry = row_entry(row);
@@ -193,15 +204,15 @@ fn lookups_match() {
     let c = c_open(None).1.unwrap();
     let mut rust = Index::new().unwrap();
     let rows: &[Row<'_>] = &[
-        (c"B", 0, 1, 1, 0o100644, 0),
-        (c"a", 1, 1, 2, 0o100644, 0),
-        (c"a", 3, 1, 3, 0o100644, 0),
-        (c"b", 0, 1, 4, 0o100644, 0),
-        (c"b", 2, 1, 5, 0o100644, 0),
-        (c"d/e", 1, 1, 6, 0o100644, 0),
-        (c"d/e", 2, 1, 7, 0o100644, 0),
-        (c"d/e", 3, 1, 8, 0o100644, 0),
-        (c"z", 0, 1, 9, 0o100644, 0),
+        (c"B", 0, 1, 1, 0o100_644, 0),
+        (c"a", 1, 1, 2, 0o100_644, 0),
+        (c"a", 3, 1, 3, 0o100_644, 0),
+        (c"b", 0, 1, 4, 0o100_644, 0),
+        (c"b", 2, 1, 5, 0o100_644, 0),
+        (c"d/e", 1, 1, 6, 0o100_644, 0),
+        (c"d/e", 2, 1, 7, 0o100_644, 0),
+        (c"d/e", 3, 1, 8, 0o100_644, 0),
+        (c"z", 0, 1, 9, 0o100_644, 0),
     ];
     for row in rows {
         let entry = row_entry(row);
@@ -272,7 +283,7 @@ fn conflict_add_sequences_match() {
     init();
     let c = c_open(None).1.unwrap();
     let mut rust = Index::new().unwrap();
-    for row in [(c"f", 0, 1, 1, 0o100644, 0), (c"g", 0, 1, 2, 0o100644, 0)] {
+    for row in [(c"f", 0, 1, 1, 0o100_644, 0), (c"g", 0, 1, 2, 0o100_644, 0)] {
         let entry = row_entry(&row);
         // SAFETY: as in `add_sequences_match`.
         assert_eq!(unsafe { ffi::git_index_add(c.0, &entry.into_raw()) }, 0);
@@ -281,22 +292,26 @@ fn conflict_add_sequences_match() {
     let side = |path, byte, mode| Some(entry(path, 0, 1, byte, mode, 0));
     let steps = [
         [
-            side(c"f", 1, 0o100644),
-            side(c"f", 2, 0o100644),
-            side(c"f", 3, 0o100755),
+            side(c"f", 1, 0o100_644),
+            side(c"f", 2, 0o100_644),
+            side(c"f", 3, 0o100_755),
         ],
-        [None, side(c"f", 4, 0o120000), None],
-        [side(c"g", 5, 0o100644), None, side(c"h", 6, 0o100644)],
+        [None, side(c"f", 4, 0o120_000), None],
+        [side(c"g", 5, 0o100_644), None, side(c"h", 6, 0o100_644)],
         [None, None, None],
-        [side(c"i", 7, 0o100644), side(c"i", 8, 0o040000), None],
-        [side(c"j", 7, 0o100644), side(c".git/j", 8, 0o100644), None],
+        [side(c"i", 7, 0o100_644), side(c"i", 8, 0o040_000), None],
         [
-            side(c"k", 9, 0o160000),
-            side(c"k", 9, 0o160000),
-            side(c"k", 9, 0o160000),
+            side(c"j", 7, 0o100_644),
+            side(c".git/j", 8, 0o100_644),
+            None,
         ],
-        [None, side(c"f/x", 1, 0o100644), side(c"f/x", 2, 0o100644)],
-        [side(c"", 1, 0o100644), None, None],
+        [
+            side(c"k", 9, 0o160_000),
+            side(c"k", 9, 0o160_000),
+            side(c"k", 9, 0o160_000),
+        ],
+        [None, side(c"f/x", 1, 0o100_644), side(c"f/x", 2, 0o100_644)],
+        [side(c"", 1, 0o100_644), None, None],
     ];
     for (n, sides) in steps.iter().enumerate() {
         let lent = sides.each_ref().map(|s| s.as_ref().map(|e| e.as_ref()));
@@ -319,7 +334,7 @@ fn conflict_add_sequences_match() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn stage_bits_match() {
     for bits in 0..=u16::MAX {
-        let entry = entry(c"a", 0, 1, 0, 0o100644, 0);
+        let entry = entry(c"a", 0, 1, 0, 0o100_644, 0);
         let mut entry = entry;
         entry
             .as_mut()
@@ -328,12 +343,10 @@ fn stage_bits_match() {
         let raw = entry.into_raw();
         let ptr = &raw const raw;
         // SAFETY: a live entry, only read.
-        let (stage, conflict) = unsafe {
-            (
-                ffi::git_index_entry_stage(ptr),
-                ffi::git_index_entry_is_conflict(ptr),
-            )
-        };
+        let index_entry_stage = unsafe { ffi::git_index_entry_stage(ptr) };
+        // SAFETY: as above.
+        let (stage, conflict) =
+            unsafe { (index_entry_stage, ffi::git_index_entry_is_conflict(ptr)) };
         assert_eq!(entry.as_ref().stage().raw(), stage, "{bits:#x}");
         assert_eq!(entry.as_ref().is_conflict(), conflict != 0, "{bits:#x}");
     }
@@ -341,7 +354,7 @@ fn stage_bits_match() {
 
 /// The same conflicts and entries, `(a, o, t)` sides on each of `paths`.
 fn seed_conflicts(c: *mut ffi::git_index, rust: &mut IndexBox) {
-    let resolved = entry(c"aa-resolved", 0, 1, 1, 0o100644, 0);
+    let resolved = entry(c"aa-resolved", 0, 1, 1, 0o100_644, 0);
     // SAFETY: as in `add_sequences_match`.
     assert_eq!(unsafe { ffi::git_index_add(c, &resolved.into_raw()) }, 0);
     rust.as_mut().add(resolved.as_ref()).unwrap();
@@ -354,7 +367,7 @@ fn seed_conflicts(c: *mut ffi::git_index, rust: &mut IndexBox) {
         (c"e", 5),
     ] {
         let sides =
-            [1u8, 2, 4].map(|bit| (mask & bit != 0).then(|| entry(path, 0, 1, bit, 0o100644, 0)));
+            [1u8, 2, 4].map(|bit| (mask & bit != 0).then(|| entry(path, 0, 1, bit, 0o100_644, 0)));
         let lent = sides.each_ref().map(|s| s.as_ref().map(|e| e.as_ref()));
         let raw = sides.map(|s| s.map(IndexEntry::into_raw));
         let [a, o, t] = raw
@@ -366,7 +379,7 @@ fn seed_conflicts(c: *mut ffi::git_index, rust: &mut IndexBox) {
             .add_conflict(lent[0], lent[1], lent[2])
             .unwrap();
     }
-    let normal = entry(c"b", 0, 1, 9, 0o100644, 0);
+    let normal = entry(c"b", 0, 1, 9, 0o100_644, 0);
     // SAFETY: as above.
     assert_eq!(unsafe { ffi::git_index_add(c, &normal.into_raw()) }, 0);
     rust.as_mut().add(normal.as_ref()).unwrap();
@@ -385,7 +398,7 @@ fn conflict_iteration_matches() {
         }
         let mut raw = ptr::null_mut();
         // SAFETY: a writable slot and a live index, unchanged until the cursor is freed.
-        let rc = unsafe { ffi::git_index_conflict_iterator_new(&mut raw, c.0) };
+        let rc = unsafe { ffi::git_index_conflict_iterator_new(&raw mut raw, c.0) };
         assert_eq!(rc, 0);
         let mut cursor = ConflictIterator::new(rust.as_mut()).unwrap();
         let mut steps = cursor.as_mut();
@@ -420,12 +433,12 @@ fn snapshot_iteration_matches() {
     let rust: IndexArc = rust.into();
     let mut raw = ptr::null_mut();
     // SAFETY: a writable slot and a live index; C counts a reference of its own.
-    assert_eq!(unsafe { ffi::git_index_iterator_new(&mut raw, c.0) }, 0);
+    assert_eq!(unsafe { ffi::git_index_iterator_new(&raw mut raw, c.0) }, 0);
     let mut iterator = IndexIterator::new(&rust).unwrap();
     let c_next = || {
         let mut out = ptr::null();
         // SAFETY: a live iterator; `out` is written only on success, and copied at once.
-        let rc = unsafe { ffi::git_index_iterator_next(&mut out, raw) };
+        let rc = unsafe { ffi::git_index_iterator_next(&raw mut out, raw) };
         (rc == 0).then(|| c_fields(out).unwrap())
     };
     for step in 0..14 {
@@ -435,15 +448,15 @@ fn snapshot_iteration_matches() {
         if step == 2 {
             // The same changes to both indexes, behind the snapshots.
             for index in [c.0, rust.as_c_ptr()] {
-                let replaced = entry(c"aa-resolved", 0, 1, 0x55, 0o100755, 0);
-                let added = entry(c"zz", 0, 1, 1, 0o100644, 0);
+                let replaced = entry(c"aa-resolved", 0, 1, 0x55, 0o100_755, 0);
+                let added = entry(c"zz", 0, 1, 1, 0o100_644, 0);
                 // SAFETY: a live index whose entries no borrow reads (the snapshots
                 // copy or own theirs); C copies each entry and frees removed ones late.
-                unsafe {
-                    assert_eq!(ffi::git_index_add(index, &replaced.into_raw()), 0);
-                    assert_eq!(ffi::git_index_add(index, &added.into_raw()), 0);
-                    assert_eq!(ffi::git_index_remove(index, c"e".as_ptr(), 3), 0);
-                }
+                unsafe { assert_eq!(ffi::git_index_add(index, &replaced.into_raw()), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_index_add(index, &added.into_raw()), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_index_remove(index, c"e".as_ptr(), 3), 0) };
             }
         }
     }
@@ -473,7 +486,7 @@ impl Repo {
         let mut out = ptr::null_mut();
         let repo = self.repo.as_ref().unwrap().as_c_ptr();
         // SAFETY: a writable slot and a live repository.
-        let rc = unsafe { ffi::git_repository_index(&mut out, repo) };
+        let rc = unsafe { ffi::git_repository_index(&raw mut out, repo) };
         assert_eq!(rc, 0);
         CIndex(out)
     }
@@ -484,7 +497,7 @@ impl Repo {
     fn index_box(&self) -> IndexBox {
         let raw = self.c_index();
         let ptr = raw.0;
-        core::mem::forget(raw);
+        let _ = core::mem::ManuallyDrop::new(raw);
         // SAFETY: a counted reference, released once by `git_index_free`; see above.
         unsafe { IndexBox::from_c(ptr) }.unwrap()
     }
@@ -538,11 +551,15 @@ impl Drop for Repo {
 /// `add_from_buffer` refuses (a unit test holds that regression).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::used_underscore_binding,
+    reason = "the binding is held for its drop, and read here on purpose"
+)]
 fn add_from_buffer_sequences_match() {
     init();
     let c = c_open(None).1.unwrap();
     let mut rust = Index::new().unwrap();
-    let file = entry(c"f", 0, 1, 1, 0o100644, 0);
+    let file = entry(c"f", 0, 1, 1, 0o100_644, 0);
     clear();
     // SAFETY: a live index; `file` and the bytes are read for the call.
     let expected = c_status(unsafe {
@@ -560,14 +577,16 @@ fn add_from_buffer_sequences_match() {
         let [c_id, rust_id] =
             [&c_repo, &rust_repo].map(|repo| blob::create_from_buffer(repo.repo(), &[n]).unwrap());
         assert_eq!(c_id.as_ref().id(), rust_id.as_ref().id());
-        let mut side = entry(c"f", 0, 1, n, 0o100644, 0);
+        let mut side = entry(c"f", 0, 1, n, 0o100_644, 0);
         side.as_mut().set_id(rust_id.as_ref());
         side
     });
     let lent: Vec<_> = sides.iter().map(|s| s.as_ref()).collect();
     let raw: Vec<_> = sides.iter().map(|s| s.into_raw()).collect();
     // SAFETY: a live index; each side a live entry naming an object the repository has.
-    let rc = unsafe { ffi::git_index_conflict_add(c.0, &raw[0], &raw[1], &raw[2]) };
+    let rc = unsafe {
+        ffi::git_index_conflict_add(c.0, &raw const raw[0], &raw const raw[1], &raw const raw[2])
+    };
     assert_eq!(rc, 0);
     rust.as_mut()
         .add_conflict(Some(lent[0]), Some(lent[1]), Some(lent[2]))
@@ -575,16 +594,16 @@ fn add_from_buffer_sequences_match() {
     assert_same(c.0, &rust.as_mut(), "conflicted");
     let big = vec![7u8; 70_000];
     let steps: &[(Row<'_>, &[u8])] = &[
-        ((c"f", 0, 1, 0, 0o100644, 0), b"resolved"),
-        ((c"f", 0, 1, 0, 0o100755, 0), b"again"),
-        ((c"g", 0, 2, 9, 0o120000, 0x2000), b"target"),
-        ((c"h", 0, 1, 0, 0o100644, 0), b""),
-        ((c"h", 0, 1, 0, 0o100644, 0), &big),
-        ((c"i", 0, 1, 0, 0o160000, 0), b"x"),
-        ((c"i", 0, 1, 0, 0o040000, 0), b"x"),
-        ((c".git/i", 0, 1, 0, 0o100644, 0), b"x"),
-        ((c"", 0, 1, 0, 0o100644, 0), b"x"),
-        ((c"g/h", 0, 1, 0, 0o100644, 0), b"x"),
+        ((c"f", 0, 1, 0, 0o100_644, 0), b"resolved"),
+        ((c"f", 0, 1, 0, 0o100_755, 0), b"again"),
+        ((c"g", 0, 2, 9, 0o120_000, 0x2000), b"target"),
+        ((c"h", 0, 1, 0, 0o100_644, 0), b""),
+        ((c"h", 0, 1, 0, 0o100_644, 0), &big),
+        ((c"i", 0, 1, 0, 0o160_000, 0), b"x"),
+        ((c"i", 0, 1, 0, 0o040_000, 0), b"x"),
+        ((c".git/i", 0, 1, 0, 0o100_644, 0), b"x"),
+        ((c"", 0, 1, 0, 0o100_644, 0), b"x"),
+        ((c"g/h", 0, 1, 0, 0o100_644, 0), b"x"),
     ];
     for (row, data) in steps {
         let entry = row_entry(row);
@@ -605,7 +624,7 @@ fn add_from_buffer_sequences_match() {
     for repo in [&c_repo, &rust_repo] {
         std::fs::write(repo._dir.0.join(".git/objects").join(&hex[..2]), b"").unwrap();
     }
-    let stuck = entry(c"stuck", 0, 1, 0, 0o100644, 0);
+    let stuck = entry(c"stuck", 0, 1, 0, 0o100_644, 0);
     clear();
     // SAFETY: as above.
     let expected = c_status(unsafe {
@@ -638,13 +657,13 @@ fn conflict_stage_buffers_fail_as_c_before_adding() {
     let (c_repo, rust_repo) = (Repo::new("entries-stage-c"), Repo::new("entries-stage-r"));
     let owned = || (c_repo.c_index(), rust_repo.index_box());
     let cases: &[BufferCase<'_>] = &[
-        ("unowned file", &unowned, 0o100644, b"x"),
-        ("unowned link", &unowned, 0o120000, b"x"),
-        ("unowned tree", &unowned, 0o040000, b"x"),
-        ("unowned oversized", &unowned, 0o100644, &big),
-        ("owned submodule", &owned, 0o160000, b"x"),
-        ("owned tree", &owned, 0o040000, b"x"),
-        ("owned oversized", &owned, 0o100755, &big),
+        ("unowned file", &unowned, 0o100_644, b"x"),
+        ("unowned link", &unowned, 0o120_000, b"x"),
+        ("unowned tree", &unowned, 0o040_000, b"x"),
+        ("unowned oversized", &unowned, 0o100_644, &big),
+        ("owned submodule", &owned, 0o160_000, b"x"),
+        ("owned tree", &owned, 0o040_000, b"x"),
+        ("owned oversized", &owned, 0o100_755, &big),
     ];
     for (case, indexes, mode, data) in cases {
         let (c, mut rust) = indexes();
@@ -681,13 +700,13 @@ fn owned_additions_match() {
     let (c_repo, rust_repo) = (Repo::new("entries-owned-c"), Repo::new("entries-owned-r"));
     let c = c_repo.c_index();
     let mut rust = rust_repo.index_box();
-    let mut present = entry(c"p", 0, 1, 0, 0o100644, 0);
+    let mut present = entry(c"p", 0, 1, 0, 0o100_644, 0);
     for repo in [&c_repo, &rust_repo] {
         let id = blob::create_from_buffer(repo.repo(), b"present").unwrap();
         present.as_mut().set_id(id.as_ref());
     }
-    let missing = entry(c"p", 0, 1, 0xEE, 0o100644, 0);
-    let submodule = entry(c"s", 0, 1, 0xEE, 0o160000, 0);
+    let missing = entry(c"p", 0, 1, 0xEE, 0o100_644, 0);
+    let submodule = entry(c"s", 0, 1, 0xEE, 0o160_000, 0);
     for step in 0..4 {
         let (a, o, t) = match step {
             0 => (Some(present.as_ref()), Some(missing.as_ref()), None),
@@ -732,6 +751,10 @@ fn owned_additions_match() {
 /// trees of another object id type.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::used_underscore_binding,
+    reason = "the binding is held for its drop, and read here on purpose"
+)]
 fn read_tree_sequences_match() {
     init();
     let (c_repo, rust_repo) = (Repo::new("entries-tree-c"), Repo::new("entries-tree-r"));
@@ -744,8 +767,8 @@ fn read_tree_sequences_match() {
         &["a", "b", "d/x", "e/z"],
     ];
     let seed = [
-        entry(c"c", 2, 1, 1, 0o100644, 0),
-        entry(c"a", 0, 1, 1, 0o100644, 0),
+        entry(c"c", 2, 1, 1, 0o100_644, 0),
+        entry(c"a", 0, 1, 1, 0o100_644, 0),
     ];
     for row in &seed {
         // SAFETY: as in `add_sequences_match`.
@@ -764,13 +787,16 @@ fn read_tree_sequences_match() {
         // New metadata on the first entry, kept by the next read when it matches.
         if n == 0 {
             for index in [c.0, rust.as_c_ptr()] {
-                // SAFETY: a live index lending no entry; the entry is copied, changed and
-                // added back before any other call.
-                unsafe {
-                    let mut first = *ffi::git_index_get_byindex(index, 0);
+                {
+                    // SAFETY: a live index lending no entry.
+                    let entry = unsafe { ffi::git_index_get_byindex(index, 0) };
+                    // SAFETY: as above; the entry is copied, changed and added back before
+                    // any other call.
+                    let mut first = unsafe { *entry };
                     first.file_size = 77;
                     first.ino = 5;
-                    assert_eq!(ffi::git_index_add(index, &first), 0);
+                    // SAFETY: as above.
+                    unsafe { assert_eq!(ffi::git_index_add(index, &raw const first), 0) };
                 }
             }
         }
@@ -795,7 +821,7 @@ fn read_tree_sequences_match() {
     // A SHA-256 repository's trees, into these SHA-1 indexes and SHA-256 ones.
     let sha256 = [0, 1].map(|n| {
         let dir = Scratch::new(&format!("entries-tree-256-{n}"));
-        let mut opts = libgit2::libgit2::repository::repository::InitOptions::new();
+        let mut opts = InitOptions::new();
         opts.as_mut().set_oid_type(Some(OidType::Sha256));
         let repo = Repository::init_ext(&c_path(&dir.0), opts.as_mut()).unwrap();
         Repo {
@@ -809,7 +835,7 @@ fn read_tree_sequences_match() {
         let mut out = ptr::null_mut();
         let raw = opts.into_raw();
         // SAFETY: a writable slot and live options of this version, read for the call.
-        let rc = unsafe { ffi::git_index_new_ext(&mut out, &raw) };
+        let rc = unsafe { ffi::git_index_new_ext(&raw mut out, &raw const raw) };
         assert_eq!(rc, 0);
         CIndex(out)
     };
@@ -827,7 +853,7 @@ fn read_tree_sequences_match() {
 
 /// Reading a tree with an entry whose name an index cannot hold (`.git`) fails alike,
 /// leaving both indexes as they were. libgit2 leaks the entry's joined path
-/// (`read_tree_cb`) on either side, so the test runs in a child with LeakSanitizer off.
+/// (`read_tree_cb`) on either side, so the test runs in a child with `LeakSanitizer` off.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn refused_tree_entry_names_match() {
@@ -859,7 +885,7 @@ fn refused_tree_entry_names_match() {
                 // call.
                 let rc = unsafe {
                     ffi::git_odb_write(
-                        &mut tree,
+                        &raw mut tree,
                         odb.as_c_ptr(),
                         raw.as_ptr().cast(),
                         raw.len(),

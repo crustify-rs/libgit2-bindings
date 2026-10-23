@@ -6,7 +6,7 @@
 //! repository, and allocation failures after libgit2 built the commit. Each result is
 //! released in every order its repository and references allow, on this thread or
 //! another while its commit's other references (the repository's object cache) are in
-//! use (ASan: overflow, use after free, double free; LSan: leak; TSan: the commit's
+//! use (`ASan`: overflow, use after free, double free; `LSan`: leak; `TSan`: the commit's
 //! reference count).
 //!
 //! Outliving the repository, sharing an owner across threads (it is not `Sync`),
@@ -44,6 +44,10 @@ fn oid(id: &ffi::git_oid) -> Oid {
 }
 
 /// Every id type byte a caller can build: the named ones and unnamed ones around them.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the named id types are 1 and 2, and a const cannot call try_from"
+)]
 const KINDS: [u8; 5] = [
     0,
     ffi::GIT_OID_SHA1 as u8,
@@ -68,11 +72,11 @@ mod lookup {
                 for kind in KINDS {
                     match AnnotatedCommit::lookup(repo.repo(), retyped(id, kind).as_ref()) {
                         Ok(commit) => {
-                            assert_eq!(kind, own as u8);
+                            assert_eq!(kind, u8::try_from(own).unwrap());
                             assert_eq!(read(&commit), (hex(id), None));
                             held.push(commit);
                         }
-                        Err(e) if kind != own as u8 => {
+                        Err(e) if kind != u8::try_from(own).unwrap() => {
                             assert_eq!(e.class(), Some(ErrorClass::Invalid));
                             assert_eq!(
                                 e.message(),
@@ -213,7 +217,7 @@ mod from_ref {
 
     /// The copy before the name's, the description's, fails inside libgit2's
     /// `annotated_commit_init`, which reports the failure with nothing in the out slot
-    /// (and leaks the half-built commit, so LeakSanitizer is off in this child): the
+    /// (and leaks the half-built commit, so `LeakSanitizer` is off in this child): the
     /// wrapper adopts nothing and reports the error, and the next call succeeds.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -261,7 +265,10 @@ mod from_fetchhead {
                         );
                         match result {
                             Ok(commit) => {
-                                assert!(std::ptr::eq(id, &repo.first) && kind == own as u8);
+                                assert!(
+                                    std::ptr::eq(id, &raw const repo.first)
+                                        && kind == u8::try_from(own).unwrap()
+                                );
                                 assert_eq!(
                                     read(&commit),
                                     (hex(id), branch.to_str().ok().map(Into::into))

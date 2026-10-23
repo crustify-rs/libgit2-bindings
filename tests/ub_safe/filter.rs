@@ -2,7 +2,7 @@
 //!
 //! `FilterListBox` releases through `git_filter_list_free`, which hands each filter's
 //! state to its `cleanup` (libgit2's `crlf` filter keeps an allocation per list): every
-//! list is freed once (ASan flags a double free, LSan a leak), whatever constructor built
+//! list is freed once (`ASan` flags a double free, `LSan` a leak), whatever constructor built
 //! it and whatever order the owners drop in, and always before the repository it
 //! borrows (the borrow enforces it; outliving it, or reaching the repository
 //! exclusively meanwhile, does not compile: `compile_fail/filter_list_*` and the
@@ -11,16 +11,16 @@
 //! The list keeps a bare pointer to its repository, which libgit2's filters read while
 //! the list is applied (`crlf` reads the repository's configuration): applying a list
 //! between Rust's own shared reborrows of the repository, which fill its caches
-//! through the same object, must not conflict (BorrowSanitizer; the apply is the
+//! through the same object, must not conflict (`BorrowSanitizer`; the apply is the
 //! fixture's stand-in for the list's apply wrapper).
 //!
 //! Lists are neither `Send` nor `Sync`, so nothing here crosses threads with one;
 //! several threads each loading and dropping lists of their own repository exercise
-//! libgit2's filter registry (under its read lock) and allocator under TSan. libgit2
+//! libgit2's filter registry (under its read lock) and allocator under `TSan`. libgit2
 //! marks a filter initialised under that *read* lock the first time a list selects it;
 //! the constructors initialise the built-in filters once, before their first load (see
 //! `filter.rs`'s module docs), so threads loading their first lists at once in a fresh
-//! process do not race (TSan). libgit2's own routines that load lists internally (the
+//! process do not race (`TSan`). libgit2's own routines that load lists internally (the
 //! other modules' fixtures add files to an index through raw calls) do not go through
 //! that, so each test here runs alone in a child process.
 //!
@@ -30,9 +30,9 @@
 //! where the `crustify-probe` attribute is set) records that id from its `check` and
 //! keeps a payload of its own in the list, which its `cleanup` frees: the tests drop
 //! the blob (and, for a blob of another repository, that repository) before the list,
-//! so a list that kept the blob would read freed memory on its free (ASan), and a list
-//! freed without its filters' cleanup leaks the payload (LSan). An object of another
-//! type is refused before libgit2 reads it as a blob (ASan would flag the read of a
+//! so a list that kept the blob would read freed memory on its free (`ASan`), and a list
+//! freed without its filters' cleanup leaks the payload (`LSan`). An object of another
+//! type is refused before libgit2 reads it as a blob (`ASan` would flag the read of a
 //! smaller object), and the edge cases recur with a blob: no filter for the path (no
 //! list), a failing load, and an absolute path.
 
@@ -62,7 +62,7 @@ impl Workdir {
         init();
         let path =
             std::env::temp_dir().join(format!("crustify-filter-ub-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
         let repo = Repository::init(&c_path, false).unwrap();
         std::fs::write(
@@ -93,7 +93,7 @@ impl Drop for Workdir {
     fn drop(&mut self) {
         // Every list borrowed the fixture, so is gone by now.
         drop(self.repo.take());
-        let _ = std::fs::remove_dir_all(&self.path);
+        drop(std::fs::remove_dir_all(&self.path));
     }
 }
 
@@ -120,8 +120,8 @@ fn handles_reborrow_and_drop_once() {
             assert_eq!(shared(r), shared(copy));
             assert_eq!(exclusive(list.as_mut()), "FilterList { .. }");
             let mut m = list.as_mut();
-            let _ = exclusive(m.as_mut());
-            let _ = exclusive(m);
+            drop(exclusive(m.as_mut()));
+            drop(exclusive(m));
             assert_eq!(filter_count(&list), 2);
             drop(list);
         },
@@ -241,6 +241,10 @@ fn failed_loads_build_nothing() {
 /// owner is covariant in `'r`.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::items_after_statements,
+    reason = "each helper item sits beside the steps that use it"
+)]
 fn owners_shorten_their_repository_borrow() {
     isolated(
         concat!(module_path!(), "::owners_shorten_their_repository_borrow"),
@@ -258,7 +262,7 @@ fn owners_shorten_their_repository_borrow() {
 /// The list keeps a pointer to its repository, through which `crlf` reads the
 /// repository's configuration while it applies; Rust's shared reborrows of the
 /// repository in between reach the same object and fill its caches (attributes,
-/// configuration) through it. Nothing may conflict (BorrowSanitizer), and every
+/// configuration) through it. Nothing may conflict (`BorrowSanitizer`), and every
 /// application sees the same repository.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -371,7 +375,7 @@ mod with_blob {
             register();
             let wd = Self::make(tag);
             drop(FilterList::load(wd.repo(), c"a.probe", ffi::GIT_FILTER_TO_ODB, 0).unwrap());
-            let _ = seen();
+            drop(seen());
             wd
         }
 
@@ -381,7 +385,7 @@ mod with_blob {
                 "crustify-filter-ub-blob-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
             let repo = Repository::init(&c_path, false).unwrap();
             std::fs::write(
@@ -410,7 +414,7 @@ mod with_blob {
     impl Drop for Workdir {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -431,7 +435,7 @@ mod with_blob {
             ),
             || {
                 let wd = Workdir::new("blob-freed");
-                let _ = seen();
+                drop(seen());
                 for path in [c"a.probe", c"a.id"] {
                     for mode in [ffi::GIT_FILTER_TO_WORKTREE, ffi::GIT_FILTER_TO_ODB] {
                         let (blob, id) = wd.blob(b"$Id$\n");
@@ -466,7 +470,7 @@ mod with_blob {
             || {
                 let wd = Workdir::new("blob-own");
                 let other = Workdir::new("blob-other");
-                let _ = seen();
+                drop(seen());
                 let (blob, id) = other.blob(b"elsewhere\n");
                 let list = FilterList::load_with_blob(
                     wd.repo(),
@@ -515,7 +519,7 @@ mod with_blob {
             ),
             || {
                 let wd = Workdir::new("ext-blob-freed");
-                let _ = seen();
+                drop(seen());
                 let opts = ffi::git_filter_options {
                     version: 1,
                     flags: ffi::GIT_FILTER_NO_SYSTEM_ATTRIBUTES,
@@ -553,7 +557,7 @@ mod with_blob {
             ),
             || {
                 let wd = Workdir::new("blob-edges");
-                let _ = seen();
+                drop(seen());
                 let (blob, _) = wd.blob(b"x");
                 let head = ffi::git_filter_options {
                     version: 1,
@@ -619,7 +623,7 @@ mod with_blob {
     fn only_blobs_are_read() {
         isolated(concat!(module_path!(), "::only_blobs_are_read"), || {
             let wd = Workdir::new("not-blobs");
-            let _ = seen();
+            drop(seen());
             let path = std::ffi::CString::new(format!(
                 "{}/c/tests/resources/testrepo.git",
                 env!("CARGO_MANIFEST_DIR")
@@ -662,7 +666,7 @@ mod with_blob {
                     ));
                     assert_eq!(error.message(), c"the object is not a blob");
                 }
-                let _ = object_view(other);
+                drop(object_view(other));
             }
             assert_eq!(seen(), (vec![], 0));
             // A blob of that repository is taken.

@@ -19,8 +19,8 @@
 //! - a line whose replaced email is empty (`Name <>`) makes libgit2 fail the whole buffer with a
 //!   failed argument assertion and leak the entry it began; the wrapper skips the line, as libgit2
 //!   skips every other line that is not an entry. C is not run on such lines here (the leak fails
-//!   LeakSanitizer); the Rust result is compared with C's on the same buffer without them, and the
-//!   classification itself with C's refusals in the crate's unit tests.
+//!   `LeakSanitizer`); the Rust result is compared with C's on the same buffer without them, and
+//!   the classification itself with C's refusals in the crate's unit tests.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
@@ -45,7 +45,9 @@ type Record = (c_int, Option<(String, String)>, Option<(c_int, String)>);
 /// The calling thread's last error, read through C.
 fn c_error() -> (c_int, String) {
     // SAFETY: no arguments; libgit2 is initialised, so it returns a live error.
-    let error = unsafe { &*ffi::git_error_last() };
+    let error = unsafe { ffi::git_error_last() };
+    // SAFETY: as above, non-NULL and live.
+    let error = unsafe { &*error };
     // SAFETY: a libgit2 error's message is NUL-terminated, live until the next call.
     let message = unsafe { CStr::from_ptr(error.message) };
     (error.klass, message.to_string_lossy().into_owned())
@@ -103,8 +105,8 @@ fn resolve_all(mailmap: *const ffi::git_mailmap) -> Vec<Record> {
             // reads it; `name` and `email` are NUL-terminated.
             let rc = unsafe {
                 ffi::git_mailmap_resolve(
-                    &mut real_name,
-                    &mut real_email,
+                    &raw mut real_name,
+                    &raw mut real_email,
                     mailmap,
                     name.as_ptr(),
                     email.as_ptr(),
@@ -116,9 +118,11 @@ fn resolve_all(mailmap: *const ffi::git_mailmap) -> Vec<Record> {
             // SAFETY: on success both point at `name`, `email` or an entry's strings,
             // NUL-terminated and live until `mailmap` or the probe is released, after
             // this copy.
+            let cstr = unsafe { CStr::from_ptr(real_name) };
+            // SAFETY: as above.
             let resolved = unsafe {
                 (
-                    CStr::from_ptr(real_name).to_string_lossy().into_owned(),
+                    cstr.to_string_lossy().into_owned(),
                     CStr::from_ptr(real_email).to_string_lossy().into_owned(),
                 )
             };
@@ -191,7 +195,7 @@ fn c_from_buffer(buf: &[u8]) -> (c_int, Option<(c_int, String)>, Vec<Vec<Record>
     };
     // SAFETY: a writable slot; `data` addresses `buf.len()` readable bytes (one, for an
     // empty buffer).
-    let rc = unsafe { ffi::git_mailmap_from_buffer(&mut out, data, buf.len()) };
+    let rc = unsafe { ffi::git_mailmap_from_buffer(&raw mut out, data, buf.len()) };
     if rc < 0 {
         assert!(out.is_null());
         return (rc, Some(c_error()), Vec::new());
@@ -203,6 +207,10 @@ fn c_from_buffer(buf: &[u8]) -> (c_int, Option<(c_int, String)>, Vec<Vec<Record>
 }
 
 /// The steps on a Rust-built mailmap, which is then dropped.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the helper consumes what it reports, as its callers hand it over"
+)]
 fn rust_steps(mailmap: MailmapBox) -> Vec<Vec<Record>> {
     add_steps(mailmap.as_c_ptr())
 }
@@ -226,7 +234,7 @@ fn generated_buffers() -> Vec<Vec<u8>> {
         seed ^= seed << 13;
         seed ^= seed >> 7;
         seed ^= seed << 17;
-        (seed % n as u64) as usize
+        usize::try_from(seed % n as u64).unwrap()
     };
     (0..240)
         .map(|_| {
@@ -250,7 +258,7 @@ fn new_mailmaps_match() {
     init();
     let mut c_mailmap = ptr::null_mut();
     // SAFETY: a writable slot.
-    let c_rc = unsafe { ffi::git_mailmap_new(&mut c_mailmap) };
+    let c_rc = unsafe { ffi::git_mailmap_new(&raw mut c_mailmap) };
     let rust = Mailmap::new().map(rust_steps);
     assert_eq!(c_rc, 0);
     let c_steps = add_steps(c_mailmap);
@@ -307,9 +315,12 @@ fn nul_bytes_fail_on_both_sides() {
         assert_eq!(c_rc, -1);
         assert_eq!(
             c_err,
-            Some((ffi::GIT_ERROR_NONE as c_int, "no error".to_owned()))
+            Some((ffi::GIT_ERROR_NONE.cast_signed(), "no error".to_owned()))
         );
-        assert!(c_steps.is_empty());
+        assert_eq!(
+            c_steps,
+            Vec::<Vec<(i32, Option<(String, String)>, Option<(i32, String)>)>>::new()
+        );
         let error = Mailmap::from_buffer(buf).unwrap_err();
         assert_eq!(error.class(), Some(ErrorClass::Invalid));
         assert_eq!(error.message(), c"mailmap buffer contains a NUL byte");
@@ -386,10 +397,10 @@ fn c_from_repository(
     open: impl FnOnce(*mut *mut ffi::git_repository) -> c_int,
 ) -> Vec<Vec<Record>> {
     let mut repo = ptr::null_mut();
-    assert_eq!(open(&mut repo), 0);
+    assert_eq!(open(&raw mut repo), 0);
     let mut out = ptr::null_mut();
     // SAFETY: a writable slot and an open repository.
-    let rc = unsafe { ffi::git_mailmap_from_repository(&mut out, repo) };
+    let rc = unsafe { ffi::git_mailmap_from_repository(&raw mut out, repo) };
     assert_eq!(rc, 0);
     // SAFETY: opened above, freed once; the mailmap keeps nothing of it.
     unsafe { ffi::git_repository_free(repo) };
@@ -404,7 +415,7 @@ fn c_from_repository(
 fn repository_mailmaps_match() {
     init();
     let root = std::env::temp_dir().join(format!("crustify-equiv-mailmap-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
+    drop(fs::remove_dir_all(&root));
     fs::create_dir_all(&root).unwrap();
     let override_file = root.join("file_override");
     fs::write(
@@ -442,13 +453,12 @@ fn repository_mailmaps_match() {
             let (r_work, r_git) = mailmap_repo(&root, &format!("rust-{bare}"), i, config);
             let c_steps = c_from_repository(|out| {
                 let path = c_path(if bare { &c_git } else { &c_work });
-                // SAFETY: a writable slot and a NUL-terminated path.
-                unsafe {
-                    if bare {
-                        ffi::git_repository_open_bare(out, path.as_ptr())
-                    } else {
-                        ffi::git_repository_open(out, path.as_ptr())
-                    }
+                if bare {
+                    // SAFETY: a writable slot and a NUL-terminated path.
+                    unsafe { ffi::git_repository_open_bare(out, path.as_ptr()) }
+                } else {
+                    // SAFETY: as above.
+                    unsafe { ffi::git_repository_open(out, path.as_ptr()) }
                 }
             });
             let repo = if bare {
@@ -473,7 +483,7 @@ fn repository_mailmaps_match() {
     let mailmap = Mailmap::from_repository(repo.as_ref()).unwrap();
     assert_eq!(mapped(&c_steps), 0);
     assert_eq!(rust_steps(mailmap), c_steps);
-    let _ = fs::remove_dir_all(&root);
+    drop(fs::remove_dir_all(&root));
 }
 
 /// Equivalence of `MailmapMut::add_entry` and `MailmapRef::resolve` with
@@ -561,7 +571,9 @@ mod entries {
         real_email: *const c_char,
     ) -> Resolved {
         // SAFETY: both point at the probe's strings or at the mailmap's, live here.
-        let (n, e) = unsafe { (CStr::from_ptr(real_name), CStr::from_ptr(real_email)) };
+        let cstr = unsafe { CStr::from_ptr(real_name) };
+        // SAFETY: as above.
+        let (n, e) = unsafe { (cstr, CStr::from_ptr(real_email)) };
         (
             n.to_string_lossy().into_owned(),
             e.to_string_lossy().into_owned(),
@@ -577,7 +589,13 @@ mod entries {
                 let (mut n, mut e) = (ptr::null(), ptr::null());
                 // SAFETY: two writable slots, a live mailmap, NUL-terminated probes.
                 let rc = unsafe {
-                    ffi::git_mailmap_resolve(&mut n, &mut e, mailmap, name.as_ptr(), email.as_ptr())
+                    ffi::git_mailmap_resolve(
+                        &raw mut n,
+                        &raw mut e,
+                        mailmap,
+                        name.as_ptr(),
+                        email.as_ptr(),
+                    )
                 };
                 assert_eq!(rc, 0);
                 record(name, email, n, e)
@@ -604,7 +622,7 @@ mod entries {
         let mut c_map = ptr::null_mut();
         // SAFETY: a writable slot and a live buffer.
         let rc = unsafe {
-            ffi::git_mailmap_from_buffer(&mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
+            ffi::git_mailmap_from_buffer(&raw mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
         };
         assert_eq!(rc, 0);
         let mut rust_map = Mailmap::from_buffer(MAILMAP).unwrap();
@@ -663,7 +681,7 @@ mod entries {
 /// [`MailmapRef::resolve_signature`]: libgit2::libgit2::object::mailmap::MailmapRef::resolve_signature
 /// [`SignatureView`]: libgit2::libgit2::core::types::SignatureView
 mod signatures {
-    use std::ffi::{CStr, c_char, c_int};
+    use std::ffi::{CStr, c_int};
     use std::ptr;
 
     use libgit2::ffi;
@@ -707,7 +725,7 @@ mod signatures {
             .map(|line| {
                 let mut sig = ptr::null_mut();
                 // SAFETY: a writable slot and a NUL-terminated line.
-                let rc = unsafe { ffi::git_signature_from_buffer(&mut sig, line.as_ptr()) };
+                let rc = unsafe { ffi::git_signature_from_buffer(&raw mut sig, line.as_ptr()) };
                 assert_eq!(rc, 0, "{line:?}");
                 sig
             })
@@ -723,7 +741,7 @@ mod signatures {
                 when: ffi::git_time {
                     time,
                     offset,
-                    sign: (if offset < 0 { b'-' } else { b'+' }) as c_char,
+                    sign: (if offset < 0 { b'-' } else { b'+' }).cast_signed(),
                 },
             })
             .collect()
@@ -732,22 +750,28 @@ mod signatures {
     fn c_resolve(map: *const ffi::git_mailmap, sig: *const ffi::git_signature) -> Resolved {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot, a live mailmap and a live signature with both strings.
-        let rc = unsafe { ffi::git_mailmap_resolve_signature(&mut out, map, sig) };
+        let rc = unsafe { ffi::git_mailmap_resolve_signature(&raw mut out, map, sig) };
         if rc < 0 {
             let (class, message) = c_error();
             return Err((rc, class, message));
         }
-        // SAFETY: on success a fresh signature, read and freed once.
-        unsafe {
-            let r = &*out;
-            let resolved = (
-                CStr::from_ptr(r.name).to_bytes().to_vec(),
-                CStr::from_ptr(r.email).to_bytes().to_vec(),
-                r.when.time,
-                r.when.offset,
-                r.when.sign as u8,
-            );
-            ffi::git_signature_free(out);
+        {
+            // SAFETY: on success a fresh signature, read and freed once.
+            let r = unsafe { &*out };
+            // SAFETY: as above.
+            let cstr = unsafe { CStr::from_ptr(r.name) };
+            // SAFETY: as above.
+            let resolved = unsafe {
+                (
+                    cstr.to_bytes().to_vec(),
+                    CStr::from_ptr(r.email).to_bytes().to_vec(),
+                    r.when.time,
+                    r.when.offset,
+                    r.when.sign.cast_unsigned(),
+                )
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_signature_free(out) };
             Ok(resolved)
         }
     }
@@ -779,7 +803,7 @@ mod signatures {
         let mut c_map = ptr::null_mut();
         // SAFETY: a writable slot and a live buffer.
         let rc = unsafe {
-            ffi::git_mailmap_from_buffer(&mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
+            ffi::git_mailmap_from_buffer(&raw mut c_map, MAILMAP.as_ptr().cast(), MAILMAP.len())
         };
         assert_eq!(rc, 0);
         let mut rust_map = Mailmap::from_buffer(MAILMAP).unwrap();

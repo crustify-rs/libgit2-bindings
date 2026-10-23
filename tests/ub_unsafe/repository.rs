@@ -6,9 +6,9 @@
 //! for a repository of the same type declared before (and so dropped after) the one
 //! installing it, and no libgit2 routine is running on the repository. Each refdb is
 //! released exactly once, by whichever of the arc and the repository lets go last, a
-//! replaced one included (ASan: use after free, double free; LSan: leak), and the
+//! replaced one included (`ASan`: use after free, double free; `LSan`: leak), and the
 //! reference operations of the installing repository reach the refdb's own repository
-//! only while it lives (ASan). Every test calls libgit2, so nothing here runs under
+//! only while it lives (`ASan`). Every test calls libgit2, so nothing here runs under
 //! Miri.
 
 use std::ffi::CString;
@@ -28,7 +28,7 @@ impl Scratch {
             "crustify-repository-ub-unsafe-{}-{tag}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -36,7 +36,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        drop(fs::remove_dir_all(&self.0));
     }
 }
 
@@ -102,7 +102,7 @@ fn set_refdb_installs_the_repository_s_own_refdbs() {
 }
 
 /// The body, alone in a child process: libgit2 writes the reflog through
-/// `git_signature_now`, whose glibc `tzset` TSan reports against any concurrent caller.
+/// `git_signature_now`, whose glibc `tzset` `TSan` reports against any concurrent caller.
 fn set_refdb_installs_the_repository_s_own_refdbs_alone() {
     let scratch = Scratch::new("own");
     let repo = testrepo(&scratch, "repo");
@@ -146,7 +146,7 @@ fn set_refdb_installs_the_refdb_of_an_outliving_repository() {
 }
 
 /// The body, alone in a child process: libgit2 writes the reflog through
-/// `git_signature_now`, whose glibc `tzset` TSan reports against any concurrent caller.
+/// `git_signature_now`, whose glibc `tzset` `TSan` reports against any concurrent caller.
 fn set_refdb_installs_the_refdb_of_an_outliving_repository_alone() {
     let scratch = Scratch::new("outliving");
     // Declared first, so dropped last.

@@ -71,7 +71,7 @@ fn names_survive_inputs_and_reborrow_before_clear() {
     assert_eq!(saved.as_c_str(), c"\xff");
 }
 
-/// The reader can produce all-null and single-name records that name_add cannot.
+/// The reader can produce all-null and single-name records that `name_add` cannot.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn names_from_file_support_all_nullable_fields() {
@@ -86,7 +86,7 @@ fn names_from_file_support_all_nullable_fields() {
             names.push(0);
         }
         let mut bytes = b"DIRC\0\0\0\x02\0\0\0\0NAME".to_vec();
-        bytes.extend_from_slice(&(names.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&u32::try_from(names.len()).unwrap().to_be_bytes());
         bytes.extend(names);
         bytes.extend([0; 20]); // libgit2 accepts an omitted (all-zero) checksum.
         std::fs::write(&path, bytes).unwrap();
@@ -99,7 +99,7 @@ fn names_from_file_support_all_nullable_fields() {
         {
             assert_eq!(name.is_some(), mask & (1 << bit) != 0);
             if let Some(name) = name {
-                assert_eq!(name.to_bytes(), &[b'a' + bit as u8]);
+                assert_eq!(name.to_bytes(), &[b'a' + u8::try_from(bit).unwrap()]);
             }
         }
         // Force a sort of parser-produced records, including those with neither
@@ -122,10 +122,10 @@ fn reuc_entries_from_file_borrow_index() {
         let mut records: Vec<Record> = (0..48u8)
             .map(|i| {
                 let modes = match i % 4 {
-                    0 => [0o100644, 0o100644, 0o100755],
-                    1 => [0, 0o100644, 0o120000],
-                    2 => [0o160000, 0, 0o40000],
-                    _ => [u32::MAX, 0o100644, 0],
+                    0 => [0o100_644, 0o100_644, 0o100_755],
+                    1 => [0, 0o100_644, 0o120_000],
+                    2 => [0o160_000, 0, 0o40000],
+                    _ => [u32::MAX, 0o100_644, 0],
                 };
                 Record::new(format!("dir/{i:02}-\u{e9}").as_bytes(), modes, i)
             })
@@ -147,7 +147,7 @@ fn reuc_entries_from_file_borrow_index() {
                 if *mode == 0 {
                     assert_eq!((kind_byte, id), (0, [0; 32]));
                 } else {
-                    assert_eq!(kind_byte, kind.raw() as u8);
+                    assert_eq!(kind_byte, u8::try_from(kind.raw()).unwrap());
                     assert_eq!(id[..kind.size()], record.ids[side][..kind.size()]);
                 }
             }
@@ -186,18 +186,18 @@ fn reuc_entries_survive_until_replacement_and_clear() {
     for round in 0..3 {
         for i in (0..24).rev() {
             let path = CString::new(format!("p{i:02}")).unwrap();
-            assert_eq!(add_reuc(&mut index, &path, [0o100644, -1, 0], refs), 0);
+            assert_eq!(add_reuc(&mut index, &path, [0o100_644, -1, 0], refs), 0);
         }
         let handle = index.as_mut();
         let first = handle.reuc_entry(0).unwrap();
         let last = handle.reuc_entry_by_path(c"p23").unwrap();
         assert_eq!(first.path(), c"p00");
-        assert_eq!(first.modes(), [0o100644, u32::MAX, 0]);
+        assert_eq!(first.modes(), [0o100_644, u32::MAX, 0]);
         assert_eq!(last.ours().unwrap().id.id()[..20], [2; 20]);
         assert!(last.theirs().is_none());
         // A same-path add frees the old record; the borrow has ended first.
         let path = first.path().to_owned();
-        assert_eq!(add_reuc(&mut index, &path, [0, 0, 0o100755], refs), 0);
+        assert_eq!(add_reuc(&mut index, &path, [0, 0, 0o100_755], refs), 0);
         let handle = index.as_mut();
         let replaced = handle.reuc_entry(0).unwrap();
         assert_eq!(replaced.path(), c"p00");
@@ -221,7 +221,7 @@ fn reuc_entries_survive_until_replacement_and_clear() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reuc_records_outlive_writes_through_the_shared_reborrow() {
     let dir = std::env::temp_dir().join(format!("crustify-reuc-write-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
     std::fs::create_dir_all(&dir).unwrap();
     let file = CString::new(dir.join("index").to_str().unwrap()).unwrap();
     let ids = [1u8, 2, 3].map(|b| Oid::from_raw(&[b; 20], OidType::Sha1).unwrap());
@@ -232,7 +232,7 @@ fn reuc_records_outlive_writes_through_the_shared_reborrow() {
         for i in (0..12).rev() {
             let path = CString::new(format!("{}{i:02}", ["p", "P"][i % 2])).unwrap();
             assert_eq!(
-                add_reuc(&mut index, &path, [0o100644, 0, 0o100755], refs),
+                add_reuc(&mut index, &path, [0o100_644, 0, 0o100_755], refs),
                 0
             );
         }
@@ -245,7 +245,7 @@ fn reuc_records_outlive_writes_through_the_shared_reborrow() {
         }
         for (record, path) in held.iter().zip(&before) {
             assert_eq!(record.path(), path.as_c_str());
-            assert_eq!(record.modes(), [0o100644, 0, 0o100755]);
+            assert_eq!(record.modes(), [0o100_644, 0, 0o100_755]);
             assert_eq!(record.theirs().unwrap().id.id()[..20], [3; 20]);
         }
         assert_eq!(found.path(), c"p04");
@@ -260,7 +260,7 @@ fn reuc_records_outlive_writes_through_the_shared_reborrow() {
             .collect();
         assert_eq!(paths, before);
     }
-    let _ = std::fs::remove_dir_all(dir);
+    drop(std::fs::remove_dir_all(dir));
 }
 
 /// Case-folded lookups after the index re-sorts its records for ignore-case.
@@ -268,9 +268,9 @@ fn reuc_records_outlive_writes_through_the_shared_reborrow() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reuc_lookup_follows_ignore_case() {
     let records = [
-        Record::new(b"B", [0o100644; 3], 1),
-        Record::new(b"a", [0o100644; 3], 2),
-        Record::new(b"C", [0o100644; 3], 3),
+        Record::new(b"B", [0o100_644; 3], 1),
+        Record::new(b"a", [0o100_644; 3], 2),
+        Record::new(b"C", [0o100_644; 3], 3),
     ];
     let file = IndexFile::new("icase", &sorted(&records), OidType::Sha1);
     let mut index = file.open(OidType::Sha1);
@@ -329,6 +329,6 @@ fn reuc_malformed_extensions_refused() {
     let mut index = Index::open(&file.c_path).unwrap();
     let handle = index.as_mut();
     let entry = handle.reuc_entry(0).unwrap();
-    assert_eq!((entry.path(), entry.modes()), (c"a", [0o100644, 0, 0]));
+    assert_eq!((entry.path(), entry.modes()), (c"a", [0o100_644, 0, 0]));
     assert_eq!(entry.ancestor().unwrap().id.id()[..20], id);
 }

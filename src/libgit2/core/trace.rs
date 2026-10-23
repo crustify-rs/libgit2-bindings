@@ -28,7 +28,7 @@ use crate::ffi;
 /// lower level, so `configured >= level` decides whether a message is reported, as
 /// libgit2 decides it.
 ///
-/// Wraps: git_trace_level_t
+/// Wraps: `git_trace_level_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -53,6 +53,7 @@ pub enum TraceLevel {
 impl TraceLevel {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_trace_level_t) -> Option<Self> {
         match raw {
             ffi::GIT_TRACE_NONE => Some(Self::None),
@@ -67,6 +68,7 @@ impl TraceLevel {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_trace_level_t {
         self as ffi::git_trace_level_t
     }
@@ -95,6 +97,7 @@ pub struct UnnamedTraceLevel(ffi::git_trace_level_t);
 
 impl UnnamedTraceLevel {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_trace_level_t {
         self.0
     }
@@ -202,7 +205,7 @@ pub trait Tracer {
 /// let _ = TraceCallback(c_tracer);
 /// ```
 ///
-/// Wraps: git_trace_cb
+/// Wraps: `git_trace_cb`
 /// Handwritten
 #[derive(Clone, Copy)]
 pub struct TraceCallback(TraceFn);
@@ -242,11 +245,13 @@ impl TraceCallback {
     }
 
     /// The C function, as libgit2 calls it.
+    #[must_use]
     pub const fn as_fn(self) -> TraceFn {
         self.0
     }
 
     /// The C value, as `git_trace_set` takes it: never NULL.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_trace_cb {
         Some(self.0)
     }
@@ -307,7 +312,7 @@ unsafe extern "C" fn trace_with<T: Tracer>(level: ffi::git_trace_level_t, msg: *
 /// synchronisation, the level first and the callback twice. The calling thread
 /// itself may be inside libgit2, in a traced call or in `callback`.
 ///
-/// Wraps: git_trace_set
+/// Wraps: `git_trace_set`
 pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
     // SAFETY: a named level with a callback, which `git_trace_set` accepts without
     // touching the error state, so before `git_libgit2_init` too; `callback` is safe
@@ -327,7 +332,7 @@ pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
 /// callback as set before its check and as NULL at the call (libgit2 reads it
 /// twice), and call NULL.
 ///
-/// Wraps: git_trace_set
+/// Wraps: `git_trace_set`
 pub unsafe fn clear() {
     // SAFETY: `GIT_TRACE_NONE` without a callback, which `git_trace_set` accepts
     // without touching the error state. The caller excludes every concurrent reader
@@ -391,7 +396,7 @@ mod unit_tests {
         }
 
         fn take_seen() -> Vec<(TraceLevel, CString)> {
-            SEEN.with(|s| s.take())
+            SEEN.with(RefCell::take)
         }
 
         /// Records each message on the calling thread.

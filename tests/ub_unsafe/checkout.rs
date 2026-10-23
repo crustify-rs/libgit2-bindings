@@ -8,7 +8,7 @@
 //! after it was replaced must never be reached again, the arguments a callback gets
 //! must be readable in full, and dropping the options must release nothing. Callbacks
 //! reenter libgit2 and the Rust API, and checkouts on several threads, each with its
-//! own options, repository and callbacks, must race nothing (TSan). The baseline tree
+//! own options, repository and callbacks, must race nothing (`TSan`). The baseline tree
 //! and index are no seams: their safe setters borrow a `TreeRef` and an `IndexRef`,
 //! tested in `ub_safe`.
 //!
@@ -42,6 +42,10 @@ fn c_ptr(options: &CheckoutOptions<'_>) -> *const ffi::git_checkout_options {
 /// A non-bare repository with two trees, `old` (`a.txt`, `b.txt`) and `new` (`a.txt`
 /// changed, `c.txt` added), whose working directory and index hold `old`; released
 /// on drop.
+#[expect(
+    clippy::struct_field_names,
+    reason = "the fields mirror the names of what they hold"
+)]
 struct Repo {
     root: PathBuf,
     repo: *mut ffi::git_repository,
@@ -67,7 +71,7 @@ impl Repo {
             "crustify-checkout-ub-unsafe-{}-{tag}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&root);
+        drop(fs::remove_dir_all(&root));
         let work = root.join("work");
         let c_work = CString::new(work.as_os_str().as_bytes()).unwrap();
         let mut opts = InitOptions::new();
@@ -78,7 +82,8 @@ impl Repo {
             .into_c();
         let mut index = ptr::null_mut();
         // SAFETY: `repo` is live; the result is a reference this function releases.
-        assert_eq!(unsafe { ffi::git_repository_index(&mut index, repo) }, 0);
+        let ret = unsafe { ffi::git_repository_index(&raw mut index, repo) };
+        assert_eq!(ret, 0);
         let tree = |files: &[(&str, &str)]| {
             for (path, content) in files {
                 fs::write(work.join(path), content).unwrap();
@@ -89,21 +94,22 @@ impl Repo {
             }
             let mut id = ffi::git_oid::default();
             // SAFETY: a live out-parameter and a live index.
-            assert_eq!(unsafe { ffi::git_index_write_tree(&mut id, index) }, 0);
+            assert_eq!(unsafe { ffi::git_index_write_tree(&raw mut id, index) }, 0);
             let mut tree = ptr::null_mut();
             // SAFETY: a live slot; the result is a reference the `Repo` owns.
-            assert_eq!(unsafe { ffi::git_tree_lookup(&mut tree, repo, &id) }, 0);
+            let ret = unsafe { ffi::git_tree_lookup(&raw mut tree, repo, &raw const id) };
+            assert_eq!(ret, 0);
             tree
         };
         let new = tree(&[("a.txt", "new\n"), ("b.txt", "b\n"), ("c.txt", "c\n")]);
         fs::remove_file(work.join("c.txt")).unwrap();
         let old = tree(&[("a.txt", "old\n"), ("b.txt", "b\n")]);
         // SAFETY: the index and tree are live; then the index reference is released.
-        unsafe {
-            assert_eq!(ffi::git_index_read_tree(index, old), 0);
-            assert_eq!(ffi::git_index_write(index), 0);
-            ffi::git_index_free(index);
-        }
+        unsafe { assert_eq!(ffi::git_index_read_tree(index, old), 0) };
+        // SAFETY: as above.
+        unsafe { assert_eq!(ffi::git_index_write(index), 0) };
+        // SAFETY: as above.
+        unsafe { ffi::git_index_free(index) };
         let target = CString::new(root.join("out").as_os_str().as_bytes()).unwrap();
         Self {
             root,
@@ -125,12 +131,12 @@ impl Repo {
 impl Drop for Repo {
     fn drop(&mut self) {
         // SAFETY: the trees and repository are the references `new` took, freed once.
-        unsafe {
-            ffi::git_tree_free(self.old);
-            ffi::git_tree_free(self.new);
-            ffi::git_repository_free(self.repo);
-        }
-        let _ = fs::remove_dir_all(&self.root);
+        unsafe { ffi::git_tree_free(self.old) };
+        // SAFETY: as above.
+        unsafe { ffi::git_tree_free(self.new) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(self.repo) };
+        drop(fs::remove_dir_all(&self.root));
     }
 }
 
@@ -256,16 +262,24 @@ mod set_notify_callback {
         // SAFETY: `first` lives until the callback is replaced below.
         unsafe { m.set_notify_callback(NOTIFY, payload(&first)) };
         assert_eq!(repo.checkout(repo.new, &options), 0);
-        assert!(!first.borrow().calls.is_empty());
+        assert!(
+            !first.borrow().calls.is_empty(),
+            "{:?}",
+            first.borrow().calls
+        );
         // SAFETY: `second` outlives the options.
         unsafe {
             options
                 .as_mut()
-                .set_notify_callback(NOTIFY, payload(&second))
+                .set_notify_callback(NOTIFY, payload(&second));
         };
         drop(first);
         assert_eq!(repo.checkout(repo.old, &options), 0);
-        assert!(!second.borrow().calls.is_empty());
+        assert!(
+            !second.borrow().calls.is_empty(),
+            "{:?}",
+            second.borrow().calls
+        );
     }
 
     #[test]
@@ -302,7 +316,7 @@ mod set_notify_callback {
         // routine; the payload outlives the options.
         unsafe { m.set_notify_callback(Some(reentrant), payload(&log)) };
         assert_eq!(repo.checkout(repo.new, &options), 0);
-        assert!(!log.borrow().calls.is_empty());
+        assert!(!log.borrow().calls.is_empty(), "{:?}", log.borrow().calls);
     }
 
     #[test]
@@ -339,7 +353,7 @@ mod set_notify_callback {
                         assert_eq!(repo.checkout(repo.new, &options), 0);
                         assert_eq!(repo.checkout(repo.old, &options), 0);
                     }
-                    assert!(!log.borrow().calls.is_empty());
+                    assert!(!log.borrow().calls.is_empty(), "{:?}", log.borrow().calls);
                 });
             }
         });
@@ -394,12 +408,16 @@ mod set_progress_callback {
         // SAFETY: `first` lives until the callback is cleared below.
         unsafe { m.set_progress_callback(PROGRESS, payload(&first)) };
         assert_eq!(repo.checkout(repo.new, &options), 0);
-        assert!(!first.borrow().calls.is_empty());
+        assert!(
+            !first.borrow().calls.is_empty(),
+            "{:?}",
+            first.borrow().calls
+        );
         // SAFETY: clearing stores nothing libgit2 would call.
         unsafe {
             options
                 .as_mut()
-                .set_progress_callback(None, ptr::null_mut())
+                .set_progress_callback(None, ptr::null_mut());
         };
         drop(first);
         assert_eq!(repo.checkout(repo.old, &options), 0);

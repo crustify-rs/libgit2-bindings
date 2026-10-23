@@ -14,7 +14,7 @@
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
-use core::ptr::{self, NonNull, addr_of};
+use core::ptr::{self, NonNull};
 
 use ffibox::{CSlice, define_ctype};
 
@@ -41,51 +41,47 @@ define_ctype!(
 impl<'a> NameEntryRef<'a> {
     /// The original path, absent for a conflict without an ancestor name.
     ///
-    /// Field: git_index_name_entry.ancestor
+    /// Field: `git_index_name_entry.ancestor`
+    #[must_use]
     pub fn ancestor(&self) -> Option<&'a CStr> {
-        // SAFETY: the handle keeps this initialized entry and its immutable,
-        // nullable NUL-terminated strings alive for 'a; projection forms no reference
-        // to the C struct. Non-null strings remain unmodified for the same borrow.
-        unsafe {
-            let p = addr_of!((*self.as_ptr()).ancestor).read();
-            if p.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(p))
-            }
-        }
+        // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
+        // projection forms no reference to it.
+        let ancestor_ptr = unsafe { &raw const (*self.as_ptr()).ancestor };
+        // SAFETY: reads the initialised field.
+        let p = unsafe { ancestor_ptr.read() };
+        // SAFETY: a non-NULL field addresses an immutable NUL-terminated string the index keeps
+        // alive and unmodified for 'a.
+        (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) })
     }
 
     /// Our path, or `None` when this side has no name.
     ///
-    /// Field: git_index_name_entry.ours
+    /// Field: `git_index_name_entry.ours`
+    #[must_use]
     pub fn ours(&self) -> Option<&'a CStr> {
-        // SAFETY: as for ancestor: this field is null or a live immutable C string
-        // owned by the index, which cannot change during the handle's borrow.
-        unsafe {
-            let p = addr_of!((*self.as_ptr()).ours).read();
-            if p.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(p))
-            }
-        }
+        // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
+        // projection forms no reference to it.
+        let ours_ptr = unsafe { &raw const (*self.as_ptr()).ours };
+        // SAFETY: reads the initialised field.
+        let p = unsafe { ours_ptr.read() };
+        // SAFETY: as for ancestor: a non-NULL field is a live immutable C string owned by the
+        // index, which cannot change during the handle's borrow.
+        (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) })
     }
 
     /// Their path, or `None` when this side has no name.
     ///
-    /// Field: git_index_name_entry.theirs
+    /// Field: `git_index_name_entry.theirs`
+    #[must_use]
     pub fn theirs(&self) -> Option<&'a CStr> {
-        // SAFETY: as for ancestor: the initialized field points to an immutable
-        // NUL-terminated string kept alive for 'a, or is null.
-        unsafe {
-            let p = addr_of!((*self.as_ptr()).theirs).read();
-            if p.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(p))
-            }
-        }
+        // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
+        // projection forms no reference to it.
+        let theirs_ptr = unsafe { &raw const (*self.as_ptr()).theirs };
+        // SAFETY: reads the initialised field.
+        let p = unsafe { theirs_ptr.read() };
+        // SAFETY: as for ancestor: a non-NULL field points to an immutable NUL-terminated string
+        // kept alive for 'a.
+        (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) })
     }
 }
 
@@ -131,6 +127,7 @@ pub struct ReucSide<'a> {
 impl<'a> ReucSide<'a> {
     /// A side of mode `mode`, one of the modes libgit2 names, and id `id`, as
     /// [`IndexMut::add_reuc`] takes it.
+    #[must_use]
     pub fn new(mode: FileMode, id: OidRef<'a>) -> Self {
         Self {
             mode: mode.raw(),
@@ -143,55 +140,73 @@ impl<'a> ReucEntryRef<'a> {
     /// The resolved path. Never NULL: libgit2 stores it in the record's own
     /// allocation, so it lives exactly as long as the record.
     ///
-    /// Field: git_index_reuc_entry.path
+    /// Field: `git_index_reuc_entry.path`
+    #[must_use]
     pub fn path(&self) -> &'a CStr {
-        // SAFETY: the handle keeps this initialized, index-owned entry alive and
-        // unmodified for 'a. Both allocators point `path` at the NUL-terminated tail
-        // of the entry's own block, never NULL, and nothing writes through it.
-        unsafe { CStr::from_ptr(addr_of!((*self.as_ptr()).path).read()) }
+        // SAFETY: the shared handle's pointer addresses a live, index-owned entry; the projection
+        // forms no reference to it.
+        let path_ptr = unsafe { &raw const (*self.as_ptr()).path };
+        // SAFETY: reads the initialised field, unmodified for 'a.
+        let path = unsafe { path_ptr.read() };
+        // SAFETY: both allocators point `path` at the NUL-terminated tail of the entry's own block,
+        // never NULL, and nothing writes through it while the handle keeps the entry for 'a.
+        unsafe { CStr::from_ptr(path) }
     }
 
     /// The ancestor's, our and their stored modes, in that order; 0 marks a side
     /// that did not exist.
     ///
-    /// Field: git_index_reuc_entry.mode
+    /// Field: `git_index_reuc_entry.mode`
+    #[must_use]
     pub fn modes(&self) -> [u32; 3] {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let mode_ptr = unsafe { &raw const (*self.as_ptr()).mode };
         // SAFETY: a read through the shared handle's pointer to a live entry; any
         // three `u32`s are valid.
-        unsafe { addr_of!((*self.as_ptr()).mode).read() }
+        unsafe { mode_ptr.read() }
     }
 
     /// The ancestor's, our and their ids, in that order, borrowed in place. A slot
     /// whose mode is 0 carries no id: libgit2 leaves it all zero (typeless).
     ///
-    /// Field: git_index_reuc_entry.oid
+    /// Field: `git_index_reuc_entry.oid`
+    #[must_use]
     pub fn ids(&self) -> CSlice<'a, Oid> {
-        // SAFETY: the field projected from the shared handle's pointer to a live entry
-        // is three initialised `git_oid`s (`Oid` is transparent over one), non-NULL,
+        // SAFETY: the shared handle's pointer addresses a live, index-owned entry; the projection
+        // forms no reference to it.
+        let ids = unsafe { &raw const (*self.as_ptr()).oid };
+        // SAFETY: a field's address is not NULL.
+        let ids = unsafe { NonNull::new_unchecked(ids.cast::<Oid>().cast_mut()) };
+        // SAFETY: `ids` addresses three initialised `git_oid`s (`Oid` is transparent over one),
         // which live and stay unmodified for 'a with the entry; the run only reads.
-        unsafe {
-            let ids = addr_of!((*self.as_ptr()).oid).cast::<Oid>().cast_mut();
-            CSlice::from_raw_parts(NonNull::new_unchecked(ids), 3)
-        }
+        unsafe { CSlice::from_raw_parts(ids, 3) }
     }
 
     /// The common ancestor's side, or `None` when it had no such file.
+    #[must_use]
     pub fn ancestor(&self) -> Option<ReucSide<'a>> {
         self.side(0)
     }
 
     /// Our side, or `None` when it had no such file.
+    #[must_use]
     pub fn ours(&self) -> Option<ReucSide<'a>> {
         self.side(1)
     }
 
     /// Their side, or `None` when it had no such file.
+    #[must_use]
     pub fn theirs(&self) -> Option<ReucSide<'a>> {
         self.side(2)
     }
 
     /// Slot `i`, present exactly when its mode is non-zero: libgit2 copies (and
     /// writes) an id only for those.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers hold a reference to the value"
+    )]
     fn side(&self, i: usize) -> Option<ReucSide<'a>> {
         let mode = self.modes()[i];
         if mode == 0 {
@@ -218,7 +233,8 @@ impl fmt::Debug for ReucEntryRef<'_> {
 impl IndexRef<'_> {
     /// Number of rename-conflict records currently held by the index.
     ///
-    /// Wraps: git_index_name_entrycount
+    /// Wraps: `git_index_name_entrycount`
+    #[must_use]
     pub fn name_entry_count(&self) -> usize {
         // SAFETY: the index is live; this C routine only reads its vector length
         // despite its non-const parameter, and returns no retained borrow.
@@ -231,7 +247,12 @@ impl IndexMut<'_> {
     /// names must be present, as required by C. Empty strings and non-UTF-8 names
     /// are preserved in memory; no pointer into the inputs is retained.
     ///
-    /// Wraps: git_index_name_add
+    /// Wraps: `git_index_name_add`
+    ///
+    /// # Errors
+    ///
+    /// Fails with a `GIT_ERROR_INVALID` error when fewer than two names are present, and with
+    /// libgit2's error when it runs out of memory.
     pub fn add_name(
         &mut self,
         ancestor: Option<&CStr>,
@@ -282,16 +303,14 @@ impl IndexMut<'_> {
     /// let _ = name.to_bytes();
     /// ```
     ///
-    /// Wraps: git_index_name_get_byindex
+    /// Wraps: `git_index_name_get_byindex`
     pub fn name_entry(&mut self, position: usize) -> Option<NameEntryRef<'_>> {
-        // SAFETY: the exclusive index borrow permits sorting and excludes clearing,
-        // reloading, and freeing until the returned borrow ends. C returns null or
-        // one initialized, index-owned entry; no Rust reference covers it.
-        unsafe {
-            NameEntryRef::from_ptr(
-                ffi::git_index_name_get_byindex(self.as_mut_ptr(), position).cast_mut(),
-            )
-        }
+        // SAFETY: the exclusive index borrow permits sorting and excludes clearing, reloading, and
+        // freeing until the returned borrow ends.
+        let entry = unsafe { ffi::git_index_name_get_byindex(self.as_mut_ptr(), position) };
+        // SAFETY: C returns null or one initialized, index-owned entry, live until that borrow
+        // ends; no Rust reference covers it.
+        unsafe { NameEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// Read the REUC record at `position`, in path order; out-of-range positions
@@ -326,41 +345,44 @@ impl IndexMut<'_> {
     /// let _ = index.as_ref().reuc_entry(0);
     /// ```
     ///
-    /// Wraps: git_index_reuc_get_byindex
+    /// Wraps: `git_index_reuc_get_byindex`
+    #[must_use]
     pub fn reuc_entry(&self, position: usize) -> Option<ReucEntryRef<'_>> {
-        // SAFETY: the exclusive handle proves no other holder can change the index,
-        // and the shared borrow of it excludes clearing, reloading, and freeing until
-        // the returned borrow ends. C only reads the vector despite the non-const
-        // parameter, returning null or one initialized, index-owned entry (whose
-        // address no reordering changes); no Rust reference covers it.
-        unsafe {
-            ReucEntryRef::from_ptr(
-                ffi::git_index_reuc_get_byindex(self.as_ref().as_ptr().cast_mut(), position)
-                    .cast_mut(),
-            )
-        }
+        // SAFETY: the exclusive handle proves no other holder can change the index, and the shared
+        // borrow of it excludes clearing, reloading, and freeing until the returned borrow ends. C
+        // only reads the vector despite the non-const parameter.
+        let entry =
+            unsafe { ffi::git_index_reuc_get_byindex(self.as_ref().as_ptr().cast_mut(), position) };
+        // SAFETY: C returns null or one initialized, index-owned entry (whose address no reordering
+        // changes), live until that borrow ends; no Rust reference covers it.
+        unsafe { ReucEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// Find the REUC record for `path`, or `None`. The search folds case when the
     /// index ignores case. Borrowing is as for [`reuc_entry`](Self::reuc_entry).
     ///
-    /// Wraps: git_index_reuc_get_bypath
+    /// Wraps: `git_index_reuc_get_bypath`
+    #[must_use]
     pub fn reuc_entry_by_path(&self, path: &CStr) -> Option<ReucEntryRef<'_>> {
-        // SAFETY: as in `reuc_entry`; C returns before searching unless the vector is
-        // flagged sorted, so it only reads. `path` is a NUL-terminated key read for the
-        // binary search and never retained.
-        unsafe {
-            ReucEntryRef::from_ptr(
-                ffi::git_index_reuc_get_bypath(self.as_ref().as_ptr().cast_mut(), path.as_ptr())
-                    .cast_mut(),
-            )
-        }
+        // SAFETY: as in `reuc_entry`; C returns before searching unless the vector is flagged
+        // sorted, so it only reads. `path` is a NUL-terminated key read for the binary search and
+        // never retained.
+        let entry = unsafe {
+            ffi::git_index_reuc_get_bypath(self.as_ref().as_ptr().cast_mut(), path.as_ptr())
+        };
+        // SAFETY: as in `reuc_entry`, for the result.
+        unsafe { ReucEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// Destroy all rename-conflict records and their strings, leaving the index
     /// reusable. Existing record/string borrows must end before this call.
     ///
-    /// Wraps: git_index_name_clear
+    /// Wraps: `git_index_name_clear`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error should the index refuse to clear its records; libgit2 reports no
+    /// other failure.
     pub fn clear_names(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: exclusive access excludes every borrowed NAME entry; C disposes
         // the owned entries and resets the vector, retaining the index itself.
@@ -372,14 +394,15 @@ impl IndexMut<'_> {
 /// The mode `git_index_reuc_add` takes for one side: 0 for an absent side. C stores
 /// it in an `unsigned int`, so the wrapping cast keeps every `u32` as given.
 fn reuc_mode(side: Option<ReucSide<'_>>) -> c_int {
-    side.map_or(0, |side| side.mode as c_int)
+    side.map_or(0, |side| side.mode.cast_signed())
 }
 
 impl IndexRef<'_> {
     /// Number of resolve-undo (REUC) records currently held by the index: the stages
     /// of conflicts resolved since the index was read.
     ///
-    /// Wraps: git_index_reuc_entrycount
+    /// Wraps: `git_index_reuc_entrycount`
+    #[must_use]
     pub fn reuc_entry_count(&self) -> usize {
         // SAFETY: the index is live; this C routine only reads its vector length
         // despite its non-const parameter, and returns no retained borrow.
@@ -397,9 +420,11 @@ impl IndexMut<'_> {
     /// mode is 0 is recorded as absent, without its id. Empty and non-UTF-8 paths are
     /// kept as given.
     ///
-    /// Fails, with libgit2's error, only when it runs out of memory.
+    /// Wraps: `git_index_reuc_add`
     ///
-    /// Wraps: git_index_reuc_add
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, only when it runs out of memory.
     pub fn add_reuc(
         &mut self,
         path: &CStr,
@@ -432,23 +457,25 @@ impl IndexMut<'_> {
     ///
     /// Requires exclusive index access because C sorts the REUC vector lazily.
     ///
-    /// Wraps: git_index_reuc_find
+    /// Wraps: `git_index_reuc_find`
     pub fn find_reuc(&mut self, path: &CStr) -> Option<usize> {
         let mut position = 0;
         let index = self.as_mut_ptr();
         // SAFETY: `at_pos` is a writable slot; the exclusive borrow permits the sort,
         // and `path` is NUL-terminated, read for the call.
-        let rc = unsafe { ffi::git_index_reuc_find(&mut position, index, path.as_ptr()) };
+        let rc = unsafe { ffi::git_index_reuc_find(&raw mut position, index, path.as_ptr()) };
         (rc == 0).then_some(position)
     }
 
     /// Removes and frees the resolve-undo record at `position`.
     ///
+    /// Wraps: `git_index_reuc_remove`
+    ///
+    /// # Errors
+    ///
     /// Fails for a position past the last record. libgit2 then returns
     /// `GIT_ENOTFOUND` without an error of its own; the error is a `GIT_ERROR_INDEX`
     /// one describing the position.
-    ///
-    /// Wraps: git_index_reuc_remove
     pub fn remove_reuc(&mut self, position: usize) -> Result<(), ErrorBuf> {
         clear();
         // SAFETY: the exclusive handle excludes every borrow of the record freed; C
@@ -469,7 +496,12 @@ impl IndexMut<'_> {
     /// Destroy all resolve-undo records, leaving the index reusable. Existing record
     /// borrows must end before this call.
     ///
-    /// Wraps: git_index_reuc_clear
+    /// Wraps: `git_index_reuc_clear`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error should the index refuse to clear its records; libgit2 reports no
+    /// other failure.
     pub fn clear_reuc(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: exclusive access excludes every borrowed REUC record; C frees the
         // owned records and resets the vector, retaining the index itself.
@@ -532,7 +564,7 @@ mod unit_tests {
         id[0] = first;
         id[31] = !first;
         ffi::git_oid {
-            type_: kind as _,
+            type_: u8::try_from(kind).unwrap(),
             id,
         }
     }
@@ -548,7 +580,7 @@ mod unit_tests {
             align_of::<ffi::git_index_reuc_entry>()
         );
         let raw = ffi::git_index_reuc_entry {
-            mode: [0, 0o100644, u32::MAX],
+            mode: [0, 0o100_644, u32::MAX],
             oid: [
                 raw_oid(0, 0),
                 raw_oid(ffi::GIT_OID_SHA1, 0x11),
@@ -562,7 +594,7 @@ mod unit_tests {
         let view = unsafe { ReucEntryRef::from_ptr(ptr::from_ref(&raw).cast_mut()) }.unwrap();
         let copy = view;
         assert_eq!(view.path(), c"dir/\xff");
-        assert_eq!(copy.modes(), [0, 0o100644, u32::MAX]);
+        assert_eq!(copy.modes(), [0, 0o100_644, u32::MAX]);
         let ids = view.ids();
         assert_eq!(ids.len(), 3);
         // Compare in Rust: `OidRef`'s `PartialEq` calls libgit2.
@@ -573,8 +605,8 @@ mod unit_tests {
         assert!(ids.get(3).is_none());
         assert!(view.ancestor().is_none());
         let ours = view.ours().unwrap();
-        assert_eq!(ours.mode, 0o100644);
-        assert_eq!(ours.id.raw_kind(), ffi::GIT_OID_SHA1 as u8);
+        assert_eq!(ours.mode, 0o100_644);
+        assert_eq!(ours.id.raw_kind(), u8::try_from(ffi::GIT_OID_SHA1).unwrap());
         assert_eq!(ours.id.id()[0], 0x11);
         let theirs = view.theirs().unwrap();
         assert_eq!(theirs.mode, u32::MAX);
@@ -616,8 +648,8 @@ mod unit_tests {
         let side = |mode| Some(ReucSide::new(mode, id.as_ref()));
         assert_eq!(reuc_mode(None), 0);
         assert_eq!(reuc_mode(side(FileMode::Unreadable)), 0);
-        assert_eq!(reuc_mode(side(FileMode::Commit)), 0o160000);
-        assert_eq!(reuc_mode(side(FileMode::BlobExecutable)), 0o100755);
+        assert_eq!(reuc_mode(side(FileMode::Commit)), 0o160_000);
+        assert_eq!(reuc_mode(side(FileMode::BlobExecutable)), 0o100_755);
         let any = ReucSide {
             mode: u32::MAX,
             id: id.as_ref(),

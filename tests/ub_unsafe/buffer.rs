@@ -1,13 +1,13 @@
 //! UB tests for the unsafe API of `git2/buffer.h`: `Buf::from_raw`, called within its
 //! contract on every shape of `git_buf` libgit2 leaves behind or C code builds, edge
 //! cases included, and then driven through the safe API: read, taken out, refilled by
-//! libgit2, and released (ASan: double free, invalid free, use after free, overflow;
-//! LSan: leak).
+//! libgit2, and released (`ASan`: double free, invalid free, use after free, overflow;
+//! `LSan`: leak).
 //!
 //! libgit2's `GIT_OPT_*` string options are unsynchronised globals, so the tests that
 //! set them rerun alone in a child process.
 
-use std::ffi::{c_char, c_int};
+use std::ffi::c_char;
 use std::process::Command;
 use std::ptr::{self, NonNull};
 use std::thread;
@@ -56,14 +56,15 @@ fn zeroed_buf() -> ffi::git_buf {
 fn set_option(option: u32, value: *const c_char) {
     // SAFETY: the string options copy their `const char *`, or restore their default
     // for NULL.
-    assert_eq!(unsafe { ffi::git_libgit2_opts(option as c_int, value) }, 0);
+    let ret = unsafe { ffi::git_libgit2_opts(option.cast_signed(), value) };
+    assert_eq!(ret, 0);
 }
 
 /// A `GIT_OPT_GET_*` option taking a `git_buf *` into `buf`.
 fn get_option(option: u32, buf: &mut ffi::git_buf) {
     // SAFETY: the option takes a `git_buf *` that is zeroed, disposed or as a libgit2
     // routine left it, which it fills.
-    let rc = unsafe { ffi::git_libgit2_opts(option as c_int, &raw mut *buf) };
+    let rc = unsafe { ffi::git_libgit2_opts(option.cast_signed(), &raw mut *buf) };
     assert_eq!(rc, 0);
 }
 
@@ -75,10 +76,11 @@ fn c_buf(bytes: &[u8], reserved: usize) -> ffi::git_buf {
     let p = unsafe { ffi::git_odb_backend_data_alloc(ptr::null_mut(), reserved) }.cast::<u8>();
     assert!(!p.is_null());
     // SAFETY: `p` holds `reserved` writable bytes, distinct from `bytes`.
-    unsafe {
-        p.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
-        p.add(bytes.len()).write(0);
-    }
+    unsafe { p.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
+    // SAFETY: as above.
+    let value2 = unsafe { p.add(bytes.len()) };
+    // SAFETY: as above.
+    unsafe { value2.write(0) };
     ffi::git_buf {
         ptr: p.cast(),
         reserved,
@@ -236,7 +238,7 @@ fn adopting_what_libgit2_leaves() {
             let mut raw = zeroed_buf();
             get_option(ua, &mut raw);
             // SAFETY: `raw` owns a libgit2 allocation.
-            unsafe { ffi::git_buf_dispose(&mut raw) };
+            unsafe { ffi::git_buf_dispose(&raw mut raw) };
             assert!(!raw.ptr.is_null() && raw.reserved == 0);
             // SAFETY: `raw` is as `git_buf_dispose` left it.
             drop(unsafe { Buf::from_raw(raw) });
@@ -289,7 +291,7 @@ fn adopted_buffers_handed_back_to_c() {
     let buf = unsafe { Buf::from_raw(c_buf(b"abc", 9)) };
     let mut raw = buf.into_inner().into_raw();
     // SAFETY: `raw` owns its allocation, which C now releases.
-    unsafe { ffi::git_buf_dispose(&mut raw) };
+    unsafe { ffi::git_buf_dispose(&raw mut raw) };
     // SAFETY: `raw` is as `git_buf_dispose` left it: the static empty string.
     let buf = unsafe { Buf::from_raw(raw) };
     assert_eq!((buf.as_ref().as_c_str(), buf.as_ref().capacity()), (c"", 0));

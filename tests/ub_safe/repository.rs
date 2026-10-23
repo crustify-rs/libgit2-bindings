@@ -4,9 +4,9 @@
 ///
 /// `InitFlag` is a fieldless enum over C's `git_repository_init_flag_t`. The only safe
 /// way in from a raw value is `from_raw` / `try_from`, which must reject every value
-/// without a variant rather than produce an invalid discriminant (which Miri and UBSan
+/// without a variant rather than produce an invalid discriminant (which Miri and `UBSan`
 /// would flag on the next read); an `as` cast to it does not compile
-/// (`compile_fail/`). `InitFlags` keeps any `uint32_t` C hands it, init_ext's internal
+/// (`compile_fail/`). `InitFlags` keeps any `uint32_t` C hands it, `init_ext`'s internal
 /// bits included, so its operations must stay in range for every bit pattern.
 /// `InitMode` reads every `u32` as a mode: the shared modes' values become their
 /// variants and every other value a `CustomMode`, which only `from_raw` builds (its
@@ -14,8 +14,8 @@
 /// and every value reads back unchanged.
 ///
 /// They are plain values: nothing allocates, points or is freed, so there is no
-/// lifetime for ASan or BorrowSanitizer to catch, and sharing them across threads races
-/// nothing (TSan). None of them calls libgit2, so they also run under Miri.
+/// lifetime for `ASan` or `BorrowSanitizer` to catch, and sharing them across threads races
+/// nothing (`TSan`). None of them calls libgit2, so they also run under Miri.
 mod init_flags_and_modes {
     use std::collections::HashSet;
     use std::hint::black_box;
@@ -24,7 +24,7 @@ mod init_flags_and_modes {
     use libgit2::libgit2::repository::repository::{InitFlag, InitFlags, InitMode};
 
     /// Every value around the declared ones, each single bit, and a coarse stride
-    /// across the whole type; BorrowSanitizer instruments each comparison, so the probe
+    /// across the whole type; `BorrowSanitizer` instruments each comparison, so the probe
     /// set stays small.
     fn probes() -> impl Iterator<Item = u32> {
         (0..=300)
@@ -49,10 +49,14 @@ mod init_flags_and_modes {
             if let Some(flag) = InitFlag::from_raw(black_box(raw)) {
                 // Reading the discriminant back validates it.
                 assert_eq!(flag.raw(), raw);
-                assert!(!format!("{flag:?}").is_empty());
+                assert_ne!(format!("{flag:?}"), "");
                 seen.insert(flag);
             } else {
-                assert_eq!(InitFlag::try_from(raw).map_err(|e| e.raw()), Err(raw));
+                assert_eq!(
+                    InitFlag::try_from(raw)
+                        .map_err(libgit2::libgit2::repository::repository::UnnamedInitFlag::raw),
+                    Err(raw)
+                );
             }
         }
         assert_eq!(seen.len(), InitFlag::ALL.len());
@@ -64,7 +68,7 @@ mod init_flags_and_modes {
         // must never alias a variant, nor a variant read as `None`.
         for raw in probes() {
             let flag = black_box(InitFlag::from_raw(raw));
-            assert_eq!(flag.map(InitFlag::raw).unwrap_or(raw), raw);
+            assert_eq!(flag.map_or(raw, InitFlag::raw), raw);
         }
     }
 
@@ -76,7 +80,7 @@ mod init_flags_and_modes {
             let named: Vec<_> = set.iter().collect();
             assert!(named.len() <= InitFlag::ALL.len());
             assert!(named.iter().all(|&f| set.contains(f)));
-            assert!(!format!("{set:?}").is_empty());
+            assert_ne!(format!("{set:?}"), "");
             let truncated = InitFlags::from_bits_truncate(bits);
             assert_eq!(truncated.unnamed_bits(), 0);
             assert_eq!(truncated.iter().collect::<Vec<_>>(), named);
@@ -99,7 +103,7 @@ mod init_flags_and_modes {
             let mode = black_box(InitMode::from_raw(black_box(raw)));
             // Reading the variant and its payload back validates them.
             assert_eq!(mode.raw(), raw);
-            assert!(!format!("{mode:?}").is_empty());
+            assert_ne!(format!("{mode:?}"), "");
             match mode {
                 InitMode::Custom(custom) => assert_eq!(custom.bits(), raw),
                 other => {
@@ -139,15 +143,15 @@ mod init_flags_and_modes {
 /// `Item` and `OpenFlag` are fieldless enums over C's `git_repository_item_t` and
 /// `git_repository_open_flag_t`. The only safe way in from a raw value is `from_raw` /
 /// `try_from`, which must reject every value without a variant rather than produce an
-/// invalid discriminant (which Miri and UBSan would flag on the next read); an `as` cast
+/// invalid discriminant (which Miri and `UBSan` would flag on the next read); an `as` cast
 /// to either does not compile (`compile_fail/`). For `Item` that also keeps libgit2 in
 /// bounds: `git_repository_item_path` indexes a table of `GIT_REPOSITORY_ITEM__LAST`
-/// entries with the value unchecked (UBSan reports `index 15 out of bounds` for the
+/// entries with the value unchecked (`UBSan` reports `index 15 out of bounds` for the
 /// sentinel), so every value an `Item` carries must resolve in bounds under ASan/UBSan.
 /// `OpenFlags` keeps any `unsigned int`, so its operations must stay in range for every
 /// bit pattern. They are plain values: nothing allocates, points or is freed, so there
-/// is no lifetime for ASan or BorrowSanitizer to catch, and sharing them across threads
-/// races nothing (TSan). Only the item paths call libgit2; the rest also runs under
+/// is no lifetime for `ASan` or `BorrowSanitizer` to catch, and sharing them across threads
+/// races nothing (`TSan`). Only the item paths call libgit2; the rest also runs under
 /// Miri.
 mod items_and_open_flags {
     use std::collections::HashSet;
@@ -160,7 +164,7 @@ mod items_and_open_flags {
     use crate::fixture::{TempRepo, item_path};
 
     /// Every value around the declared ones, each single bit, and a coarse stride
-    /// across the whole type; BorrowSanitizer instruments each comparison, so the probe
+    /// across the whole type; `BorrowSanitizer` instruments each comparison, so the probe
     /// set stays small.
     fn probes() -> impl Iterator<Item = u32> {
         (0..=300)
@@ -185,10 +189,14 @@ mod items_and_open_flags {
                 // Reading the discriminant back validates it.
                 assert_eq!(item.raw(), raw);
                 assert!(item.raw() < ffi::GIT_REPOSITORY_ITEM__LAST);
-                assert!(!format!("{item:?}").is_empty());
+                assert_ne!(format!("{item:?}"), "");
                 seen.insert(item);
             } else {
-                assert_eq!(Item::try_from(raw).map_err(|e| e.raw()), Err(raw));
+                assert_eq!(
+                    Item::try_from(raw)
+                        .map_err(libgit2::libgit2::repository::repository::UnnamedItem::raw),
+                    Err(raw)
+                );
             }
         }
         assert_eq!(seen.len(), Item::ALL.len());
@@ -200,10 +208,14 @@ mod items_and_open_flags {
         for raw in probes() {
             if let Some(flag) = OpenFlag::from_raw(black_box(raw)) {
                 assert_eq!(flag.raw(), raw);
-                assert!(!format!("{flag:?}").is_empty());
+                assert_ne!(format!("{flag:?}"), "");
                 seen.insert(flag);
             } else {
-                assert_eq!(OpenFlag::try_from(raw).map_err(|e| e.raw()), Err(raw));
+                assert_eq!(
+                    OpenFlag::try_from(raw)
+                        .map_err(libgit2::libgit2::repository::repository::UnnamedOpenFlag::raw),
+                    Err(raw)
+                );
             }
         }
         assert_eq!(seen.len(), OpenFlag::ALL.len());
@@ -215,9 +227,9 @@ mod items_and_open_flags {
         // a rejected value must never alias a variant, nor a variant read as `None`.
         for raw in probes() {
             let item = black_box(Item::from_raw(raw));
-            assert_eq!(item.map(Item::raw).unwrap_or(raw), raw);
+            assert_eq!(item.map_or(raw, Item::raw), raw);
             let flag = black_box(OpenFlag::from_raw(raw));
-            assert_eq!(flag.map(OpenFlag::raw).unwrap_or(raw), raw);
+            assert_eq!(flag.map_or(raw, OpenFlag::raw), raw);
         }
     }
 
@@ -230,7 +242,7 @@ mod items_and_open_flags {
             assert!(named.len() <= OpenFlag::ALL.len());
             assert!(named.iter().all(|&f| set.contains(f)));
             assert_eq!(set.iter().count(), named.len());
-            assert!(!format!("{set:?}").is_empty());
+            assert_ne!(format!("{set:?}"), "");
             for flag in OpenFlag::ALL {
                 set.insert(flag);
                 assert!(set.contains(flag));
@@ -281,9 +293,9 @@ mod items_and_open_flags {
 ///
 /// The only safe way in from a raw value is `from_raw` / `try_from`, which must
 /// reject every value without a variant rather than produce an invalid discriminant
-/// (which Miri and UBSan would flag on the next read); an `as` cast to it does not
+/// (which Miri and `UBSan` would flag on the next read); an `as` cast to it does not
 /// compile (`compile_fail/`). It owns and points at nothing, and none of these tests
-/// calls libgit2, so they also run under Miri; the sweep stays small for BSan.
+/// calls libgit2, so they also run under Miri; the sweep stays small for `BSan`.
 mod state {
     use std::collections::HashSet;
     use std::hint::black_box;
@@ -303,19 +315,16 @@ mod state {
         let mut seen = HashSet::new();
         for raw in probes() {
             // `black_box` keeps the conversion from being folded at compile time.
-            match RepositoryState::from_raw(black_box(raw)) {
-                Some(state) => {
-                    // Reading the discriminant back validates it.
-                    assert_eq!(state.raw(), raw);
-                    assert_eq!(state.is_clean(), raw == 0);
-                    assert!(!format!("{state:?}").is_empty());
-                    seen.insert(state);
-                }
-                None => {
-                    let err: UnnamedRepositoryState = RepositoryState::try_from(raw).unwrap_err();
-                    assert_eq!(err.raw(), raw);
-                    assert!(!err.to_string().is_empty());
-                }
+            if let Some(state) = RepositoryState::from_raw(black_box(raw)) {
+                // Reading the discriminant back validates it.
+                assert_eq!(state.raw(), raw);
+                assert_eq!(state.is_clean(), raw == 0);
+                assert_ne!(format!("{state:?}"), "");
+                seen.insert(state);
+            } else {
+                let err: UnnamedRepositoryState = RepositoryState::try_from(raw).unwrap_err();
+                assert_eq!(err.raw(), raw);
+                assert_ne!(err.to_string(), "");
             }
         }
         assert_eq!(seen.len(), 12);
@@ -327,7 +336,7 @@ mod state {
         // rejected value must never alias a variant, nor a variant read as `None`.
         for raw in probes() {
             let state = black_box(RepositoryState::from_raw(raw));
-            assert_eq!(state.map(RepositoryState::raw).unwrap_or(raw), raw);
+            assert_eq!(state.map_or(raw, RepositoryState::raw), raw);
             assert_eq!(state.is_some(), raw <= 11);
         }
     }
@@ -353,8 +362,8 @@ mod state {
 /// `git_repository_free` policy.
 ///
 /// Every repository a constructor builds, or leaves behind when it fails, must be
-/// released exactly once (ASan: double free, use after free; LSan: leak), whichever
-/// thread builds it first (TSan: the first constructor initialises libgit2). Handles
+/// released exactly once (`ASan`: double free, use after free; `LSan`: leak), whichever
+/// thread builds it first (`TSan`: the first constructor initialises libgit2). Handles
 /// outliving their box and boxes crossing threads are `compile_fail` doctests on
 /// `Repository`. Every constructor calls libgit2, so nothing here runs under Miri.
 mod repository_owner {
@@ -396,7 +405,7 @@ mod repository_owner {
                 "crustify-repository-ub-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
             Self { path, c_path }
         }
@@ -409,7 +418,7 @@ mod repository_owner {
 
     impl Drop for Scratch {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
+            drop(fs::remove_dir_all(&self.path));
         }
     }
 
@@ -627,19 +636,19 @@ mod repository_owner {
 ///
 /// The options store pointers to the strings their setters borrow and read them back
 /// through the getters; every source here is a `CString`, an allocation of exactly its
-/// length, so ASan flags a read past one, and each is released after the options, once
-/// (ASan, LSan). The getters' strings outlive the handles and the options, since they
+/// length, so `ASan` flags a read past one, and each is released after the options, once
+/// (`ASan`, `LSan`). The getters' strings outlive the handles and the options, since they
 /// point at the sources. Every getter and setter runs on every holder Rust has for the
 /// options (a local, a heap slot, an element of a run that moves when it grows, a
 /// copy), through reborrows, and across threads under the `Send` / `Sync` the crate
-/// asserts (TSan); `new` runs on many threads before anything initialised libgit2
+/// asserts (`TSan`); `new` runs on many threads before anything initialised libgit2
 /// (`git_repository_init_options_init` copies a template, touching no global state).
 /// libgit2 reads the options in `git_repository_init_ext` (`Repository::init_ext`):
-/// every string is read in bounds (ASan), the flags it ORs in are written through the
+/// every string is read in bounds (`ASan`), the flags it ORs in are written through the
 /// exclusive borrow, and nothing is kept past the call, so the options may be reused,
-/// moved to another thread or dropped right after (BSan: a foreign write between Rust
+/// moved to another thread or dropped right after (`BSan`: a foreign write between Rust
 /// reborrows, no retained pointer); a repository the call leaves behind a failure is
-/// released once (ASan, LSan). The object id type and reference
+/// released once (`ASan`, `LSan`). The object id type and reference
 /// storage only take named values, and a string, the options' handles and borrows that
 /// outlive their sources do not compile (`compile_fail/`, the type's doctests). Every
 /// test builds its options through `git_repository_init_options_init`, so Miri skips
@@ -663,7 +672,13 @@ mod init_options {
     /// `n` distinct strings of lengths `base + 1`, `base + 2`, ...
     fn strings(base: usize, n: usize) -> Vec<CString> {
         (1..=n)
-            .map(|i| CString::new(vec![b'a' + ((base + i) % 26) as u8; base + i]).unwrap())
+            .map(|i| {
+                CString::new(vec![
+                    b'a' + u8::try_from((base + i) % 26).unwrap();
+                    base + i
+                ])
+                .unwrap()
+            })
             .collect()
     }
 
@@ -704,7 +719,7 @@ mod init_options {
         let pick = |i: usize| (round % 4 != 3).then(|| s[i].as_c_str());
         m.set_version(round % 3);
         m.set_flags(InitFlags::from_bits_retain(round.rotate_left(round)));
-        m.set_mode(InitMode::from_raw(round.wrapping_mul(0o1234567)));
+        m.set_mode(InitMode::from_raw(round.wrapping_mul(0o1_234_567)));
         m.set_workdir_path(pick(0));
         m.set_description(pick(1));
         m.set_template_path(pick(2));
@@ -728,11 +743,15 @@ mod init_options {
         (
             round % 3,
             round.rotate_left(round),
-            round.wrapping_mul(0o1234567),
+            round.wrapping_mul(0o1_234_567),
             strs,
         )
     }
 
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn values(o: InitOptionsRef<'_, '_>) -> (u32, u32, u32, Vec<Vec<u8>>) {
         let (v, f, m, s, _) = read_all(o);
         (v, f, m, s)
@@ -770,7 +789,7 @@ mod init_options {
         }
         // Every element of the run still reads what it was given.
         for (i, opts) in run.iter().enumerate().skip(1) {
-            let round = i as u32 - 1;
+            let round = u32::try_from(i).unwrap() - 1;
             assert_eq!(
                 values(opts.as_ref()),
                 expected(&pool[round as usize], round)
@@ -811,7 +830,7 @@ mod init_options {
         let shared = m.as_ref();
         let copy = shared;
         assert_eq!(copy.flags(), InitFlag::Bare.into());
-        assert!(!format!("{m:?}").is_empty());
+        assert_ne!(format!("{m:?}"), "");
         m.set_origin_url(Some(&s[1]));
         m.set_initial_head(None);
         let o = opts.as_ref();
@@ -823,6 +842,10 @@ mod init_options {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn copies_are_independent() {
         let s = strings(11, 5);
         let t = strings(13, 5);
@@ -896,7 +919,7 @@ mod init_options {
                         let mut guard = opts.lock().unwrap();
                         let n = guard.as_ref().version();
                         let mut m = guard.as_mut();
-                        write(m.as_mut(), s, t as u32);
+                        write(m.as_mut(), s, u32::try_from(t).unwrap());
                         m.set_version(n + 1);
                     }
                 });
@@ -906,7 +929,7 @@ mod init_options {
     }
 
     /// `new` copies libgit2's template into a fresh value on each call: concurrent
-    /// calls share nothing for TSan to flag, and each result is the default.
+    /// calls share nothing for `TSan` to flag, and each result is the default.
     fn new_from_many_threads() {
         let default = format!("{:?}", InitOptions::default());
         thread::scope(|s| {
@@ -951,7 +974,7 @@ mod init_options {
                 "crustify-init-options-ub-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -963,7 +986,7 @@ mod init_options {
 
     impl Drop for Root {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            drop(fs::remove_dir_all(&self.0));
         }
     }
 
@@ -1095,15 +1118,15 @@ mod init_options {
 /// `RepositoryMut::cleanup_state`.
 ///
 /// `wrap_odb` consumes the caller's odb reference once the repository holds its own:
-/// the odb must stay live through the repository (ASan: use after free), be freed with
-/// it (LSan) and never twice (ASan: double free), and only an odb no repository owns is
+/// the odb must stay live through the repository (`ASan`: use after free), be freed with
+/// it (`LSan`) and never twice (`ASan`: double free), and only an odb no repository owns is
 /// accepted (an odb a repository lent does not compile: doctest on `wrap_odb`). The
 /// working directory `workdir` returns is the repository's string, borrowed for the
-/// handle's lifetime (ASan; outliving the repository does not compile: doctest on
+/// handle's lifetime (`ASan`; outliving the repository does not compile: doctest on
 /// `workdir`). `cleanup_state` removes files through the exclusive handle, and refuses
 /// a repository without a git directory, which libgit2 would resolve against the
 /// process's working directory. A repository is neither `Send` nor `Sync`, so nothing
-/// races (TSan); libgit2 keeps no pointer into Rust storage (BSan). Every test calls
+/// races (`TSan`); libgit2 keeps no pointer into Rust storage (`BSan`). Every test calls
 /// libgit2, so none runs under Miri.
 mod routines {
     use std::ffi::CString;
@@ -1122,7 +1145,7 @@ mod routines {
             "crustify-repository-routines-ub-{}-{tag}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         path
     }
 
@@ -1211,16 +1234,16 @@ mod routines {
 /// and the `MERGE_HEAD` callback.
 ///
 /// Every reference a repository lends or is given is a counted one, released exactly
-/// once whichever of the repository and the reference goes first (ASan: use after
-/// free, double free; LSan: leak); every string a setter replaces is freed while no
+/// once whichever of the repository and the reference goes first (`ASan`: use after
+/// free, double free; `LSan`: leak); every string a setter replaces is freed while no
 /// handle lends it (the borrow checker: `compile_fail` doctests on `RepositoryRef::path`,
 /// `RepositoryRef::odb` and `RepositoryMut::set_odb`). An object id of another type than
-/// the repository's never reaches libgit2's loose-object path formatter (ASan:
+/// the repository's never reaches libgit2's loose-object path formatter (`ASan`:
 /// heap-buffer-overflow), a repository without a git directory never reaches the routines
 /// that would dereference or misplace its path (SIGSEGV, files in the current directory)
 /// nor the state assertion a debug build aborts on, and a panic in the callback never
 /// unwinds through C. An odb a repository lends is read from several threads while the
-/// repository lives (TSan). Every test calls libgit2, so nothing here runs under Miri.
+/// repository lives (`TSan`). Every test calls libgit2, so nothing here runs under Miri.
 mod heads_and_parts {
     use std::ffi::{CStr, CString, c_int};
     use std::ops::ControlFlow;
@@ -1262,7 +1285,7 @@ mod heads_and_parts {
                 "crustify-repository-routines-ub-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             Self(path.canonicalize().unwrap())
         }
@@ -1274,7 +1297,7 @@ mod heads_and_parts {
 
     impl Drop for Scratch {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            drop(fs::remove_dir_all(&self.0));
         }
     }
 
@@ -1412,7 +1435,7 @@ mod heads_and_parts {
         for repo_first in [true, false] {
             let mut repo = testrepo(&scratch, &format!("repo-{repo_first}"));
             let index: IndexArc = Index::new().unwrap().into();
-            let config: ConfigArc = Config::new().unwrap().into();
+            let config: ConfigArc<'_> = Config::new().unwrap().into();
             repo.as_mut().set_index(Some(&index));
             repo.as_mut().set_config(&config);
             assert!(index.as_ref().has_owner());
@@ -1473,6 +1496,10 @@ mod heads_and_parts {
         repo.as_mut().reinit_filesystem(true).unwrap();
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn assert_refused(error: RepositoryError) {
         assert_eq!(error.code(), Some(ErrorCode::NotFound), "{error:?}");
         assert_eq!(error.class(), Some(ErrorClass::Invalid));
@@ -1503,6 +1530,10 @@ mod heads_and_parts {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::large_stack_arrays,
+        reason = "the test needs a buffer past the size the code under test treats specially"
+    )]
     fn messages_are_read_and_removed_through_owned_buffers() {
         let scratch = Scratch::new("message");
         let repo = testrepo(&scratch, "repo");
@@ -1552,10 +1583,10 @@ mod heads_and_parts {
     }
 
     /// Ids of another type than the repository's are refused before libgit2 formats
-    /// them into a loose object path sized for the repository's (ASan would report the
+    /// them into a loose object path sized for the repository's (`ASan` would report the
     /// overflow of a SHA256 id into a SHA1 path).
     /// Alone in a child process: libgit2 writes the reflog through
-    /// `git_signature_now`, whose glibc `tzset` TSan reports against any concurrent
+    /// `git_signature_now`, whose glibc `tzset` `TSan` reports against any concurrent
     /// caller in the process.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1661,6 +1692,10 @@ mod heads_and_parts {
     /// panics contained and resumed, a callback dropped mid-way. Runs under Miri, which
     /// checks the trampoline's reborrow of the payload and the lent id's lifetime.
     #[test]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn the_callback_lends_ids_for_the_call_only() {
         let ids = [Oid::zero(OidType::Sha1), Oid::zero(OidType::Sha256)];
         let mut kinds = Vec::new();
@@ -1840,8 +1875,8 @@ mod head_and_lookups {
         let (name, email) = r.ident();
         touch(name);
         touch(email);
-        let _ = (r.is_bare(), r.is_worktree(), r.is_shallow(), r.is_empty());
-        let _ = (r.is_head_detached(), r.is_head_unborn());
+        drop((r.is_bare(), r.is_worktree(), r.is_shallow(), r.is_empty()));
+        drop((r.is_head_detached(), r.is_head_unborn()));
         for item in ITEMS {
             if let Ok(path) = r.item_path(item) {
                 touch(Some(path.as_ref().as_c_str()));
@@ -1856,8 +1891,8 @@ mod head_and_lookups {
             read += ids(&parents).len();
         }
         if let Some(sandbox) = sandbox {
-            let _ = r.hash_file(&sandbox.c_path("bare/HEAD"), ObjectType::Blob, None);
-            let _ = r.hash_file(c"relative", ObjectType::Tree, Some(c""));
+            drop(r.hash_file(&sandbox.c_path("bare/HEAD"), ObjectType::Blob, None));
+            drop(r.hash_file(c"relative", ObjectType::Tree, Some(c"")));
         }
         read
     }
@@ -1955,7 +1990,7 @@ mod head_and_lookups {
     /// The `MERGE_HEAD`s after which `git_repository_commit_parents` frees cached
     /// commits: the wrapper fails, and the commits stay usable through the cache
     /// (looked up again) and are released before the repository, which they borrow.
-    /// ASan watches.
+    /// `ASan` watches.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn failing_merge_heads_leave_the_cache_intact() {
@@ -2030,12 +2065,12 @@ mod head_and_lookups {
             seen.set(seen.get() + 1);
             let r = repo.as_ref();
             assert!(r.is_bare());
-            let _ = (
+            drop((
                 r.head(),
                 r.commit_parents(),
                 r.config(),
                 entry.id.to_hex_string(),
-            );
+            ));
             if seen.get() == 2 {
                 ControlFlow::Break(())
             } else {
@@ -2076,8 +2111,8 @@ mod head_and_lookups {
     }
 
     /// Each thread walks its own repository's `FETCH_HEAD`, the entries copied out
-    /// during their calls; a repository without paths is refused on any thread (TSan,
-    /// ASan).
+    /// during their calls; a repository without paths is refused on any thread (`TSan`,
+    /// `ASan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn fetchhead_walks_on_threads() {
@@ -2127,7 +2162,7 @@ mod head_and_lookups {
     }
 
     /// `HEAD` detached, in a child: writing it reads the time through glibc's
-    /// `tzset`, which TSan reports against other threads of this binary.
+    /// `tzset`, which `TSan` reports against other threads of this binary.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn detach_head_rewrites_head() {

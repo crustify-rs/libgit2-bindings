@@ -59,7 +59,11 @@ fn init() {
 fn last_message() -> String {
     // SAFETY: `git_error_last` never returns NULL, and its message is a NUL-terminated
     // string, both live until the next libgit2 call on this thread, after the copy.
-    unsafe { CStr::from_ptr((*ffi::git_error_last()).message) }
+    let error_last = unsafe { ffi::git_error_last() };
+    // SAFETY: as above.
+    let message2 = unsafe { (*error_last).message };
+    // SAFETY: as above.
+    unsafe { CStr::from_ptr(message2) }
         .to_string_lossy()
         .into_owned()
 }
@@ -243,9 +247,9 @@ mod callback {
                         Ok(n) => request.extend_from_slice(&chunk[..n]),
                     }
                 }
-                let _ = stream.write_all(
+                drop(stream.write_all(
                     b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                );
+                ));
             }
         });
         CString::new(format!("http://127.0.0.1:{port}/repo.git")).unwrap()
@@ -269,10 +273,15 @@ mod callback {
             )
         };
         let error = (rc < 0).then(|| {
-            // SAFETY: never NULL; copied out before the next libgit2 call.
-            unsafe {
-                let e = ffi::git_error_last();
-                ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+            {
+                // SAFETY: never NULL; copied out before the next libgit2 call.
+                let e = unsafe { ffi::git_error_last() };
+                // SAFETY: as above.
+                let klass = unsafe { (*e).klass };
+                // SAFETY: as above.
+                let message2 = unsafe { (*e).message };
+                // SAFETY: as above.
+                unsafe { (klass, CStr::from_ptr(message2).to_owned()) }
             }
         });
         // SAFETY: the remote created above, freed once.
@@ -425,7 +434,7 @@ mod config {
 
     /// Marks the thread's error state, so a step that touches it shows.
     fn mark_error() {
-        let class = ffi::GIT_ERROR_CALLBACK as c_int;
+        let class = ffi::GIT_ERROR_CALLBACK.cast_signed();
         // SAFETY: a class and a C string, which libgit2 copies; libgit2 is initialised.
         let rc = unsafe { ffi::git_error_set_str(class, c"mark".as_ptr()) };
         assert_eq!(rc, 0);
@@ -433,10 +442,15 @@ mod config {
 
     /// The thread's last error: its class and message.
     fn last_error() -> (c_int, CString) {
-        // SAFETY: never NULL; copied out before the next libgit2 call.
-        unsafe {
-            let e = ffi::git_error_last();
-            ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+        {
+            // SAFETY: never NULL; copied out before the next libgit2 call.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe { (klass, CStr::from_ptr(message2).to_owned()) }
         }
     }
 
@@ -516,7 +530,10 @@ mod config {
                     assert_eq!(take(&C_LOG), [], "step {i}: C received a Rust step");
 
                     assert_eq!(c.0, 0);
-                    assert_eq!(c.1, (ffi::GIT_ERROR_CALLBACK as c_int, c"mark".to_owned()));
+                    assert_eq!(
+                        c.1,
+                        (ffi::GIT_ERROR_CALLBACK.cast_signed(), c"mark".to_owned())
+                    );
                     let level = match step {
                         Step::Set(level) => level,
                         Step::Clear => TraceLevel::None,
@@ -558,7 +575,7 @@ mod config {
                 assert_eq!(logs[1], logs[0]);
                 // The switch on the first message took effect for the rest: from
                 // `Trace` to `Debug`, so the connection's `Received` reached no one.
-                assert!(!logs[0].is_empty());
+                assert!(!logs[0].is_empty(), "{:?}", logs[0]);
                 assert!(
                     logs[0]
                         .iter()
@@ -615,7 +632,7 @@ mod config {
             let r = take(&C_LOG);
             let c = c_step(Step::Set(TraceLevel::Debug), &url);
             assert_eq!(r, c.2);
-            assert!(!r.is_empty());
+            assert!(!r.is_empty(), "{r:?}");
             // SAFETY: one thread.
             unsafe { trace::clear() };
         });

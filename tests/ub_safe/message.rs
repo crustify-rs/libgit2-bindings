@@ -3,22 +3,22 @@
 //!
 //! A trailer is a pair of strings borrowed for `'t`: it owns and frees nothing, so the
 //! obligations are Rust-side. The getters must hand back exactly the strings stored,
-//! for as long as `'t` (ASan flags a read of a dropped string, Miri a dangling or
-//! misaligned read, BorrowSanitizer a read through a pointer a reborrow invalidated);
+//! for as long as `'t` (`ASan` flags a read of a dropped string, Miri a dangling or
+//! misaligned read, `BorrowSanitizer` a read through a pointer a reborrow invalidated);
 //! the setters replace one field each; copies are independent; and the values cross
-//! threads and are read from several at once (TSan). Nothing here calls libgit2, so it
+//! threads and are read from several at once (`TSan`). Nothing here calls libgit2, so it
 //! all runs under Miri. Illegal paths (a trailer outliving its strings, an exclusive
 //! handle shrunk to a shorter-lived string) are in `compile_fail/`.
 //!
 //! An array owns the block `git_message_trailers` copies the message's trailers into
 //! and the trailer buffer pointing into it, both freed by
 //! `git_message_trailer_array_free`: every array is freed once, by whichever owner holds
-//! its buffers last, whether parsed, taken out, moved in or cleared (ASan: double free,
-//! use after free; LSan: leaks), and the empty array never reaches C (Miri runs those
+//! its buffers last, whether parsed, taken out, moved in or cleared (`ASan`: double free,
+//! use after free; `LSan`: leaks), and the empty array never reaches C (Miri runs those
 //! paths). Every trailer and string read through an array lives as long as its shared
 //! borrow; libgit2 writes the array into Rust's storage and Rust then reads it back
-//! through fresh shared reborrows (BorrowSanitizer). Arrays cross threads and are read
-//! from several at once (TSan). Outliving the array, or holding its trailers across a
+//! through fresh shared reborrows (`BorrowSanitizer`). Arrays cross threads and are read
+//! from several at once (`TSan`). Outliving the array, or holding its trailers across a
 //! write, does not compile (`compile_fail/message_trailer_array_*` and the doctests on
 //! `MessageTrailerArray`).
 
@@ -52,7 +52,7 @@ fn getters_return_the_stored_strings() {
         let handle = trailer.as_ref();
         assert_eq!(handle.key(), owned[i].as_c_str());
         assert_eq!(handle.value().to_bytes().len(), i);
-        assert!(!format!("{trailer:?}").is_empty());
+        assert_ne!(format!("{trailer:?}"), "");
     }
     // A string read through a handle outlives the handle and the trailer, as `'t` says.
     let key = trailers[3].as_ref().key();
@@ -163,7 +163,7 @@ fn parse(message: &CStr) -> MessageTrailerArrayVal {
 }
 
 /// The (key, value) pairs of an array, read through its shared handle.
-fn pairs<'a>(array: MessageTrailerArrayRef<'a>) -> Vec<(&'a CStr, &'a CStr)> {
+fn pairs(array: MessageTrailerArrayRef<'_>) -> Vec<(&CStr, &CStr)> {
     array
         .trailers()
         .iter()
@@ -190,7 +190,7 @@ fn parsed_arrays_read_back() {
             // The last string of the block: a read past its NUL leaves the allocation.
             strings.push(last.value());
         }
-        assert!(!format!("{handle:?}").is_empty());
+        assert_ne!(format!("{handle:?}"), "");
     }
     // Strings read earlier are still the array's while it is borrowed.
     assert_eq!(strings[0], c"A U Thor <a@example.com>");
@@ -200,7 +200,7 @@ fn parsed_arrays_read_back() {
 
 /// Messages whose trailer block ends inside each state of libgit2's parser (a key, the
 /// whitespace after one, after a separator, a skipped line), where the last string is
-/// the block's last bytes: every trailer reads within the block (ASan).
+/// the block's last bytes: every trailer reads within the block (`ASan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn blocks_ending_mid_trailer_read_back() {
@@ -278,7 +278,7 @@ fn moved_buffers_are_freed_once() {
 
 /// Arrays cross threads: one is read from several at once, its handles are sent,
 /// an exclusive handle is sent to empty and refill it, and owners parsed on one thread
-/// are freed on another (TSan).
+/// are freed on another (`TSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn arrays_cross_threads() {
@@ -317,11 +317,11 @@ fn arrays_cross_threads() {
 }
 
 /// UB tests for `prettify` (`git_message_prettify`): libgit2 reads the message for the
-/// call only and fills a fresh buffer it owns, released once (LSan, ASan). Messages
+/// call only and fills a fresh buffer it owns, released once (`LSan`, `ASan`). Messages
 /// sit in exact-length heap strings, overwritten and freed after the call: blank,
 /// whitespace-only, comment-only, unterminated last lines, long lines, and every
 /// comment byte, those above `0x7f` (negative as a C `char`) included. Runs on many
-/// threads at once (TSan).
+/// threads at once (`TSan`).
 mod prettify {
     use std::ffi::{CStr, CString};
     use std::thread;

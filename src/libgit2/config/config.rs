@@ -148,7 +148,7 @@ use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set};
 /// let _ = handle;
 /// ```
 ///
-/// Wraps: git_config
+/// Wraps: `git_config`
 /// Handwritten
 #[repr(transparent)]
 pub struct Config<'r>(
@@ -191,14 +191,20 @@ unsafe impl<'r> CCell for Config<'r> {
         Self: 'a;
 }
 
-impl<'a, 'r> ConfigRef<'a, 'r> {
+impl<'r> ConfigRef<'_, 'r> {
     /// Borrows the config at `ptr`; `None` if it is NULL.
     ///
     /// # Safety
     ///
     /// `ptr` must be NULL or address a live config that stays live for `'a`, loaded
     /// for no repository or for one that outlives `'r`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_config) -> Option<Self> {
         // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
         // live `git_config` that outlives `'a` and is not written meanwhile.
@@ -207,20 +213,19 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
 
     /// Pointer to the C object, for the routines that take a `git_config *` and
     /// only read it.
-    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *mut ffi::git_config {
         self.0.as_non_null().as_ptr().cast()
     }
 }
 
-impl<'a, 'r> ConfigMut<'a, 'r> {
+impl<'r> ConfigMut<'_, 'r> {
     /// Writable pointer to the C object.
-    #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> ConfigRef<'_, 'r> {
         self.0
     }
@@ -237,13 +242,18 @@ impl ConfigRef<'_, '_> {
     /// changes to the source do not change the snapshot. The result uses the
     /// existing config release policy and remains thread-bound, like `Config`.
     ///
-    /// Wraps: git_config_snapshot
+    /// Wraps: `git_config_snapshot`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when the snapshot cannot be made: a backend that cannot
+    /// reread its changed file, or an allocation failure while copying the entries.
     pub fn snapshot(&self) -> Result<ConfigBox<'static>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: this handle keeps the source and its repository live. `out` is
         // a writable pointer slot. C copies entries synchronously, retaining no
         // Rust borrow, and frees partial construction on failure.
-        let rc = unsafe { ffi::git_config_snapshot(&mut out, self.as_ptr()) };
+        let rc = unsafe { ffi::git_config_snapshot(&raw mut out, self.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -274,7 +284,12 @@ impl ConfigMut<'_, '_> {
     /// let _ = shared.snapshot();
     /// ```
     ///
-    /// Wraps: git_config_set_string
+    /// Wraps: `git_config_set_string`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and copied error for an invalid name, a key that names several
+    /// values, a locked file, or a configuration without a writable backend.
     pub fn set_string(&mut self, name: &CStr, value: &CStr) -> Result<(), ConfigError> {
         let config = self.as_mut_ptr();
         // SAFETY: the exclusive handle permits mutation and keeps any repository
@@ -294,10 +309,12 @@ impl ConfigMut<'_, '_> {
     /// selecting a single level reliably selects that backend. This does not
     /// change read priority or make read-only backends writable.
     ///
+    /// Wraps: `git_config_set_writeorder`
+    ///
+    /// # Errors
+    ///
     /// Fails before calling C if the length is not less than `i32::MAX`, which
     /// C requires to represent indices and safely compare priorities.
-    ///
-    /// Wraps: git_config_set_writeorder
     pub fn set_write_order(&mut self, levels: &[ConfigLevel]) -> Result<(), ConfigError> {
         validate_write_order_len(levels.len())?;
         // SAFETY: exclusive config access, and a readable contiguous slice of
@@ -375,8 +392,8 @@ impl fmt::Debug for ConfigMut<'_, '_> {
 /// config, its backend list and every backend it alone holds once the count reaches
 /// zero and no repository owns it; builds one through `git_config_new`.
 ///
-/// Wraps: git_config_free
-/// Wraps: git_config_new
+/// Wraps: `git_config_free`
+/// Wraps: `git_config_new`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConfigFree;
@@ -406,7 +423,7 @@ unsafe impl CNew<Config<'static>> for ConfigFree {
         // SAFETY: `out` is a writable slot. The runtime is pinned, so the allocation
         // goes through an initialised allocator and a failure is reported on live
         // thread-local state.
-        let rc = unsafe { ffi::git_config_new(&mut out) };
+        let rc = unsafe { ffi::git_config_new(&raw mut out) };
         if rc < 0 {
             return None;
         }
@@ -442,10 +459,12 @@ impl Config<'_> {
     /// An empty configuration, with no backends: every lookup misses, and every
     /// write fails until a backend is added.
     ///
+    /// Wraps: `git_config_new`
+    ///
+    /// # Errors
+    ///
     /// Pins the runtime first. Fails, with libgit2's error, when the config cannot be
     /// allocated or libgit2 cannot be initialised.
-    ///
-    /// Wraps: git_config_new
     pub fn new() -> Result<ConfigBox<'static>, ErrorBuf> {
         ConfigBox::new().ok_or_else(last)
     }
@@ -465,7 +484,12 @@ impl Config<'_> {
     /// files are accepted and created by a later write. The path is copied; no
     /// repository is retained.
     ///
-    /// Wraps: git_config_open_ondisk
+    /// Wraps: `git_config_open_ondisk`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when libgit2 cannot be initialised, or when `path`
+    /// exists but cannot be read or parsed.
     pub fn open(path: &CStr) -> Result<ConfigBox<'static>, ConfigError> {
         if !runtime_pinned() {
             return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -473,7 +497,7 @@ impl Config<'_> {
         let mut out = ptr::null_mut();
         // SAFETY: one writable output slot and a live NUL-terminated path, copied
         // by C. Success transfers a new config; failure frees partial construction.
-        let rc = unsafe { ffi::git_config_open_ondisk(&mut out, path.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_ondisk(&raw mut out, path.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -484,7 +508,12 @@ impl Config<'_> {
 
     /// Opens the default global, XDG and system configuration locations.
     ///
-    /// Wraps: git_config_open_default
+    /// Wraps: `git_config_open_default`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when libgit2 cannot be initialised, or when one of the
+    /// default files exists but cannot be read or parsed.
     pub fn open_default() -> Result<ConfigBox<'static>, ConfigError> {
         if !runtime_pinned() {
             return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -492,7 +521,7 @@ impl Config<'_> {
         let mut out = ptr::null_mut();
         // SAFETY: C initializes this writable slot with an independent config
         // loaded for no repository, or frees it on failure. Runtime is pinned.
-        let rc = unsafe { ffi::git_config_open_default(&mut out) };
+        let rc = unsafe { ffi::git_config_open_default(&raw mut out) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -508,12 +537,17 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     /// The view keeps the parent borrowed (custom backends may
     /// use their parent pointer). Use the exclusive handle to obtain a writable view.
     ///
-    /// Wraps: git_config_open_level
+    /// Wraps: `git_config_open_level`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend has that priority, and with libgit2's
+    /// code and error when the view cannot be allocated.
     pub fn open_level(&self, level: ConfigLevel) -> Result<ConfigArc<'a>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: parent is live for 'a and C only reads its backend vector. C
         // uprefs the selected backend into a fresh config, tied here to the parent.
-        let rc = unsafe { ffi::git_config_open_level(&mut out, self.as_ptr(), level.raw()) };
+        let rc = unsafe { ffi::git_config_open_level(&raw mut out, self.as_ptr(), level.raw()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -526,12 +560,17 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
 
     /// Opens XDG when present, otherwise global, as a shared Rust view.
     ///
-    /// Wraps: git_config_open_global
+    /// Wraps: `git_config_open_global`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when neither an XDG nor a global backend is present, and
+    /// with libgit2's code and error when the view cannot be allocated.
     pub fn open_global(&self) -> Result<ConfigArc<'a>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: live parent borrowed for 'a; C returns a fresh config holding
         // one retained backend. The returned shared owner keeps the parent borrowed.
-        let rc = unsafe { ffi::git_config_open_global(&mut out, self.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_global(&raw mut out, self.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -544,13 +583,18 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
 
     /// Reads and parses a configuration bool value, returning an owned scalar.
     ///
-    /// Wraps: git_config_get_bool
+    /// Wraps: `git_config_get_bool`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name or a value that does not parse as a boolean.
     pub fn get_bool(&self, name: &CStr) -> Result<bool, ConfigError> {
         let mut out = 0;
         // SAFETY: config is live, name is NUL-terminated, and out is a writable
         // aligned scalar. C temporarily retains and releases its entry; no borrow
         // escapes this call, even when a live backend refreshes its file.
-        let rc = unsafe { ffi::git_config_get_bool(&mut out, self.as_ptr(), name.as_ptr()) };
+        let rc = unsafe { ffi::git_config_get_bool(&raw mut out, self.as_ptr(), name.as_ptr()) };
         if rc < 0 {
             Err(ConfigError::from_libgit2(rc))
         } else {
@@ -560,13 +604,19 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
 
     /// Reads and parses a configuration i32 value, returning an owned scalar.
     ///
-    /// Wraps: git_config_get_int32
+    /// Wraps: `git_config_get_int32`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name or a value that does not parse as a 32-bit integer or overflows
+    /// it.
     pub fn get_i32(&self, name: &CStr) -> Result<i32, ConfigError> {
         let mut out = 0;
         // SAFETY: config is live, name is NUL-terminated, and out is a writable
         // aligned scalar. C temporarily retains and releases its entry; no borrow
         // escapes this call, even when a live backend refreshes its file.
-        let rc = unsafe { ffi::git_config_get_int32(&mut out, self.as_ptr(), name.as_ptr()) };
+        let rc = unsafe { ffi::git_config_get_int32(&raw mut out, self.as_ptr(), name.as_ptr()) };
         if rc < 0 {
             Err(ConfigError::from_libgit2(rc))
         } else {
@@ -578,14 +628,19 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     /// Clears stale errors first and reports C's silent suffix-tail parse failure
     /// as a configuration parse error instead of attributing a previous failure.
     ///
-    /// Wraps: git_config_get_int64
+    /// Wraps: `git_config_get_int64`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name or a value that does not parse as a 64-bit integer.
     pub fn get_i64(&self, name: &CStr) -> Result<i64, ConfigError> {
         let mut out = 0;
         clear();
         // SAFETY: config is live, name is NUL-terminated, and out is a writable
         // aligned scalar. C temporarily retains and releases its entry; no borrow
         // escapes this call, even when a live backend refreshes its file.
-        let rc = unsafe { ffi::git_config_get_int64(&mut out, self.as_ptr(), name.as_ptr()) };
+        let rc = unsafe { ffi::git_config_get_int64(&raw mut out, self.as_ptr(), name.as_ptr()) };
         if rc < 0 {
             if last().class() == Some(ErrorClass::None) {
                 set(
@@ -604,12 +659,17 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     /// Returning an owned string prevents backend sharing or future calls from
     /// invalidating a Rust string reference.
     ///
-    /// Wraps: git_config_get_string
+    /// Wraps: `git_config_get_string`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name or a live configuration, which C refuses for this accessor.
     pub fn get_string(&self, name: &CStr) -> Result<CString, ConfigError> {
         let mut out = ptr::null();
         // SAFETY: live config and name, writable pointer slot. On success C's
         // read-only backend keeps the NUL-terminated result live through this copy.
-        let rc = unsafe { ffi::git_config_get_string(&mut out, self.as_ptr(), name.as_ptr()) };
+        let rc = unsafe { ffi::git_config_get_string(&raw mut out, self.as_ptr(), name.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -621,7 +681,12 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     /// Copies a value from either a live config or snapshot into an owned buffer.
     /// Valueless entries are empty strings, distinct from missing entries.
     ///
-    /// Wraps: git_config_get_string_buf
+    /// Wraps: `git_config_get_string_buf`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name or an allocation failure.
     pub fn get_string_buf(
         &self,
         name: &CStr,
@@ -642,7 +707,13 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     /// Copies a path and expands a leading `~/` (or `~`) using C's home lookup.
     /// Named users (`~user`) and valueless path entries are rejected by C.
     ///
-    /// Wraps: git_config_get_path
+    /// Wraps: `git_config_get_path`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for a `~user` path or a valueless entry, which C refuses, or when the home directory
+    /// cannot be found.
     pub fn get_path(
         &self,
         name: &CStr,
@@ -662,17 +733,23 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
     }
 }
 
-impl<'a, 'r> ConfigMut<'a, 'r> {
+impl<'r> ConfigMut<'_, 'r> {
     /// Adds a copied file path at a priority, optionally replacing that priority.
     /// A repository is retained as a borrow for includeIf evaluation on every reparse.
     /// It must outlive the config's `'r`; narrow a fresh owner's lifetime before
     /// obtaining its mutable handle to attach a non-static repository.
     ///
-    /// Registration accepts 0..i32::MAX (exclusive). Negative levels are selectors,
+    /// Wraps: `git_config_add_file_ondisk`
+    ///
+    /// # Errors
+    ///
+    /// Registration accepts `0..i32::MAX` (exclusive). Negative levels are selectors,
     /// not priorities. Excluding MAX also prevents C comparator subtraction overflow
     /// in a view opened with HIGHEST, which C registers internally at -1.
     ///
-    /// Wraps: git_config_add_file_ondisk
+    /// Fails with [`ErrorCode::Invalid`] for a level outside `0..i32::MAX`, before calling C; with
+    /// [`ErrorCode::Exists`] when a backend already has that priority and `force` is false; and
+    /// with libgit2's code and error when the file exists but cannot be read or parsed.
     pub fn add_file(
         &mut self,
         path: &CStr,
@@ -712,12 +789,18 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// C retains the backend; the exclusive borrow prevents two views from locking
     /// the same backend recursively or replacing it through the parent.
     ///
-    /// Wraps: git_config_open_level
+    /// Wraps: `git_config_open_level`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend has that priority, and with libgit2's
+    /// code and error when the view cannot be allocated.
     pub fn open_level(&mut self, level: ConfigLevel) -> Result<ConfigBox<'_>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: parent is live and exclusively borrowed for the returned view.
         // Success constructs a fresh config with one retained backend instance.
-        let rc = unsafe { ffi::git_config_open_level(&mut out, self.as_mut_ptr(), level.raw()) };
+        let rc =
+            unsafe { ffi::git_config_open_level(&raw mut out, self.as_mut_ptr(), level.raw()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -728,12 +811,17 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 
     /// Opens a writable XDG view, falling back to global. Keeps the parent exclusive.
     ///
-    /// Wraps: git_config_open_global
+    /// Wraps: `git_config_open_global`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when neither an XDG nor a global backend is present, and
+    /// with libgit2's code and error when the view cannot be allocated.
     pub fn open_global(&mut self) -> Result<ConfigBox<'_>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: as open_level: fresh config over a retained backend; the returned
         // owner's lifetime freezes the parent until the view is released.
-        let rc = unsafe { ffi::git_config_open_global(&mut out, self.as_mut_ptr()) };
+        let rc = unsafe { ffi::git_config_open_global(&raw mut out, self.as_mut_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -744,7 +832,12 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 
     /// Writes an owned scalar to the highest-priority writable backend.
     ///
-    /// Wraps: git_config_set_bool
+    /// Wraps: `git_config_set_bool`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name, a key that names several values, a
+    /// locked file, or a configuration without a writable backend.
     pub fn set_bool(&mut self, name: &CStr, value: bool) -> Result<(), ConfigError> {
         let config = self.as_mut_ptr();
         // SAFETY: exclusive live config and a NUL-terminated name borrowed only
@@ -759,7 +852,12 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 
     /// Writes an owned scalar to the highest-priority writable backend.
     ///
-    /// Wraps: git_config_set_int32
+    /// Wraps: `git_config_set_int32`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name, a key that names several values, a
+    /// locked file, or a configuration without a writable backend.
     pub fn set_i32(&mut self, name: &CStr, value: i32) -> Result<(), ConfigError> {
         // SAFETY: exclusive live config and a NUL-terminated name borrowed only
         // for this call. C formats and copies the scalar, retaining neither input.
@@ -773,7 +871,12 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 
     /// Writes an owned scalar to the highest-priority writable backend.
     ///
-    /// Wraps: git_config_set_int64
+    /// Wraps: `git_config_set_int64`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name, a key that names several values, a
+    /// locked file, or a configuration without a writable backend.
     pub fn set_i64(&mut self, name: &CStr, value: i64) -> Result<(), ConfigError> {
         // SAFETY: exclusive live config and a NUL-terminated name borrowed only
         // for this call. C formats and copies the scalar, retaining neither input.
@@ -789,12 +892,17 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// refuses a multivar (use [`delete_multivar`](Self::delete_multivar)) and a
     /// missing key. The name is borrowed only for this call.
     ///
+    /// Wraps: `git_config_delete_entry`
+    ///
+    /// # Errors
+    ///
     /// Without a writable backend this fails with [`ErrorCode::ReadOnly`] and a
     /// configuration error saying so. libgit2 sets no error on that path, leaving
     /// whatever an earlier call set, so the wrapper clears the thread's error before
     /// the call and sets its own; a success therefore leaves no earlier error behind.
     ///
-    /// Wraps: git_config_delete_entry
+    /// Fails, as well, with [`ErrorCode::NotFound`] for a missing key, and with libgit2's code and
+    /// error for a key that names several values.
     pub fn delete_entry(&mut self, name: &CStr) -> Result<(), ConfigError> {
         clear();
         // SAFETY: exclusive live config, live NUL-terminated name, no retained Rust
@@ -807,10 +915,15 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// Both strings are borrowed only for this call; the backend compiles and frees
     /// its own regex.
     ///
+    /// Wraps: `git_config_delete_multivar`
+    ///
+    /// # Errors
+    ///
     /// Without a writable backend this fails as [`delete_entry`](Self::delete_entry)
     /// does, with an error of its own.
     ///
-    /// Wraps: git_config_delete_multivar
+    /// Fails with libgit2's code and error for an invalid name or pattern, and
+    /// [`ErrorCode::NotFound`] when no value matches.
     pub fn delete_multivar(&mut self, name: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         clear();
         // SAFETY: exclusive live config, live NUL-terminated inputs, no retained
@@ -825,7 +938,12 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// none match, in the writer backend. Strings are borrowed only for this call;
     /// the value is copied.
     ///
-    /// Wraps: git_config_set_multivar
+    /// Wraps: `git_config_set_multivar`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name or pattern, a locked file, or a
+    /// configuration without a writable backend.
     pub fn set_multivar(
         &mut self,
         name: &CStr,
@@ -856,7 +974,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_set_string
+    /// Wraps: `git_config_set_string`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::set_string` does.
     pub fn set_string(&mut self, name: &CStr, value: &CStr) -> Result<(), ConfigError> {
         self.config_mut().set_string(name, value)
     }
@@ -864,7 +986,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_set_bool
+    /// Wraps: `git_config_set_bool`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::set_bool` does.
     pub fn set_bool(&mut self, name: &CStr, value: bool) -> Result<(), ConfigError> {
         self.config_mut().set_bool(name, value)
     }
@@ -872,7 +998,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_set_int32
+    /// Wraps: `git_config_set_int32`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::set_i32` does.
     pub fn set_i32(&mut self, name: &CStr, value: i32) -> Result<(), ConfigError> {
         self.config_mut().set_i32(name, value)
     }
@@ -880,7 +1010,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_set_int64
+    /// Wraps: `git_config_set_int64`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::set_i64` does.
     pub fn set_i64(&mut self, name: &CStr, value: i64) -> Result<(), ConfigError> {
         self.config_mut().set_i64(name, value)
     }
@@ -888,7 +1022,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_set_multivar
+    /// Wraps: `git_config_set_multivar`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::set_multivar` does.
     pub fn set_multivar(
         &mut self,
         name: &CStr,
@@ -901,7 +1039,11 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_delete_entry
+    /// Wraps: `git_config_delete_entry`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::delete_entry` does.
     pub fn delete_entry(&mut self, name: &CStr) -> Result<(), ConfigError> {
         self.config_mut().delete_entry(name)
     }
@@ -909,16 +1051,25 @@ impl crate::libgit2::refs::transaction::ConfigTransaction<'_, '_> {
     /// Mutates the locked writer through the transaction's retained exclusive
     /// config borrow, without allowing another lock of that same backend.
     ///
-    /// Wraps: git_config_delete_multivar
+    /// Wraps: `git_config_delete_multivar`
+    ///
+    /// # Errors
+    ///
+    /// Fails as `ConfigMut::delete_multivar` does.
     pub fn delete_multivar(&mut self, name: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         self.config_mut().delete_multivar(name, regexp)
     }
 }
 
-/// Finds the existing global config file using C's search paths. NotFound is an
+/// Finds the existing global config file using C's search paths. `NotFound` is an
 /// error with its original code; no UTF-8 assumption is made about the output.
 ///
-/// Wraps: git_config_find_global
+/// Wraps: `git_config_find_global`
+///
+/// # Errors
+///
+/// Fails with [`ErrorCode::NotFound`] when no global configuration file exists, and with libgit2's
+/// code and error when libgit2 cannot be initialised or the search paths cannot be read.
 pub fn find_global() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
     if !runtime_pinned() {
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -934,10 +1085,15 @@ pub fn find_global() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError
     }
 }
 
-/// Finds the existing system config file using C's search paths. NotFound is an
+/// Finds the existing system config file using C's search paths. `NotFound` is an
 /// error with its original code; no UTF-8 assumption is made about the output.
 ///
-/// Wraps: git_config_find_system
+/// Wraps: `git_config_find_system`
+///
+/// # Errors
+///
+/// Fails with [`ErrorCode::NotFound`] when no system configuration file exists, and with libgit2's
+/// code and error when libgit2 cannot be initialised or the search paths cannot be read.
 pub fn find_system() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
     if !runtime_pinned() {
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -953,10 +1109,15 @@ pub fn find_system() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError
     }
 }
 
-/// Finds the existing xdg config file using C's search paths. NotFound is an
+/// Finds the existing xdg config file using C's search paths. `NotFound` is an
 /// error with its original code; no UTF-8 assumption is made about the output.
 ///
-/// Wraps: git_config_find_xdg
+/// Wraps: `git_config_find_xdg`
+///
+/// # Errors
+///
+/// Fails with [`ErrorCode::NotFound`] when no XDG configuration file exists, and with libgit2's
+/// code and error when libgit2 cannot be initialised or the search paths cannot be read.
 pub fn find_xdg() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
     if !runtime_pinned() {
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -975,7 +1136,12 @@ pub fn find_xdg() -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
 /// Expands `~` or `~/...` and copies other paths verbatim. Named users are unsupported.
 /// Input is borrowed only for the call; the returned buffer owns its bytes.
 ///
-/// Wraps: git_config_parse_path
+/// Wraps: `git_config_parse_path`
+///
+/// # Errors
+///
+/// Fails with libgit2's code and error for a `~user` path, when the home directory cannot be found,
+/// or when libgit2 cannot be initialised.
 pub fn parse_path(value: &CStr) -> Result<crate::libgit2::core::buffer::BufVal, ConfigError> {
     if !runtime_pinned() {
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -1005,7 +1171,12 @@ pub fn parse_path(value: &CStr) -> Result<crate::libgit2::core::buffer::BufVal, 
 /// parse_bool(Some("true"));
 /// ```
 ///
-/// Wraps: git_config_parse_bool
+/// Wraps: `git_config_parse_bool`
+///
+/// # Errors
+///
+/// Fails with libgit2's error, of class [`ErrorClass::Config`], for a value that is neither a
+/// boolean word nor an integer, or when libgit2 cannot be initialised.
 pub fn parse_bool(value: Option<&CStr>) -> Result<bool, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1016,7 +1187,7 @@ pub fn parse_bool(value: Option<&CStr>) -> Result<bool, ErrorBuf> {
     // pointer. The pinned runtime keeps error reporting's TLS key live.
     let rc = unsafe {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
-        ffi::git_config_parse_bool(&mut out, value)
+        ffi::git_config_parse_bool(&raw mut out, value)
     };
     if rc < 0 { Err(last()) } else { Ok(out != 0) }
 }
@@ -1028,7 +1199,12 @@ pub fn parse_bool(value: Option<&CStr>) -> Result<bool, ErrorBuf> {
 /// Borrows the input only for this call and returns an owned scalar or error.
 /// Pins libgit2's runtime before calling C, including on error paths.
 ///
-/// Wraps: git_config_parse_int32
+/// Wraps: `git_config_parse_int32`
+///
+/// # Errors
+///
+/// Fails with libgit2's error, of class [`ErrorClass::Config`], for `None`, an empty or malformed
+/// value, or one outside the `i32` range, or when libgit2 cannot be initialised.
 pub fn parse_i32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1039,7 +1215,7 @@ pub fn parse_i32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
     // pointer. The pinned runtime keeps error reporting's TLS key live.
     let rc = unsafe {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
-        ffi::git_config_parse_int32(&mut out, value)
+        ffi::git_config_parse_int32(&raw mut out, value)
     };
     if rc < 0 { Err(last()) } else { Ok(out) }
 }
@@ -1054,12 +1230,17 @@ pub fn parse_i32(value: Option<&CStr>) -> Result<i32, ErrorBuf> {
 /// Pins libgit2's runtime before calling C, including on error paths, and clears
 /// the thread's last error first, so a success leaves none.
 ///
+/// Wraps: `git_config_parse_int64`
+///
+/// # Errors
+///
 /// libgit2 fails on extra characters after a recognized suffix (e.g. `1kb`)
 /// without setting an error of its own, leaving whatever an earlier call set;
 /// this wrapper reports the failure as libgit2 reports every other one,
 /// `failed to parse '<value>' as an integer` in [`ErrorClass::Config`].
 ///
-/// Wraps: git_config_parse_int64
+/// Fails, as well, for `None`, an empty or malformed value, or overflow, or when libgit2 cannot be
+/// initialised.
 pub fn parse_i64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1071,7 +1252,7 @@ pub fn parse_i64(value: Option<&CStr>) -> Result<i64, ErrorBuf> {
     // pointer. The pinned runtime keeps error reporting's TLS key live.
     let rc = unsafe {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
-        ffi::git_config_parse_int64(&mut out, value)
+        ffi::git_config_parse_int64(&raw mut out, value)
     };
     if rc < 0 {
         // The error state was cleared before the call, so `GIT_ERROR_NONE` is
@@ -1099,7 +1280,7 @@ fn integer_parse_error(value: Option<&CStr>) -> CString {
 /// C's priority comparators subtract signed integers and can overflow when mixing
 /// extreme negative and positive levels.
 ///
-/// Wraps: git_config_level_t
+/// Wraps: `git_config_level_t`
 /// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1108,20 +1289,27 @@ pub struct ConfigLevel(ffi::git_config_level_t);
 impl ConfigLevel {
     /// First application-specific priority; larger priorities are also supported.
     pub const APP: Self = Self(ffi::GIT_CONFIG_LEVEL_APP);
+    /// The user's global configuration, `~/.gitconfig`.
     pub const GLOBAL: Self = Self(ffi::GIT_CONFIG_LEVEL_GLOBAL);
     /// Select the highest loaded priority when querying, not when adding a backend.
     pub const HIGHEST: Self = Self(ffi::GIT_CONFIG_HIGHEST_LEVEL);
+    /// The repository's own configuration, `$GIT_DIR/config`.
     pub const LOCAL: Self = Self(ffi::GIT_CONFIG_LEVEL_LOCAL);
+    /// The system-wide configuration, `$(prefix)/etc/gitconfig`.
     pub const SYSTEM: Self = Self(ffi::GIT_CONFIG_LEVEL_SYSTEM);
+    /// The worktree's own configuration, `$GIT_DIR/config.worktree`.
     pub const WORKTREE: Self = Self(ffi::GIT_CONFIG_LEVEL_WORKTREE);
+    /// The XDG configuration, `$XDG_CONFIG_HOME/git/config`.
     pub const XDG: Self = Self(ffi::GIT_CONFIG_LEVEL_XDG);
 
     /// Preserves an integer supplied by C, including custom priorities.
+    #[must_use]
     pub const fn from_raw(value: ffi::git_config_level_t) -> Self {
         Self(value)
     }
 
     /// The C value, for interoperability.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_config_level_t {
         self.0
     }
@@ -1143,19 +1331,26 @@ impl From<ConfigLevel> for ffi::git_config_level_t {
 /// input directly; boolean and string mappings return the entry's mapped value.
 /// Unknown C values are rejected instead of constructing an invalid Rust enum.
 ///
-/// Wraps: git_configmap_t
+/// Wraps: `git_configmap_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum MapType {
+    /// Matches a boolean false value (`GIT_CONFIGMAP_FALSE`).
     False,
+    /// Matches a boolean true value, or a valueless entry (`GIT_CONFIGMAP_TRUE`).
     True,
+    /// Matches an integer, returning it parsed (`GIT_CONFIGMAP_INT32`).
     Int32,
+    /// Matches the rule's string, case-insensitively (`GIT_CONFIGMAP_STRING`).
     String,
 }
 
 impl MapType {
+    /// Every mapping type, in discriminator order.
     pub const ALL: [Self; 4] = [Self::False, Self::True, Self::Int32, Self::String];
 
+    /// The C discriminator of this mapping type.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_configmap_t {
         match self {
             Self::False => ffi::GIT_CONFIGMAP_FALSE,
@@ -1165,6 +1360,8 @@ impl MapType {
         }
     }
 
+    /// The mapping type of the C discriminator `raw`; `None` for a value the header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_configmap_t) -> Option<Self> {
         match raw {
             ffi::GIT_CONFIGMAP_FALSE => Some(Self::False),
@@ -1187,11 +1384,13 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
     /// transaction drops. Dropping aborts. The owner does not expose a mutable
     /// config handle: that would permit recursively locking the same C backend.
     ///
+    /// Wraps: `git_config_lock`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's code: [`ErrorCode::ReadOnly`] when there is no writer
     /// (an empty or read-only config), [`ErrorCode::Locked`] when another writer
     /// holds the file's lock, a backend's own code otherwise.
-    ///
-    /// Wraps: git_config_lock
     pub fn lock(
         self,
     ) -> Result<crate::libgit2::refs::transaction::ConfigTransaction<'a, 'r>, ConfigError> {
@@ -1225,6 +1424,7 @@ impl ConfigError {
 
     /// A failure in `class` described by `message`, returned as `GIT_ERROR`: what a
     /// [`CustomBackend`](crate::libgit2::config::sys::config::CustomBackend) reports.
+    #[must_use]
     pub fn new(class: ErrorClass, message: &CStr) -> Self {
         Self {
             code: ErrorCode::Generic.raw(),
@@ -1234,6 +1434,7 @@ impl ConfigError {
 
     /// The same failure, returned as `code` ([`ErrorCode::NotFound`], say).
     /// [`ErrorCode::Ok`] would read as success, so the error then keeps its code.
+    #[must_use]
     pub fn with_code(mut self, code: ErrorCode) -> Self {
         if code != ErrorCode::Ok {
             self.code = code.raw();
@@ -1253,32 +1454,38 @@ impl ConfigError {
 
     /// The returned code; `None` for one the header does not name
     /// ([`raw_code`](Self::raw_code) has it).
+    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
 
     /// The returned code, always negative.
+    #[must_use]
     pub fn raw_code(&self) -> c_int {
         self.code
     }
 
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         self.error.class()
     }
 
     /// The error's class as libgit2 stored it.
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
         self.error.raw_class()
     }
 
     /// The error message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         self.error.message()
     }
 
     /// The error, without the code.
+    #[must_use]
     pub fn error(&self) -> &ErrorBuf {
         &self.error
     }
@@ -1358,7 +1565,7 @@ define_ctype!(
 /// a standalone `git_config_entry` or an iterator/callback's borrowed entry:
 /// C casts to the larger `git_config_backend_entry` to find the callback.
 ///
-/// Wraps: git_config_entry_free
+/// Wraps: `git_config_entry_free`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EntryFree;
 impl_cdrop!(EntryFree, Entry, ffi::git_config_entry_free);
@@ -1367,15 +1574,25 @@ impl_cdrop!(EntryFree, Entry, ffi::git_config_entry_free);
 /// The backing storage stays alive independently of the config/repository.
 pub type EntryArc = CArc<Entry, EntryFree>;
 
-impl<'a, 'r> ConfigRef<'a, 'r> {
+impl<'a> ConfigRef<'a, '_> {
     /// Creates an iterator borrowing this config, without retaining a reference.
     ///
-    /// Wraps: git_config_iterator_new
+    /// Wraps: `git_config_iterator_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when a backend cannot reread its changed file or the
+    /// iterator cannot be allocated.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `successful iterator constructor returned NULL`, only if libgit2 breaks its
+    /// contract.
     pub fn iterator(&self) -> Result<IteratorBox<'a>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: this handle keeps config/repository live for 'a; writable out
         // slot; C constructs a fresh complete allocation or cleans up failure.
-        let rc = unsafe { ffi::git_config_iterator_new(&mut out, self.as_ptr()) };
+        let rc = unsafe { ffi::git_config_iterator_new(&raw mut out, self.as_ptr()) };
         if rc != 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -1388,14 +1605,24 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
     /// Iterates keys matching C's regex syntax; `None` means all keys. The regex
     /// is compiled/copied during construction, not retained as a Rust borrow.
     ///
-    /// Wraps: git_config_iterator_glob_new
+    /// Wraps: `git_config_iterator_glob_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid pattern, when a backend cannot reread its
+    /// changed file, or when the iterator cannot be allocated.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `successful iterator constructor returned NULL`, only if libgit2 breaks its
+    /// contract.
     pub fn iterator_matching(&self, regexp: Option<&CStr>) -> Result<IteratorBox<'a>, ConfigError> {
         let mut out = ptr::null_mut();
         // SAFETY: live config and writable out; regexp is NUL-terminated and
         // borrowed only for the call. C frees failed regex construction.
         let rc = unsafe {
             ffi::git_config_iterator_glob_new(
-                &mut out,
+                &raw mut out,
                 self.as_ptr(),
                 regexp.map_or(ptr::null(), CStr::as_ptr),
             )
@@ -1422,7 +1649,17 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
     /// iterator when its own allocation fails (`config.c:1139`) remains, with or
     /// without a regex.
     ///
-    /// Wraps: git_config_multivar_iterator_new
+    /// Wraps: `git_config_multivar_iterator_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name or pattern, when a backend cannot
+    /// reread its changed file, or when the iterator cannot be allocated.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `successful iterator constructor returned NULL`, only if libgit2 breaks its
+    /// contract.
     pub fn multivar_iterator(
         &self,
         name: &CStr,
@@ -1434,7 +1671,7 @@ impl<'a, 'r> ConfigRef<'a, 'r> {
         // safe here, and failed normalization releases its partial construction.
         let rc = unsafe {
             ffi::git_config_multivar_iterator_new(
-                &mut out,
+                &raw mut out,
                 self.as_ptr(),
                 name.as_ptr(),
                 ptr::null(),
@@ -1488,13 +1725,24 @@ impl IteratorMut<'_, '_> {
     /// let _ = entry.value();
     /// ```
     ///
-    /// Wraps: git_config_next
+    /// Wraps: `git_config_next`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when a backend cannot refresh or read its next entry;
+    /// the iterator may be advanced again after such a failure. The end of the iteration is
+    /// `Ok(None)`, not an error.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `successful iterator advance returned NULL`, only if libgit2 breaks its
+    /// contract.
     pub fn advance_entry(&mut self) -> Result<Option<EntryRef<'_>>, ConfigError> {
         let mut entry = ptr::null_mut();
         // SAFETY: the exclusive handle denotes a complete live iterator with
         // its allocation-matched callback; out is writable. No entry from an
         // earlier advance remains lent across this exclusive reborrow.
-        let rc = unsafe { ffi::git_config_next(&mut entry, self.as_mut_ptr()) };
+        let rc = unsafe { ffi::git_config_next(&raw mut entry, self.as_mut_ptr()) };
         if rc == ffi::GIT_ITEROVER {
             return Ok(None);
         }
@@ -1532,7 +1780,17 @@ impl ConfigRef<'_, '_> {
     /// backend's entries can corrupt its heap, as for [`snapshot`](Self::snapshot),
     /// and one failure leaks an iterator.
     ///
-    /// Wraps: git_config_get_entry
+    /// Wraps: `git_config_get_entry`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend holds `name`, and with libgit2's code and
+    /// error for an invalid name, a backend that cannot reread its changed file, or an allocation
+    /// failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `successful entry lookup returned NULL`, only if libgit2 breaks its contract.
     pub fn entry(&self, name: &CStr) -> Result<EntryArc, ConfigError> {
         let before = last();
         if let Some(failure) = self.reread_through(name)? {
@@ -1543,7 +1801,8 @@ impl ConfigRef<'_, '_> {
         // SAFETY: the snapshot is live for the call; its backends never reread,
         // so `get` fails only as a found or missing key; name is NUL-terminated;
         // out is an exclusive writable slot. Success acquires one reference.
-        let rc = unsafe { ffi::git_config_get_entry(&mut out, snapshot.as_c_ptr(), name.as_ptr()) };
+        let rc =
+            unsafe { ffi::git_config_get_entry(&raw mut out, snapshot.as_c_ptr(), name.as_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -1563,6 +1822,10 @@ impl ConfigRef<'_, '_> {
     /// entry. Returns the failure of the highest-priority backend that failed
     /// above every backend holding `name`: C's lookup stops there. An invalid
     /// name fails first, as in C.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers hold a reference to the value"
+    )]
     fn reread_through(&self, name: &CStr) -> Result<Option<ConfigError>, ConfigError> {
         let mut iter = self.multivar_iterator(name, None)?;
         let mut failure = None;
@@ -1604,7 +1867,12 @@ impl ConfigRef<'_, '_> {
     /// `entry` apply here. Mapping retains C's first-match semantics and error
     /// reporting.
     ///
-    /// Wraps: git_config_get_mapped
+    /// Wraps: `git_config_get_mapped`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`entry`](Self::entry) does, and as [`lookup_map_value`] does when no rule matches
+    /// the value.
     pub fn get_mapped(&self, name: &CStr, maps: &[ConfigMap<'_>]) -> Result<i32, ConfigError> {
         let entry = self.entry(name)?;
         lookup_map_value(maps, entry.as_ref().value())
@@ -1626,7 +1894,12 @@ impl ConfigRef<'_, '_> {
 /// undefined; the wrapper reports it itself, spelling the value `(null)` as
 /// libgit2's parsers and glibc do.
 ///
-/// Wraps: git_config_lookup_map_value
+/// Wraps: `git_config_lookup_map_value`
+///
+/// # Errors
+///
+/// Fails with libgit2's code and error, of class [`ErrorClass::Config`], when no rule matches
+/// `value`, the table is empty, or libgit2 cannot be initialised.
 pub fn lookup_map_value(maps: &[ConfigMap<'_>], value: Option<&CStr>) -> Result<i32, ConfigError> {
     if !runtime_pinned() {
         return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -1641,7 +1914,7 @@ pub fn lookup_map_value(maps: &[ConfigMap<'_>], value: Option<&CStr>) -> Result<
     // strings are NULL or immutable live C strings and C retains nothing.
     let rc = unsafe {
         ffi::git_config_lookup_map_value(
-            &mut out,
+            &raw mut out,
             maps.as_ptr().cast(),
             maps.len(),
             value.map_or(ptr::null(), CStr::as_ptr),
@@ -1704,7 +1977,12 @@ impl ConfigRef<'_, '_> {
     /// As with C enumeration, file backends copy their entry lists. libgit2's
     /// previously documented list-copy allocation-failure defects also apply here.
     ///
-    /// Wraps: git_config_foreach
+    /// Wraps: `git_config_foreach`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when a backend cannot reread its changed file or list
+    /// its entries.
     pub fn foreach(
         &self,
         callback: &mut ForeachCallback<'_>,
@@ -1724,7 +2002,12 @@ impl ConfigRef<'_, '_> {
     /// No matches is success. Callback stops, panics and list-copy limitations are
     /// handled as in [`foreach`](Self::foreach).
     ///
-    /// Wraps: git_config_foreach_match
+    /// Wraps: `git_config_foreach_match`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid pattern, or when a backend cannot reread
+    /// its changed file or list its entries; a callback's stop is not an error.
     pub fn foreach_match(
         &self,
         regexp: Option<&CStr>,
@@ -1760,7 +2043,16 @@ impl ConfigRef<'_, '_> {
     /// skips valueless settings and leaks nothing, and otherwise matches, calls
     /// back and reports errors as C does.
     ///
-    /// Wraps: git_config_get_multivar_foreach
+    /// Wraps: `git_config_get_multivar_foreach`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid name, [`ErrorCode::InvalidSpec`] for an
+    /// invalid pattern, and [`ErrorCode::NotFound`] when no value matches.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is always set"
+    )]
     pub fn foreach_multivar(
         &self,
         name: &CStr,
@@ -1838,7 +2130,12 @@ impl BackendMut<'_> {
     /// nameless entry is allowed without a pattern, but rejected when matching
     /// would pass its NULL name to C's regex engine.
     ///
-    /// Wraps: git_config_backend_foreach_match
+    /// Wraps: `git_config_backend_foreach_match`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for an invalid pattern, a nameless entry met while
+    /// matching, or when the backend cannot list its entries; a callback's stop is not an error.
     pub fn foreach_match(
         &mut self,
         regexp: Option<&CStr>,
@@ -1921,7 +2218,9 @@ impl<'c> PreparedBackendWalk<'c> {
         let p = ptr::from_mut(&mut prepared);
         // SAFETY: project and initialize through the same raw provenance C
         // will use; a fresh Rust reborrow would invalidate that retained tag.
-        unsafe { addr_of_mut!((*p).iterator.backend).write(p.cast()) };
+        let backend_ptr = unsafe { addr_of_mut!((*p).iterator.backend) };
+        // SAFETY: as above.
+        unsafe { backend_ptr.write(p.cast()) };
         let rc = walk(p.cast());
         (rc, prepared.state)
     }
@@ -1932,7 +2231,9 @@ impl<'c> PreparedBackendWalk<'c> {
     ) -> c_int {
         // SAFETY: only this adapter installs the callback; backend is its offset-zero
         // base, out is writable, and the enclosing stable stack object outlives C.
-        unsafe { out.write(addr_of_mut!((*backend.cast::<Self>()).iterator)) };
+        let value = unsafe { addr_of_mut!((*backend.cast::<Self>()).iterator) };
+        // SAFETY: as above.
+        unsafe { out.write(value) };
         0
     }
 
@@ -1940,12 +2241,15 @@ impl<'c> PreparedBackendWalk<'c> {
         out: *mut *mut ffi::git_config_backend_entry,
         iterator: *mut ffi::git_config_iterator,
     ) -> c_int {
-        // SAFETY: iterator is this adapter's live base, with the enclosing pointer
-        // installed before C. State is Rust-owned, exclusively used synchronously;
-        // the reference covers no C-owned layout or pointee.
-        let state = unsafe {
-            let p = addr_of!((*iterator).backend).read().cast::<Self>();
-            &mut *addr_of_mut!((*p).state)
+        let state = {
+            // SAFETY: iterator is this adapter's live base, with the enclosing pointer
+            // installed before C. State is Rust-owned, exclusively used synchronously;
+            // the reference covers no C-owned layout or pointee.
+            let backend_ptr = unsafe { addr_of!((*iterator).backend) };
+            // SAFETY: as above.
+            let p = unsafe { backend_ptr.read().cast::<Self>() };
+            // SAFETY: as above; the state is Rust-owned, reached exclusively for the call.
+            unsafe { &mut (*p).state }
         };
         let mut m = state.inner.as_mut();
         match m.advance() {
@@ -1993,7 +2297,7 @@ fn after_callback(rc: c_int, action: &str) -> c_int {
     rc
 }
 
-/// C folds a callback's GIT_ITEROVER into success, so consult the callback state
+/// C folds a callback's `GIT_ITEROVER` into success, so consult the callback state
 /// first. Never mistake a callback's negative stop for a backend error.
 fn foreach_result(
     rc: c_int,
@@ -2052,7 +2356,7 @@ type ForeachFn<'f> = dyn for<'e> FnMut(EntryRef<'e>) -> ControlFlow<NonZero<c_in
 /// std::thread::scope(|scope| { scope.spawn(move || drop(callback)); });
 /// ```
 ///
-/// Wraps: git_config_foreach_cb
+/// Wraps: `git_config_foreach_cb`
 /// Handwritten
 pub struct ForeachCallback<'f> {
     f: &'f mut ForeachFn<'f>,
@@ -2061,6 +2365,8 @@ pub struct ForeachCallback<'f> {
 }
 
 impl<'f> ForeachCallback<'f> {
+    /// A callback that calls `f` with each entry, until it returns `Break` with the code to stop
+    /// the walk with.
     pub fn new<F>(f: &'f mut F) -> Self
     where
         F: for<'e> FnMut(EntryRef<'e>) -> ControlFlow<NonZero<c_int>> + 'f,
@@ -2073,6 +2379,10 @@ impl<'f> ForeachCallback<'f> {
     }
 
     /// Calls through the C trampoline and resumes any panic on the Rust side.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is always set"
+    )]
     pub fn call(&mut self, entry: EntryRef<'_>) -> ControlFlow<NonZero<c_int>> {
         let rc = self.walk_with(|callback, payload| {
             let callback = callback.expect("the trampoline is always set");
@@ -2083,8 +2393,9 @@ impl<'f> ForeachCallback<'f> {
         NonZero::new(rc).map_or(ControlFlow::Continue(()), ControlFlow::Break)
     }
 
-    /// The closure's stop code in the last invocation/walk, including GIT_EUSER
+    /// The closure's stop code in the last invocation/walk, including `GIT_EUSER`
     /// for a panic. Distinguishes callback stops from C's own errors.
+    #[must_use]
     pub fn stopped(&self) -> Option<NonZero<c_int>> {
         self.stopped
     }
@@ -2116,7 +2427,7 @@ impl fmt::Debug for ForeachCallback<'_> {
 }
 
 /// # Safety
-/// payload addresses a live exclusively used ForeachCallback on this thread;
+/// payload addresses a live exclusively used `ForeachCallback` on this thread;
 /// entry is NULL or a live immutable entry with NULL/immutable NUL strings for
 /// this call. Neither pointer is retained or freed here.
 unsafe extern "C" fn foreach_with(
@@ -2151,10 +2462,14 @@ impl<'a> EntryRef<'a> {
     /// Normalized key; built-in backends always supply it.
     /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
     ///
-    /// Field: git_config_entry.name
+    /// Field: `git_config_entry.name`
+    #[must_use]
     pub fn name(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let name_ptr = unsafe { &raw const (*self.as_ptr()).name };
         // SAFETY: the live shared handle permits reading this initialized field.
-        let value = unsafe { addr_of!((*self.as_ptr()).name).read() };
+        let value = unsafe { name_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -2167,10 +2482,14 @@ impl<'a> EntryRef<'a> {
     /// None is an implicit true boolean, distinct from an empty string.
     /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
     ///
-    /// Field: git_config_entry.value
+    /// Field: `git_config_entry.value`
+    #[must_use]
     pub fn value(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let value_ptr = unsafe { &raw const (*self.as_ptr()).value };
         // SAFETY: the live shared handle permits reading this initialized field.
-        let value = unsafe { addr_of!((*self.as_ptr()).value).read() };
+        let value = unsafe { value_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -2183,10 +2502,14 @@ impl<'a> EntryRef<'a> {
     /// Backend label, typically "file" or "in-memory".
     /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
     ///
-    /// Field: git_config_entry.backend_type
+    /// Field: `git_config_entry.backend_type`
+    #[must_use]
     pub fn backend_type(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let backend_type_ptr = unsafe { &raw const (*self.as_ptr()).backend_type };
         // SAFETY: the live shared handle permits reading this initialized field.
-        let value = unsafe { addr_of!((*self.as_ptr()).backend_type).read() };
+        let value = unsafe { backend_type_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -2199,10 +2522,14 @@ impl<'a> EntryRef<'a> {
     /// Origin path, absent for a memory backend without an origin.
     /// Strings are immutable and tied to this entry borrow, including non-UTF-8.
     ///
-    /// Field: git_config_entry.origin_path
+    /// Field: `git_config_entry.origin_path`
+    #[must_use]
     pub fn origin_path(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let origin_path_ptr = unsafe { &raw const (*self.as_ptr()).origin_path };
         // SAFETY: the live shared handle permits reading this initialized field.
-        let value = unsafe { addr_of!((*self.as_ptr()).origin_path).read() };
+        let value = unsafe { origin_path_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -2212,17 +2539,25 @@ impl<'a> EntryRef<'a> {
         }
     }
 
-    /// Field: git_config_entry.level
+    /// Field: `git_config_entry.level`
+    #[must_use]
     pub fn level(&self) -> ConfigLevel {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let level_ptr = unsafe { &raw const (*self.as_ptr()).level };
         // SAFETY: reads an initialized scalar; ConfigLevel preserves custom values.
-        let level = unsafe { addr_of!((*self.as_ptr()).level).read() };
+        let level = unsafe { level_ptr.read() };
         ConfigLevel::from_raw(level)
     }
 
-    /// Field: git_config_entry.include_depth
+    /// Field: `git_config_entry.include_depth`
+    #[must_use]
     pub fn include_depth(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let include_depth_ptr = unsafe { &raw const (*self.as_ptr()).include_depth };
         // SAFETY: reads the initialized unsigned scalar through a live handle.
-        unsafe { addr_of!((*self.as_ptr()).include_depth).read() }
+        unsafe { include_depth_ptr.read() }
     }
 }
 
@@ -2256,13 +2591,19 @@ impl fmt::Debug for EntryMut<'_> {
 /// integer mode returns the parsed input, not the record's mapped value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MapMatch<'s> {
+    /// A boolean-false rule matched.
     False,
+    /// A boolean-true rule matched.
     True,
+    /// An integer rule matched.
     Int32,
+    /// A string rule matched, with its string.
     String(&'s CStr),
 }
 
 impl MapMatch<'_> {
+    /// The mapping type of the rule that matched.
+    #[must_use]
     pub const fn map_type(self) -> MapType {
         match self {
             Self::False => MapType::False,
@@ -2332,7 +2673,7 @@ impl MapMatch<'_> {
 /// assert!(text.is_some());
 /// ```
 ///
-/// Wraps: git_configmap
+/// Wraps: `git_configmap`
 /// Handwritten
 #[repr(transparent)]
 pub struct ConfigMap<'s>(ffi::git_configmap, PhantomData<(*const (), &'s CStr)>);
@@ -2383,6 +2724,7 @@ unsafe impl Sync for ConfigMapMut<'_, '_> {}
 
 impl<'s> ConfigMap<'s> {
     /// Builds a resource-free record with a valid discriminator/string pair.
+    #[must_use]
     pub const fn new(rule: MapMatch<'s>, map_value: i32) -> Self {
         Self(
             ffi::git_configmap {
@@ -2397,11 +2739,14 @@ impl<'s> ConfigMap<'s> {
         )
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> ConfigMapRef<'_, 's> {
         // SAFETY: initialized Rust-owned record shared for the returned lifetime.
         ConfigMapRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
         // SAFETY: exclusive Rust borrow supplies live storage and write provenance.
         let p = unsafe { CBorrowedPtr::new(NonNull::from(self)) };
@@ -2442,38 +2787,59 @@ impl<'a, 's> ConfigMapRef<'a, 's> {
     /// NULL or a live aligned initialized record, unchanged for `'a`, with
     /// a known mode and immutable NUL string valid for `'s` when non-NULL;
     /// String mode requires non-NULL. `'s` must outlive `'a`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(raw: *const ffi::git_configmap) -> Option<Self> {
         let p = NonNull::new(raw.cast_mut().cast::<ConfigMap<'s>>())?;
         // SAFETY: caller proves layout, validity, liveness and string lifetimes.
         Some(Self(unsafe { CBorrowedPtr::new(p) }))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_configmap {
         self.0.as_non_null().as_ptr().cast()
     }
 
-    /// Field: git_configmap.type
+    /// Field: `git_configmap.type`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `invalid mapping discriminator`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn map_type(&self) -> MapType {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let type_ptr = unsafe { &raw const (*self.as_ptr()).type_ };
         // SAFETY: live shared record; constructors/seams ensure a known mode.
-        let raw = unsafe { addr_of!((*self.as_ptr()).type_).read() };
+        let raw = unsafe { type_ptr.read() };
         MapType::from_raw(raw).expect("invalid mapping discriminator")
     }
 
-    /// Field: git_configmap.map_value
+    /// Field: `git_configmap.map_value`
+    #[must_use]
     pub fn map_value(&self) -> i32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let map_value_ptr = unsafe { &raw const (*self.as_ptr()).map_value };
         // SAFETY: reads an initialized scalar through the live shared handle.
-        unsafe { addr_of!((*self.as_ptr()).map_value).read() }
+        unsafe { map_value_ptr.read() }
     }
 
     /// None for ordinary non-string rules; String mode always has a string.
     /// Raw C non-string records may also have an ignored string, preserved here.
     ///
-    /// Field: git_configmap.str_match
+    /// Field: `git_configmap.str_match`
+    #[must_use]
     pub fn str_match(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let str_match_ptr = unsafe { &raw const (*self.as_ptr()).str_match };
         // SAFETY: the shared live handle permits reading the initialized pointer.
-        let p = unsafe { addr_of!((*self.as_ptr()).str_match).read() };
+        let p = unsafe { str_match_ptr.read() };
         if p.is_null() {
             None
         } else {
@@ -2483,6 +2849,9 @@ impl<'a, 's> ConfigMapRef<'a, 's> {
         }
     }
 
+    /// The rule this record describes: its mapping type, with its string for a string rule.
+    #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "cannot panic: NULL string rule")]
     pub fn rule(&self) -> MapMatch<'a> {
         match self.map_type() {
             MapType::False => MapMatch::False,
@@ -2493,11 +2862,14 @@ impl<'a, 's> ConfigMapRef<'a, 's> {
     }
 }
 
-impl<'a, 's> ConfigMapMut<'a, 's> {
+impl<'s> ConfigMapMut<'_, 's> {
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> ConfigMapRef<'_, 's> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
         ConfigMapMut(self.0, PhantomData)
     }
@@ -2514,24 +2886,34 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
         };
         // SAFETY: exclusive live record, with no outstanding shared view;
         // the new referent is borrowed for 's. Neither referent is owned here.
-        unsafe {
-            addr_of_mut!((*self.as_mut_ptr()).str_match).write(p);
-            addr_of_mut!((*self.as_mut_ptr()).type_).write(rule.map_type().raw());
-        }
+        let value2 = unsafe { addr_of_mut!((*self.as_mut_ptr()).str_match) };
+        // SAFETY: as above.
+        unsafe { value2.write(p) };
+        // SAFETY: as above.
+        let value2 = unsafe { addr_of_mut!((*self.as_mut_ptr()).type_) };
+        // SAFETY: as above.
+        unsafe { value2.write(rule.map_type().raw()) };
     }
 
     /// Replaces the string borrow without changing the mode. Non-string modes
     /// may store an ignored string too; `set_match` clears it for those modes.
     /// A non-null argument preserves String mode's required string invariant.
     pub fn set_str_match(&mut self, value: &'s CStr) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let str_match_ptr = unsafe { &raw mut (*self.as_mut_ptr()).str_match };
         // SAFETY: exclusive initialized record; the replacement immutable NUL
         // string lives for 's. Neither the previous nor new referent is owned.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).str_match).write(value.as_ptr()) };
+        unsafe { str_match_ptr.write(value.as_ptr()) };
     }
 
+    /// Sets the value the rule maps a match to.
     pub fn set_map_value(&mut self, value: i32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let map_value_ptr = unsafe { &raw mut (*self.as_mut_ptr()).map_value };
         // SAFETY: exclusive live handle allows replacing the initialized scalar.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).map_value).write(value) };
+        unsafe { map_value_ptr.write(value) };
     }
 }
 
@@ -2637,9 +3019,7 @@ pub(crate) mod unit_tests {
             count += 1;
             assert_eq!(e.value(), Some(c"input"));
             assert_eq!(e.include_depth(), u32::MAX);
-            if count == 1 {
-                panic!("caught inside trampoline");
-            }
+            assert!(count != 1, "caught inside trampoline");
             ControlFlow::Break(NonZero::new(73).unwrap())
         };
         let mut callback = ForeachCallback::new(&mut f);
@@ -2652,7 +3032,7 @@ pub(crate) mod unit_tests {
                 let invoke = || unsafe { cb.unwrap()(entry.as_ptr(), payload) };
                 assert_eq!(invoke(), ErrorCode::User.raw());
                 assert_eq!(invoke(), ErrorCode::User.raw());
-            })
+            });
         }));
         assert!(caught.is_err());
         assert_eq!(
@@ -2680,9 +3060,7 @@ pub(crate) mod unit_tests {
         let mut f = |entry: EntryRef<'_>| {
             assert!(entry.name().is_some());
             count += 1;
-            if count == 1 {
-                panic!("foreign iteration panic");
-            }
+            assert!(count != 1, "foreign iteration panic");
             ControlFlow::Continue(())
         };
         let mut callback = ForeachCallback::new(&mut f);
@@ -2777,14 +3155,14 @@ pub(crate) mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn file_priority_rejected_before_foreign_comparators() {
-        let mut cfg = super::Config::new().unwrap();
+        let mut cfg = Config::new().unwrap();
         for value in [i32::MIN, -2, -1, i32::MAX] {
             let error = cfg
                 .as_mut()
-                .add_file(c"unused", super::ConfigLevel::from_raw(value), None, false)
+                .add_file(c"unused", ConfigLevel::from_raw(value), None, false)
                 .unwrap_err();
-            assert_eq!(error.raw_code(), crate::ffi::GIT_EINVALID);
-            assert_eq!(error.class(), Some(super::ErrorClass::Invalid));
+            assert_eq!(error.raw_code(), ffi::GIT_EINVALID);
+            assert_eq!(error.class(), Some(ErrorClass::Invalid));
         }
     }
 
@@ -2794,11 +3172,11 @@ pub(crate) mod unit_tests {
         let file =
             std::env::temp_dir().join(format!("crustify-get-i64-silent-{}", std::process::id()));
         std::fs::write(&file, b"[a]\n number = 1kb\n").unwrap();
-        let path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
-        let cfg = super::Config::open(&path).unwrap();
-        super::set(super::ErrorClass::Invalid, c"unrelated earlier failure");
+        let path = CString::new(file.to_str().unwrap()).unwrap();
+        let cfg = Config::open(&path).unwrap();
+        set(ErrorClass::Invalid, c"unrelated earlier failure");
         let error = cfg.as_ref().get_i64(c"a.number").unwrap_err();
-        assert_eq!(error.class(), Some(super::ErrorClass::Config));
+        assert_eq!(error.class(), Some(ErrorClass::Config));
         assert_eq!(
             error.message(),
             c"failed to parse configuration value as an integer"
@@ -2809,10 +3187,13 @@ pub(crate) mod unit_tests {
 
     #[test]
     fn mapping_layout_borrows_clone_and_seams() {
-        assert_eq!(size_of::<ConfigMap>(), size_of::<ffi::git_configmap>());
-        assert_eq!(align_of::<ConfigMap>(), align_of::<ffi::git_configmap>());
-        assert_eq!(size_of::<ConfigMapRef>(), size_of::<*const ()>());
-        assert_eq!(size_of::<ConfigMapMut>(), size_of::<*mut ()>());
+        assert_eq!(size_of::<ConfigMap<'_>>(), size_of::<ffi::git_configmap>());
+        assert_eq!(
+            align_of::<ConfigMap<'_>>(),
+            align_of::<ffi::git_configmap>()
+        );
+        assert_eq!(size_of::<ConfigMapRef<'_, '_>>(), size_of::<*const ()>());
+        assert_eq!(size_of::<ConfigMapMut<'_, '_>>(), size_of::<*mut ()>());
         let text = CString::new([0xFF, b'x']).unwrap();
         let mut map = ConfigMap::new(MapMatch::String(&text), i32::MIN);
         let cloned = map.clone();
@@ -2843,8 +3224,8 @@ pub(crate) mod unit_tests {
     fn entry_layout_and_borrowed_fields_without_c() {
         assert_eq!(size_of::<Entry>(), size_of::<ffi::git_config_entry>());
         assert_eq!(align_of::<Entry>(), align_of::<ffi::git_config_entry>());
-        assert_eq!(size_of::<EntryRef>(), size_of::<*const ()>());
-        assert_eq!(size_of::<EntryMut>(), size_of::<*mut ()>());
+        assert_eq!(size_of::<EntryRef<'_>>(), size_of::<*const ()>());
+        assert_eq!(size_of::<EntryMut<'_>>(), size_of::<*mut ()>());
         assert_eq!(size_of::<EntryArc>(), size_of::<*mut ()>());
         assert_eq!(size_of::<Option<EntryArc>>(), size_of::<*mut ()>());
         let mut raw = ffi::git_config_entry {
@@ -2931,7 +3312,7 @@ pub(crate) mod unit_tests {
 
     /// A backend that cannot reread its changed file fails a lookup that would
     /// consult it, with libgit2's parse error, and without the unwritten entry
-    /// pointer C's `get_entry` forms for it (UBSan: member access within null
+    /// pointer C's `get_entry` forms for it (`UBSan`: member access within null
     /// pointer). Afterwards the backend serves its old entries, as in C. An
     /// invalid name fails first, without spending the reread; a failure spent
     /// below the key's backend leaves the thread's error as it was.
@@ -2940,7 +3321,7 @@ pub(crate) mod unit_tests {
     fn entry_reports_failed_rereads() {
         let dir =
             std::env::temp_dir().join(format!("crustify-entry-rereads-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         let (low, high) = (dir.join("global"), dir.join("local"));
         std::fs::write(&low, b"[test]\n shared = g\n").unwrap();
@@ -3110,7 +3491,7 @@ pub(crate) mod unit_tests {
 
     /// Refusing each allocation of an entry lookup in turn, through the reread
     /// walk and the snapshot, fails with libgit2's out-of-memory error, leaks
-    /// nothing (LSan) and leaves the config usable, until the lookup completes.
+    /// nothing (`LSan`) and leaves the config usable, until the lookup completes.
     /// The config has no file backend: a file backend's iterator and snapshot
     /// duplicate its entry list, and `git_config_list_dup_entry` corrupts the
     /// heap when an allocation fails there
@@ -3179,7 +3560,7 @@ pub(crate) mod unit_tests {
         }
     }
 
-    // SAFETY: libc's allocator, declared with its C signatures.
+    // libc's allocator, declared with its C signatures.
     unsafe extern "C" {
         fn malloc(n: usize) -> *mut c_void;
         fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
@@ -3225,7 +3606,7 @@ pub(crate) mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -3239,10 +3620,16 @@ pub(crate) mod unit_tests {
 
     #[test]
     fn layout_matches_c() {
-        assert_eq!(size_of::<ConfigBox>(), size_of::<*mut ffi::git_config>());
-        assert_eq!(size_of::<ConfigArc>(), size_of::<*mut ffi::git_config>());
         assert_eq!(
-            size_of::<Option<ConfigArc>>(),
+            size_of::<ConfigBox<'_>>(),
+            size_of::<*mut ffi::git_config>()
+        );
+        assert_eq!(
+            size_of::<ConfigArc<'_>>(),
+            size_of::<*mut ffi::git_config>()
+        );
+        assert_eq!(
+            size_of::<Option<ConfigArc<'_>>>(),
             size_of::<*mut ffi::git_config>()
         );
         assert_eq!(
@@ -3289,7 +3676,7 @@ pub(crate) mod unit_tests {
     }
 
     /// Every construction path builds an empty config, which misses every lookup and
-    /// refuses writes, and is freed once (LSan flags a leak, ASan a double free).
+    /// refuses writes, and is freed once (`LSan` flags a leak, `ASan` a double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn constructors_build_empty_configs() {
@@ -3313,12 +3700,12 @@ pub(crate) mod unit_tests {
             get(shared.as_ref(), c"core.bare"),
             Err(ErrorCode::NotFound.raw())
         );
-        assert_eq!(format!("{:p}", other), format!("{:p}", other.as_c_ptr()));
+        assert_eq!(format!("{other:p}"), format!("{:p}", other.as_c_ptr()));
     }
 
     /// A repository's config, adopted as a shared reference of the repository's borrow,
-    /// is shared with the repository and released once per reference (ASan flags a use
-    /// after free or a double free, LSan a leak); the repository goes last.
+    /// is shared with the repository and released once per reference (`ASan` flags a use
+    /// after free or a double free, `LSan` a leak); the repository goes last.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn repository_config_is_shared_for_the_repository_borrow() {
@@ -3332,7 +3719,7 @@ pub(crate) mod unit_tests {
         // directories.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut repo,
+                &raw mut repo,
                 path.as_ptr().cast(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -3342,7 +3729,7 @@ pub(crate) mod unit_tests {
         let adopt = || {
             let mut out = ptr::null_mut();
             // SAFETY: `out` is a writable slot, `repo` open.
-            assert_eq!(unsafe { ffi::git_repository_config(&mut out, repo) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_config(&raw mut out, repo) }, 0);
             // SAFETY: `git_repository_config` hands out one up-ref'd reference to the
             // repository's config, released by `git_config_free`; the repository holds
             // another, so it is shared, and outlives the arcs (freed below, after them).
@@ -3429,7 +3816,7 @@ pub(crate) mod unit_tests {
     }
 
     /// Out of memory, the view, opening and file-adding routines report libgit2's error
-    /// and free what they built (LSan), whether the new config or its backend entry
+    /// and free what they built (`LSan`), whether the new config or its backend entry
     /// failed to allocate, and the parent stays usable.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -3443,7 +3830,7 @@ pub(crate) mod unit_tests {
                 install_refusing();
                 let dir =
                     std::env::temp_dir().join(format!("crustify-open-oom-{}", std::process::id()));
-                let _ = std::fs::remove_dir_all(&dir);
+                drop(std::fs::remove_dir_all(&dir));
                 std::fs::create_dir_all(&dir).unwrap();
                 let file = |name: &str| {
                     let path = dir.join(name);
@@ -3494,7 +3881,7 @@ pub(crate) mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "allocates 8 GiB of address space; calls libgit2")]
     fn write_order_refuses_oversized_slices() {
-        let raw = vec![0 as ffi::git_config_level_t; c_int::MAX as usize];
+        let raw = vec![0; c_int::MAX as usize];
         let (levels, len) = (raw.as_ptr().cast::<ConfigLevel>(), raw.len());
         // SAFETY: `ConfigLevel` is `#[repr(transparent)]` over `git_config_level_t`;
         // the slice covers the vector's zeroed elements and is only read.
@@ -3589,10 +3976,10 @@ pub(crate) mod unit_tests {
     fn checked_mapping_modes() {
         for mode in MapType::ALL {
             assert_eq!(MapType::from_raw(mode.raw()), Some(mode));
-            assert_eq!(crate::ffi::git_configmap_t::from(mode), mode.raw());
+            assert_eq!(ffi::git_configmap_t::from(mode), mode.raw());
         }
         assert_eq!(MapType::from_raw(4), None);
-        assert_eq!(MapType::from_raw(crate::ffi::git_configmap_t::MAX), None);
+        assert_eq!(MapType::from_raw(ffi::git_configmap_t::MAX), None);
         assert_ne!(MapType::False, MapType::True);
         assert_eq!(format!("{:?}", MapType::Int32), "Int32");
     }
@@ -3601,12 +3988,12 @@ pub(crate) mod unit_tests {
     #[cfg_attr(miri, ignore = "reads libgit2's last error")]
     fn config_errors_keep_codes() {
         let _config = Config::new().unwrap();
-        crate::libgit2::util::sys::errors::set(ErrorClass::Config, c"held");
+        set(ErrorClass::Config, c"held");
         let locked = ConfigError::from_libgit2(ErrorCode::Locked.raw());
         assert_eq!(locked.code(), Some(ErrorCode::Locked));
         assert_eq!(locked.raw_code(), ffi::GIT_ELOCKED);
         assert_eq!(locked.class(), Some(ErrorClass::Config));
-        assert_eq!(locked.raw_class(), ffi::GIT_ERROR_CONFIG as c_int);
+        assert_eq!(locked.raw_class(), ffi::GIT_ERROR_CONFIG.cast_signed());
         assert_eq!(locked.message(), c"held");
         assert_eq!(locked.error().message(), c"held");
         assert_eq!(
@@ -3652,7 +4039,7 @@ pub(crate) mod unit_tests {
         clear();
         assert_eq!(missing.raise(), ffi::GIT_ENOTFOUND);
         let raised = last();
-        assert_eq!(raised.raw_class(), ffi::GIT_ERROR_OS as c_int);
+        assert_eq!(raised.raw_class(), ffi::GIT_ERROR_OS.cast_signed());
         assert_eq!(raised.message(), c"store refused %s");
     }
 
@@ -3739,6 +4126,10 @@ pub(crate) mod unit_tests {
         /// itself is refused (`config.c:1139`, its second allocation) is skipped.
         #[test]
         #[cfg_attr(miri, ignore = "installs a libgit2 allocator")]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn constructors_report_allocation_failure() {
             isolated(
                 concat!(module_path!(), "::constructors_report_allocation_failure"),
@@ -3790,20 +4181,32 @@ pub(crate) mod unit_tests {
                 p: *mut ffi::git_config_iterator,
             ) -> c_int {
                 let p = p.cast::<Self>();
-                // SAFETY: this callback belongs only to Scripted allocations, with
-                // the base at offset zero; C gives exclusive access for the call
-                // and out is a writable slot. Only by-value fields are read.
-                unsafe {
-                    let calls = addr_of_mut!((*p).calls);
-                    let n = calls.read();
-                    calls.write(n + 1);
-                    let status = addr_of!((*p).script)
-                        .read()
-                        .get(n)
-                        .copied()
-                        .unwrap_or(ffi::GIT_ITEROVER);
+                {
+                    // SAFETY: this callback belongs only to Scripted allocations, with
+                    // the base at offset zero; C gives exclusive access for the call
+                    // and out is a writable slot. Only by-value fields are read.
+                    let calls = unsafe { addr_of_mut!((*p).calls) };
+                    // SAFETY: as above.
+                    let n = unsafe { calls.read() };
+                    // SAFETY: as above.
+                    unsafe { calls.write(n + 1) };
+                    // SAFETY: as above.
+                    let script_ptr = unsafe { addr_of!((*p).script) };
+                    // SAFETY: as above.
+                    let status = unsafe {
+                        script_ptr
+                            .read()
+                            .get(n)
+                            .copied()
+                            .unwrap_or(ffi::GIT_ITEROVER)
+                    };
                     match status {
-                        0 => out.write(addr_of_mut!((*p).entry)),
+                        0 => {
+                            // SAFETY: as above; the projection forms no reference to the fixture.
+                            let entry = unsafe { &raw mut (*p).entry };
+                            // SAFETY: as above, `out` is a writable slot.
+                            unsafe { out.write(entry) };
+                        }
                         ffi::GIT_ITEROVER => {}
                         _ => set(ErrorClass::Config, c"scripted failure"),
                     }
@@ -3857,10 +4260,12 @@ pub(crate) mod unit_tests {
             let inner = Scripted::adopt(&[0, ffi::GIT_ITEROVER], releases.clone());
             let (rc, state) = PreparedBackendWalk::run(inner, true, |backend| {
                 // SAFETY: the lent base is initialized; slots are read by value.
-                let make_iterator = unsafe { addr_of!((*backend).iterator).read() }.unwrap();
+                let iterator_ptr = unsafe { addr_of!((*backend).iterator) };
+                // SAFETY: as above.
+                let make_iterator = unsafe { iterator_ptr.read() }.unwrap();
                 let mut iterator = ptr::null_mut();
                 // SAFETY: the adapter's own callback on its base; writable out.
-                assert_eq!(unsafe { make_iterator(&mut iterator, backend) }, 0);
+                assert_eq!(unsafe { make_iterator(&raw mut iterator, backend) }, 0);
                 assert_eq!(
                     iterator.cast::<u8>(),
                     backend
@@ -3868,23 +4273,24 @@ pub(crate) mod unit_tests {
                         .wrapping_add(core::mem::offset_of!(PreparedBackendWalk<'_>, iterator))
                 );
                 // SAFETY: the iterator base handed out above is initialized.
-                let (next, free) = unsafe {
-                    (
-                        addr_of!((*iterator).next).read(),
-                        addr_of!((*iterator).free).read(),
-                    )
-                };
+                let next_ptr = unsafe { addr_of!((*iterator).next) };
+                // SAFETY: as above.
+                let read2 = unsafe { next_ptr.read() };
+                // SAFETY: as above.
+                let free_ptr = unsafe { addr_of!((*iterator).free) };
+                // SAFETY: as above.
+                let (next, free) = unsafe { (read2, free_ptr.read()) };
                 let (next, free) = (next.unwrap(), free.unwrap());
                 let mut entry = ptr::null_mut();
                 // SAFETY: the adapter's matched iterator; writable slot. The inner
                 // Rust callback lends a static-string entry without foreign calls.
-                assert_eq!(unsafe { next(&mut entry, iterator) }, 0);
+                assert_eq!(unsafe { next(&raw mut entry, iterator) }, 0);
                 // SAFETY: the successful advance lends an initialized live entry
                 // until the next advance. A shared view does not release its storage.
                 let view = unsafe { EntryRef::from_ptr(entry.cast()) }.unwrap();
                 assert_eq!(view.name(), Some(c"scripted.key"));
                 // SAFETY: the entry borrow is over; same iterator and slot.
-                assert_eq!(unsafe { next(&mut entry, iterator) }, ffi::GIT_ITEROVER);
+                assert_eq!(unsafe { next(&raw mut entry, iterator) }, ffi::GIT_ITEROVER);
                 // SAFETY: this base is borrowed stack storage; the matching free is a
                 // no-op and neither consumes nor changes the Rust owner.
                 unsafe { free(iterator) };
@@ -3926,17 +4332,16 @@ pub(crate) mod unit_tests {
                 };
                 let mut owner = Scripted::adopt(script, state.releases.clone());
                 if state.script == [42] {
-                    // SAFETY: uniquely owned complete Scripted fixture, before any
-                    // entry is lent. NULL is a valid optional name for EntryRef.
-                    unsafe {
-                        addr_of_mut!(
-                            (*owner.as_mut().as_mut_ptr().cast::<Scripted>())
-                                .entry
-                                .entry
-                                .name
-                        )
-                        .write(ptr::null())
+                    // SAFETY: the owner is the uniquely owned, complete Scripted fixture, before
+                    // any entry is lent; the projection forms no reference to it.
+                    let name = unsafe {
+                        &raw mut (*owner.as_mut().as_mut_ptr().cast::<Scripted>())
+                            .entry
+                            .entry
+                            .name
                     };
+                    // SAFETY: NULL is a valid optional name for EntryRef.
+                    unsafe { name.write(ptr::null()) };
                 }
                 // SAFETY: C supplies writable out; transfers one complete iterator
                 // allocation with matching callbacks and only static dependencies.
@@ -4048,7 +4453,7 @@ pub(crate) mod unit_tests {
         #[test]
         #[cfg_attr(miri, ignore = "calls git_config_next and iterator_free")]
         fn advance_entry_dispatches_statuses_and_lends() {
-            let _ = Config::new().unwrap(); // Pins the runtime for error reporting.
+            drop(Config::new().unwrap()); // Pins the runtime for error reporting.
             let releases = Rc::new(Cell::new(0));
             let script = &[0, -7, 3, ffi::GIT_ITEROVER, 0];
             let mut owner = Scripted::adopt(script, releases.clone());

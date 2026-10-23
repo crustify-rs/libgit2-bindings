@@ -76,7 +76,9 @@ fn parsed_trailers_match() {
         let (mut c_side, mut rust_side) = (Vec::new(), Vec::new());
         for i in 0..arr.count {
             // SAFETY: `i < count`, so the trailer is in the array's buffer.
-            let raw = unsafe { arr.trailers.add(i).read() };
+            let add = unsafe { arr.trailers.add(i) };
+            // SAFETY: as above.
+            let raw = unsafe { add.read() };
             c_side.push((c_read(raw.key), c_read(raw.value)));
             // SAFETY: libgit2 set both strings, non-NULL and NUL-terminated, in the
             // array's block, which lives, unwritten, until the array is freed below,
@@ -90,7 +92,7 @@ fn parsed_trailers_match() {
         }
         assert_eq!(rust_side, c_side, "{message:?}");
         // SAFETY: filled by `git_message_trailers`, freed once.
-        unsafe { ffi::git_message_trailer_array_free(&mut arr) };
+        unsafe { ffi::git_message_trailer_array_free(&raw mut arr) };
     }
 }
 
@@ -153,7 +155,9 @@ fn c_array(arr: &ffi::git_message_trailer_array) -> ArrayView {
     let pairs = (0..arr.count)
         .map(|i| {
             // SAFETY: `i < count`, within the trailer buffer.
-            let t = unsafe { arr.trailers.add(i).read() };
+            let add2 = unsafe { arr.trailers.add(i) };
+            // SAFETY: as above.
+            let t = unsafe { add2.read() };
             (c_read(t.key), c_read(t.value))
         })
         .collect();
@@ -171,10 +175,10 @@ fn parsed_arrays_match() {
     for message in MESSAGES {
         let mut c = ffi::git_message_trailer_array::default();
         // SAFETY: zeroed storage; `message` is NUL-terminated and only read.
-        let rc = unsafe { ffi::git_message_trailers(&mut c, message.as_ptr()) };
+        let rc = unsafe { ffi::git_message_trailers(&raw mut c, message.as_ptr()) };
         let c_view = (rc, c_array(&c));
         // SAFETY: filled by `git_message_trailers`, freed once.
-        unsafe { ffi::git_message_trailer_array_free(&mut c) };
+        unsafe { ffi::git_message_trailer_array_free(&raw mut c) };
 
         let rust = MessageTrailerArray::parse(message).unwrap();
         let trailers: Vec<_> = rust
@@ -317,14 +321,14 @@ mod allocator {
         // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member
         // set, which it copies; nothing is allocated yet.
         let rc = unsafe {
-            ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+            ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
         };
         assert_eq!(rc, 0);
         // SAFETY: no arguments; refcounted, never released in this process.
         assert!(unsafe { ffi::git_libgit2_init() } > 0);
         drop(MessageTrailerArray::parse(c"").unwrap());
         // The thread's error state, which a failure writes to.
-        let _ = last();
+        drop(last());
     }
 
     /// One allocator event, with pointers replaced by the number of their allocation.
@@ -379,7 +383,7 @@ mod allocator {
     fn c_parse(message: &CStr) -> ffi::git_message_trailer_array {
         let mut arr = ffi::git_message_trailer_array::default();
         // SAFETY: zeroed storage; `message` is NUL-terminated and only read.
-        let rc = unsafe { ffi::git_message_trailers(&mut arr, message.as_ptr()) };
+        let rc = unsafe { ffi::git_message_trailers(&raw mut arr, message.as_ptr()) };
         assert_eq!(rc, 0);
         arr
     }
@@ -491,7 +495,7 @@ mod allocator {
                 let mut c = ffi::git_message_trailer_array::default();
                 FAIL.store(1, Ordering::SeqCst);
                 // SAFETY: zeroed storage; `message` is NUL-terminated and only read.
-                let rc = unsafe { ffi::git_message_trailers(&mut c, message.as_ptr()) };
+                let rc = unsafe { ffi::git_message_trailers(&raw mut c, message.as_ptr()) };
                 let c_error = last();
                 assert_eq!(FAIL.load(Ordering::SeqCst), 0);
                 let c_seen = (
@@ -526,7 +530,7 @@ mod allocator {
 /// (a negative C `char`); the results are compared byte for byte. A buffer is reused on
 /// the C side across messages, as `git_buf` callers do.
 mod prettify {
-    use std::ffi::{CString, c_char};
+    use std::ffi::CString;
 
     use libgit2::ffi;
     use libgit2::libgit2::object::message::prettify;
@@ -560,7 +564,7 @@ mod prettify {
 
     fn c_prettify(buf: &mut ffi::git_buf, message: &[u8], comment: Option<u8>) -> Vec<u8> {
         let message = CString::new(message).unwrap();
-        let (strip, c) = comment.map_or((0, 0), |c| (1, c as c_char));
+        let (strip, c) = comment.map_or((0, 0), |c| (1, c.cast_signed()));
         // SAFETY: a buffer libgit2 filled before or zeroed; a NUL-terminated message.
         let rc = unsafe { ffi::git_message_prettify(buf, message.as_ptr(), strip, c) };
         assert_eq!(rc, 0);
@@ -584,6 +588,6 @@ mod prettify {
             }
         }
         // SAFETY: the buffer libgit2 filled, disposed once.
-        unsafe { ffi::git_buf_dispose(&mut buf) };
+        unsafe { ffi::git_buf_dispose(&raw mut buf) };
     }
 }

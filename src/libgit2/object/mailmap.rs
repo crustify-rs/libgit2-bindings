@@ -141,8 +141,8 @@ impl fmt::Debug for MailmapMut<'_> {
 /// runtime first, so the free is ordered after the initialisation that settled the
 /// allocator it frees into.
 ///
-/// Wraps: git_mailmap_free
-/// Wraps: git_mailmap_new
+/// Wraps: `git_mailmap_free`
+/// Wraps: `git_mailmap_new`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MailmapFree;
 
@@ -161,7 +161,7 @@ unsafe impl CNew<Mailmap> for MailmapFree {
         // SAFETY: `out` is a writable slot; the runtime is pinned, so the allocation
         // goes through an initialised allocator and a failure is reported on live
         // thread-local state.
-        let rc = unsafe { ffi::git_mailmap_new(&mut out) };
+        let rc = unsafe { ffi::git_mailmap_new(&raw mut out) };
         if rc < 0 {
             return None;
         }
@@ -175,10 +175,14 @@ pub type MailmapBox = CBox<Mailmap, MailmapFree>;
 impl Mailmap {
     /// An empty mailmap: every lookup resolves a name and email to themselves.
     ///
-    /// Pins the runtime first. Fails, with libgit2's error, when the mailmap cannot be
-    /// allocated or libgit2 cannot be initialised.
+    /// Pins the runtime first.
     ///
-    /// Wraps: git_mailmap_new
+    /// Wraps: `git_mailmap_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when the mailmap cannot be allocated or libgit2 cannot be
+    /// initialised.
     pub fn new() -> Result<MailmapBox, ErrorBuf> {
         MailmapBox::new().ok_or_else(last)
     }
@@ -192,15 +196,17 @@ impl Mailmap {
     /// A line whose replaced email is empty (`Name <>`, `Real <real@email> Name <>`)
     /// is skipped too, as any other line that is not an entry. libgit2 diverges here:
     /// it begins such an entry, then fails the whole buffer with
-    /// [`ErrorClass::Invalid`], "invalid argument: 'replace_email && *replace_email'",
+    /// [`ErrorClass::Invalid`], "invalid argument: '`replace_email` && *`replace_email`'",
     /// and leaks the entry; so those lines are left out of what it is given.
+    ///
+    /// Wraps: `git_mailmap_from_buffer`
+    ///
+    /// # Errors
     ///
     /// Pins the runtime first. Fails when `buf` contains a NUL byte, which libgit2
     /// refuses without an error of its own, reported as [`ErrorClass::Invalid`],
     /// "mailmap buffer contains a NUL byte"; and with libgit2's error when the mailmap
     /// cannot be allocated or libgit2 cannot be initialised.
-    ///
-    /// Wraps: git_mailmap_from_buffer
     pub fn from_buffer(buf: &[u8]) -> Result<MailmapBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -218,7 +224,7 @@ impl Mailmap {
         // SAFETY: `out` is a writable slot; `data` addresses `buf.len()` readable bytes
         // (or one, for an empty `buf`), which libgit2 only reads during the call. The
         // runtime is pinned, so allocations and errors reach live state.
-        let rc = unsafe { ffi::git_mailmap_from_buffer(&mut out, data, buf.len()) };
+        let rc = unsafe { ffi::git_mailmap_from_buffer(&raw mut out, data, buf.len()) };
         if rc < 0 {
             // The error state was cleared before the call, so `GIT_ERROR_NONE` is
             // libgit2's silence: the NUL check, the one failure that sets no error.
@@ -251,10 +257,14 @@ impl Mailmap {
     /// fills the repository's config cache, as every routine reading its config does,
     /// through the shared handle.
     ///
-    /// Pins the runtime first. Fails, with libgit2's error, only when the mailmap
-    /// cannot be allocated or libgit2 cannot be initialised.
+    /// Pins the runtime first.
     ///
-    /// Wraps: git_mailmap_from_repository
+    /// Wraps: `git_mailmap_from_repository`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, only when the mailmap cannot be allocated or libgit2 cannot be
+    /// initialised.
     pub fn from_repository(repo: RepositoryRef<'_>) -> Result<MailmapBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -264,7 +274,8 @@ impl Mailmap {
         // the call, which reads it and fills its caches through the pointer: the
         // repository is not `Sync`, so no other thread uses it meanwhile. The runtime is
         // pinned, so allocations and errors reach live state.
-        let rc = unsafe { ffi::git_mailmap_from_repository(&mut out, repo.as_ptr().cast_mut()) };
+        let rc =
+            unsafe { ffi::git_mailmap_from_repository(&raw mut out, repo.as_ptr().cast_mut()) };
         if rc < 0 {
             return Err(last());
         }
@@ -308,7 +319,8 @@ impl<'a> MailmapRef<'a> {
     /// let _ = name;
     /// ```
     ///
-    /// Wraps: git_mailmap_resolve
+    /// Wraps: `git_mailmap_resolve`
+    #[must_use]
     pub fn resolve<'s>(&self, name: &'s CStr, email: &'s CStr) -> (&'s CStr, &'s CStr)
     where
         'a: 's,
@@ -320,8 +332,8 @@ impl<'a> MailmapRef<'a> {
         // fail with non-NULL arguments.
         let rc = unsafe {
             ffi::git_mailmap_resolve(
-                &mut real_name,
-                &mut real_email,
+                &raw mut real_name,
+                &raw mut real_email,
                 self.as_ptr(),
                 name.as_ptr(),
                 email.as_ptr(),
@@ -332,7 +344,9 @@ impl<'a> MailmapRef<'a> {
         // of the mailmap's entries, NUL-terminated; the given ones live for `'s`, and the
         // entries' for `'a`, outliving `'s`, unchanged since nothing writes the mailmap
         // while it is shared.
-        unsafe { (CStr::from_ptr(real_name), CStr::from_ptr(real_email)) }
+        let cstr = unsafe { CStr::from_ptr(real_name) };
+        // SAFETY: as above.
+        unsafe { (cstr, CStr::from_ptr(real_email)) }
     }
 
     /// The signature `signature` resolves to: a fresh copy whose name and email are
@@ -348,11 +362,6 @@ impl<'a> MailmapRef<'a> {
     /// signature may hold such strings, as may the mailmap's entries); and when libgit2
     /// runs out of memory.
     ///
-    /// Refuses a signature without its name or its email (one libgit2 lost to a failed
-    /// allocation while it parsed the signature) with libgit2's own error for it, class
-    /// `GIT_ERROR_INTERNAL`, "unrecoverable internal error: 'name'" (or `'email'`),
-    /// which a debug build of libgit2 aborts on instead.
-    ///
     /// ```
     /// # if cfg!(miri) { return; }
     /// use libgit2::libgit2::core::types::Signature;
@@ -367,7 +376,14 @@ impl<'a> MailmapRef<'a> {
     /// assert_eq!(real.as_ref().when(), old.as_ref().when());
     /// ```
     ///
-    /// Wraps: git_mailmap_resolve_signature
+    /// Wraps: `git_mailmap_resolve_signature`
+    ///
+    /// # Errors
+    ///
+    /// Refuses a signature without its name or its email (one libgit2 lost to a failed
+    /// allocation while it parsed the signature) with libgit2's own error for it, class
+    /// `GIT_ERROR_INTERNAL`, "unrecoverable internal error: 'name'" (or `'email'`),
+    /// which a debug build of libgit2 aborts on instead.
     pub fn resolve_signature(&self, signature: SignatureRef<'_>) -> Result<SignatureBox, ErrorBuf> {
         if signature.name().is_none() {
             set(
@@ -391,7 +407,7 @@ impl<'a> MailmapRef<'a> {
         // copied during the call. The mailmap was built after the runtime was pinned, so
         // allocations and errors reach live state.
         let rc = unsafe {
-            ffi::git_mailmap_resolve_signature(&mut out, self.as_ptr(), signature.as_ptr())
+            ffi::git_mailmap_resolve_signature(&raw mut out, self.as_ptr(), signature.as_ptr())
         };
         if rc < 0 {
             return Err(last());
@@ -409,11 +425,6 @@ impl MailmapMut<'_> {
     /// same name and email replaces the previous one. A missing or empty real name or
     /// email leaves the identity's own in place when it is resolved; a missing or empty
     /// `replace_name` matches any name. The strings are copied.
-    ///
-    /// Refuses an empty `replace_email` before calling libgit2, with libgit2's own error
-    /// for it (`GIT_ERROR_INVALID`, "invalid argument: 'replace_email && *replace_email'"),
-    /// which libgit2 raises only after allocating the entry, leaking it (and aborts a
-    /// debug build). Fails with libgit2's error when the entry cannot be allocated.
     ///
     /// ```
     /// # if cfg!(miri) { return; }
@@ -433,7 +444,14 @@ impl MailmapMut<'_> {
     /// assert_eq!(resolved, (c"Real Name", c"old@example.com"));
     /// ```
     ///
-    /// Wraps: git_mailmap_add_entry
+    /// Wraps: `git_mailmap_add_entry`
+    ///
+    /// # Errors
+    ///
+    /// Refuses an empty `replace_email` before calling libgit2, with libgit2's own error
+    /// for it (`GIT_ERROR_INVALID`, "invalid argument: '`replace_email` && *`replace_email`'"),
+    /// which libgit2 raises only after allocating the entry, leaking it (and aborts a
+    /// debug build). Fails with libgit2's error when the entry cannot be allocated.
     pub fn add_entry(
         &mut self,
         real_name: Option<&CStr>,
@@ -556,7 +574,7 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use core::ffi::{CStr, c_char, c_int, c_void};
+    use core::ffi::{CStr, c_char, c_void};
     use core::mem::size_of;
     use std::process::Command;
     use std::sync::atomic::Ordering::SeqCst;
@@ -653,7 +671,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -669,8 +687,8 @@ mod unit_tests {
         // it; `name` and `email` are NUL-terminated.
         let rc = unsafe {
             ffi::git_mailmap_resolve(
-                &mut real_name,
-                &mut real_email,
+                &raw mut real_name,
+                &raw mut real_email,
                 mailmap.as_ptr(),
                 name.as_ptr(),
                 email.as_ptr(),
@@ -680,9 +698,11 @@ mod unit_tests {
         // SAFETY: on success both point at `name`, `email` or an entry's strings, all
         // NUL-terminated and live until `mailmap` or the inputs are released, after
         // this copy.
+        let cstr = unsafe { CStr::from_ptr(real_name) };
+        // SAFETY: as above.
         unsafe {
             (
-                CStr::from_ptr(real_name).to_string_lossy().into_owned(),
+                cstr.to_string_lossy().into_owned(),
                 CStr::from_ptr(real_email).to_string_lossy().into_owned(),
             )
         }
@@ -762,7 +782,7 @@ not an entry
     }
 
     /// Every construction path builds a mailmap that resolves as its source says, and is
-    /// freed once (LSan flags a leak, ASan a double free).
+    /// freed once (`LSan` flags a leak, `ASan` a double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn constructors_build_mailmaps() {
@@ -835,7 +855,7 @@ not an entry
         let mut raw = ptr::null_mut();
         // SAFETY: a writable slot; the buffer is `MAILMAP.len()` readable bytes.
         let rc = unsafe {
-            ffi::git_mailmap_from_buffer(&mut raw, MAILMAP.as_ptr().cast(), MAILMAP.len())
+            ffi::git_mailmap_from_buffer(&raw mut raw, MAILMAP.as_ptr().cast(), MAILMAP.len())
         };
         assert_eq!(rc, 0);
         // SAFETY: a fresh mailmap the caller owns alone, released by `git_mailmap_free`.
@@ -853,7 +873,7 @@ not an entry
     }
 
     /// A repository without paths has no working directory and no `HEAD`: libgit2 skips
-    /// every source, and the mailmap is empty, which ASan checks reads nothing it
+    /// every source, and the mailmap is empty, which `ASan` checks reads nothing it
     /// should not.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -894,7 +914,7 @@ not an entry
     }
 
     /// An allocation failure is `None` from the policy and libgit2's out-of-memory
-    /// error from each constructor; nothing leaks (LSan).
+    /// error from each constructor; nothing leaks (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn out_of_memory_is_an_error() {
@@ -923,12 +943,16 @@ not an entry
 
     /// An allocation failure at each point of building a mailmap, in turn, is
     /// `libgit2`'s out-of-memory error, or, once enough is granted, the whole mailmap;
-    /// ASan checks every partial build is unwound without a bad access. libgit2 leaks
+    /// `ASan` checks every partial build is unwound without a bad access. libgit2 leaks
     /// the entry it is filling when one of its strings cannot be copied
     /// (`GIT_ERROR_CHECK_ALLOC` returns before `mailmap_entry_free`), so this runs with
-    /// LeakSanitizer off.
+    /// `LeakSanitizer` off.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn each_allocation_failure_is_an_error() {
         isolated_with(
             concat!(module_path!(), "::each_allocation_failure_is_an_error"),
@@ -1035,7 +1059,7 @@ not an entry
     /// The classifier picks exactly the lines libgit2 fails on with its
     /// `replace_email` assertion, and libgit2 accepts every other line (skipping those
     /// that are not entries). C leaks the entry it began for each refused line, so this
-    /// runs in a child with LeakSanitizer off.
+    /// runs in a child with `LeakSanitizer` off.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn classifier_agrees_with_libgit2() {
@@ -1055,7 +1079,7 @@ not an entry
                         } else {
                             line.as_ptr().cast()
                         };
-                        ffi::git_mailmap_from_buffer(&mut out, data, line.len())
+                        ffi::git_mailmap_from_buffer(&raw mut out, data, line.len())
                     };
                     let shown = String::from_utf8_lossy(&line);
                     if replaces_empty_email(&line) {
@@ -1096,7 +1120,7 @@ not an entry
     }
 
     /// A line replacing an empty email is skipped like any line that is not an entry:
-    /// the rest of the buffer is read, and nothing leaks (LSan), where libgit2 fails
+    /// the rest of the buffer is read, and nothing leaks (`LSan`), where libgit2 fails
     /// the whole buffer and leaks the entry it began.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1113,7 +1137,7 @@ not an entry
     }
 
     /// An empty replaced email is refused before libgit2 sees it, with the error
-    /// libgit2 raises for it, and nothing is added or leaked (LSan; libgit2 allocates the
+    /// libgit2 raises for it, and nothing is added or leaked (`LSan`; libgit2 allocates the
     /// entry before its check and never frees it).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1134,7 +1158,7 @@ not an entry
 
     /// Entries added through the exclusive handle resolve through the shared one, as
     /// libgit2's own lookup reads them: an empty string is no string, a later entry for
-    /// the same identity replaces an earlier one (freeing it: ASan flags a stale read),
+    /// the same identity replaces an earlier one (freeing it: `ASan` flags a stale read),
     /// and a named entry wins over the email-only one.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1180,19 +1204,24 @@ not an entry
     fn resolve_c<'s>(m: MailmapRef<'s>, name: &'s CStr, email: &'s CStr) -> (&'s CStr, &'s CStr) {
         let (mut real_name, mut real_email): (*const c_char, *const c_char) =
             (ptr::null(), ptr::null());
-        // SAFETY: two writable slots; `m` is live and only read; the inputs are
-        // NUL-terminated. The results point at the inputs or at the mailmap's entries,
-        // both live for `'s`.
-        unsafe {
-            let rc = ffi::git_mailmap_resolve(
-                &mut real_name,
-                &mut real_email,
-                m.as_ptr(),
-                name.as_ptr(),
-                email.as_ptr(),
-            );
+        {
+            // SAFETY: two writable slots; `m` is live and only read; the inputs are
+            // NUL-terminated. The results point at the inputs or at the mailmap's entries,
+            // both live for `'s`.
+            let rc = unsafe {
+                ffi::git_mailmap_resolve(
+                    &raw mut real_name,
+                    &raw mut real_email,
+                    m.as_ptr(),
+                    name.as_ptr(),
+                    email.as_ptr(),
+                )
+            };
             assert_eq!(rc, 0);
-            (CStr::from_ptr(real_name), CStr::from_ptr(real_email))
+            // SAFETY: as above.
+            let cstr = unsafe { CStr::from_ptr(real_name) };
+            // SAFETY: as above.
+            unsafe { (cstr, CStr::from_ptr(real_email)) }
         }
     }
 
@@ -1207,7 +1236,7 @@ not an entry
         let when = ffi::git_time {
             time: 1,
             offset: 0,
-            sign: b'+' as c_char,
+            sign: b'+'.cast_signed(),
         };
         let cases = [
             (
@@ -1222,7 +1251,7 @@ not an entry
             let mut raw = ffi::git_signature { name, email, when };
             // SAFETY: `raw` is a live signature on this stack frame, outliving the
             // handle, whose strings are NULL or static; nothing writes it meanwhile.
-            let sig = unsafe { SignatureRef::from_ptr(&mut raw) }.unwrap();
+            let sig = unsafe { SignatureRef::from_ptr(&raw mut raw) }.unwrap();
             let e = mailmap.as_ref().resolve_signature(sig).unwrap_err();
             assert_eq!(e.class(), Some(ErrorClass::Internal));
             let expected = format!("unrecoverable internal error: {}", what.to_str().unwrap());

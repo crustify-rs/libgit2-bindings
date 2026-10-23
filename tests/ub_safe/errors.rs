@@ -2,7 +2,7 @@
 //!
 //! Both enums are fieldless enums over C `int`s. The only safe way in from an `int`
 //! is `from_raw` / `try_from`, which must reject every value without a variant rather
-//! than produce an invalid discriminant (which Miri and UBSan would flag on the next
+//! than produce an invalid discriminant (which Miri and `UBSan` would flag on the next
 //! read); an `as` cast to either enum does not compile (`compile_fail/`). Neither
 //! calls libgit2, so those tests also run under Miri.
 //!
@@ -10,8 +10,8 @@
 //! initialised, so it is also tried as a process's first contact with libgit2, alone
 //! and racing. The message it reads lives in a per-thread buffer that later errors
 //! rewrite and reallocate and thread exit frees: the copy it returns must outlive all
-//! of that, where ASan flags one aliasing the buffer, and thread states allocated only
-//! to be read must not leak (LSan). A message borrowed from the copy cannot outlive
+//! of that, where `ASan` flags one aliasing the buffer, and thread states allocated only
+//! to be read must not leak (`LSan`). A message borrowed from the copy cannot outlive
 //! it (`compile_fail/`).
 
 use std::collections::HashSet;
@@ -26,7 +26,7 @@ use libgit2::libgit2::util::sys::errors::{clear, set, set_oom, set_str};
 use crate::fixture::isolated;
 
 /// Every `int` around the declared ranges, then a coarse stride across the whole type;
-/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+/// `BorrowSanitizer` instruments each comparison, so the probe set stays small.
 fn probes() -> impl Iterator<Item = c_int> {
     (-64..=64)
         .chain((c_int::MIN..=c_int::MAX).step_by(1 << 26))
@@ -41,10 +41,14 @@ fn from_raw_yields_only_valid_codes() {
         if let Some(code) = ErrorCode::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(code.raw(), raw);
-            assert!(!format!("{code:?}").is_empty());
+            assert_ne!(format!("{code:?}"), "");
             seen.insert(code);
         } else {
-            assert_eq!(ErrorCode::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                ErrorCode::try_from(raw)
+                    .map_err(libgit2::libgit2::util::errors::UnnamedErrorCode::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 35);
@@ -56,10 +60,14 @@ fn from_raw_yields_only_valid_classes() {
     for raw in probes() {
         if let Some(class) = ErrorClass::from_raw(black_box(raw)) {
             assert_eq!(class.raw(), raw);
-            assert!(!format!("{class:?}").is_empty());
+            assert_ne!(format!("{class:?}"), "");
             seen.insert(class);
         } else {
-            assert_eq!(ErrorClass::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                ErrorClass::try_from(raw)
+                    .map_err(libgit2::libgit2::util::errors::UnnamedErrorClass::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 37);
@@ -72,8 +80,8 @@ fn option_niche_holds_for_every_value() {
     for raw in probes() {
         let code = black_box(ErrorCode::from_raw(raw));
         let class = black_box(ErrorClass::from_raw(raw));
-        assert_eq!(code.map(ErrorCode::raw).unwrap_or(raw), raw);
-        assert_eq!(class.map(ErrorClass::raw).unwrap_or(raw), raw);
+        assert_eq!(code.map_or(raw, ErrorCode::raw), raw);
+        assert_eq!(class.map_or(raw, ErrorClass::raw), raw);
     }
 }
 
@@ -104,7 +112,7 @@ fn enums_cross_threads() {
 
 fn text(len: usize, seed: u8) -> CString {
     let bytes = (0..len)
-        .map(|i| b'a' + (i as u8).wrapping_add(seed) % 26)
+        .map(|i| b'a' + i.to_le_bytes()[0].wrapping_add(seed) % 26)
         .collect::<Vec<_>>();
     CString::new(bytes).unwrap()
 }
@@ -158,7 +166,7 @@ fn copies_outlive_the_next_errors() {
         .iter()
         .enumerate()
         .map(|(i, &len)| {
-            let message = text(len, i as u8);
+            let message = text(len, u8::try_from(i).unwrap());
             if i % 2 == 0 {
                 set(ErrorClass::Tree, &message);
             } else {
@@ -202,8 +210,8 @@ fn copies_outlive_their_thread() {
     }
 }
 
-/// A thread that only reads allocates its error state, and frees it on exit; LSan
-/// flags a leak, ASan a double free.
+/// A thread that only reads allocates its error state, and frees it on exit; `LSan`
+/// flags a leak, `ASan` a double free.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reading_threads_release_their_state() {
@@ -214,7 +222,7 @@ fn reading_threads_release_their_state() {
 }
 
 /// Copies are shared and sent between threads that keep setting and reading their own
-/// errors; TSan flags any state they share unsynchronised.
+/// errors; `TSan` flags any state they share unsynchronised.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn copies_cross_threads_while_they_read() {

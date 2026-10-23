@@ -61,7 +61,7 @@ use crate::libgit2::util::sys::errors::runtime_pinned;
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: git_feature_t
+/// Wraps: `git_feature_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -115,6 +115,7 @@ impl Feature {
 
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_feature_t) -> Option<Self> {
         let mut i = 0;
         while i < Self::ALL.len() {
@@ -127,6 +128,7 @@ impl Feature {
     }
 
     /// The C value, as `git_libgit2_feature_backend` takes it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_feature_t {
         self as ffi::git_feature_t
     }
@@ -161,6 +163,7 @@ pub struct UnnamedFeature(ffi::git_feature_t);
 
 impl UnnamedFeature {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_feature_t {
         self.0
     }
@@ -185,7 +188,7 @@ impl std::error::Error for UnnamedFeature {}
 /// what C produced; [`iter`](Self::iter) and [`contains`](Self::contains) see the
 /// named features, and [`unnamed_bits`](Self::unnamed_bits) the rest.
 ///
-/// Wraps: git_feature_t
+/// Wraps: `git_feature_t`
 /// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Features(c_int);
@@ -203,32 +206,38 @@ impl Features {
     };
 
     /// The set with no feature.
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
     /// The set of every bit of `bits`, as `git_libgit2_features` returns it; bits
     /// that no [`Feature`] names are kept.
+    #[must_use]
     pub const fn from_bits_retain(bits: c_int) -> Self {
         Self(bits)
     }
 
     /// The bits of the set, as `git_libgit2_features` returns them.
+    #[must_use]
     pub const fn bits(self) -> c_int {
         self.0
     }
 
     /// The bits of the set that no [`Feature`] names.
+    #[must_use]
     pub const fn unnamed_bits(self) -> c_int {
         self.0 & !Self::NAMED
     }
 
     /// Whether the set has no bit, named or not.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     /// Whether `feature` is in the set.
+    #[must_use]
     pub const fn contains(self, feature: Feature) -> bool {
         self.0 & feature.bit() != 0
     }
@@ -244,6 +253,7 @@ impl Features {
     }
 
     /// The named features in the set, in ascending bit order.
+    #[must_use]
     pub fn iter(self) -> FeaturesIter {
         FeaturesIter { set: self, next: 0 }
     }
@@ -321,7 +331,7 @@ impl fmt::Debug for Features {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Features {")?;
         let mut sep = "";
-        for feature in self.iter() {
+        for feature in *self {
             write!(f, "{sep}{feature:?}")?;
             sep = " | ";
         }
@@ -370,7 +380,7 @@ impl core::iter::FusedIterator for FeaturesIter {}
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant,
 /// `0` included.
 ///
-/// Wraps: git_buildinfo_t
+/// Wraps: `git_buildinfo_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -385,6 +395,7 @@ pub enum BuildInfo {
 impl BuildInfo {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_buildinfo_t) -> Option<Self> {
         match raw {
             ffi::GIT_BUILDINFO_CPU => Some(Self::Cpu),
@@ -394,6 +405,7 @@ impl BuildInfo {
     }
 
     /// The C value, as `git_libgit2_buildinfo` takes it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_buildinfo_t {
         self as ffi::git_buildinfo_t
     }
@@ -422,6 +434,7 @@ pub struct UnnamedBuildInfo(ffi::git_buildinfo_t);
 
 impl UnnamedBuildInfo {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_buildinfo_t {
         self.0
     }
@@ -448,7 +461,7 @@ impl std::error::Error for UnnamedBuildInfo {}
 /// reading no further argument; [`from_raw`](Self::from_raw) and
 /// [`from_key`](Self::from_key) give `None` for exactly those.
 ///
-/// Wraps: git_libgit2_opt_t
+/// Wraps: `git_libgit2_opt_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -611,6 +624,7 @@ pub enum LibraryOption {
 impl LibraryOption {
     /// The variant whose C value is `raw`; `None` for a key this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_libgit2_opt_t) -> Option<Self> {
         match raw {
             ffi::GIT_OPT_GET_MWINDOW_SIZE => Some(Self::GetMwindowSize),
@@ -671,19 +685,22 @@ impl LibraryOption {
 
     /// The variant whose key, as `git_libgit2_opts` takes it, is `key`; `None` for a
     /// key it refuses.
+    #[must_use]
     pub const fn from_key(key: c_int) -> Option<Self> {
         if key < 0 {
             return None;
         }
-        Self::from_raw(key as ffi::git_libgit2_opt_t)
+        Self::from_raw(key.cast_unsigned())
     }
 
     /// The C value, as the header declares it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_libgit2_opt_t {
         self as ffi::git_libgit2_opt_t
     }
 
     /// The key as `git_libgit2_opts` takes it, an `int`; every variant's value fits.
+    #[must_use]
     pub const fn key(self) -> c_int {
         self as c_int
     }
@@ -712,6 +729,7 @@ pub struct UnnamedLibraryOption(ffi::git_libgit2_opt_t);
 
 impl UnnamedLibraryOption {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_libgit2_opt_t {
         self.0
     }
@@ -760,7 +778,8 @@ impl fmt::Display for Version {
 /// libgit2 answers from constants compiled into it, so this needs no initialisation
 /// and cannot fail.
 ///
-/// Wraps: git_libgit2_version
+/// Wraps: `git_libgit2_version`
+#[must_use]
 pub fn version() -> Version {
     let (mut major, mut minor, mut revision) = (0, 0, 0);
     // SAFETY: three out-parameters, each a live `int` local, written once and not
@@ -781,7 +800,8 @@ pub fn version() -> Version {
 /// stays loaded: this crate links it for the life of the process. Needs no
 /// initialisation.
 ///
-/// Wraps: git_libgit2_prerelease
+/// Wraps: `git_libgit2_prerelease`
+#[must_use]
 pub fn prerelease() -> Option<&'static CStr> {
     // SAFETY: no arguments, no state read.
     let s = unsafe { ffi::git_libgit2_prerelease() };
@@ -796,7 +816,8 @@ pub fn prerelease() -> Option<&'static CStr> {
 /// The set keeps any bit a later libgit2 adds that this crate's [`Feature`] does not
 /// name. Needs no initialisation.
 ///
-/// Wraps: git_libgit2_features
+/// Wraps: `git_libgit2_features`
+#[must_use]
 pub fn features() -> Features {
     // SAFETY: no arguments; the routine ORs compile-time constants.
     Features::from_bits_retain(unsafe { ffi::git_libgit2_features() })
@@ -810,9 +831,10 @@ pub fn features() -> Features {
 /// libgit2 returns a string literal of its own, as [`prerelease`] does, chosen by the
 /// build's defines. Needs no initialisation: the routine's only other path, an
 /// assertion for a compiled-in feature whose backend no define names, cannot be
-/// reached by a build that CMake configured, which always names one.
+/// reached by a build that `CMake` configured, which always names one.
 ///
-/// Wraps: git_libgit2_feature_backend
+/// Wraps: `git_libgit2_feature_backend`
+#[must_use]
 pub fn feature_backend(feature: Feature) -> Option<&'static CStr> {
     // SAFETY: a named `git_feature_t`, by value; the routine reads no state.
     let s = unsafe { ffi::git_libgit2_feature_backend(feature.raw()) };
@@ -830,7 +852,8 @@ pub fn feature_backend(feature: Feature) -> Option<&'static CStr> {
 /// libgit2 returns a string literal of its own, as [`prerelease`] does. Needs no
 /// initialisation.
 ///
-/// Wraps: git_libgit2_buildinfo
+/// Wraps: `git_libgit2_buildinfo`
+#[must_use]
 pub fn build_info(item: BuildInfo) -> Option<&'static CStr> {
     // SAFETY: a named `git_buildinfo_t`, by value; the routine reads no state.
     let s = unsafe { ffi::git_libgit2_buildinfo(item.raw()) };
@@ -935,15 +958,14 @@ unsafe fn sysdir_status(
     let error = last();
     let mut repaired = -1;
     for path in [c"", c"$PATH"] {
-        // SAFETY: per this function's contract, `key` reads `level` (a named one) when
-        // given and a `const char *`, NUL-terminated here, which `git_sysdir_set`
-        // copies without allocating for these two values; the caller excludes
-        // concurrent access to the directory.
-        repaired = unsafe {
-            match level {
-                Some(level) => ffi::git_libgit2_opts(key.key(), level.raw(), path.as_ptr()),
-                None => ffi::git_libgit2_opts(key.key(), path.as_ptr()),
-            }
+        repaired = match level {
+            // SAFETY: per this function's contract, `key` reads `level` (a named one) and
+            // a `const char *`, NUL-terminated here, which `git_sysdir_set` copies without
+            // allocating for these two values; the caller excludes concurrent access to the
+            // directory.
+            Some(level) => unsafe { ffi::git_libgit2_opts(key.key(), level.raw(), path.as_ptr()) },
+            // SAFETY: as above, for a key that reads the string alone.
+            None => unsafe { ffi::git_libgit2_opts(key.key(), path.as_ptr()) },
         };
     }
     debug_assert_eq!(repaired, 0, "{key:?} could not be emptied");
@@ -1004,6 +1026,7 @@ pub enum SearchPathLevel {
 
 impl SearchPathLevel {
     /// The `git_config_level_t` value, as `git_libgit2_opts` reads it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_config_level_t {
         self as ffi::git_config_level_t
     }
@@ -1024,7 +1047,8 @@ pub struct CachedMemory {
 
 /// The maximum size of an mmap window into a pack file, in bytes.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn mwindow_size() -> usize {
     // SAFETY: `GIT_OPT_GET_MWINDOW_SIZE` writes one `size_t` through one `size_t *`.
     // Its global is written only by `set_mwindow_size`, whose caller excludes this.
@@ -1039,7 +1063,7 @@ pub fn mwindow_size() -> usize {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_mwindow_size(size: usize) {
     // SAFETY: `GIT_OPT_SET_MWINDOW_SIZE` reads one `size_t`; the caller excludes
     // concurrent access to its global.
@@ -1048,7 +1072,8 @@ pub unsafe fn set_mwindow_size(size: usize) {
 
 /// The maximum number of bytes libgit2 maps from pack files at any time, in total.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn mwindow_mapped_limit() -> usize {
     // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_MWINDOW_MAPPED_LIMIT`.
     unsafe { get_size(LibraryOption::GetMwindowMappedLimit) }
@@ -1062,7 +1087,7 @@ pub fn mwindow_mapped_limit() -> usize {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_mwindow_mapped_limit(limit: usize) {
     // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_MWINDOW_MAPPED_LIMIT`.
     unsafe { set_size(LibraryOption::SetMwindowMappedLimit, limit) }
@@ -1070,7 +1095,8 @@ pub unsafe fn set_mwindow_mapped_limit(limit: usize) {
 
 /// The maximum number of pack files libgit2 maps at any time; 0 is unlimited.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn mwindow_file_limit() -> usize {
     // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_MWINDOW_FILE_LIMIT`.
     unsafe { get_size(LibraryOption::GetMwindowFileLimit) }
@@ -1085,7 +1111,7 @@ pub fn mwindow_file_limit() -> usize {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_mwindow_file_limit(limit: usize) {
     // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_MWINDOW_FILE_LIMIT`.
     unsafe { set_size(LibraryOption::SetMwindowFileLimit, limit) }
@@ -1095,10 +1121,13 @@ pub unsafe fn set_mwindow_file_limit(limit: usize) {
 /// (`GIT_PATH_LIST_SEPARATOR`), where libgit2 looks for that level's configuration,
 /// attributes and ignore files.
 ///
-/// Pins the runtime first: libgit2 computes the defaults from the environment when it
-/// initialises. Fails, with libgit2's error, when the copy cannot be allocated.
+/// Pins the runtime first: libgit2 computes the defaults from the environment when it initialises.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 pub fn search_path(level: SearchPathLevel) -> Result<CString, ErrorBuf> {
     buf_string(|buf| {
         // SAFETY: `GIT_OPT_GET_SEARCH_PATH` reads an `int` level, a named one, and a
@@ -1112,12 +1141,15 @@ pub fn search_path(level: SearchPathLevel) -> Result<CString, ErrorBuf> {
 /// Sets the search path of configuration `level`, or with `None` resets it to the
 /// default libgit2 derives from the environment.
 ///
-/// `path` lists directories separated by `:` (`GIT_PATH_LIST_SEPARATOR`); a `$PATH` in
-/// it stands for the previous value, so `"/opt/git:$PATH"` prepends. libgit2 copies
-/// it. Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated; the level is then empty, libgit2 having freed its previous value before
-/// the copy failed (and, left to itself, it would make the level unreadable: see
-/// `sysdir_status`).
+/// `path` lists directories separated by `:` (`GIT_PATH_LIST_SEPARATOR`); a `$PATH` in it stands
+/// for the previous value, so `"/opt/git:$PATH"` prepends. libgit2 copies it. Pins the runtime
+/// first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; the level is then empty, libgit2
+/// having freed its previous value before the copy failed (and, left to itself, it would make the
+/// level unreadable: see `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1125,7 +1157,7 @@ pub fn search_path(level: SearchPathLevel) -> Result<CString, ErrorBuf> {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_search_path(level: SearchPathLevel, path: Option<&CStr>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1154,7 +1186,7 @@ pub unsafe fn set_search_path(level: SearchPathLevel, path: Option<&CStr>) -> Re
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_cache_object_limit(kind: ObjectType, size: usize) {
     // SAFETY: `GIT_OPT_SET_CACHE_OBJECT_LIMIT` reads an `int` object type, a named one
     // that indexes its table in bounds, so it neither fails nor sets an error, and a
@@ -1174,7 +1206,7 @@ pub unsafe fn set_cache_object_limit(kind: ObjectType, size: usize) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_cache_max_size(max_storage_bytes: isize) {
     // SAFETY: `GIT_OPT_SET_CACHE_MAX_SIZE` reads one `ssize_t`; the caller excludes
     // concurrent access to its global.
@@ -1192,7 +1224,7 @@ pub unsafe fn set_cache_max_size(max_storage_bytes: isize) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_caching(enabled: bool) {
     // SAFETY: `GIT_OPT_ENABLE_CACHING` reads one `int`; the caller excludes concurrent
     // access to its global.
@@ -1207,7 +1239,8 @@ pub unsafe fn enable_caching(enabled: bool) {
 /// this runs: libgit2 reads the current size with a plain load, while every
 /// repository's cache updates it atomically as it adds and evicts objects.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub unsafe fn cached_memory() -> CachedMemory {
     let mut memory = CachedMemory::default();
     // SAFETY: `GIT_OPT_GET_CACHED_MEMORY` writes one `ssize_t` through each of two
@@ -1226,10 +1259,13 @@ pub unsafe fn cached_memory() -> CachedMemory {
 
 /// The default template directory, which repository initialisation copies from.
 ///
-/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// Pins the runtime first.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 pub fn template_path() -> Result<CString, ErrorBuf> {
     buf_string(|buf| {
         // SAFETY: `GIT_OPT_GET_TEMPLATE_PATH` reads a `git_buf *`, the zeroed local
@@ -1243,10 +1279,13 @@ pub fn template_path() -> Result<CString, ErrorBuf> {
 /// Sets the default template directory, or with `None` resets it to libgit2's
 /// default.
 ///
-/// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when
-/// the copy cannot be allocated; the path is then empty, libgit2 having freed its
-/// previous value before the copy failed (and, left to itself, it would make the path
-/// unreadable: see `sysdir_status`).
+/// libgit2 copies `path`. Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; the path is then empty, libgit2
+/// having freed its previous value before the copy failed (and, left to itself, it would make the
+/// path unreadable: see `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1254,7 +1293,7 @@ pub fn template_path() -> Result<CString, ErrorBuf> {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_template_path(path: Option<&CStr>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1274,9 +1313,12 @@ pub unsafe fn set_template_path(path: Option<&CStr>) -> Result<(), ErrorBuf> {
 /// file of concatenated certificates, and `path`, a directory of certificates one per
 /// file.
 ///
-/// Either may be `None`; with both, OpenSSL loads nothing and the call fails. Pins the
-/// runtime first. Fails, with libgit2's error (`GIT_ERROR_SSL`), when OpenSSL cannot
-/// load them.
+/// Either may be `None`; with both, OpenSSL loads nothing and the call fails. Pins the runtime
+/// first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error (`GIT_ERROR_SSL`), when OpenSSL cannot load them.
 ///
 /// # Safety
 ///
@@ -1284,7 +1326,7 @@ pub unsafe fn set_template_path(path: Option<&CStr>) -> Result<(), ErrorBuf> {
 /// this runs: libgit2 loads them into the one OpenSSL context every HTTPS connection
 /// is created from, which OpenSSL does not synchronise.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_ssl_cert_locations(
     file: Option<&CStr>,
     path: Option<&CStr>,
@@ -1304,19 +1346,22 @@ pub unsafe fn set_ssl_cert_locations(
 /// Adds the OpenSSL certificate `cert` to the certificate store of libgit2's TLS
 /// backend, for the rest of the process.
 ///
-/// libgit2 takes a reference of its own (`X509_STORE_add_cert` up-refs it), so the
-/// caller keeps its own. Pins the runtime first. Fails, with libgit2's error
-/// (`GIT_ERROR_SSL`), when OpenSSL cannot add it.
+/// libgit2 takes a reference of its own (`X509_STORE_add_cert` up-refs it), so the caller keeps its
+/// own. Pins the runtime first.
 ///
 /// Raw seam: libgit2 publishes no type for the certificate, OpenSSL's `X509`, and
 /// this crate binds no OpenSSL.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error (`GIT_ERROR_SSL`), when OpenSSL cannot add it.
 ///
 /// # Safety
 ///
 /// `cert` must point to a live `X509` of the libcrypto libgit2 is linked against,
 /// valid for the call.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn add_ssl_x509_cert(cert: NonNull<c_void>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1331,10 +1376,13 @@ pub unsafe fn add_ssl_x509_cert(cert: NonNull<c_void>) -> Result<(), ErrorBuf> {
 /// The comment part of the `User-Agent` header libgit2 sends: `"libgit2 1.9.0"` (the
 /// version) by default.
 ///
-/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// Pins the runtime first.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 pub fn user_agent() -> Result<CString, ErrorBuf> {
     buf_string(|buf| {
         // SAFETY: `GIT_OPT_GET_USER_AGENT` reads a `git_buf *`, the zeroed local
@@ -1349,8 +1397,11 @@ pub fn user_agent() -> Result<CString, ErrorBuf> {
 /// ([`set_user_agent_product`]); `Some(c"")` sends no comment, and `None` restores the
 /// default.
 ///
-/// libgit2 copies `user_agent`. Pins the runtime first. Fails, with libgit2's error,
-/// when the copy cannot be allocated; the default is then in effect.
+/// libgit2 copies `user_agent`. Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; the default is then in effect.
 ///
 /// # Safety
 ///
@@ -1358,7 +1409,7 @@ pub fn user_agent() -> Result<CString, ErrorBuf> {
 /// this runs: libgit2 frees the previous string, which its HTTP transport reads
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_user_agent(user_agent: Option<&CStr>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1373,10 +1424,13 @@ pub unsafe fn set_user_agent(user_agent: Option<&CStr>) -> Result<(), ErrorBuf> 
 
 /// The product part of the `User-Agent` header libgit2 sends: `"git/2.0"` by default.
 ///
-/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// Pins the runtime first.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 pub fn user_agent_product() -> Result<CString, ErrorBuf> {
     buf_string(|buf| {
         // SAFETY: as in `user_agent`, for `GIT_OPT_GET_USER_AGENT_PRODUCT`, whose string
@@ -1389,8 +1443,11 @@ pub fn user_agent_product() -> Result<CString, ErrorBuf> {
 /// `User-Agent` at all, and `None` restores `"git/2.0"`. Servers detect clients by it,
 /// so keep it `git/<version>`.
 ///
-/// libgit2 copies `product`. Pins the runtime first. Fails, with libgit2's error, when
-/// the copy cannot be allocated; the default is then in effect.
+/// libgit2 copies `product`. Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; the default is then in effect.
 ///
 /// # Safety
 ///
@@ -1398,7 +1455,7 @@ pub fn user_agent_product() -> Result<CString, ErrorBuf> {
 /// this runs: libgit2 frees the previous string, which its HTTP transport reads
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_user_agent_product(product: Option<&CStr>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1418,14 +1475,14 @@ pub unsafe fn set_user_agent_product(product: Option<&CStr>) -> Result<(), Error
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_strict_object_creation(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`.
     unsafe {
         set_int(
             LibraryOption::EnableStrictObjectCreation,
             c_int::from(enabled),
-        )
+        );
     }
 }
 
@@ -1439,24 +1496,27 @@ pub unsafe fn enable_strict_object_creation(enabled: bool) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_strict_symbolic_ref_creation(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_SYMBOLIC_REF_CREATION`.
     unsafe {
         set_int(
             LibraryOption::EnableStrictSymbolicRefCreation,
             c_int::from(enabled),
-        )
+        );
     }
 }
 
 /// Sets the cipher list libgit2's TLS backend offers on HTTPS connections, in
 /// OpenSSL's syntax.
 ///
-/// libgit2 copies `ciphers`, and applies it when it sets OpenSSL up: when it
-/// initialises, before this can run with OpenSSL linked in, or on first use with
-/// OpenSSL loaded dynamically. Pins the runtime first. Fails, with libgit2's error,
-/// when the copy cannot be allocated.
+/// libgit2 copies `ciphers`, and applies it when it sets OpenSSL up: when it initialises, before
+/// this can run with OpenSSL linked in, or on first use with OpenSSL loaded dynamically. Pins the
+/// runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 ///
 /// # Safety
 ///
@@ -1464,7 +1524,7 @@ pub unsafe fn enable_strict_symbolic_ref_creation(enabled: bool) {
 /// this runs: libgit2 frees the previous string, which it reads without
 /// synchronisation when it sets OpenSSL up.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_ssl_ciphers(ciphers: &CStr) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1486,7 +1546,7 @@ pub unsafe fn set_ssl_ciphers(ciphers: &CStr) -> Result<(), ErrorBuf> {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_ofs_delta(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_OFS_DELTA`.
     unsafe { set_int(LibraryOption::EnableOfsDelta, c_int::from(enabled)) }
@@ -1501,7 +1561,7 @@ pub unsafe fn enable_ofs_delta(enabled: bool) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_fsync_gitdir(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_FSYNC_GITDIR`.
     unsafe { set_int(LibraryOption::EnableFsyncGitDir, c_int::from(enabled)) }
@@ -1510,7 +1570,8 @@ pub unsafe fn enable_fsync_gitdir(enabled: bool) {
 /// The share mode libgit2 opens files with on Windows (see `CreateFile`); `None`
 /// elsewhere, where libgit2 keeps none and writes nothing.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn windows_sharemode() -> Option<c_ulong> {
     let mut mode: c_ulong = 0;
     // SAFETY: `GIT_OPT_GET_WINDOWS_SHAREMODE` reads one `unsigned long *`, a live
@@ -1532,7 +1593,7 @@ pub fn windows_sharemode() -> Option<c_ulong> {
 /// this runs: on Windows, libgit2 keeps the setting in a global that its other
 /// routines read without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_windows_sharemode(mode: c_ulong) {
     // SAFETY: `GIT_OPT_SET_WINDOWS_SHAREMODE` reads one `unsigned long` on Windows and
     // nothing elsewhere; the caller excludes concurrent access to its global.
@@ -1549,14 +1610,14 @@ pub unsafe fn set_windows_sharemode(mode: c_ulong) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_strict_hash_verification(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_STRICT_HASH_VERIFICATION`.
     unsafe {
         set_int(
             LibraryOption::EnableStrictHashVerification,
             c_int::from(enabled),
-        )
+        );
     }
 }
 
@@ -1584,7 +1645,7 @@ pub unsafe fn enable_strict_hash_verification(enabled: bool) {
 /// - No other thread may call into libgit2 — through this crate or otherwise — while this runs:
 ///   every allocation reads the global without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_allocator(allocator: Option<AllocatorRef<'_>>) {
     let allocator = allocator.map_or(ptr::null(), |a| a.as_ptr());
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` reads one `git_allocator *`, NULL or a live
@@ -1605,20 +1666,21 @@ pub unsafe fn set_allocator(allocator: Option<AllocatorRef<'_>>) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_unsaved_index_safety(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_UNSAVED_INDEX_SAFETY`.
     unsafe {
         set_int(
             LibraryOption::EnableUnsavedIndexSafety,
             c_int::from(enabled),
-        )
+        );
     }
 }
 
 /// The most objects libgit2 accepts in a pack file downloaded from a remote.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn pack_max_objects() -> usize {
     // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_PACK_MAX_OBJECTS`.
     unsafe { get_size(LibraryOption::GetPackMaxObjects) }
@@ -1633,7 +1695,7 @@ pub fn pack_max_objects() -> usize {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_pack_max_objects(objects: usize) {
     // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_PACK_MAX_OBJECTS`.
     unsafe { set_size(LibraryOption::SetPackMaxObjects, objects) }
@@ -1648,18 +1710,18 @@ pub unsafe fn set_pack_max_objects(objects: usize) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn disable_pack_keep_file_checks(disabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_DISABLE_PACK_KEEP_FILE_CHECKS`.
     unsafe {
         set_int(
             LibraryOption::DisablePackKeepFileChecks,
             c_int::from(disabled),
-        )
+        );
     }
 }
 
-/// Enables or disables `Expect: 100-continue` when POSTing to a server that
+/// Enables or disables `Expect: 100-continue` when `POSTing` to a server that
 /// authenticates with NTLM or Negotiate. Not available on Windows.
 ///
 /// # Safety
@@ -1668,14 +1730,14 @@ pub unsafe fn disable_pack_keep_file_checks(disabled: bool) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn enable_http_expect_continue(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_ENABLE_HTTP_EXPECT_CONTINUE`.
     unsafe {
         set_int(
             LibraryOption::EnableHttpExpectContinue,
             c_int::from(enabled),
-        )
+        );
     }
 }
 
@@ -1688,7 +1750,7 @@ pub unsafe fn enable_http_expect_continue(enabled: bool) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_odb_packed_priority(priority: c_int) {
     // SAFETY: `GIT_OPT_SET_ODB_PACKED_PRIORITY` reads one `int`; the caller excludes
     // concurrent access to its global.
@@ -1704,7 +1766,7 @@ pub unsafe fn set_odb_packed_priority(priority: c_int) {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_odb_loose_priority(priority: c_int) {
     // SAFETY: as in `set_odb_packed_priority`, for `GIT_OPT_SET_ODB_LOOSE_PRIORITY`.
     unsafe { set_int(LibraryOption::SetOdbLoosePriority, priority) }
@@ -1714,12 +1776,15 @@ pub unsafe fn set_odb_loose_priority(priority: c_int) {
 /// `objectformat`, ...) less those negated with [`set_extensions`], and those added
 /// with it.
 ///
-/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated; a copy that fails part-way leaks the names copied until then, which
-/// libgit2 drops without releasing (`git_repository__extensions`) and nothing here
-/// can reach.
+/// Pins the runtime first.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; a copy that fails part-way leaks
+/// the names copied until then, which libgit2 drops without releasing
+/// (`git_repository__extensions`) and nothing here can reach.
 pub fn extensions() -> Result<StrArrayVal, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1744,9 +1809,12 @@ pub fn extensions() -> Result<StrArrayVal, ErrorBuf> {
 /// ones; a built-in one prefixed with `!` (`"!noop"`) is negated instead, so that
 /// libgit2 refuses repositories needing it.
 ///
-/// Replaces every extension set before. libgit2 copies each string, keeping one copy
-/// of duplicates and none of the built-in names. Pins the runtime first. Fails, with
-/// libgit2's error, when a copy cannot be allocated; the extensions copied until then
+/// Replaces every extension set before. libgit2 copies each string, keeping one copy of duplicates
+/// and none of the built-in names. Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when a copy cannot be allocated; the extensions copied until then
 /// are set.
 ///
 /// # Safety
@@ -1755,7 +1823,7 @@ pub fn extensions() -> Result<StrArrayVal, ErrorBuf> {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_extensions<S: AsRef<CStr>>(extensions: &[S]) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1778,7 +1846,8 @@ pub unsafe fn set_extensions<S: AsRef<CStr>>(extensions: &[S]) -> Result<(), Err
 /// Whether libgit2 refuses to open a repository whose directory the current user does
 /// not own.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn owner_validation() -> bool {
     // SAFETY: `GIT_OPT_GET_OWNER_VALIDATION` writes one `int` through one `int *`. Its
     // global is written only by `set_owner_validation`, whose caller excludes this.
@@ -1794,7 +1863,7 @@ pub fn owner_validation() -> bool {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_owner_validation(enabled: bool) {
     // SAFETY: as in `enable_caching`, for `GIT_OPT_SET_OWNER_VALIDATION`.
     unsafe { set_int(LibraryOption::SetOwnerValidation, c_int::from(enabled)) }
@@ -1802,10 +1871,13 @@ pub unsafe fn set_owner_validation(enabled: bool) {
 
 /// The directory libgit2 takes as the current user's home for file lookups.
 ///
-/// Pins the runtime first. Fails, with libgit2's error, when the copy cannot be
-/// allocated.
+/// Pins the runtime first.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated.
 pub fn homedir() -> Result<CString, ErrorBuf> {
     buf_string(|buf| {
         // SAFETY: `GIT_OPT_GET_HOMEDIR` reads a `git_buf *`, the zeroed local
@@ -1819,10 +1891,13 @@ pub fn homedir() -> Result<CString, ErrorBuf> {
 /// Sets the directory libgit2 takes as the current user's home for file lookups, or
 /// with `None` resets it to the default libgit2 derives from the environment.
 ///
-/// libgit2 copies `path`. Pins the runtime first. Fails, with libgit2's error, when the
-/// copy cannot be allocated; the directory is then empty, libgit2 having freed its
-/// previous value before the copy failed (and, left to itself, it would make the
-/// directory unreadable: see `sysdir_status`).
+/// libgit2 copies `path`. Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error, when the copy cannot be allocated; the directory is then empty,
+/// libgit2 having freed its previous value before the copy failed (and, left to itself, it would
+/// make the directory unreadable: see `sysdir_status`).
 ///
 /// # Safety
 ///
@@ -1830,7 +1905,7 @@ pub fn homedir() -> Result<CString, ErrorBuf> {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_homedir(path: Option<&CStr>) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1844,7 +1919,8 @@ pub unsafe fn set_homedir(path: Option<&CStr>) -> Result<(), ErrorBuf> {
 
 /// The timeout for connecting to a remote server, in milliseconds; 0 is the system's.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn server_connect_timeout() -> c_int {
     // SAFETY: `GIT_OPT_GET_SERVER_CONNECT_TIMEOUT` writes one `int` through one
     // `int *`. Its global is written only by `set_server_connect_timeout`, whose
@@ -1856,8 +1932,12 @@ pub fn server_connect_timeout() -> c_int {
 /// default) is the system's, typically 75 seconds, which a longer timeout may not
 /// exceed.
 ///
-/// Pins the runtime first. Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid
-/// connect timeout"), for a negative timeout, leaving the setting alone.
+/// Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid connect timeout"), for a negative
+/// timeout, leaving the setting alone.
 ///
 /// # Safety
 ///
@@ -1865,7 +1945,7 @@ pub fn server_connect_timeout() -> c_int {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_server_connect_timeout(timeout_ms: c_int) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1881,7 +1961,8 @@ pub unsafe fn set_server_connect_timeout(timeout_ms: c_int) -> Result<(), ErrorB
 /// The timeout for reading from and writing to a remote server, in milliseconds; 0 is
 /// the system's.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn server_timeout() -> c_int {
     // SAFETY: as in `server_connect_timeout`, for `GIT_OPT_GET_SERVER_TIMEOUT`, written
     // only by `set_server_timeout`.
@@ -1891,8 +1972,12 @@ pub fn server_timeout() -> c_int {
 /// Sets the timeout for reading from and writing to a remote server, in milliseconds;
 /// 0 (the default) is the system's.
 ///
-/// Pins the runtime first. Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid
-/// timeout"), for a negative timeout, leaving the setting alone.
+/// Pins the runtime first.
+///
+/// # Errors
+///
+/// Fails, with libgit2's error (`GIT_ERROR_INVALID`, "invalid timeout"), for a negative timeout,
+/// leaving the setting alone.
 ///
 /// # Safety
 ///
@@ -1900,7 +1985,7 @@ pub fn server_timeout() -> c_int {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_server_timeout(timeout_ms: c_int) -> Result<(), ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -1912,7 +1997,8 @@ pub unsafe fn set_server_timeout(timeout_ms: c_int) -> Result<(), ErrorBuf> {
 /// The largest object, in bytes, libgit2 accepts in a pack file downloaded from a
 /// remote.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
+#[must_use]
 pub fn pack_max_object_size() -> usize {
     // SAFETY: as in `mwindow_size`, for `GIT_OPT_GET_PACK_MAX_OBJECT_SIZE`.
     unsafe { get_size(LibraryOption::GetPackMaxObjectSize) }
@@ -1927,7 +2013,7 @@ pub fn pack_max_object_size() -> usize {
 /// this runs: libgit2 keeps the setting in a global that its other routines read
 /// without synchronisation.
 ///
-/// Wraps: git_libgit2_opts
+/// Wraps: `git_libgit2_opts`
 pub unsafe fn set_pack_max_object_size(size: usize) {
     // SAFETY: as in `set_mwindow_size`, for `GIT_OPT_SET_PACK_MAX_OBJECT_SIZE`.
     unsafe { set_size(LibraryOption::SetPackMaxObjectSize, size) }
@@ -2071,7 +2157,7 @@ mod unit_tests {
         set |= Feature::Threads;
         assert_eq!(
             set.bits(),
-            (ffi::GIT_FEATURE_SHA256 | ffi::GIT_FEATURE_THREADS) as c_int
+            (ffi::GIT_FEATURE_SHA256 | ffi::GIT_FEATURE_THREADS).cast_signed()
         );
         assert!(set.contains(Feature::Threads) && set.contains(Feature::Sha256));
         assert!(!set.contains(Feature::Ssh));
@@ -2154,7 +2240,7 @@ mod unit_tests {
             let opt = LibraryOption::from_raw(raw).unwrap();
             assert_eq!(opt.raw(), raw);
             assert_eq!(ffi::git_libgit2_opt_t::from(opt), raw);
-            assert_eq!(opt.key(), raw as c_int);
+            assert_eq!(opt.key(), raw.cast_signed());
             assert_eq!(LibraryOption::from_key(opt.key()), Some(opt));
             assert_eq!(LibraryOption::try_from(raw), Ok(opt));
         }
@@ -2174,7 +2260,7 @@ mod unit_tests {
         for key in [-1, -2, c_int::MIN] {
             assert_eq!(LibraryOption::from_key(key), None);
         }
-        assert_eq!(LibraryOption::from_key(END as c_int), None);
+        assert_eq!(LibraryOption::from_key(END.cast_signed()), None);
         assert_eq!(LibraryOption::from_key(c_int::MAX), None);
     }
 
@@ -2241,7 +2327,7 @@ mod unit_tests {
     }
 
     /// A key that fails leaves its error; a key that leaves the buffer untouched (NULL)
-    /// reads as empty; a filled buffer is copied and disposed (LSan).
+    /// reads as empty; a filled buffer is copied and disposed (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn buf_string_covers_every_outcome() {

@@ -4,7 +4,7 @@
 //! `GitFile` is a fieldless enum over C's `git_path_gitfile`, whose raw value libgit2
 //! uses as an index into a table of three names. The only safe way in from a raw value
 //! is `from_raw` / `try_from`, which must reject every value without a variant rather
-//! than produce an invalid discriminant (which Miri and UBSan would flag on the next
+//! than produce an invalid discriminant (which Miri and `UBSan` would flag on the next
 //! read); an `as` cast to it does not compile (`compile_fail/`). None of them calls
 //! libgit2, so they also run under Miri.
 
@@ -31,12 +31,12 @@ fn from_raw_yields_only_valid_files() {
             // Reading the discriminant back validates it.
             assert_eq!(file.raw(), raw);
             assert_eq!(ffi::git_path_gitfile::from(file), raw);
-            assert!(!format!("{file:?}").is_empty());
+            assert_ne!(format!("{file:?}"), "");
             seen.insert(file);
         } else {
             let err = GitFile::try_from(raw).unwrap_err();
             assert_eq!(err.raw(), raw);
-            assert!(!err.to_string().is_empty());
+            assert_ne!(err.to_string(), "");
         }
     }
     assert_eq!(seen.len(), 3);
@@ -104,7 +104,7 @@ mod filesystem {
 }
 
 /// [`is_gitfile`] reads within its component: one cut from a longer buffer, empty,
-/// long, non-UTF-8 and short-name-shaped components, under ASan; and from threads
+/// long, non-UTF-8 and short-name-shaped components, under `ASan`; and from threads
 /// before anything initialised libgit2, which it needs no runtime for.
 mod is_gitfile {
     use std::ffi::{CStr, CString};

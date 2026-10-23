@@ -26,7 +26,7 @@ impl Scratch {
     fn new(tag: &str) -> Self {
         let dir =
             std::env::temp_dir().join(format!("crustify-index-ub-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
@@ -38,7 +38,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        drop(std::fs::remove_dir_all(&self.0));
     }
 }
 
@@ -347,7 +347,7 @@ fn open_survives_corrupted_extensions() {
 
 /// As above, for a version 4 index, whose entries' paths are prefix-compressed. libgit2
 /// leaks the path it decompressed when an entry runs past the end of the file, so
-/// LeakSanitizer is off for this one (and only this one); the other sanitizers stay on.
+/// `LeakSanitizer` is off for this one (and only this one); the other sanitizers stay on.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn open_survives_corrupted_version_4_files() {
@@ -436,7 +436,7 @@ fn replaced_repository_index_stays_with_its_arc() {
 }
 
 /// Threads building and releasing their own indexes race nothing, the first of them
-/// initialising libgit2 included (ThreadSanitizer).
+/// initialising libgit2 included (`ThreadSanitizer`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn threads_build_their_own_indexes() {
@@ -498,15 +498,18 @@ fn scalar_options_exhaustive() {
             assigned |= rhs;
             assert_eq!(assigned, lhs.union(rhs));
 
-            let lhs = Capabilities::from_bits(a as i32).unwrap();
-            let rhs = Capabilities::from_bits(b as i32).unwrap();
-            assert_eq!((lhs | rhs).bits(), (a | b) as i32);
+            let lhs = Capabilities::from_bits(a.cast_signed()).unwrap();
+            let rhs = Capabilities::from_bits(b.cast_signed()).unwrap();
+            assert_eq!((lhs | rhs).bits(), (a | b).cast_signed());
             assert_eq!(lhs.contains(rhs), a & b == b);
-            assert_eq!(lhs.without(rhs).bits(), (a & !b) as i32);
+            assert_eq!(lhs.without(rhs).bits(), (a & !b).cast_signed());
             let mut assigned = lhs;
             assigned |= rhs;
             assert_eq!(assigned, lhs.union(rhs));
-            assert_eq!(CapabilitySetting::from(assigned).to_raw(), (a | b) as i32);
+            assert_eq!(
+                CapabilitySetting::from(assigned).to_raw(),
+                (a | b).cast_signed()
+            );
         }
     }
     for bits in [0, 8, 1 << 31, u32::MAX] {
@@ -778,11 +781,11 @@ mod entry_value {
                 inner.set_file_size(value.wrapping_add(4));
                 inner.set_mode(value);
             }
-            let seconds = value as i32;
+            let seconds = value.cast_signed();
             handle.set_ctime(IndexTime::new(seconds, value).as_ref());
             handle.mtime_mut().set_seconds(seconds.wrapping_neg());
             handle.mtime_mut().set_nanoseconds(!value);
-            handle.set_id(id(OidType::Sha256, step as u8).as_ref());
+            handle.set_id(id(OidType::Sha256, u8::try_from(step).unwrap()).as_ref());
             handle
                 .set_flags(EntryFlags::from_bits_retain(value & 0xFFFF))
                 .unwrap();
@@ -803,7 +806,7 @@ mod entry_value {
             assert_eq!(shared.mtime().seconds(), seconds.wrapping_neg());
             assert_eq!(shared.mtime().nanoseconds(), !value);
             assert_eq!(shared.id().kind(), Some(OidType::Sha256));
-            assert_eq!(shared.id().id(), [step as u8; 32]);
+            assert_eq!(shared.id().id(), [u8::try_from(step).unwrap(); 32]);
             assert_eq!(shared.flags().bits(), value & 0xFFFF);
             assert_eq!(shared.flags_extended().bits(), value >> 16);
             let copy = shared.to_index_entry();
@@ -813,11 +816,11 @@ mod entry_value {
         }
         let mode_cases = [
             (FileMode::Unreadable, 0),
-            (FileMode::Tree, 0o040000),
-            (FileMode::Blob, 0o100644),
-            (FileMode::BlobExecutable, 0o100755),
-            (FileMode::Link, 0o120000),
-            (FileMode::Commit, 0o160000),
+            (FileMode::Tree, 0o040_000),
+            (FileMode::Blob, 0o100_644),
+            (FileMode::BlobExecutable, 0o100_755),
+            (FileMode::Link, 0o120_000),
+            (FileMode::Commit, 0o160_000),
         ];
         for (mode, raw) in mode_cases {
             entry.as_mut().set_filemode(mode);
@@ -826,7 +829,7 @@ mod entry_value {
                 (raw, Some(mode))
             );
         }
-        entry.as_mut().set_mode(0o100664);
+        entry.as_mut().set_mode(0o100_664);
         assert_eq!(entry.as_ref().filemode(), None);
     }
 
@@ -888,7 +891,8 @@ mod entry_value {
         for (handle, path) in handles.iter().zip(&paths) {
             assert_eq!(handle.path(), path.as_c_str());
         }
-        let copies: Vec<IndexEntry<'_>> = handles.iter().map(|h| h.to_index_entry()).collect();
+        let copies: Vec<IndexEntry<'_>> =
+            handles.iter().map(IndexEntryRef::to_index_entry).collect();
         drop(handles);
         for (i, entry) in entries.iter_mut().enumerate() {
             entry.as_mut().set_path(&paths[63 - i]);
@@ -952,7 +956,7 @@ mod entry_value {
                 .set_flags(EntryFlags::from_bits_retain(flags))
                 .unwrap();
             let initial = handle.as_ref().stage();
-            assert_eq!(initial.raw() as u32, (flags >> 12) & 3);
+            assert_eq!(initial.raw().cast_unsigned(), (flags >> 12) & 3);
             let copy = handle.as_ref().to_index_entry();
             for (i, stage) in STAGES.into_iter().enumerate() {
                 {
@@ -963,7 +967,10 @@ mod entry_value {
                 let shared: IndexEntryRef<'_, '_> = handle.as_ref();
                 let again = shared;
                 assert_eq!(shared.stage(), stage);
-                assert_eq!(again.flags().bits(), (flags & !0x3000) | (i as u32) << 12);
+                assert_eq!(
+                    again.flags().bits(),
+                    (flags & !0x3000) | u32::try_from(i).unwrap() << 12
+                );
                 assert_eq!(shared.to_index_entry().as_ref().stage(), stage);
             }
             assert_eq!(copy.as_ref().stage(), initial);
@@ -1096,7 +1103,7 @@ mod routines {
                 "crustify-index-ub-work-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let repo = Some(Repository::init(&c_path(&dir), bare).unwrap());
             Self { dir, repo }
         }
@@ -1115,7 +1122,7 @@ mod routines {
     impl Drop for WorkRepo {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -1196,7 +1203,12 @@ mod routines {
         // Three sides of a conflict, and an entry with a non-UTF-8 path.
         for stage in 1..=3 {
             assert_eq!(
-                add_staged_id(&mut index, c"d1/f01", stage, &[stage as u8]),
+                add_staged_id(
+                    &mut index,
+                    c"d1/f01",
+                    stage,
+                    &[u8::try_from(stage).unwrap()]
+                ),
                 0
             );
         }
@@ -1234,7 +1246,12 @@ mod routines {
             assert_eq!(add(&mut index, path), 0);
             for stage in 1..=3 {
                 assert_eq!(
-                    add_staged_id(&mut index, path, stage, &[(i * 3) as u8 + stage as u8]),
+                    add_staged_id(
+                        &mut index,
+                        path,
+                        stage,
+                        &[u8::try_from(i * 3).unwrap() + u8::try_from(stage).unwrap()]
+                    ),
                     0
                 );
             }
@@ -1277,13 +1294,13 @@ mod routines {
         let mut index = Index::open(&file).unwrap();
         let signatures: Vec<[u8; 4]> = (0..20u8).map(|i| [b'Z', b'A' + i, b'X', b'\xff']).collect();
         for (i, signature) in signatures.iter().enumerate() {
-            let data = vec![i as u8; i * 7];
+            let data = vec![u8::try_from(i).unwrap(); i * 7];
             index.as_mut().set_extension(signature, &data).unwrap();
         }
         let mut copies = Vec::new();
         for (i, signature) in signatures.iter().enumerate() {
             let copy = index.as_mut().extension(signature).unwrap().unwrap();
-            assert_eq!(copy.as_slice(), vec![i as u8; i * 7]);
+            assert_eq!(copy.as_slice(), vec![u8::try_from(i).unwrap(); i * 7]);
             copies.push(copy);
         }
         index
@@ -1324,7 +1341,7 @@ mod routines {
         drop((index, reread));
         // The copies are the caller's.
         for (i, copy) in copies.iter().enumerate() {
-            assert_eq!(copy.as_slice(), vec![i as u8; i * 7]);
+            assert_eq!(copy.as_slice(), vec![u8::try_from(i).unwrap(); i * 7]);
         }
         drop(copies);
 
@@ -1421,7 +1438,7 @@ mod routines {
                     index.as_mut().add_path(c"a").unwrap();
                     index.as_mut().add_path(c"a").unwrap();
                     for (path, code) in [
-                        (c"d" as &CStr, Some(ErrorCode::Directory)),
+                        (c"d", Some(ErrorCode::Directory)),
                         (c"missing", Some(ErrorCode::NotFound)),
                         (c"", Some(ErrorCode::Generic)),
                         (c"d/", Some(ErrorCode::Generic)),
@@ -1547,7 +1564,7 @@ mod routines {
 
     /// A directory holding a repository with no commit, which is no submodule, is
     /// refused; libgit2 leaks what it built for the entry and the nested repository
-    /// (`add_repo_as_submodule`, `src/libgit2/index.c`), so LeakSanitizer is off in the
+    /// (`add_repo_as_submodule`, `src/libgit2/index.c`), so `LeakSanitizer` is off in the
     /// child, which also keeps the filter loads to itself.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]

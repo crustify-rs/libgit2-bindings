@@ -4,7 +4,7 @@
 //! `git_commitarray` libgit2 leaves behind or C code builds, edge cases included, and
 //! then driven through the safe API: read, emptied, cleared, handed back with
 //! `into_raw` and adopted again, and released before its repository, as the contract
-//! requires (ASan: double free, invalid free, use after free, overflow; LSan: leak).
+//! requires (`ASan`: double free, invalid free, use after free, overflow; `LSan`: leak).
 //!
 //! The signing callback of `CreateExtOptions` is set safely
 //! (`CreateExtOptionsMut::set_signer`); its tests are in `ub_safe`.
@@ -36,7 +36,7 @@ fn open(name: &str) -> *mut ffi::git_repository {
     // SAFETY: a live slot and a NUL-terminated path; no ceiling directories.
     let rc = unsafe {
         ffi::git_repository_open_ext(
-            &mut repo,
+            &raw mut repo,
             path.as_ptr(),
             ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
             ptr::null(),
@@ -55,13 +55,9 @@ fn hex(commit: CommitRef<'_, '_>) -> String {
     let commit = commit.to_commit();
     let mut out = [0u8; 41];
     // SAFETY: a commit its owner keeps alive; 41 writable bytes.
-    unsafe {
-        ffi::git_oid_tostr(
-            out.as_mut_ptr().cast(),
-            out.len(),
-            ffi::git_commit_id(commit.as_c_ptr()),
-        )
-    };
+    let commit_id = unsafe { ffi::git_commit_id(commit.as_c_ptr()) };
+    // SAFETY: as above.
+    unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), commit_id) };
     CStr::from_bytes_until_nul(&out)
         .unwrap()
         .to_str()
@@ -77,7 +73,7 @@ fn ids(array: CommitArrayRef<'_, '_>) -> Vec<String> {
 fn parents(repo: *mut ffi::git_repository) -> ffi::git_commitarray {
     let mut raw = ffi::git_commitarray::default();
     // SAFETY: a zeroed array and an open repository.
-    let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo) };
+    let rc = unsafe { ffi::git_repository_commit_parents(&raw mut raw, repo) };
     assert_eq!(rc, 0);
     raw
 }
@@ -86,11 +82,12 @@ fn parents(repo: *mut ffi::git_repository) -> ffi::git_commitarray {
 fn lookup(repo: *mut ffi::git_repository, hex: &CStr) -> *mut ffi::git_commit {
     let mut id = ffi::git_oid::default();
     // SAFETY: a writable oid and a NUL-terminated hex string.
-    let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+    let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
     assert_eq!(rc, 0);
     let mut commit = ptr::null_mut();
     // SAFETY: a live slot, an open repository and a live oid.
-    assert_eq!(unsafe { ffi::git_commit_lookup(&mut commit, repo, &id) }, 0);
+    let ret = unsafe { ffi::git_commit_lookup(&raw mut commit, repo, &raw const id) };
+    assert_eq!(ret, 0);
     commit
 }
 
@@ -109,7 +106,9 @@ fn c_built(commits: &[*mut ffi::git_commit], slots: usize) -> ffi::git_commitarr
         let commit = commits.get(i).copied().unwrap_or(ptr::null_mut());
         // SAFETY: `buf` holds `slots` pointer slots, suitably aligned (libgit2's
         // allocator is malloc).
-        unsafe { buf.add(i).write(commit) };
+        let add = unsafe { buf.add(i) };
+        // SAFETY: as above.
+        unsafe { add.write(commit) };
     }
     ffi::git_commitarray {
         commits: buf,
@@ -140,7 +139,7 @@ fn adopts_what_libgit2_fills() {
         let mut raw = array.into_inner().into_raw();
         assert!(raw.commits.is_null() && raw.count == 0);
         // SAFETY: `raw` is empty, so nothing is overwritten unreleased.
-        let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo) };
+        let rc = unsafe { ffi::git_repository_commit_parents(&raw mut raw, repo) };
         assert_eq!(rc, 0);
         // SAFETY: as above: libgit2 refilled it.
         let mut again: CommitArrayVal<'_> = unsafe { CommitArray::from_raw(raw) };
@@ -198,7 +197,7 @@ fn adopts_what_c_code_builds() {
     let mut back = adopted.into_inner().into_raw();
     assert_eq!(back.count, 1);
     // SAFETY: `back` owns its commit and buffer again, released once by C.
-    unsafe { ffi::git_commitarray_dispose(&mut back) };
+    unsafe { ffi::git_commitarray_dispose(&raw mut back) };
     assert!(back.commits.is_null() && back.count == 0);
     free_repo(repo);
 }

@@ -50,7 +50,7 @@ define_ctype!(
 /// Releases one counted reference, freeing the patterns, prefix, pool and object
 /// when the count reaches zero. No public clone or up-ref routine exists.
 ///
-/// Wraps: git_pathspec_free
+/// Wraps: `git_pathspec_free`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PathspecFree;
 
@@ -108,16 +108,20 @@ pub type PathspecBox = CBox<Pathspec, PathspecFree>;
 pub type PathspecArc = CArc<Pathspec, PathspecFree>;
 
 impl Pathspec {
-    /// Compiles an array of patterns, copying everything needed before returning.
-    /// An empty array, or an array of empty strings, matches every path. Either a
-    /// borrowed [`StrArrayView`](crate::libgit2::core::strarray::StrArrayView) or an
-    /// owned string array can provide the handle. Reports C's error on failure.
+    /// Compiles an array of patterns, copying everything needed before returning. An empty array,
+    /// or an array of empty strings, matches every path. Either a borrowed
+    /// [`StrArrayView`](crate::libgit2::core::strarray::StrArrayView) or an owned string array can
+    /// provide the handle.
+    ///
+    /// Wraps: `git_pathspec_new`
+    ///
+    /// # Errors
+    ///
+    /// Reports C's error on failure.
     ///
     /// An array mixing empty and non-empty patterns is refused, with a
     /// `GIT_ERROR_INVALID` error, before libgit2 sees it: libgit2 would read past the
     /// end of each empty one (`parse_optimized_patterns`, `src/libgit2/attr_file.c`).
-    ///
-    /// Wraps: git_pathspec_new
     pub fn new(patterns: StrArrayRef<'_>) -> Result<PathspecBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -129,7 +133,7 @@ impl Pathspec {
         // SAFETY: `patterns` supplies a live read-only array of non-null terminated
         // strings (or an empty array). C copies them and retains no input pointer.
         // `out` is a writable output slot; the pinned runtime outlives the result.
-        let rc = unsafe { ffi::git_pathspec_new(&mut out, patterns.as_ptr()) };
+        let rc = unsafe { ffi::git_pathspec_new(&raw mut out, patterns.as_ptr()) };
         if rc < 0 {
             // C cleans its partial allocation and leaves the output untouched.
             return Err(last());
@@ -153,7 +157,8 @@ impl PathspecRef<'_> {
     /// libgit2 only reads the pathspec and `path`, retains neither, and reports no
     /// error: its sole failure path rejects a NULL argument, which cannot occur here.
     ///
-    /// Wraps: git_pathspec_matches_path
+    /// Wraps: `git_pathspec_matches_path`
+    #[must_use]
     pub fn matches_path(&self, flags: PathspecFlags, path: &CStr) -> bool {
         let (pathspec, path) = (self.as_ptr(), path.as_ptr());
         // SAFETY: this handle keeps the initialized pathspec alive and unwritten for
@@ -184,7 +189,7 @@ pub(crate) fn patterns_are_parsable(patterns: StrArrayRef<'_>) -> bool {
 /// `USE_CASE` where case flags apply. These are bits, not a Rust enum: combinations
 /// (including zero and both case flags) are valid.
 ///
-/// Wraps: git_pathspec_flag_t
+/// Wraps: `git_pathspec_flag_t`
 /// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -207,21 +212,25 @@ impl PathspecFlags {
     pub const USE_CASE: Self = Self(ffi::GIT_PATHSPEC_USE_CASE);
 
     /// Preserve every supplied bit, including bits unknown to this C version.
+    #[must_use]
     pub const fn from_bits_retain(bits: u32) -> Self {
         Self(bits)
     }
 
     /// The bitset passed to the C matching operations.
+    #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
     /// Whether every bit in `other` is enabled.
+    #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 
     /// Whether no bits are enabled.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
@@ -289,7 +298,7 @@ impl BitAndAssign for PathspecFlags {
 /// }
 /// ```
 ///
-/// Wraps: git_pathspec_match_list
+/// Wraps: `git_pathspec_match_list`
 /// Handwritten
 #[repr(transparent)]
 pub struct MatchList<'diff>(
@@ -300,15 +309,9 @@ pub struct MatchList<'diff>(
 /// Copyable shared handle; no Rust reference covers C-owned list storage.
 ///
 /// Handwritten
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct MatchListRef<'a, 'diff>(CBorrowedPtr<'a, MatchList<'diff>>);
-
-impl Clone for MatchListRef<'_, '_> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl Copy for MatchListRef<'_, '_> {}
 
 /// Exclusive handle, invariant in the retained diff lifetime.
 ///
@@ -337,7 +340,7 @@ unsafe impl<'diff> CCell for MatchList<'diff> {
 /// Releases the list, its arrays, string pool and retained pathspec reference.
 /// Borrowed diff deltas are never freed. No C clone operation exists.
 ///
-/// Wraps: git_pathspec_match_list_free
+/// Wraps: `git_pathspec_match_list_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MatchListFree;
@@ -354,26 +357,30 @@ unsafe impl CDrop<MatchList<'_>> for MatchListFree {
 /// Sole owner, freed through C. No deep-copy or refcount clone is available.
 pub type MatchListBox<'diff> = CBox<MatchList<'diff>, MatchListFree>;
 
-impl<'a, 'diff> MatchListRef<'a, 'diff> {
+impl<'a> MatchListRef<'a, '_> {
     pub(crate) fn as_ptr(&self) -> *const ffi::git_pathspec_match_list {
         self.0.as_non_null().as_ptr().cast()
     }
 
     /// Number of filenames or diff deltas; zero with `FAILURES_ONLY`.
     ///
-    /// Wraps: git_pathspec_match_list_entrycount
+    /// Wraps: `git_pathspec_match_list_entrycount`
+    #[must_use]
     pub fn len(&self) -> usize {
         // SAFETY: this handle keeps the initialized list alive and unwritten.
         unsafe { ffi::git_pathspec_match_list_entrycount(self.as_ptr()) }
     }
 
+    /// Whether no path matched.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Matched filename, or `None` out of bounds or for a diff-generated list.
     ///
-    /// Wraps: git_pathspec_match_list_entry
+    /// Wraps: `git_pathspec_match_list_entry`
+    #[must_use]
     pub fn entry(&self, index: usize) -> Option<&'a CStr> {
         // SAFETY: C checks the datatype and index before reading its array. Strings
         // are NUL-terminated pool allocations, immutable until this list is freed.
@@ -384,7 +391,8 @@ impl<'a, 'diff> MatchListRef<'a, 'diff> {
 
     /// Number of unmatched patterns; zero unless `FIND_FAILURES` was requested.
     ///
-    /// Wraps: git_pathspec_match_list_failed_entrycount
+    /// Wraps: `git_pathspec_match_list_failed_entrycount`
+    #[must_use]
     pub fn failed_len(&self) -> usize {
         // SAFETY: the shared handle keeps the initialized list alive.
         unsafe { ffi::git_pathspec_match_list_failed_entrycount(self.as_ptr()) }
@@ -392,7 +400,8 @@ impl<'a, 'diff> MatchListRef<'a, 'diff> {
 
     /// A copied unmatched pattern, or `None` out of bounds.
     ///
-    /// Wraps: git_pathspec_match_list_failed_entry
+    /// Wraps: `git_pathspec_match_list_failed_entry`
+    #[must_use]
     pub fn failed_entry(&self, index: usize) -> Option<&'a CStr> {
         // SAFETY: C bounds-checks before reading; failure strings are immutable
         // NUL-terminated allocations in this list's pool (not caller storage).
@@ -404,22 +413,25 @@ impl<'a, 'diff> MatchListRef<'a, 'diff> {
     /// A delta borrowed from the source diff, or `None` out of bounds / for a
     /// filename list. Its lifetime is bounded by the list and the source diff.
     ///
-    /// Wraps: git_pathspec_match_list_diff_entry
+    /// Wraps: `git_pathspec_match_list_diff_entry`
+    #[must_use]
     pub fn diff_entry(&self, index: usize) -> Option<DiffDeltaRef<'a>> {
         // SAFETY: C checks datatype and bounds; the list and borrowed diff are live.
-        unsafe {
-            DiffDeltaRef::from_ptr(
-                ffi::git_pathspec_match_list_diff_entry(self.as_ptr(), index).cast_mut(),
-            )
-        }
+        let pathspec_match_list_diff_entry =
+            unsafe { ffi::git_pathspec_match_list_diff_entry(self.as_ptr(), index) };
+        // SAFETY: as above.
+        unsafe { DiffDeltaRef::from_ptr(pathspec_match_list_diff_entry.cast_mut()) }
     }
 }
 
 impl<'diff> MatchListMut<'_, 'diff> {
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> MatchListRef<'_, 'diff> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> MatchListMut<'_, 'diff> {
         MatchListMut(self.0, PhantomData)
     }
@@ -441,7 +453,13 @@ impl MatchList<'static> {
     /// }
     /// ```
     ///
-    /// Wraps: git_pathspec_match_index
+    /// Wraps: `git_pathspec_match_index`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when the index cannot be iterated, and with
+    /// [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) under
+    /// [`PathspecFlags::NO_MATCH_ERROR`] when no path matches.
     pub fn from_index(
         mut index: IndexMut<'_>,
         pathspec: &PathspecArc,
@@ -453,7 +471,7 @@ impl MatchList<'static> {
         // slot. C copies all names and releases its iterator before returning.
         let rc = unsafe {
             ffi::git_pathspec_match_index(
-                &mut out,
+                &raw mut out,
                 index.as_mut_ptr(),
                 flags.bits(),
                 pathspec.as_ref().as_ptr().cast_mut(),
@@ -467,7 +485,13 @@ impl MatchList<'static> {
 
     /// Match a tree; the result copies filenames and need not retain the tree.
     ///
-    /// Wraps: git_pathspec_match_tree
+    /// Wraps: `git_pathspec_match_tree`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when the tree cannot be iterated, and with
+    /// [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) under
+    /// [`PathspecFlags::NO_MATCH_ERROR`] when no path matches.
     pub fn from_tree(
         tree: TreeRef<'_, '_>,
         pathspec: &PathspecArc,
@@ -479,7 +503,7 @@ impl MatchList<'static> {
         // bumped, by C), and a writable output slot.
         let rc = unsafe {
             ffi::git_pathspec_match_tree(
-                &mut out,
+                &raw mut out,
                 tree.as_ptr().cast_mut(),
                 flags.bits(),
                 pathspec.as_ref().as_ptr().cast_mut(),
@@ -493,7 +517,14 @@ impl MatchList<'static> {
     /// Match the working directory, excluding ignored untracked files. A bare
     /// repository is an error. Filenames in the result are independent copies.
     ///
-    /// Wraps: git_pathspec_match_workdir
+    /// Wraps: `git_pathspec_match_workdir`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::BareRepo`](crate::libgit2::util::errors::ErrorCode::BareRepo) for a
+    /// bare repository, with libgit2's code and error when the working directory cannot be read,
+    /// and with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) under
+    /// [`PathspecFlags::NO_MATCH_ERROR`] when no path matches.
     pub fn from_workdir(
         mut repo: RepositoryMut<'_>,
         pathspec: &PathspecArc,
@@ -505,7 +536,7 @@ impl MatchList<'static> {
         // repository, and writes only our output slot.
         let rc = unsafe {
             ffi::git_pathspec_match_workdir(
-                &mut out,
+                &raw mut out,
                 repo.as_mut_ptr(),
                 flags.bits(),
                 pathspec.as_ref().as_ptr().cast_mut(),
@@ -537,7 +568,13 @@ impl<'diff> MatchList<'diff> {
     /// drop(list);
     /// ```
     ///
-    /// Wraps: git_pathspec_match_diff
+    /// Wraps: `git_pathspec_match_diff`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when it runs out of memory, and with
+    /// [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound) under
+    /// [`PathspecFlags::NO_MATCH_ERROR`] when no path matches.
     pub fn from_diff(
         diff: DiffRef<'diff, '_>,
         pathspec: &PathspecArc,
@@ -549,7 +586,7 @@ impl<'diff> MatchList<'diff> {
         // retains it via its atomic count, but merely borrows delta pointers.
         let rc = unsafe {
             ffi::git_pathspec_match_diff(
-                &mut out,
+                &raw mut out,
                 diff.as_ptr().cast_mut(),
                 flags.bits(),
                 pathspec.as_ref().as_ptr().cast_mut(),
@@ -564,10 +601,10 @@ impl<'diff> MatchList<'diff> {
 
 /// The list a matcher returning `rc` handed out, or its error. Every matcher leaves its
 /// output NULL on failure, so a failure adopts nothing.
-fn constructed<'diff>(
+fn constructed(
     rc: i32,
-    list: Option<MatchListBox<'diff>>,
-) -> Result<MatchListBox<'diff>, RepositoryError> {
+    list: Option<MatchListBox<'_>>,
+) -> Result<MatchListBox<'_>, RepositoryError> {
     if rc < 0 {
         return Err(RepositoryError::from_libgit2(rc));
     }
@@ -671,7 +708,7 @@ mod unit_tests {
     // Allocation fault injection lives in a fresh process: no other Rust test can
     // observe or race the process-global C allocator replacement.
     mod failures {
-        use core::ffi::{CStr, c_int};
+        use core::ffi::CStr;
         use core::ptr::NonNull;
         use std::sync::atomic::AtomicIsize;
         use std::sync::atomic::Ordering::SeqCst;
@@ -752,7 +789,7 @@ mod unit_tests {
             // allocator table is copied by C before any allocations are made.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };
@@ -767,10 +804,7 @@ mod unit_tests {
             }
             assert!(runtime_pinned());
             // Warm up the thread's error storage before counting live allocations.
-            crate::libgit2::util::sys::errors::set(
-                crate::libgit2::util::errors::ErrorClass::Invalid,
-                c"warm up",
-            );
+            set(ErrorClass::Invalid, c"warm up");
             let patterns = StrArrayView::new(&[c"src/*.rs", c"src/lib/*.c", c"src/other"]);
             let baseline = LIVE.load(SeqCst);
             let mut errors = 0;
@@ -840,7 +874,10 @@ mod match_list_unit_tests {
         drop(index);
         assert_eq!(list.as_ref().as_ptr(), raw.cast_const());
         // Intentionally exercise Clone, not only the equivalent Copy operation.
-        #[allow(clippy::clone_on_copy)]
+        #[expect(
+            clippy::clone_on_copy,
+            reason = "exercises `Clone` itself, not the `Copy` it shadows"
+        )]
         let cloned = list.as_ref().clone();
         assert_eq!(cloned.failed_entry(0), Some(c"missing"));
         assert_eq!(

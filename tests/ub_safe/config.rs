@@ -3,8 +3,8 @@
 //! constructor and the `git_config_free` policy.
 //!
 //! Every reference must be released exactly once, whichever owner holds it and in
-//! whatever order owners and repositories go (ASan: double free, use after free;
-//! LSan: leak). The tests drive the object through the safe wrappers only. Nothing
+//! whatever order owners and repositories go (`ASan`: double free, use after free;
+//! `LSan`: leak). The tests drive the object through the safe wrappers only. Nothing
 //! here runs without libgit2, so Miri runs none of it. Illegal uses are compile-fail
 //! doctests on the crate and `compile_fail/` cases: a
 //! `ConfigArc` clone, an exclusive handle from a shared owner, sending either owner to
@@ -42,7 +42,7 @@ fn write_through_file(config: &mut ConfigBox<'_>, file: &CStr, name: &CStr, valu
 fn scratch(tag: &str) -> std::ffi::CString {
     let path =
         std::env::temp_dir().join(format!("crustify-ub-config-{}-{tag}", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    drop(std::fs::remove_file(&path));
     std::ffi::CString::new(path.to_str().unwrap()).unwrap()
 }
 
@@ -64,7 +64,7 @@ fn configs_build_use_and_release() {
     let shared = ConfigArc::new().unwrap();
     assert_eq!(number(boxed.as_ref(), c"a.b"), Err(NOT_FOUND));
     assert_eq!(number(shared.as_ref(), c"a.b"), Err(NOT_FOUND));
-    let _ = std::fs::remove_file(file.to_str().unwrap());
+    drop(std::fs::remove_file(file.to_str().unwrap()));
 }
 
 /// A box shared as an arc, and a repository's config adopted twice, are each released
@@ -97,7 +97,7 @@ fn shared_configs_release_each_reference_once() {
     );
     drop(third);
     drop(repo);
-    let _ = std::fs::remove_file(file.to_str().unwrap());
+    drop(std::fs::remove_file(file.to_str().unwrap()));
 }
 
 /// A repository's config is used only while the repository lives: its file backends
@@ -116,7 +116,7 @@ fn repository_config_reparses_against_its_live_repository() {
         "crustify-ub-config-includeif-{}",
         std::process::id()
     ));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
     std::fs::create_dir_all(&dir).unwrap();
     let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
     let repo = Repository::init(&path, false).unwrap();
@@ -140,12 +140,12 @@ fn repository_config_reparses_against_its_live_repository() {
     assert_eq!(number(shared.as_ref(), c"a.b"), Ok(7));
     drop(shared);
     drop(repo);
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
 }
 
 /// The process's first configs, built on several threads at once: each `Config::new`
 /// pins the runtime before `git_config_new` reaches the allocator, so they race
-/// neither the first `git_libgit2_init` nor each other (TSan); each config stays on its
+/// neither the first `git_libgit2_init` nor each other (`TSan`); each config stays on its
 /// own thread.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -219,17 +219,17 @@ mod parsers {
         // may read it but must not go beyond it. Invalid bytes need no UTF-8 claim.
         for bytes in [b"1k\0".as_slice(), b"1kb\0", b"\xff\0"] {
             let value = CStr::from_bytes_with_nul(bytes).unwrap();
-            let _ = parse_bool(Some(value));
-            let _ = parse_i32(Some(value));
-            let _ = parse_i64(Some(value));
+            drop(parse_bool(Some(value)));
+            drop(parse_i32(Some(value)));
+            drop(parse_i64(Some(value)));
         }
         let long = CString::new("9".repeat(4096)).unwrap();
         assert!(parse_i64(Some(&long)).is_err());
         for byte in 1..=255 {
             let input = CString::new([byte]).unwrap();
-            let _ = parse_bool(Some(&input));
-            let _ = parse_i32(Some(&input));
-            let _ = parse_i64(Some(&input));
+            drop(parse_bool(Some(&input)));
+            drop(parse_i32(Some(&input)));
+            drop(parse_i64(Some(&input)));
         }
     }
 
@@ -368,7 +368,7 @@ mod entry_and_map_types {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn entries_retain_storage_across_parent_drop_and_refresh() {
         let dir = std::env::temp_dir().join(format!("crustify-entry-b0-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let path = CString::new(dir.to_str().unwrap()).unwrap();
         let repo = Repository::init(&path, false).unwrap();
         let config_path = dir.join(".git/config");
@@ -444,7 +444,7 @@ mod entry_and_map_types {
     /// A `static` table is read from many threads at once, shared handles and
     /// scoped borrows cross threads, an exclusive handle writes on another
     /// thread, and records holding only `'static` borrows move to a detached one
-    /// (TSan: data race; Miri: aliasing of the handles' pointers).
+    /// (`TSan`: data race; Miri: aliasing of the handles' pointers).
     #[test]
     fn maps_cross_threads() {
         static TABLE: [ConfigMap<'static>; 3] = [
@@ -498,7 +498,7 @@ mod entry_and_map_types {
     /// entry-lookup-forms-member-of-unwritten-backend-entry`: a lookup that rereads a file
     /// rewritten into something libgit2 cannot parse fails with the parse error instead of
     /// reaching `get_entry`'s member access through the entry pointer the failed backend never
-    /// wrote (UBSan: member access within null pointer); entries acquired before stay valid.
+    /// wrote (`UBSan`: member access within null pointer); entries acquired before stay valid.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn rewritten_unparsable_file_fails_lookup_cleanly() {
@@ -521,8 +521,8 @@ mod entry_and_map_types {
 
     /// Entries stay readable after everything that produced them is gone: a
     /// snapshot and its source, a level view and its parent, the list a write
-    /// replaces, and the file's own config; any release order is fine (ASan:
-    /// use after free, double free; LSan: leaked entry lists).
+    /// replaces, and the file's own config; any release order is fine (`ASan`:
+    /// use after free, double free; `LSan`: leaked entry lists).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn entries_outlive_snapshots_views_and_writes() {
@@ -586,6 +586,10 @@ mod file_access {
     use super::*;
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn file_api_sequences() {
         let file = scratch("file-api");
         std::fs::write(
@@ -711,10 +715,10 @@ mod file_access {
         let outputs = [find_global(), find_xdg(), find_system()];
         let copied = parse_path(c"relative/\xff").unwrap();
         for input in [c"", c"~", c"~/child", c"~named/child"] {
-            let _ = parse_path(input);
+            drop(parse_path(input));
         }
         for output in outputs.into_iter().flatten() {
-            assert!(!output.as_ref().as_bytes().is_empty());
+            assert_ne!(output.as_ref().as_bytes(), b"");
         }
         assert_eq!(copied.as_ref().as_bytes(), b"relative/\xff");
     }
@@ -755,7 +759,7 @@ mod file_access {
     fn independent_file_owners_on_threads() {
         let threads: Vec<_> = (0..8)
             .map(|index| {
-                std::thread::spawn(move || {
+                thread::spawn(move || {
                     let file = scratch(&format!("file-thread-{index}"));
                     let mut cfg = Config::open(&file).unwrap();
                     for value in [i64::MIN, 0, i64::MAX] {
@@ -770,7 +774,7 @@ mod file_access {
             })
             .collect();
         for thread in threads {
-            assert!(!thread.join().unwrap().as_ref().as_bytes().is_empty());
+            assert_ne!(thread.join().unwrap().as_ref().as_bytes(), b"");
         }
     }
 
@@ -802,7 +806,7 @@ mod file_access {
             );
             return;
         }
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(dir.join("xdg/git")).unwrap();
         std::fs::write(dir.join(".gitconfig"), b"[a]\n value = 11\n").unwrap();
         std::fs::write(dir.join("xdg/git/config"), b"[a]\n value = 22\n").unwrap();
@@ -827,6 +831,10 @@ mod file_access {
     }
 
     #[test]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn global_views_and_repository_keepalive() {
         let global = scratch("global-view");
         let xdg = scratch("xdg-view");
@@ -854,7 +862,7 @@ mod file_access {
 
         let dir =
             std::env::temp_dir().join(format!("crustify-safe-config-repo-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let path = CString::new(dir.to_str().unwrap()).unwrap();
         let repo = Repository::init(&path, true).unwrap();
         let file = CString::new(dir.join("config").to_str().unwrap()).unwrap();
@@ -873,7 +881,7 @@ mod file_access {
         // The explicit annotation narrows Config::new's covariant static owner.
         fn bound<'r>(
             repo: libgit2::libgit2::repository::repository::RepositoryRef<'r>,
-            file: &std::ffi::CStr,
+            file: &CStr,
         ) -> ConfigBox<'r> {
             let mut cfg: ConfigBox<'r> = Config::new().unwrap();
             cfg.as_mut()
@@ -903,12 +911,7 @@ fn string_file_config(tag: &str) -> (ConfigBox<'static>, std::ffi::CString) {
     let file = scratch(tag);
     config
         .as_mut()
-        .add_file(
-            &file,
-            libgit2::libgit2::config::config::ConfigLevel::LOCAL,
-            None,
-            false,
-        )
+        .add_file(&file, ConfigLevel::LOCAL, None, false)
         .unwrap();
     (config, file)
 }
@@ -1181,9 +1184,7 @@ mod mapping_callbacks {
         assert_eq!(seen, [c"a.flag".to_owned()]);
         let mut first = true;
         let mut panicking = |e: EntryRef<'_>| {
-            if std::mem::take(&mut first) {
-                panic!("callback panic");
-            }
+            assert!(!std::mem::take(&mut first), "callback panic");
             assert_eq!(e.value(), Some(c"input"));
             ControlFlow::Continue(())
         };
@@ -1395,9 +1396,7 @@ mod enumeration {
             let mut calls = 0;
             let mut f = |_: EntryRef<'_>| {
                 calls += 1;
-                if std::mem::take(&mut first) {
-                    panic!("enumeration panic");
-                }
+                assert!(!std::mem::take(&mut first), "enumeration panic");
                 ControlFlow::Continue(())
             };
             let mut cb = ForeachCallback::new(&mut f);
@@ -1491,10 +1490,14 @@ mod enumeration {
     }
 
     /// C's value filter calls strlen(NULL) on a valueless setting; the wrapper's
-    /// skips it. Invalid patterns release everything (LSan), and stops, panics and
+    /// skips it. Invalid patterns release everything (`LSan`), and stops, panics and
     /// nested filtered walks leave the callback reusable.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn enumeration_value_filter_skips_valueless_and_cleans_up() {
         let (path, config) = filter_input("enumeration-filter");
         let walk = |name: &CStr, regexp: &CStr| {
@@ -1587,9 +1590,7 @@ mod enumeration {
         let mut calls = 0;
         let mut f = |_: EntryRef<'_>| {
             calls += 1;
-            if std::mem::take(&mut first) {
-                panic!("filtered enumeration panic");
-            }
+            assert!(!std::mem::take(&mut first), "filtered enumeration panic");
             ControlFlow::Continue(())
         };
         let mut cb = ForeachCallback::new(&mut f);
@@ -1640,7 +1641,7 @@ mod enumeration {
             "crustify-ub-config-enumeration-repo-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let path = CString::new(dir.to_str().unwrap()).unwrap();
         let repo = Repository::init(&path, false).unwrap();
         let config_path = dir.join(".git/config");
@@ -1927,7 +1928,7 @@ mod iterator_entries {
             "crustify-ub-config-iterator-repo-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let repo = Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false).unwrap();
         let config_path = dir.join(".git/config");
         let mut text = std::fs::read(&config_path).unwrap();

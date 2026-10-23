@@ -139,8 +139,8 @@ fn from_raw_names_exactly_the_c_codes() {
 #[test]
 fn classes_carry_their_c_values() {
     for (c, class) in CLASSES {
-        assert_eq!(class.raw(), c as c_int, "{class:?}");
-        assert_eq!(c_int::from(class), c as c_int, "{class:?}");
+        assert_eq!(class.raw(), c.cast_signed(), "{class:?}");
+        assert_eq!(c_int::from(class), c.cast_signed(), "{class:?}");
     }
 }
 
@@ -149,7 +149,7 @@ fn from_raw_names_exactly_the_c_classes() {
     for raw in probes() {
         let c = CLASSES
             .iter()
-            .find(|(c, _)| *c as c_int == raw)
+            .find(|(c, _)| (*c).cast_signed() == raw)
             .map(|&(_, class)| class);
         assert_eq!(ErrorClass::from_raw(raw), c, "{raw}");
         assert_eq!(
@@ -187,7 +187,9 @@ fn last_klass() -> c_int {
     // SAFETY: `git_error_last` never returns NULL; it points at this thread's error
     // state or at a static, either of which stays valid until the next libgit2 call
     // on this thread, after the read.
-    unsafe { (*ffi::git_error_last()).klass }
+    let error_last = unsafe { ffi::git_error_last() };
+    // SAFETY: as above.
+    unsafe { (*error_last).klass }
 }
 
 /// Checks that Rust classifies C's return value and last error class as the C
@@ -196,7 +198,7 @@ fn assert_classified(ret: c_int, code: ErrorCode, klass: ffi::git_error_t, class
     assert_eq!(ret, code.raw());
     assert_eq!(ErrorCode::from_raw(ret), Some(code));
     let raw = last_klass();
-    assert_eq!(raw, klass as c_int);
+    assert_eq!(raw, klass.cast_signed());
     assert_eq!(ErrorClass::from_raw(raw), Some(class));
 }
 
@@ -216,7 +218,7 @@ fn classifies_what_libgit2_reports() {
             let mut size = 0usize;
             // SAFETY: GIT_OPT_GET_MWINDOW_SIZE takes one `size_t *`, written once.
             let ret = unsafe {
-                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_MWINDOW_SIZE as c_int, &raw mut size)
+                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_MWINDOW_SIZE.cast_signed(), &raw mut size)
             };
             assert_classified(ret, ErrorCode::Ok, ffi::GIT_ERROR_NONE, ErrorClass::None);
 
@@ -240,9 +242,9 @@ fn classifies_what_libgit2_reports() {
             // of which may be NULL; `missing` outlives the call.
             let ret = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_SSL_CERT_LOCATIONS as c_int,
+                    ffi::GIT_OPT_SET_SSL_CERT_LOCATIONS.cast_signed(),
                     missing.as_ptr(),
-                    ptr::null::<std::ffi::c_char>(),
+                    ptr::null::<c_char>(),
                 )
             };
             assert_classified(ret, ErrorCode::Generic, ffi::GIT_ERROR_SSL, ErrorClass::Ssl);
@@ -254,8 +256,8 @@ fn classifies_what_libgit2_reports() {
             // string before rejecting the level.
             let ret = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_GET_SEARCH_PATH as c_int,
-                    999 as c_int,
+                    ffi::GIT_OPT_GET_SEARCH_PATH.cast_signed(),
+                    999,
                     &raw mut buf,
                 )
             };
@@ -282,7 +284,7 @@ fn classifies_what_libgit2_reports() {
 fn classifies_codes_libgit2_produces() {
     // SAFETY: no arguments; the first reference initialises the runtime.
     assert!(unsafe { ffi::git_libgit2_init() } >= 0);
-    let mut out = [0 as c_char; 64];
+    let mut out = [0; 64];
     let normalize = |out: &mut [c_char], name: &CStr| {
         // SAFETY: `out` is writable for its length, which is passed as the buffer
         // size; `name` is NUL-terminated and read during the call only.
@@ -346,7 +348,7 @@ fn set_classes_round_trip_through_libgit2() {
     for (c, class) in CLASSES {
         // SAFETY: a NUL-terminated message, copied during the call; any class is
         // stored as given. The runtime is initialised.
-        let ret = unsafe { ffi::git_error_set_str(c as c_int, c"class".as_ptr()) };
+        let ret = unsafe { ffi::git_error_set_str(c.cast_signed(), c"class".as_ptr()) };
         assert_eq!(ret, 0);
         let from_c = last_klass();
 
@@ -405,7 +407,9 @@ struct Seen {
 
 fn set_errno(value: c_int) {
     // SAFETY: the calling thread's `errno`, valid for writes.
-    unsafe { libc::__errno_location().write(value) }
+    let value2 = unsafe { libc::__errno_location() };
+    // SAFETY: as above.
+    unsafe { value2.write(value) }
 }
 
 fn errno() -> c_int {
@@ -414,11 +418,16 @@ fn errno() -> c_int {
 
 /// `git_error_last()`'s class and message, copied out.
 fn c_last() -> (c_int, Vec<u8>) {
-    // SAFETY: `git_error_last` never returns NULL; its message lives until the next
-    // libgit2 call on this thread, and is copied out before one.
-    unsafe {
-        let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_bytes().to_vec())
+    {
+        // SAFETY: `git_error_last` never returns NULL; its message lives until the next
+        // libgit2 call on this thread, and is copied out before one.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { (klass, CStr::from_ptr(message2).to_bytes().to_vec()) }
     }
 }
 
@@ -446,7 +455,11 @@ fn take(step: &Step) {
             set_errno(*errno);
             // SAFETY: a `"%s"` format with the one string argument it names.
             unsafe {
-                ffi::git_error_set(ffi::GIT_ERROR_OS as c_int, c"%s".as_ptr(), message.as_ptr())
+                ffi::git_error_set(
+                    ffi::GIT_ERROR_OS.cast_signed(),
+                    c"%s".as_ptr(),
+                    message.as_ptr(),
+                );
             };
         }
         // SAFETY: no arguments.
@@ -459,7 +472,7 @@ fn take(step: &Step) {
             let mut size = 0usize;
             // SAFETY: GIT_OPT_GET_MWINDOW_SIZE takes one `size_t *`, written once.
             let ret = unsafe {
-                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_MWINDOW_SIZE as c_int, &raw mut size)
+                ffi::git_libgit2_opts(ffi::GIT_OPT_GET_MWINDOW_SIZE.cast_signed(), &raw mut size)
             };
             assert_eq!(ret, 0);
         }
@@ -525,13 +538,17 @@ fn init() {
 
 fn text(len: usize, seed: u8) -> Vec<u8> {
     (0..len)
-        .map(|i| b'a' + (i as u8).wrapping_add(seed) % 26)
+        .map(|i| b'a' + i.to_le_bytes()[0].wrapping_add(seed) % 26)
         .collect()
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the signature matches the callbacks it stands in for"
+)]
 fn expect(class: ffi::git_error_t, message: &[u8], errno: c_int) -> Option<Seen> {
     Some(Seen {
-        class: class as c_int,
+        class: class.cast_signed(),
         message: message.to_vec(),
         errno,
     })
@@ -545,16 +562,16 @@ fn last_reads_as_c_does_after_each_step() {
     let long = text(8_192, 4);
     let seen = compare(&[
         Read,
-        Str(ffi::GIT_ERROR_ODB as c_int, b"first".to_vec()),
+        Str(ffi::GIT_ERROR_ODB.cast_signed(), b"first".to_vec()),
         Read,
         Succeed,
         Fail,
         Errno(libc::EACCES),
         Oom,
         Clear,
-        Str(ffi::GIT_ERROR_INDEX as c_int, long.clone()),
+        Str(ffi::GIT_ERROR_INDEX.cast_signed(), long.clone()),
         Str(
-            ffi::GIT_ERROR_NONE as c_int,
+            ffi::GIT_ERROR_NONE.cast_signed(),
             b"set, yet class none".to_vec(),
         ),
         Str(1000, b"\xff\xfe not UTF-8".to_vec()),
@@ -611,8 +628,14 @@ fn last_reads_messages_of_every_size() {
         .into_iter()
         .enumerate()
     {
-        steps.push(Step::Str(ffi::GIT_ERROR_TREE as c_int, text(len, i as u8)));
-        steps.push(Step::Os(libc::ENOTDIR, text(len, i as u8 + 1)));
+        steps.push(Step::Str(
+            ffi::GIT_ERROR_TREE.cast_signed(),
+            text(len, u8::try_from(i).unwrap()),
+        ));
+        steps.push(Step::Os(
+            libc::ENOTDIR,
+            text(len, u8::try_from(i).unwrap() + 1),
+        ));
     }
     compare(&steps);
 }
@@ -625,7 +648,10 @@ fn last_reads_each_threads_own_error() {
     let steps: Vec<Step> = (0..64)
         .flat_map(|i| {
             [
-                Step::Str(ffi::GIT_ERROR_NET as c_int, text(i * 5, i as u8)),
+                Step::Str(
+                    ffi::GIT_ERROR_NET.cast_signed(),
+                    text(i * 5, u8::try_from(i).unwrap()),
+                ),
                 Step::Oom,
                 Step::Clear,
             ]
@@ -656,16 +682,19 @@ fn last_agrees_once_it_pins_the_runtime() {
             assert_eq!(
                 c_last(),
                 (
-                    ffi::GIT_ERROR_INVALID as c_int,
+                    ffi::GIT_ERROR_INVALID.cast_signed(),
                     b"library has not been initialized".to_vec()
                 )
             );
             let rust = rust_last();
-            assert_eq!(rust, (ffi::GIT_ERROR_NONE as c_int, b"no error".to_vec()));
+            assert_eq!(
+                rust,
+                (ffi::GIT_ERROR_NONE.cast_signed(), b"no error".to_vec())
+            );
             assert_eq!(c_last(), rust);
             let seen = compare(&[
                 Step::Read,
-                Step::Str(ffi::GIT_ERROR_CONFIG as c_int, b"pinned".to_vec()),
+                Step::Str(ffi::GIT_ERROR_CONFIG.cast_signed(), b"pinned".to_vec()),
                 Step::Fail,
             ]);
             assert_eq!(seen[1], expect(ffi::GIT_ERROR_CONFIG, b"pinned", 0));
@@ -740,7 +769,7 @@ fn last_reads_allocation_failures_as_c_does() {
             // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
             // nothing is allocated yet, so no storage changes allocator.
             let rc = unsafe {
-                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
             };
             assert_eq!(rc, 0);
             init();
@@ -764,12 +793,12 @@ fn last_reads_allocation_failures_as_c_does() {
             );
 
             let seen = compare(&[
-                Str(ffi::GIT_ERROR_INVALID as c_int, b"warm".to_vec()),
+                Str(ffi::GIT_ERROR_INVALID.cast_signed(), b"warm".to_vec()),
                 FailNext,
-                Str(ffi::GIT_ERROR_CONFIG as c_int, text(1000, 1)),
-                Str(ffi::GIT_ERROR_CONFIG as c_int, b"short".to_vec()),
+                Str(ffi::GIT_ERROR_CONFIG.cast_signed(), text(1000, 1)),
+                Str(ffi::GIT_ERROR_CONFIG.cast_signed(), b"short".to_vec()),
                 Clear,
-                Str(ffi::GIT_ERROR_CONFIG as c_int, b"again".to_vec()),
+                Str(ffi::GIT_ERROR_CONFIG.cast_signed(), b"again".to_vec()),
             ]);
             let oom = expect(ffi::GIT_ERROR_NOMEMORY, b"Out of memory", 0);
             assert_eq!((&seen[2], &seen[3]), (&oom, &oom));

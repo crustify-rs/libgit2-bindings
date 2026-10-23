@@ -130,8 +130,9 @@ fn install_tracing_allocator() {
     };
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member set,
     // which it copies; nothing is allocated yet, so no storage changes allocator.
-    let rc =
-        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator) };
+    let rc = unsafe {
+        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
+    };
     assert_eq!(rc, 0);
     // SAFETY: no arguments; refcounted, never released in this process.
     assert!(unsafe { ffi::git_libgit2_init() } > 0);
@@ -214,8 +215,13 @@ fn compare(c: &Recorder, rust: &Recorder) {
 /// The ids of a raw array, read as C code indexes them.
 fn c_contents(array: &ffi::git_oidarray) -> Vec<(u8, [u8; 32])> {
     (0..array.count)
-        // SAFETY: `ids` holds at least `count` ids whenever `count` is non-zero.
-        .map(|i| unsafe { *array.ids.add(i) })
+        .map(|i| {
+            // SAFETY: `ids` holds at least `count` ids whenever `count` is non-zero, and
+            // `i < count`.
+            let slot = unsafe { array.ids.add(i) };
+            // SAFETY: as above.
+            unsafe { *slot }
+        })
         .map(|oid| (oid.type_, oid.id))
         .collect()
 }
@@ -224,12 +230,18 @@ fn c_contents(array: &ffi::git_oidarray) -> Vec<(u8, [u8; 32])> {
 fn c_reverse(array: &mut ffi::git_oidarray) {
     for i in 0..array.count / 2 {
         let j = array.count - 1 - i;
-        // SAFETY: `i < j < count`, both within the buffer; `git_oid_cpy` is a `memcpy`
-        // of distinct ids.
-        unsafe {
-            let tmp = *array.ids.add(i);
-            *array.ids.add(i) = *array.ids.add(j);
-            *array.ids.add(j) = tmp;
+        {
+            // SAFETY: `i < j < count`, both within the buffer.
+            let (slot_i, slot_j) = (unsafe { array.ids.add(i) }, unsafe { array.ids.add(j) });
+            // SAFETY: as above, the slots hold ids; this swaps distinct ids, as
+            // `git_oid_cpy`'s `memcpy` would.
+            let tmp = unsafe { *slot_i };
+            // SAFETY: as above.
+            let value = unsafe { *slot_j };
+            // SAFETY: as above.
+            unsafe { *slot_i = value };
+            // SAFETY: as above.
+            unsafe { *slot_j = tmp };
         }
     }
 }
@@ -284,7 +296,7 @@ fn oid(seed: u8) -> Oid {
     let mut oid = Oid::zeroed();
     oid.as_mut().set_kind(OidType::Sha1);
     oid.as_mut().set_id(core::array::from_fn(|i| {
-        seed.wrapping_mul(7).wrapping_add(i as u8)
+        seed.wrapping_mul(7).wrapping_add(u8::try_from(i).unwrap())
     }));
     oid
 }
@@ -296,7 +308,7 @@ fn merge_bases(repo: *mut ffi::git_repository) -> ffi::git_oidarray {
     let parse = |hex: &CStr| {
         let mut oid = ffi::git_oid::default();
         // SAFETY: `oid` is writable and `hex` NUL-terminated.
-        let rc = unsafe { ffi::git_oid_from_string(&mut oid, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut oid, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         oid
     };
@@ -307,7 +319,7 @@ fn merge_bases(repo: *mut ffi::git_repository) -> ffi::git_oidarray {
         count: 0,
     };
     // SAFETY: `out` is writable, `repo` an open repository, `one` and `two` live ids.
-    let rc = unsafe { ffi::git_merge_bases(&mut out, repo, &one, &two) };
+    let rc = unsafe { ffi::git_merge_bases(&raw mut out, repo, &raw const one, &raw const two) };
     assert_eq!(rc, 0);
     out
 }
@@ -331,7 +343,7 @@ fn merge_base_results_read_edit_and_release_alike() {
             // ceiling directories.
             let rc = unsafe {
                 ffi::git_repository_open_ext(
-                    &mut repo,
+                    &raw mut repo,
                     path.as_ptr().cast(),
                     ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                     ptr::null(),
@@ -400,8 +412,10 @@ fn built_arrays_match_c_built_ones() {
         || {
             install_tracing_allocator();
             for n in [0usize, 1, 3, 8] {
-                let src: Vec<Oid> = (0..n).map(|i| oid(i as u8)).collect();
-                let next: Vec<Oid> = (0..n + 1).map(|i| oid(100 + i as u8)).collect();
+                let src: Vec<Oid> = (0..n).map(|i| oid(u8::try_from(i).unwrap())).collect();
+                let next: Vec<Oid> = (0..=n)
+                    .map(|i| oid(100 + u8::try_from(i).unwrap()))
+                    .collect();
                 let raw_src = src.as_ptr().cast::<ffi::git_oid>();
                 let raw_next = next.as_ptr().cast::<ffi::git_oid>();
 

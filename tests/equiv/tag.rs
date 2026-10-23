@@ -29,15 +29,22 @@ fn init() {
 
 /// The calling thread's last error class and message.
 fn c_last() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-    // NUL-terminated string, both live until the next libgit2 call on this thread,
-    // after the copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -53,7 +60,7 @@ fn c_check(name: &CStr) -> (Result<bool, c_int>, (c_int, String)) {
     let mut valid: c_int = -1;
     // SAFETY: `valid` is a writable `int`; `copy` is a NUL-terminated string, read for
     // the call only.
-    let rc = unsafe { ffi::git_tag_name_is_valid(&mut valid, copy.as_ptr()) };
+    let rc = unsafe { ffi::git_tag_name_is_valid(&raw mut valid, copy.as_ptr()) };
     let outcome = if rc < 0 {
         Err(rc)
     } else {
@@ -139,6 +146,10 @@ fn named_edge_cases() {
 /// Every name of up to three characters over the characters the rules tell apart.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::items_after_statements,
+    reason = "each helper item sits beside the steps that use it"
+)]
 fn short_names_exhaustively() {
     init();
     const CHARS: &[u8] = b"aH.-/@{*^ ~k";
@@ -173,7 +184,7 @@ fn alternating_sequence_without_clearing() {
         assert_eq!(rust, c, "{name:?}");
     }
     // The reference error from "a..b" survives the valid "v2".
-    assert_eq!(c[2].1.0, ffi::GIT_ERROR_REFERENCE as c_int);
+    assert_eq!(c[2].1.0, ffi::GIT_ERROR_REFERENCE.cast_signed());
     assert!(c[2].1.1.contains("refs/tags/a..b"));
 }
 
@@ -258,25 +269,30 @@ mod tag_object {
     fn found(tag: *mut ffi::git_tag) -> Outcome {
         let object = tag.cast::<ffi::git_object>();
         let mut target = ptr::null_mut();
-        // SAFETY: `tag` is a live tag, a `git_object` of type tag, whose repository is
-        // live; its id is formatted at once, and the peeled target released once.
-        unsafe {
-            let peeled = match ffi::git_object_peel(&mut target, object, ffi::GIT_OBJECT_ANY) {
-                rc if rc < 0 => Err(rc),
-                _ => {
-                    let view = (
-                        hex_of(ffi::git_object_id(target)),
-                        ffi::git_object_type(target),
-                    );
-                    ffi::git_object_free(target);
-                    Ok(view)
+        {
+            // SAFETY: `tag` is a live tag, a `git_object` of type tag, whose repository is
+            // live; its id is formatted at once, and the peeled target released once.
+            let peeled =
+                // SAFETY: as above.
+                match unsafe { ffi::git_object_peel(&raw mut target, object, ffi::GIT_OBJECT_ANY) } {
+                    rc if rc < 0 => Err(rc),
+                    _ => {
+                        let view = (
+                            // SAFETY: as above.
+                            hex_of(unsafe { ffi::git_object_id(target) }),
+                            // SAFETY: as above.
+                            unsafe { ffi::git_object_type(target) },
+                        );
+                        // SAFETY: as above.
+                        unsafe { ffi::git_object_free(target) };
+                        Ok(view)
+                    }
                 }
-            };
-            Outcome::Found(
-                hex_of(ffi::git_object_id(object)),
-                ffi::git_object_type(object),
-                peeled,
-            )
+            ;
+            // SAFETY: as above.
+            let object_id = unsafe { ffi::git_object_id(object) };
+            // SAFETY: as above.
+            unsafe { Outcome::Found(hex_of(object_id), ffi::git_object_type(object), peeled) }
         }
     }
 
@@ -301,7 +317,7 @@ mod tag_object {
             // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
             let rc = unsafe {
                 ffi::git_repository_open_ext(
-                    &mut repo,
+                    &raw mut repo,
                     path.as_ptr(),
                     ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                     ptr::null(),
@@ -317,7 +333,7 @@ mod tag_object {
         fn pathless() -> Self {
             let mut repo = ptr::null_mut();
             // SAFETY: a writable slot.
-            assert_eq!(unsafe { ffi::git_repository_new(&mut repo) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_new(&raw mut repo) }, 0);
             Self {
                 repo,
                 held: Vec::new(),
@@ -331,7 +347,7 @@ mod tag_object {
             // SAFETY: a writable id, and `hex.len()` readable bytes of hex digits.
             let rc = unsafe {
                 ffi::git_oid_from_prefix(
-                    &mut id,
+                    &raw mut id,
                     step.hex.as_ptr().cast(),
                     step.hex.len(),
                     ffi::GIT_OID_SHA1,
@@ -341,10 +357,14 @@ mod tag_object {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, the live repository, and a live id of its type
             // read for the call.
-            let rc = unsafe {
-                match step.len {
-                    None => ffi::git_tag_lookup(&mut out, self.repo, &id),
-                    Some(len) => ffi::git_tag_lookup_prefix(&mut out, self.repo, &id, len),
+            let rc = match step.len {
+                // SAFETY: as above.
+                None => unsafe { ffi::git_tag_lookup(&raw mut out, self.repo, &raw const id) },
+                Some(len) => {
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_tag_lookup_prefix(&raw mut out, self.repo, &raw const id, len)
+                    }
                 }
             };
             if rc < 0 {
@@ -365,7 +385,7 @@ mod tag_object {
                 .map(|&t| {
                     let mut out = ptr::null_mut();
                     // SAFETY: `t` is a live reference this side holds.
-                    assert_eq!(unsafe { ffi::git_tag_dup(&mut out, t) }, 0);
+                    assert_eq!(unsafe { ffi::git_tag_dup(&raw mut out, t) }, 0);
                     assert_eq!(out, t);
                     out
                 })
@@ -385,8 +405,9 @@ mod tag_object {
                 for &t in &self.held {
                     ffi::git_tag_free(t);
                 }
-                ffi::git_repository_free(self.repo);
             }
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
         }
     }
 
@@ -522,7 +543,7 @@ mod tag_object {
     fn lookups_of_unparsable_tags_match_c() {
         init();
         let path = std::env::temp_dir().join(format!("crustify-tag-equiv-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let path_str = path.to_str().unwrap().to_owned();
         let target = format!("object {COMMIT}\ntype commit\n");
         let objects: Vec<(String, ffi::git_object_t)> = vec![
@@ -569,7 +590,7 @@ mod tag_object {
                     // SAFETY: a live odb, a writable id, `data` read for the call.
                     let rc = unsafe {
                         ffi::git_odb_write(
-                            &mut id,
+                            &raw mut id,
                             odb.as_c_ptr(),
                             data.as_ptr().cast(),
                             data.len(),
@@ -577,7 +598,7 @@ mod tag_object {
                         )
                     };
                     assert_eq!(rc, 0);
-                    hex_of(&id)
+                    hex_of(&raw const id)
                 })
                 .collect()
         };
@@ -589,7 +610,7 @@ mod tag_object {
         let rust = Repository::open(&CString::new(path_str.as_str()).unwrap()).unwrap();
         assert_eq!(compare(CSide::open(&path_str), &rust, &steps), 6);
         drop(rust);
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
     }
 }
 
@@ -612,7 +633,7 @@ mod repository_tags {
     //!
     //! Buffers recording a name that is no valid reference name, on which C leaks the
     //! reference name it built, are compared in [`invalid_reference_names_match_c`],
-    //! whose child process runs with LeakSanitizer off: alone, and behind a missing
+    //! whose child process runs with `LeakSanitizer` off: alone, and behind a missing
     //! target or one of another type, which C reports first.
     //!
     //! Documented divergences, outside these comparisons, held by `tag.rs`'s unit tests:
@@ -674,7 +695,7 @@ mod repository_tags {
         fn new(tag: &str) -> Self {
             let path = std::env::temp_dir()
                 .join(format!("crustify-tag-equiv-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             copy_dir(Path::new(TESTREPO), &path);
             Self(path)
         }
@@ -686,7 +707,7 @@ mod repository_tags {
 
     impl Drop for Sandbox {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            drop(std::fs::remove_dir_all(&self.0));
         }
     }
 
@@ -850,19 +871,26 @@ mod repository_tags {
     fn object(repo: *mut ffi::git_repository, id: &ffi::git_oid) -> Outcome {
         let mut odb = ptr::null_mut();
         let mut object = ptr::null_mut();
-        // SAFETY: writable slots, the live repository and a live id; the object's data
-        // is copied at once, then the object and the odb are released once.
-        unsafe {
-            assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
-            assert_eq!(ffi::git_odb_read(&mut object, odb, id), 0);
-            assert_eq!(ffi::git_odb_object_type(object), ffi::GIT_OBJECT_TAG);
-            let data = std::slice::from_raw_parts(
-                ffi::git_odb_object_data(object).cast::<u8>(),
-                ffi::git_odb_object_size(object),
-            )
-            .to_vec();
-            ffi::git_odb_object_free(object);
-            ffi::git_odb_free(odb);
+        {
+            // SAFETY: writable slots, the live repository and a live id; the object's data
+            // is copied at once, then the object and the odb are released once.
+            unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_odb_read(&raw mut object, odb, id), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_odb_object_type(object), ffi::GIT_OBJECT_TAG) };
+            // SAFETY: as above.
+            let odb_object_data = unsafe { ffi::git_odb_object_data(object) };
+            // SAFETY: as above.
+            let odb_object_size = unsafe { ffi::git_odb_object_size(object) };
+            // SAFETY: as above.
+            let data = unsafe {
+                std::slice::from_raw_parts(odb_object_data.cast::<u8>(), odb_object_size).to_vec()
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_odb_object_free(object) };
+            // SAFETY: as above.
+            unsafe { ffi::git_odb_free(odb) };
             Outcome::Object(hex(id), data)
         }
     }
@@ -902,7 +930,7 @@ mod repository_tags {
             when: ffi::git_time {
                 time: seconds,
                 offset,
-                sign: if offset < 0 { b'-' } else { b'+' } as std::ffi::c_char,
+                sign: (if offset < 0 { b'-' } else { b'+' }).cast_signed(),
             },
         }
     }
@@ -931,7 +959,7 @@ mod repository_tags {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable id and a NUL-terminated hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -964,7 +992,7 @@ mod repository_tags {
             let open = |path: &CStr| {
                 let mut repo = ptr::null_mut();
                 // SAFETY: a writable slot and a NUL-terminated path.
-                let rc = unsafe { ffi::git_repository_open(&mut repo, path.as_ptr()) };
+                let rc = unsafe { ffi::git_repository_open(&raw mut repo, path.as_ptr()) };
                 assert_eq!(rc, 0);
                 repo
             };
@@ -982,14 +1010,17 @@ mod repository_tags {
             // SAFETY: writable slots, a hex id and a live repository.
             unsafe {
                 assert_eq!(
-                    ffi::git_oid_from_string(&mut id, target.as_ptr(), ffi::GIT_OID_SHA1),
+                    ffi::git_oid_from_string(&raw mut id, target.as_ptr(), ffi::GIT_OID_SHA1),
                     0
                 );
+            };
+            // SAFETY: as above.
+            unsafe {
                 assert_eq!(
-                    ffi::git_object_lookup(&mut out, repo, &id, ffi::GIT_OBJECT_ANY),
+                    ffi::git_object_lookup(&raw mut out, repo, &raw const id, ffi::GIT_OBJECT_ANY),
                     0
                 );
-            }
+            };
             out
         }
 
@@ -999,12 +1030,16 @@ mod repository_tags {
                 count: 0,
             };
             let pattern = pattern.map(|p| CString::new(p).unwrap());
-            // SAFETY: an empty array libgit2 fills; the live repository; a NUL-terminated
-            // pattern. The array is read, then disposed once.
-            unsafe {
+            {
+                // SAFETY: an empty array libgit2 fills; the live repository; a NUL-terminated
+                // pattern. The array is read, then disposed once.
                 let rc = match &pattern {
-                    None => ffi::git_tag_list(&mut names, self.repo),
-                    Some(p) => ffi::git_tag_list_match(&mut names, p.as_ptr(), self.repo),
+                    // SAFETY: as above.
+                    None => unsafe { ffi::git_tag_list(&raw mut names, self.repo) },
+                    // SAFETY: as above.
+                    Some(p) => unsafe {
+                        ffi::git_tag_list_match(&raw mut names, p.as_ptr(), self.repo)
+                    },
                 };
                 if rc < 0 {
                     return c_failed(rc);
@@ -1016,13 +1051,16 @@ mod repository_tags {
                 );
                 let listed = (0..names.count)
                     .map(|i| {
-                        CStr::from_ptr(*names.strings.add(i))
-                            .to_str()
-                            .unwrap()
-                            .to_owned()
+                        // SAFETY: as above; `names` holds `count` strings, and `i < count`.
+                        let slot = unsafe { names.strings.add(i) };
+                        // SAFETY: as above.
+                        let s = unsafe { *slot };
+                        // SAFETY: as above, a live NUL-terminated string; it is copied.
+                        unsafe { CStr::from_ptr(s) }.to_str().unwrap().to_owned()
                     })
                     .collect();
-                ffi::git_strarray_dispose(&mut names);
+                // SAFETY: as above.
+                unsafe { ffi::git_strarray_dispose(&raw mut names) };
                 Outcome::Names(listed)
             }
         }
@@ -1031,17 +1069,20 @@ mod repository_tags {
         fn lightweight(&self, name: &str, object: *mut ffi::git_object, force: bool) -> Outcome {
             let mut id = ffi::git_oid::default();
             let name = CString::new(name).unwrap();
-            // SAFETY: a writable id, the live repository, a NUL-terminated name and a live
-            // object, released once after the call.
-            let rc = unsafe {
-                let rc = ffi::git_tag_create_lightweight(
-                    &mut id,
-                    self.repo,
-                    name.as_ptr(),
-                    object,
-                    c_int::from(force),
-                );
-                ffi::git_object_free(object);
+            let rc = {
+                // SAFETY: a writable id, the live repository, a NUL-terminated name and a live
+                // object, released once after the call.
+                let rc = unsafe {
+                    ffi::git_tag_create_lightweight(
+                        &raw mut id,
+                        self.repo,
+                        name.as_ptr(),
+                        object,
+                        c_int::from(force),
+                    )
+                };
+                // SAFETY: as above.
+                unsafe { ffi::git_object_free(object) };
                 rc
             };
             if rc < 0 {
@@ -1071,37 +1112,51 @@ mod repository_tags {
                     // SAFETY: a writable slot, the live repository and a live id; the tag
                     // is released below, after its tagger was copied out.
                     unsafe {
-                        assert_eq!(ffi::git_tag_lookup(&mut tag, self.repo, &id), 0);
-                        *ffi::git_tag_tagger(tag)
-                    }
+                        assert_eq!(
+                            ffi::git_tag_lookup(&raw mut tag, self.repo, &raw const id),
+                            0
+                        );
+                    };
+                    // SAFETY: as above.
+                    let tagger = unsafe { ffi::git_tag_tagger(tag) };
+                    // SAFETY: as above, the tagger lives with the tag; it is copied.
+                    unsafe { *tagger }
                 }
             };
             let mut id = ffi::git_oid::default();
-            // SAFETY: a writable id, the live repository, NUL-terminated strings and a
-            // live object, released once after; the signature's strings are `strings`
-            // or the live tag's, both outliving the call.
-            let rc = unsafe {
+            let rc = {
+                // SAFETY: a writable id, the live repository, NUL-terminated strings and a
+                // live object, released once after; the signature's strings are `strings`
+                // or the live tag's, both outliving the call.
                 let rc = match force {
-                    Some(force) => ffi::git_tag_create(
-                        &mut id,
-                        self.repo,
-                        name.as_ptr(),
-                        object,
-                        &signature,
-                        message.as_ptr(),
-                        c_int::from(force),
-                    ),
-                    None => ffi::git_tag_annotation_create(
-                        &mut id,
-                        self.repo,
-                        name.as_ptr(),
-                        object,
-                        &signature,
-                        message.as_ptr(),
-                    ),
+                    // SAFETY: as above.
+                    Some(force) => unsafe {
+                        ffi::git_tag_create(
+                            &raw mut id,
+                            self.repo,
+                            name.as_ptr(),
+                            object,
+                            &raw const signature,
+                            message.as_ptr(),
+                            c_int::from(force),
+                        )
+                    },
+                    // SAFETY: as above.
+                    None => unsafe {
+                        ffi::git_tag_annotation_create(
+                            &raw mut id,
+                            self.repo,
+                            name.as_ptr(),
+                            object,
+                            &raw const signature,
+                            message.as_ptr(),
+                        )
+                    },
                 };
-                ffi::git_object_free(object);
-                ffi::git_tag_free(tag);
+                // SAFETY: as above.
+                unsafe { ffi::git_object_free(object) };
+                // SAFETY: as above.
+                unsafe { ffi::git_tag_free(tag) };
                 rc
             };
             if rc < 0 {
@@ -1125,6 +1180,10 @@ mod repository_tags {
             Outcome::Walk(collected.seen, rc, error)
         }
 
+        #[expect(
+            clippy::similar_names,
+            reason = "the names pair each value with its counterpart on the other side"
+        )]
         fn run(&mut self, step: &Step) -> Outcome {
             match step {
                 Step::Annotated(name, target, tagger, message, force) => {
@@ -1159,7 +1218,7 @@ mod repository_tags {
                     // C allocates anything.
                     let rc = unsafe {
                         ffi::git_tag_create_from_buffer(
-                            &mut id,
+                            &raw mut id,
                             self.repo,
                             buffer.as_ptr(),
                             c_int::from(*force),
@@ -1184,10 +1243,9 @@ mod repository_tags {
     impl Drop for CSide {
         fn drop(&mut self) {
             // SAFETY: both repositories are released once; nothing of them is held.
-            unsafe {
-                ffi::git_repository_free(self.repo);
-                ffi::git_repository_free(self.other);
-            }
+            unsafe { ffi::git_repository_free(self.repo) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.other) };
         }
     }
 
@@ -1211,6 +1269,14 @@ mod repository_tags {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per kind of step, as the scenario lists them"
+    )]
+    #[expect(
+        clippy::similar_names,
+        reason = "the names pair each value with its counterpart on the other side"
+    )]
     fn rust_run(repo: &RepositoryBox, other: &RepositoryBox, step: &Step) -> Outcome {
         let created = |result: Result<Oid, RepositoryError>| match result {
             Ok(id) => Outcome::Id(id.as_ref().to_hex_string().unwrap()),
@@ -1348,33 +1414,40 @@ mod repository_tags {
             strings: ptr::null_mut(),
             count: 0,
         };
-        // SAFETY: an empty array libgit2 fills, read and disposed once; the live
-        // repository; each reference name is NUL-terminated and `id` writable.
-        unsafe {
-            assert_eq!(ffi::git_tag_list(&mut names, repo), 0);
+        {
+            // SAFETY: an empty array libgit2 fills, read and disposed once; the live
+            // repository; each reference name is NUL-terminated and `id` writable.
+            unsafe { assert_eq!(ffi::git_tag_list(&raw mut names, repo), 0) };
             let tags = (0..names.count)
                 .map(|i| {
-                    let name = CStr::from_ptr(*names.strings.add(i))
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
+                    // SAFETY: as above; `names` holds `count` strings, and `i < count`.
+                    let slot = unsafe { names.strings.add(i) };
+                    // SAFETY: as above.
+                    let s = unsafe { *slot };
+                    // SAFETY: as above, a live NUL-terminated string; it is copied.
+                    let name = unsafe { CStr::from_ptr(s) }.to_str().unwrap().to_owned();
                     let refname = CString::new(format!("refs/tags/{name}")).unwrap();
                     let mut reference = ptr::null_mut();
-                    assert_eq!(
-                        ffi::git_reference_lookup(&mut reference, repo, refname.as_ptr()),
-                        0
-                    );
-                    let target = ffi::git_reference_target(reference);
+                    // SAFETY: as above, a writable slot and a NUL-terminated name.
+                    let rc = unsafe {
+                        ffi::git_reference_lookup(&raw mut reference, repo, refname.as_ptr())
+                    };
+                    assert_eq!(rc, 0);
+                    // SAFETY: as above, the live reference.
+                    let target = unsafe { ffi::git_reference_target(reference) };
                     let id = if target.is_null() {
                         String::new()
                     } else {
-                        hex(&*target)
+                        // SAFETY: as above, the target lives with the reference.
+                        hex(unsafe { &*target })
                     };
-                    ffi::git_reference_free(reference);
+                    // SAFETY: as above, freed once.
+                    unsafe { ffi::git_reference_free(reference) };
                     (name, id)
                 })
                 .collect();
-            ffi::git_strarray_dispose(&mut names);
+            // SAFETY: as above.
+            unsafe { ffi::git_strarray_dispose(&raw mut names) };
             tags
         }
     }
@@ -1461,7 +1534,7 @@ mod repository_tags {
     }
 
     /// A walk whose callback breaks with `GIT_ITEROVER` (-31) at the first tag: both
-    /// sides visit that tag alone and leave the same error ("git_tag_foreach callback
+    /// sides visit that tag alone and leave the same error ("`git_tag_foreach` callback
     /// returned -31", unless loading the references left one, such as a missing global
     /// configuration file). Documented divergence: libgit2's reference walk takes -31 for its
     /// own end and returns 0, where [`foreach`] reports the break, `Break(-31)` (held by
@@ -1513,7 +1586,7 @@ mod repository_tags {
         let other = Repository::open(&CString::new(TESTREPO).unwrap()).unwrap();
         let mut c_repo = ptr::null_mut();
         // SAFETY: a writable slot.
-        assert_eq!(unsafe { ffi::git_repository_new(&mut c_repo) }, 0);
+        assert_eq!(unsafe { ffi::git_repository_new(&raw mut c_repo) }, 0);
         let rust_repo = Repository::new().unwrap();
         let strings = tagger_strings(TAGGER);
         let signature = c_signature(TAGGER, &strings);
@@ -1524,30 +1597,37 @@ mod repository_tags {
         for force in [None, Some(false), Some(true)] {
             let object = CSide::lookup(other.as_c_ptr(), COMMIT);
             let mut id = ffi::git_oid::default();
-            // SAFETY: a writable id, the live pathless repository, NUL-terminated
-            // strings, a live signature over `strings`, and a live object of another
-            // repository, released once after.
-            let rc = unsafe {
+            let rc = {
+                // SAFETY: a writable id, the live pathless repository, NUL-terminated
+                // strings, a live signature over `strings`, and a live object of another
+                // repository, released once after.
                 let rc = match force {
-                    None => ffi::git_tag_annotation_create(
-                        &mut id,
-                        c_repo,
-                        c"t".as_ptr(),
-                        object,
-                        &signature,
-                        c"m\n".as_ptr(),
-                    ),
-                    Some(force) => ffi::git_tag_create(
-                        &mut id,
-                        c_repo,
-                        c"t".as_ptr(),
-                        object,
-                        &signature,
-                        c"m\n".as_ptr(),
-                        c_int::from(force),
-                    ),
+                    // SAFETY: as above.
+                    None => unsafe {
+                        ffi::git_tag_annotation_create(
+                            &raw mut id,
+                            c_repo,
+                            c"t".as_ptr(),
+                            object,
+                            &raw const signature,
+                            c"m\n".as_ptr(),
+                        )
+                    },
+                    // SAFETY: as above.
+                    Some(force) => unsafe {
+                        ffi::git_tag_create(
+                            &raw mut id,
+                            c_repo,
+                            c"t".as_ptr(),
+                            object,
+                            &raw const signature,
+                            c"m\n".as_ptr(),
+                            c_int::from(force),
+                        )
+                    },
                 };
-                ffi::git_object_free(object);
+                // SAFETY: as above.
+                unsafe { ffi::git_object_free(object) };
                 rc
             };
             assert!(rc < 0);
@@ -1581,6 +1661,10 @@ mod repository_tags {
     /// [`create`] then writes no reference.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn unwritable_objects_match_c() {
         init();
         let scratch = Sandbox::new("unwritable-scratch");
@@ -1645,8 +1729,8 @@ mod repository_tags {
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
     /// Runs `body` alone in a child process: writing a reference reads the time through
-    /// glibc's `tzset`, which TSan reports against any concurrent caller. With
-    /// `tolerate_leaks`, LeakSanitizer is off there: C leaks.
+    /// glibc's `tzset`, which `TSan` reports against any concurrent caller. With
+    /// `tolerate_leaks`, `LeakSanitizer` is off there: C leaks.
     fn isolated(test: &str, tolerate_leaks: bool, body: fn()) {
         let name = test.split_once("::").map_or(test, |(_, rest)| rest);
         if std::env::var(CHILD).as_deref() == Ok(name) {
@@ -1813,27 +1897,31 @@ mod tag_accessors {
                 "crustify-tag-accessors-equiv-{}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             copy_dir(Path::new(TESTREPO), &path);
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let mut repo = ptr::null_mut();
             let mut odb = ptr::null_mut();
-            // SAFETY: writable slots and a NUL-terminated path; each object is written
-            // from a live buffer of its length; the odb and repository are released once.
-            let ids = unsafe {
-                assert_eq!(ffi::git_repository_open(&mut repo, c_path.as_ptr()), 0);
-                assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
-                let write = |data: &[u8]| {
-                    let mut id = ffi::git_oid::default();
-                    let rc = ffi::git_odb_write(
-                        &mut id,
-                        odb,
-                        data.as_ptr().cast(),
-                        data.len(),
-                        ffi::GIT_OBJECT_TAG,
-                    );
-                    assert_eq!(rc, 0);
-                    hex(&id)
+            let ids = {
+                // SAFETY: writable slots and a NUL-terminated path; each object is written
+                // from a live buffer of its length; the odb and repository are released once.
+                unsafe { assert_eq!(ffi::git_repository_open(&raw mut repo, c_path.as_ptr()), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo), 0) };
+                // SAFETY: as above.
+                let write = unsafe {
+                    |data: &[u8]| {
+                        let mut id = ffi::git_oid::default();
+                        let rc = ffi::git_odb_write(
+                            &raw mut id,
+                            odb,
+                            data.as_ptr().cast(),
+                            data.len(),
+                            ffi::GIT_OBJECT_TAG,
+                        );
+                        assert_eq!(rc, 0);
+                        hex(&raw const id)
+                    }
                 };
                 let mut ids: Vec<String> = TAGS.iter().map(|&t| t.to_owned()).collect();
                 ids.extend(odd_tags().iter().map(|data| write(data)));
@@ -1845,8 +1933,10 @@ mod tag_accessors {
                     format!("object {first}\ntype tag\ntag chain1\n{tagger}\ntwo\n").as_bytes(),
                 );
                 ids.extend([first, second]);
-                ffi::git_odb_free(odb);
-                ffi::git_repository_free(repo);
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
+                // SAFETY: as above.
+                unsafe { ffi::git_repository_free(repo) };
                 ids
             };
             Self { path, ids }
@@ -1859,7 +1949,7 @@ mod tag_accessors {
 
     impl Drop for Sandbox {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -1889,13 +1979,13 @@ mod tag_accessors {
             let (class, message) = c_last();
             return Err((rc, class, message));
         }
-        // SAFETY: a live object the caller hands over, read, then released once.
-        unsafe {
-            let seen = (
-                hex(ffi::git_object_id(object)),
-                ffi::git_object_type(object),
-            );
-            ffi::git_object_free(object);
+        {
+            // SAFETY: a live object the caller hands over, read, then released once.
+            let object_id = unsafe { ffi::git_object_id(object) };
+            // SAFETY: as above.
+            let seen = unsafe { (hex(object_id), ffi::git_object_type(object)) };
+            // SAFETY: as above.
+            unsafe { ffi::git_object_free(object) };
             Ok(seen)
         }
     }
@@ -1907,36 +1997,54 @@ mod tag_accessors {
 
     /// C's view of a live tag of `repo`.
     fn c_view(repo: *mut ffi::git_repository, tag: *mut ffi::git_tag) -> View {
-        // SAFETY: a live tag of the live repository; every string and id read is the
-        // tag's, copied at once; the target and peel are released by `c_looked`.
-        unsafe {
-            let tagger = ffi::git_tag_tagger(tag);
-            let tagger = (!tagger.is_null()).then(|| {
-                let t = &*tagger;
-                (
-                    bytes(t.name),
-                    bytes(t.email),
-                    t.when.time,
-                    t.when.offset,
-                    t.when.sign as u8,
-                )
-            });
+        {
+            // SAFETY: a live tag of the live repository; every string and id read is the
+            // tag's, copied at once; the target and peel are released by `c_looked`.
+            let tagger = unsafe { ffi::git_tag_tagger(tag) };
+            // SAFETY: as above.
+            let tagger = unsafe {
+                (!tagger.is_null()).then(|| {
+                    let t = &*tagger;
+                    (
+                        bytes(t.name),
+                        bytes(t.email),
+                        t.when.time,
+                        t.when.offset,
+                        t.when.sign.cast_unsigned(),
+                    )
+                })
+            };
             let mut target = ptr::null_mut();
-            let rc = ffi::git_tag_target(&mut target, tag);
+            // SAFETY: as above.
+            let rc = unsafe { ffi::git_tag_target(&raw mut target, tag) };
             let target = c_looked(rc, target);
             let mut peeled = ptr::null_mut();
-            let rc = ffi::git_tag_peel(&mut peeled, tag);
+            // SAFETY: as above.
+            let rc = unsafe { ffi::git_tag_peel(&raw mut peeled, tag) };
             let peeled = c_looked(rc, peeled);
-            View {
-                id: hex(ffi::git_tag_id(tag)),
-                owned_by_its_repository: ffi::git_tag_owner(tag) == repo,
-                name: bytes(ffi::git_tag_name(tag)).unwrap(),
-                message: bytes(ffi::git_tag_message(tag)),
-                tagger,
-                target_id: hex(ffi::git_tag_target_id(tag)),
-                target_kind: ffi::git_tag_target_type(tag),
-                target,
-                peeled,
+            // SAFETY: as above.
+            let tag_id = unsafe { ffi::git_tag_id(tag) };
+            // SAFETY: as above.
+            let tag_owner = unsafe { ffi::git_tag_owner(tag) };
+            // SAFETY: as above.
+            let tag_name = unsafe { ffi::git_tag_name(tag) };
+            // SAFETY: as above.
+            let tag_message = unsafe { ffi::git_tag_message(tag) };
+            // SAFETY: as above.
+            let tag_target_id = unsafe { ffi::git_tag_target_id(tag) };
+            // SAFETY: as above.
+            unsafe {
+                View {
+                    id: hex(tag_id),
+                    owned_by_its_repository: tag_owner == repo,
+                    name: bytes(tag_name).unwrap(),
+                    message: bytes(tag_message),
+                    tagger,
+                    target_id: hex(tag_target_id),
+                    target_kind: ffi::git_tag_target_type(tag),
+                    target,
+                    peeled,
+                }
             }
         }
     }
@@ -1986,7 +2094,7 @@ mod tag_accessors {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable id and a NUL-terminated hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -1998,7 +2106,7 @@ mod tag_accessors {
         let sandbox = Sandbox::new();
         let mut c_repo = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_open(&mut c_repo, sandbox.c_path().as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut c_repo, sandbox.c_path().as_ptr()) };
         assert_eq!(rc, 0);
         let rust_repo = Repository::open(&sandbox.c_path()).unwrap();
         let r = rust_repo.as_ref();
@@ -2008,7 +2116,8 @@ mod tag_accessors {
                 let raw = raw_id(hex_id);
                 let mut c_tag = ptr::null_mut();
                 // SAFETY: a writable slot, the live repository and a live id of its type.
-                assert_eq!(unsafe { ffi::git_tag_lookup(&mut c_tag, c_repo, &raw) }, 0);
+                let ret = unsafe { ffi::git_tag_lookup(&raw mut c_tag, c_repo, &raw const raw) };
+                assert_eq!(ret, 0);
                 let id = Oid::from_string(&CString::new(hex_id.as_str()).unwrap(), OidType::Sha1)
                     .unwrap();
                 let mut rust_tag = Tag::lookup(r, id.as_ref()).unwrap();
@@ -2016,10 +2125,9 @@ mod tag_accessors {
                     // Read through a copy whose original is released first.
                     let mut copy = ptr::null_mut();
                     // SAFETY: a live tag this side holds, copied, then released once.
-                    unsafe {
-                        assert_eq!(ffi::git_tag_dup(&mut copy, c_tag), 0);
-                        ffi::git_tag_free(c_tag);
-                    }
+                    unsafe { assert_eq!(ffi::git_tag_dup(&raw mut copy, c_tag), 0) };
+                    // SAFETY: as above.
+                    unsafe { ffi::git_tag_free(c_tag) };
                     c_tag = copy;
                     let copy = rust_tag.as_ref().to_tag();
                     drop(std::mem::replace(&mut rust_tag, copy));
@@ -2037,14 +2145,16 @@ mod tag_accessors {
                 // The target and peel outlive the tag they came from.
                 let mut c_target = ptr::null_mut();
                 let mut c_peeled = ptr::null_mut();
-                // SAFETY: writable slots and a live tag, released once after; a failure's
-                // error is read at once, before the next call replaces it.
-                let (c_target, c_peeled) = unsafe {
-                    let rc = ffi::git_tag_target(&mut c_target, c_tag);
+                let (c_target, c_peeled) = {
+                    // SAFETY: writable slots and a live tag, released once after; a failure's
+                    // error is read at once, before the next call replaces it.
+                    let rc = unsafe { ffi::git_tag_target(&raw mut c_target, c_tag) };
                     let target = (rc < 0).then(|| c_looked(rc, ptr::null_mut()));
-                    let rc = ffi::git_tag_peel(&mut c_peeled, c_tag);
+                    // SAFETY: as above.
+                    let rc = unsafe { ffi::git_tag_peel(&raw mut c_peeled, c_tag) };
                     let peeled = (rc < 0).then(|| c_looked(rc, ptr::null_mut()));
-                    ffi::git_tag_free(c_tag);
+                    // SAFETY: as above.
+                    unsafe { ffi::git_tag_free(c_tag) };
                     (
                         target.unwrap_or_else(|| c_looked(0, c_target)),
                         peeled.unwrap_or_else(|| c_looked(0, c_peeled)),

@@ -6,8 +6,8 @@
 //! binary's other suites call libgit2 from parallel test threads, so every suite here
 //! reruns alone in a child process, single-threaded around each call. Threads that
 //! read a setting start after the setter returned, which orders them after it.
-//! Strings set replace strings libgit2 frees (ASan, LSan); numbers set reach libgit2's
-//! globals with no out-of-range read (UBSan); the string results are copied out.
+//! Strings set replace strings libgit2 frees (`ASan`, `LSan`); numbers set reach libgit2's
+//! globals with no out-of-range read (`UBSan`); the string results are copied out.
 
 use std::ffi::{CStr, CString, c_int, c_void};
 use std::process::Command;
@@ -45,6 +45,10 @@ fn isolated(test: &str, body: fn()) {
 }
 
 /// Reads `get` on four threads, after the setter that ran before this returned.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the helper consumes what it reports, as its callers hand it over"
+)]
 fn read_on_threads<T: PartialEq + std::fmt::Debug + Send + Sync>(get: fn() -> T, want: T) {
     thread::scope(|s| {
         for _ in 0..4 {
@@ -121,23 +125,26 @@ isolated_test!(
             SearchPathLevel::Global,
         ] {
             // SAFETY: this child runs no other thread while setting.
-            unsafe {
-                common::set_search_path(level, Some(c"/one")).unwrap();
-                assert_eq!(common::search_path(level).unwrap(), c"/one".to_owned());
-                common::set_search_path(level, Some(c"/zero:$PATH:/two")).unwrap();
-                assert_eq!(
-                    common::search_path(level).unwrap(),
-                    c"/zero:/one:/two".to_owned()
-                );
-                common::set_search_path(level, Some(c"")).unwrap();
-                assert_eq!(common::search_path(level).unwrap(), CString::default());
-                common::set_search_path(level, Some(c"$PATH")).unwrap();
-                assert_eq!(common::search_path(level).unwrap(), CString::default());
-                common::set_search_path(level, Some(&long)).unwrap();
-                assert_eq!(common::search_path(level).unwrap(), long);
-                common::set_search_path(level, None).unwrap();
-            }
-            let _ = common::search_path(level).unwrap();
+            unsafe { common::set_search_path(level, Some(c"/one")).unwrap() };
+            assert_eq!(common::search_path(level).unwrap(), c"/one".to_owned());
+            // SAFETY: as above.
+            unsafe { common::set_search_path(level, Some(c"/zero:$PATH:/two")).unwrap() };
+            assert_eq!(
+                common::search_path(level).unwrap(),
+                c"/zero:/one:/two".to_owned()
+            );
+            // SAFETY: as above.
+            unsafe { common::set_search_path(level, Some(c"")).unwrap() };
+            assert_eq!(common::search_path(level).unwrap(), CString::default());
+            // SAFETY: as above.
+            unsafe { common::set_search_path(level, Some(c"$PATH")).unwrap() };
+            assert_eq!(common::search_path(level).unwrap(), CString::default());
+            // SAFETY: as above.
+            unsafe { common::set_search_path(level, Some(&long)).unwrap() };
+            assert_eq!(common::search_path(level).unwrap(), long);
+            // SAFETY: as above.
+            unsafe { common::set_search_path(level, None).unwrap() };
+            drop(common::search_path(level).unwrap());
         }
         read_on_threads(
             || common::search_path(SearchPathLevel::Xdg).unwrap(),
@@ -148,74 +155,79 @@ isolated_test!(
 
 isolated_test!(set_template_path, {
     // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_template_path(Some(c"/tmp/templates")).unwrap();
-        assert_eq!(
-            common::template_path().unwrap(),
-            c"/tmp/templates".to_owned()
-        );
-        common::set_template_path(Some(c"")).unwrap();
-        assert_eq!(common::template_path().unwrap(), CString::default());
-        common::set_template_path(None).unwrap();
-        common::set_template_path(Some(c"/again")).unwrap();
-    }
+    unsafe { common::set_template_path(Some(c"/tmp/templates")).unwrap() };
+    assert_eq!(
+        common::template_path().unwrap(),
+        c"/tmp/templates".to_owned()
+    );
+    // SAFETY: as above.
+    unsafe { common::set_template_path(Some(c"")).unwrap() };
+    assert_eq!(common::template_path().unwrap(), CString::default());
+    // SAFETY: as above.
+    unsafe { common::set_template_path(None).unwrap() };
+    // SAFETY: as above.
+    unsafe { common::set_template_path(Some(c"/again")).unwrap() };
     read_on_threads(|| common::template_path().unwrap(), c"/again".to_owned());
 });
 
 isolated_test!(set_homedir, {
     // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_homedir(Some(c"/home/crustify")).unwrap();
-        assert_eq!(common::homedir().unwrap(), c"/home/crustify".to_owned());
-        common::set_homedir(Some(c"")).unwrap();
-        assert_eq!(common::homedir().unwrap(), CString::default());
-        common::set_homedir(None).unwrap();
-        common::set_homedir(Some(c"/h")).unwrap();
-    }
+    unsafe { common::set_homedir(Some(c"/home/crustify")).unwrap() };
+    assert_eq!(common::homedir().unwrap(), c"/home/crustify".to_owned());
+    // SAFETY: as above.
+    unsafe { common::set_homedir(Some(c"")).unwrap() };
+    assert_eq!(common::homedir().unwrap(), CString::default());
+    // SAFETY: as above.
+    unsafe { common::set_homedir(None).unwrap() };
+    // SAFETY: as above.
+    unsafe { common::set_homedir(Some(c"/h")).unwrap() };
     read_on_threads(|| common::homedir().unwrap(), c"/h".to_owned());
 });
 
 isolated_test!(set_user_agent, {
     let long = CString::new("a".repeat(100_000)).unwrap();
     // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_user_agent(Some(c"crustify/1")).unwrap();
-        assert_eq!(common::user_agent().unwrap(), c"crustify/1".to_owned());
-        common::set_user_agent(Some(c"")).unwrap();
-        assert_eq!(common::user_agent().unwrap(), CString::default());
-        common::set_user_agent(Some(&long)).unwrap();
-        assert_eq!(common::user_agent().unwrap(), long);
-        common::set_user_agent(None).unwrap();
-        assert_eq!(common::user_agent().unwrap(), c"libgit2 1.9.0".to_owned());
-        common::set_user_agent(Some(c"kept")).unwrap();
-    }
+    unsafe { common::set_user_agent(Some(c"crustify/1")).unwrap() };
+    assert_eq!(common::user_agent().unwrap(), c"crustify/1".to_owned());
+    // SAFETY: as above.
+    unsafe { common::set_user_agent(Some(c"")).unwrap() };
+    assert_eq!(common::user_agent().unwrap(), CString::default());
+    // SAFETY: as above.
+    unsafe { common::set_user_agent(Some(&long)).unwrap() };
+    assert_eq!(common::user_agent().unwrap(), long);
+    // SAFETY: as above.
+    unsafe { common::set_user_agent(None).unwrap() };
+    assert_eq!(common::user_agent().unwrap(), c"libgit2 1.9.0".to_owned());
+    // SAFETY: as above.
+    unsafe { common::set_user_agent(Some(c"kept")).unwrap() };
     read_on_threads(|| common::user_agent().unwrap(), c"kept".to_owned());
 });
 
 isolated_test!(set_user_agent_product, {
     // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_user_agent_product(Some(c"git/2.47")).unwrap();
-        assert_eq!(
-            common::user_agent_product().unwrap(),
-            c"git/2.47".to_owned()
-        );
-        common::set_user_agent_product(Some(c"")).unwrap();
-        assert_eq!(common::user_agent_product().unwrap(), CString::default());
-        common::set_user_agent_product(None).unwrap();
-        assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
-        common::set_user_agent_product(Some(c"kept")).unwrap();
-    }
+    unsafe { common::set_user_agent_product(Some(c"git/2.47")).unwrap() };
+    assert_eq!(
+        common::user_agent_product().unwrap(),
+        c"git/2.47".to_owned()
+    );
+    // SAFETY: as above.
+    unsafe { common::set_user_agent_product(Some(c"")).unwrap() };
+    assert_eq!(common::user_agent_product().unwrap(), CString::default());
+    // SAFETY: as above.
+    unsafe { common::set_user_agent_product(None).unwrap() };
+    assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
+    // SAFETY: as above.
+    unsafe { common::set_user_agent_product(Some(c"kept")).unwrap() };
     read_on_threads(|| common::user_agent_product().unwrap(), c"kept".to_owned());
 });
 
 isolated_test!(set_ssl_ciphers, {
     // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_ssl_ciphers(c"ECDHE-RSA-AES128-GCM-SHA256").unwrap();
-        common::set_ssl_ciphers(c"").unwrap();
-        common::set_ssl_ciphers(c"HIGH:!aNULL").unwrap();
-    }
+    unsafe { common::set_ssl_ciphers(c"ECDHE-RSA-AES128-GCM-SHA256").unwrap() };
+    // SAFETY: as above.
+    unsafe { common::set_ssl_ciphers(c"").unwrap() };
+    // SAFETY: as above.
+    unsafe { common::set_ssl_ciphers(c"HIGH:!aNULL").unwrap() };
 });
 
 isolated_test!(set_extensions, {
@@ -248,13 +260,15 @@ isolated_test!(set_extensions, {
         .iter()
         .map(|s| CString::new([b"!", s.to_bytes()].concat()).unwrap())
         .collect();
-    // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_extensions::<&CStr>(&[]).unwrap();
+    {
+        // SAFETY: this child runs no other thread while setting.
+        unsafe { common::set_extensions::<&CStr>(&[]).unwrap() };
         assert_eq!(current(), sorted(&[]));
-        common::set_extensions(&[c"zed", c"noop", c"alpha", c"zed"]).unwrap();
+        // SAFETY: as above.
+        unsafe { common::set_extensions(&[c"zed", c"noop", c"alpha", c"zed"]).unwrap() };
         assert_eq!(current(), sorted(&[c"alpha", c"zed"]));
-        common::set_extensions(&negated).unwrap();
+        // SAFETY: as above.
+        unsafe { common::set_extensions(&negated).unwrap() };
         assert_eq!(
             current(),
             Vec::<CString>::new(),
@@ -263,9 +277,11 @@ isolated_test!(set_extensions, {
         let many: Vec<CString> = (0..500)
             .map(|i| CString::new(format!("x{i:03}")).unwrap())
             .collect();
-        common::set_extensions(&many).unwrap();
+        // SAFETY: as above.
+        unsafe { common::set_extensions(&many).unwrap() };
         assert_eq!(current().len(), 506);
-        common::set_extensions(&[c"kept"]).unwrap();
+        // SAFETY: as above.
+        unsafe { common::set_extensions(&[c"kept"]).unwrap() };
     }
     read_on_threads(current, sorted(&[c"kept"]));
 });
@@ -280,11 +296,7 @@ isolated_test!(set_owner_validation, {
 });
 
 /// A negative timeout is refused, with libgit2's error, and leaves the setting.
-fn timeout(
-    set: unsafe fn(c_int) -> Result<(), libgit2::libgit2::util::errors::ErrorBuf>,
-    get: fn() -> c_int,
-    message: &CStr,
-) {
+fn timeout(set: unsafe fn(c_int) -> Result<(), ErrorBuf>, get: fn() -> c_int, message: &CStr) {
     for ms in [0, 1, 75_000, c_int::MAX] {
         // SAFETY: this child runs no other thread while setting.
         unsafe { set(ms) }.unwrap();
@@ -344,7 +356,7 @@ isolated_test!(cached_memory, {
     let before = unsafe { common::cached_memory() };
     assert_eq!(before.current, 0);
     assert_eq!(before.allowed, 256 << 20);
-    let _ = common::extensions().unwrap();
+    drop(common::extensions().unwrap());
     // SAFETY: as above.
     assert_eq!(unsafe { common::cached_memory() }, before);
 });
@@ -431,20 +443,25 @@ isolated_test!(set_ssl_cert_locations, {
     let dir = cert_dir();
     let file = c_path(&dir.join("cert.pem"));
     let path = c_path(&dir);
-    // SAFETY: this child runs no other thread while setting.
-    unsafe {
-        common::set_ssl_cert_locations(Some(&file), None).unwrap();
-        common::set_ssl_cert_locations(None, Some(&path)).unwrap();
-        common::set_ssl_cert_locations(Some(&file), Some(&path)).unwrap();
-        let e =
-            common::set_ssl_cert_locations(Some(c"/nonexistent/crustify.pem"), None).unwrap_err();
+    {
+        // SAFETY: this child runs no other thread while setting.
+        unsafe { common::set_ssl_cert_locations(Some(&file), None).unwrap() };
+        // SAFETY: as above.
+        unsafe { common::set_ssl_cert_locations(None, Some(&path)).unwrap() };
+        // SAFETY: as above.
+        unsafe { common::set_ssl_cert_locations(Some(&file), Some(&path)).unwrap() };
+        // SAFETY: as above.
+        let e = unsafe {
+            common::set_ssl_cert_locations(Some(c"/nonexistent/crustify.pem"), None).unwrap_err()
+        };
         assert_eq!(e.class(), Some(ErrorClass::Ssl));
         assert!(
             e.message()
                 .to_bytes()
                 .starts_with(b"OpenSSL error: failed to load certificates")
         );
-        let e = common::set_ssl_cert_locations(None, None).unwrap_err();
+        // SAFETY: as above.
+        let e = unsafe { common::set_ssl_cert_locations(None, None).unwrap_err() };
         assert_eq!(e.class(), Some(ErrorClass::Ssl));
     }
     std::fs::remove_dir_all(dir).unwrap();
@@ -465,18 +482,27 @@ unsafe extern "C" {
 
 /// [`CERT_PEM`] parsed by libcrypto; the caller frees it with `X509_free`.
 fn x509() -> NonNull<c_void> {
-    // SAFETY: a read-only memory BIO over the PEM text, which outlives it; the
-    // certificate read from it is a fresh object the caller owns.
-    unsafe {
-        let bio = BIO_new_mem_buf(CERT_PEM.as_ptr().cast(), CERT_PEM.len() as c_int);
+    {
+        // SAFETY: a read-only memory BIO over the PEM text, which outlives it; the
+        // certificate read from it is a fresh object the caller owns.
+        let bio = unsafe {
+            BIO_new_mem_buf(
+                CERT_PEM.as_ptr().cast(),
+                i32::try_from(CERT_PEM.len()).unwrap(),
+            )
+        };
         assert!(!bio.is_null());
-        let cert = PEM_read_bio_X509(
-            bio,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        );
-        BIO_free(bio);
+        // SAFETY: as above.
+        let cert = unsafe {
+            PEM_read_bio_X509(
+                bio,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        // SAFETY: as above.
+        unsafe { BIO_free(bio) };
         NonNull::new(cert).unwrap()
     }
 }
@@ -488,17 +514,16 @@ isolated_test!(
     {
         let cert = x509();
         // SAFETY: a live libcrypto `X509`; this child runs no other thread.
-        unsafe {
-            common::add_ssl_x509_cert(cert).unwrap();
-            common::add_ssl_x509_cert(cert).unwrap();
-            X509_free(cert.as_ptr());
-        }
+        unsafe { common::add_ssl_x509_cert(cert).unwrap() };
+        // SAFETY: as above.
+        unsafe { common::add_ssl_x509_cert(cert).unwrap() };
+        // SAFETY: as above.
+        unsafe { X509_free(cert.as_ptr()) };
         let again = x509();
         // SAFETY: as above.
-        unsafe {
-            common::add_ssl_x509_cert(again).unwrap();
-            X509_free(again.as_ptr());
-        }
+        unsafe { common::add_ssl_x509_cert(again).unwrap() };
+        // SAFETY: as above.
+        unsafe { X509_free(again.as_ptr()) };
     }
 );
 
@@ -621,20 +646,20 @@ static REFUSABLE: Allocator = Allocator::new::<Refusable>();
 
 isolated_test!(
     /// Every option that allocates fails with libgit2's out-of-memory error while nothing
-    /// can be allocated, leaking nothing (LSan) and leaving each setting usable: a string
+    /// can be allocated, leaking nothing (`LSan`) and leaving each setting usable: a string
     /// whose copy failed reads as its default.
     allocation_failures_report_errors,
     {
         // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
         unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
         // SAFETY: as above.
-        unsafe {
-            common::set_user_agent(Some(c"before")).unwrap();
-            common::set_user_agent_product(Some(c"before")).unwrap();
-            // Allocates the thread's error state, so failures below need no allocation.
-            assert!(common::set_server_timeout(-1).is_err());
-        }
-        let oom = |e: libgit2::libgit2::util::errors::ErrorBuf| {
+        unsafe { common::set_user_agent(Some(c"before")).unwrap() };
+        // SAFETY: as above.
+        unsafe { common::set_user_agent_product(Some(c"before")).unwrap() };
+        // Allocates the thread's error state, so failures below need no allocation.
+        // SAFETY: as above.
+        unsafe { assert!(common::set_server_timeout(-1).is_err()) };
+        let oom = |e: ErrorBuf| {
             assert_eq!(e.class(), Some(ErrorClass::NoMemory), "{e:?}");
         };
         REFUSE.store(true, SeqCst);
@@ -645,12 +670,13 @@ isolated_test!(
         oom(common::user_agent_product().unwrap_err());
         oom(common::extensions().unwrap_err());
         // SAFETY: as above.
-        unsafe {
-            oom(common::set_user_agent(Some(c"refused")).unwrap_err());
-            oom(common::set_user_agent_product(Some(c"refused")).unwrap_err());
-            oom(common::set_ssl_ciphers(c"HIGH").unwrap_err());
-            oom(common::set_extensions(&[c"refused"]).unwrap_err());
-        }
+        unsafe { oom(common::set_user_agent(Some(c"refused")).unwrap_err()) };
+        // SAFETY: as above.
+        unsafe { oom(common::set_user_agent_product(Some(c"refused")).unwrap_err()) };
+        // SAFETY: as above.
+        unsafe { oom(common::set_ssl_ciphers(c"HIGH").unwrap_err()) };
+        // SAFETY: as above.
+        unsafe { oom(common::set_extensions(&[c"refused"]).unwrap_err()) };
         REFUSE.store(false, SeqCst);
         assert_eq!(common::user_agent().unwrap(), c"libgit2 1.9.0".to_owned());
         assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
@@ -671,7 +697,7 @@ isolated_test!(
 /// empty and readable, and a later copy fills it again. Without the wrappers' repair
 /// (`sysdir_status`), libgit2 would leave it pointing at its one-byte out-of-memory
 /// sentinel with the old value's `size`, so the next read would run past the
-/// sentinel's end (ASan), and would refuse every later copy.
+/// sentinel's end (`ASan`), and would refuse every later copy.
 fn failed_copy_empties(
     set: impl Fn(Option<&CStr>) -> Result<(), ErrorBuf>,
     get: impl Fn() -> Result<CString, ErrorBuf>,
@@ -756,7 +782,7 @@ isolated_test!(
         REFUSE.store(true, SeqCst);
         // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
         unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
-        let uninit = |e: libgit2::libgit2::util::errors::ErrorBuf| {
+        let uninit = |e: ErrorBuf| {
             assert_eq!(e.class(), Some(ErrorClass::Invalid), "{e:?}");
             assert_eq!(e.message(), c"library has not been initialized");
         };
@@ -766,21 +792,34 @@ isolated_test!(
         uninit(common::user_agent().unwrap_err());
         uninit(common::user_agent_product().unwrap_err());
         uninit(common::extensions().unwrap_err());
-        // SAFETY: as above; `cert` is a live libcrypto `X509`, freed after.
-        unsafe {
-            uninit(common::set_search_path(SearchPathLevel::Xdg, Some(c"/x")).unwrap_err());
-            uninit(common::set_template_path(None).unwrap_err());
-            uninit(common::set_homedir(None).unwrap_err());
-            uninit(common::set_user_agent(None).unwrap_err());
-            uninit(common::set_user_agent_product(None).unwrap_err());
-            uninit(common::set_ssl_ciphers(c"HIGH").unwrap_err());
-            uninit(common::set_ssl_cert_locations(None, None).unwrap_err());
+        {
+            // SAFETY: as above; `cert` is a live libcrypto `X509`, freed after.
+            unsafe {
+                uninit(common::set_search_path(SearchPathLevel::Xdg, Some(c"/x")).unwrap_err());
+            };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_template_path(None).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_homedir(None).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_user_agent(None).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_user_agent_product(None).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_ssl_ciphers(c"HIGH").unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_ssl_cert_locations(None, None).unwrap_err()) };
             let cert = x509();
-            uninit(common::add_ssl_x509_cert(cert).unwrap_err());
-            X509_free(cert.as_ptr());
-            uninit(common::set_extensions::<&CStr>(&[]).unwrap_err());
-            uninit(common::set_server_timeout(1).unwrap_err());
-            uninit(common::set_server_connect_timeout(1).unwrap_err());
+            // SAFETY: as above.
+            unsafe { uninit(common::add_ssl_x509_cert(cert).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { X509_free(cert.as_ptr()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_extensions::<&CStr>(&[]).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_server_timeout(1).unwrap_err()) };
+            // SAFETY: as above.
+            unsafe { uninit(common::set_server_connect_timeout(1).unwrap_err()) };
         }
         REFUSE.store(false, SeqCst);
         // The plain options need no runtime.

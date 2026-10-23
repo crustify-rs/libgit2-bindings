@@ -1,3 +1,4 @@
+#[expect(dead_code, reason = "this suite uses part of the shared diff support")]
 #[path = "../support/diff.rs"]
 mod support;
 use std::ffi::CString;
@@ -11,10 +12,14 @@ use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::ErrorClass;
 use support::Repo;
 
-/// Suite for Diff::generate_with_options: each generator, empty inputs, callbacks,
+/// Suite for `Diff::generate_with_options`: each generator, empty inputs, callbacks,
 /// retained payload lifetime, skip/cancel codes and reverse diffs.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::items_after_statements,
+    reason = "each helper item sits beside the steps that use it"
+)]
 fn generate_with_options_contract() {
     let fixture = Repo::new();
     let repo = fixture.get().as_ref();
@@ -24,7 +29,7 @@ fn generate_with_options_contract() {
     let mut opts = ffi::git_diff_options::default();
     assert_eq!(
         // SAFETY: writable initialized storage of the right type, supported version.
-        unsafe { ffi::git_diff_options_init(&mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) },
+        unsafe { ffi::git_diff_options_init(&raw mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) },
         0
     );
     for input in [
@@ -139,7 +144,7 @@ fn generate_with_options_checked_fields() {
     let index = Index::new().unwrap();
     let mut opts = ffi::git_diff_options::default();
     // SAFETY: writable initialized storage of the right type, supported version.
-    let rc = unsafe { ffi::git_diff_options_init(&mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) };
+    let rc = unsafe { ffi::git_diff_options_init(&raw mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) };
     assert_eq!(rc, 0);
     let inputs = || {
         [
@@ -237,7 +242,7 @@ fn generate_with_options_refuses_empty_pattern_beside_others() {
     let index = Index::new().unwrap();
     let mut opts = ffi::git_diff_options::default();
     // SAFETY: writable initialized storage of the right type, supported version.
-    let rc = unsafe { ffi::git_diff_options_init(&mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) };
+    let rc = unsafe { ffi::git_diff_options_init(&raw mut opts, ffi::GIT_DIFF_OPTIONS_VERSION) };
     assert_eq!(rc, 0);
     let inputs = || {
         [

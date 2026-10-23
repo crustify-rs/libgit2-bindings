@@ -27,7 +27,7 @@
 //! storage are typed, `None` for the zero default: libgit2 does not check them, and
 //! creates a repository it cannot open from a value it does not name.
 //!
-//! `git_repository_init_ext` ([`Repository::init_ext`]) writes to its options, ORing
+//! `git_repository_init_ext` ([`Repository::init_ext`]) writes to its options, `ORing`
 //! internal bits into their flags, so it takes them exclusively ([`InitOptionsMut`]);
 //! the wrapper clears those bits before each call, where libgit2 would read the ones a
 //! previous call left as describing this one.
@@ -83,7 +83,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::num::NonZero;
 use core::ops::{BitOr, BitOrAssign, ControlFlow};
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull};
 use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{CBorrowedPtr, CBox, CCell, CNew, CZeroable, define_ctype, impl_cdrop};
@@ -109,7 +109,7 @@ use crate::libgit2::util::sys::errors::{clear, runtime_pinned, set, set_oom};
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: git_repository_init_flag_t
+/// Wraps: `git_repository_init_flag_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -155,6 +155,7 @@ impl InitFlag {
 
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_repository_init_flag_t) -> Option<Self> {
         let mut i = 0;
         while i < Self::ALL.len() {
@@ -167,6 +168,7 @@ impl InitFlag {
     }
 
     /// The C value: the flag's bit.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_init_flag_t {
         self as ffi::git_repository_init_flag_t
     }
@@ -201,6 +203,7 @@ pub struct UnnamedInitFlag(ffi::git_repository_init_flag_t);
 
 impl UnnamedInitFlag {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_init_flag_t {
         self.0
     }
@@ -232,7 +235,7 @@ impl std::error::Error for UnnamedInitFlag {}
 /// keeps the named ones only. [`iter`](Self::iter) and [`contains`](Self::contains)
 /// see the named flags, and [`unnamed_bits`](Self::unnamed_bits) the rest.
 ///
-/// Wraps: git_repository_init_flag_t
+/// Wraps: `git_repository_init_flag_t`
 /// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct InitFlags(u32);
@@ -250,37 +253,44 @@ impl InitFlags {
     };
 
     /// The set with no flag.
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
     /// The set of every bit of `bits`, as the options' `flags` hold them; bits that no
     /// [`InitFlag`] names are kept.
+    #[must_use]
     pub const fn from_bits_retain(bits: u32) -> Self {
         Self(bits)
     }
 
     /// The set of the bits of `bits` that an [`InitFlag`] names; the rest are dropped.
+    #[must_use]
     pub const fn from_bits_truncate(bits: u32) -> Self {
         Self(bits & Self::NAMED)
     }
 
     /// The bits of the set, as the options' `flags` take them.
+    #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
     /// The bits of the set that no [`InitFlag`] names.
+    #[must_use]
     pub const fn unnamed_bits(self) -> u32 {
         self.0 & !Self::NAMED
     }
 
     /// Whether the set has no bit, named or not.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     /// Whether `flag` is in the set.
+    #[must_use]
     pub const fn contains(self, flag: InitFlag) -> bool {
         self.0 & flag.raw() != 0
     }
@@ -296,6 +306,7 @@ impl InitFlags {
     }
 
     /// The named flags in the set, in ascending bit order.
+    #[must_use]
     pub fn iter(self) -> InitFlagsIter {
         InitFlagsIter { set: self, next: 0 }
     }
@@ -373,7 +384,7 @@ impl fmt::Debug for InitFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("InitFlags {")?;
         let mut sep = "";
-        for flag in self.iter() {
+        for flag in *self {
             write!(f, "{sep}{flag:?}")?;
             sep = " | ";
         }
@@ -439,7 +450,7 @@ impl core::iter::FusedIterator for InitFlagsIter {}
 /// let _ = InitMode::Custom(CustomMode(0o2775));
 /// ```
 ///
-/// Wraps: git_repository_init_mode_t
+/// Wraps: `git_repository_init_mode_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -463,6 +474,7 @@ pub enum InitMode {
 impl InitMode {
     /// The mode whose C value is `raw`: a named variant for a
     /// `git_repository_init_mode_t` constant, [`Custom`](Self::Custom) otherwise.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_repository_init_mode_t) -> Self {
         match raw {
             ffi::GIT_REPOSITORY_INIT_SHARED_UMASK => Self::SharedUmask,
@@ -473,6 +485,7 @@ impl InitMode {
     }
 
     /// The C value, as the options' `mode` takes it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_init_mode_t {
         match self {
             Self::SharedUmask => ffi::GIT_REPOSITORY_INIT_SHARED_UMASK,
@@ -504,6 +517,7 @@ pub struct CustomMode(ffi::git_repository_init_mode_t);
 
 impl CustomMode {
     /// The permission bits, as the options' `mode` takes them.
+    #[must_use]
     pub const fn bits(self) -> ffi::git_repository_init_mode_t {
         self.0
     }
@@ -573,7 +587,7 @@ impl CustomMode {
 /// `git_repository_init_ext` writes to the options it is given: it ORs internal bits
 /// into the flags (see [`InitFlags`]), which a later call with the same options reads.
 ///
-/// Wraps: git_repository_init_options
+/// Wraps: `git_repository_init_options`
 /// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -647,7 +661,13 @@ impl<'o> InitOptions<'o> {
     /// template: it reaches no global, no allocator and no thread state, so this needs
     /// no initialised library.
     ///
-    /// Wraps: git_repository_init_options_init
+    /// Wraps: `git_repository_init_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_repository_init_options>::uninit();
         // SAFETY: `raw` is writable storage for one `git_repository_init_options`, which
@@ -665,6 +685,7 @@ impl<'o> InitOptions<'o> {
 
     /// Shared handle to the options — the getters, and the pointer for C calls that
     /// read them.
+    #[must_use]
     pub fn as_ref(&self) -> InitOptionsRef<'_, 'o> {
         // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
         InitOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
@@ -692,7 +713,7 @@ impl fmt::Debug for InitOptions<'_> {
     }
 }
 
-impl<'a, 'o> InitOptionsRef<'a, 'o> {
+impl<'o> InitOptionsRef<'_, 'o> {
     /// Read-only pointer to the C struct, for FFI calls taking
     /// `const git_repository_init_options *`.
     pub(crate) fn as_ptr(&self) -> *const ffi::git_repository_init_options {
@@ -702,32 +723,44 @@ impl<'a, 'o> InitOptionsRef<'a, 'o> {
     /// The structure version. [`InitOptions::new`] sets [`InitOptions::VERSION`];
     /// libgit2 refuses the options with `GIT_ERROR_INVALID` if it is 0 or above that.
     ///
-    /// Field: git_repository_init_options.version
+    /// Field: `git_repository_init_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let version_ptr = unsafe { &raw const (*p).version };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).version).read() }
+        unsafe { version_ptr.read() }
     }
 
     /// The init flags, every stored bit kept: after a `git_repository_init_ext` call,
-    /// the internal bits it ORed in too (see [`InitFlags`]). Empty by default.
+    /// the internal bits it `ORed` in too (see [`InitFlags`]). Empty by default.
     ///
-    /// Field: git_repository_init_options.flags
+    /// Field: `git_repository_init_options.flags`
+    #[must_use]
     pub fn flags(&self) -> InitFlags {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let flags_ptr = unsafe { &raw const (*p).flags };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let bits = unsafe { addr_of!((*p).flags).read() };
+        let bits = unsafe { flags_ptr.read() };
         InitFlags::from_bits_retain(bits)
     }
 
     /// The permissions of the directories the repository is created with;
     /// [`InitMode::SharedUmask`] by default.
     ///
-    /// Field: git_repository_init_options.mode
+    /// Field: `git_repository_init_options.mode`
+    #[must_use]
     pub fn mode(&self) -> InitMode {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let mode_ptr = unsafe { &raw const (*p).mode };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let raw = unsafe { addr_of!((*p).mode).read() };
+        let raw = unsafe { mode_ptr.read() };
         InitMode::from_raw(raw)
     }
 
@@ -735,89 +768,103 @@ impl<'a, 'o> InitOptionsRef<'a, 'o> {
     /// parent, for a repository path ending in `.git` (one is appended to a path that
     /// does not). Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_repository_init_options.workdir_path
+    /// Field: `git_repository_init_options.workdir_path`
+    #[must_use]
     pub fn workdir_path(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let workdir_path_ptr = unsafe { &raw const (*p).workdir_path };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { workdir_path_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).workdir_path).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The content of the new repository's `description` file; `None`, the default,
     /// keeps the template's. Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_repository_init_options.description
+    /// Field: `git_repository_init_options.description`
+    #[must_use]
     pub fn description(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let description_ptr = unsafe { &raw const (*p).description };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { description_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).description).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The template directory; `None`, the default, means the `init.templatedir`
     /// setting or the system's template directory, when an external template is used
     /// at all. Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_repository_init_options.template_path
+    /// Field: `git_repository_init_options.template_path`
+    #[must_use]
     pub fn template_path(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let template_path_ptr = unsafe { &raw const (*p).template_path };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { template_path_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).template_path).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The branch, or reference, `HEAD` points at; `None`, the default, means the
     /// `init.defaultbranch` setting, or `master`. Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_repository_init_options.initial_head
+    /// Field: `git_repository_init_options.initial_head`
+    #[must_use]
     pub fn initial_head(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let initial_head_ptr = unsafe { &raw const (*p).initial_head };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { initial_head_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).initial_head).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The URL of an `origin` remote to add; `None`, the default, adds none. Borrowed
     /// for `'o`, as it was set.
     ///
-    /// Field: git_repository_init_options.origin_url
+    /// Field: `git_repository_init_options.origin_url`
+    #[must_use]
     pub fn origin_url(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let origin_url_ptr = unsafe { &raw const (*p).origin_url };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { origin_url_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).origin_url).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The type of the new repository's object ids; `None`, the default, means
     /// [`OidType::default`]. Every setter stores `0` or a named type, so `None` is
     /// always the zero default.
     ///
-    /// Field: git_repository_init_options.oid_type
+    /// Field: `git_repository_init_options.oid_type`
+    #[must_use]
     pub fn oid_type(&self) -> Option<OidType> {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let oid_type_ptr = unsafe { &raw const (*p).oid_type };
         // SAFETY: a read through the shared handle's pointer to live options; the
         // field is a plain `u32`, any value valid.
-        let raw = unsafe { addr_of!((*p).oid_type).read() };
+        let raw = unsafe { oid_type_ptr.read() };
         OidType::from_raw(raw)
     }
 
@@ -825,16 +872,21 @@ impl<'a, 'o> InitOptionsRef<'a, 'o> {
     /// means [`RefdbType::default`]. Every setter stores `0` or a named format, so
     /// `None` is always the zero default.
     ///
-    /// Field: git_repository_init_options.refdb_type
+    /// Field: `git_repository_init_options.refdb_type`
+    #[must_use]
     pub fn refdb_type(&self) -> Option<RefdbType> {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let refdb_type_ptr = unsafe { &raw const (*p).refdb_type };
         // SAFETY: a read through the shared handle's pointer to live options; the
         // field is a plain `u32`, any value valid.
-        let raw = unsafe { addr_of!((*p).refdb_type).read() };
+        let raw = unsafe { refdb_type_ptr.read() };
         RefdbType::from_raw(raw)
     }
 
     /// A copy of the options, as a value of its own, borrowing the same strings.
+    #[must_use]
     pub fn to_options(&self) -> InitOptions<'o> {
         // SAFETY: a read of the whole live struct through the shared handle's pointer;
         // it is `Copy` plain data, whose string pointers keep their `'o` guarantee in
@@ -868,6 +920,7 @@ impl<'o> InitOptionsMut<'_, 'o> {
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> InitOptionsRef<'_, 'o> {
         self.0
     }
@@ -880,34 +933,43 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// Replaces the structure version. Any value is accepted; libgit2 refuses options
     /// whose version is 0 or above [`InitOptions::VERSION`].
     ///
-    /// Field: git_repository_init_options.version
+    /// Field: `git_repository_init_options.version`
     pub fn set_version(&mut self, version: u32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let version_ptr = unsafe { &raw mut (*p).version };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).version).write(version) }
+        unsafe { version_ptr.write(version) }
     }
 
     /// Replaces the init flags, every bit as given: libgit2 tests the bits
     /// [`InitFlag`] names and its own internal ones (see [`InitFlags`]), and ignores
     /// the rest; [`Repository::init_ext`] clears the internal ones before its call.
     ///
-    /// Field: git_repository_init_options.flags
+    /// Field: `git_repository_init_options.flags`
     pub fn set_flags(&mut self, flags: InitFlags) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let flags_ptr = unsafe { &raw mut (*p).flags };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).flags).write(flags.bits()) }
+        unsafe { flags_ptr.write(flags.bits()) }
     }
 
     /// Replaces the permissions of the directories the repository is created with.
     ///
-    /// Field: git_repository_init_options.mode
+    /// Field: `git_repository_init_options.mode`
     pub fn set_mode(&mut self, mode: InitMode) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let mode_ptr = unsafe { &raw mut (*p).mode };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).mode).write(mode.raw()) }
+        unsafe { mode_ptr.write(mode.raw()) }
     }
 
     /// Sets the working directory. `None` means the repository directory's parent,
@@ -918,13 +980,16 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// file there linking to the repository and records it as `core.worktree`. Ignored
     /// for a bare repository. Read during each call, never kept.
     ///
-    /// Field: git_repository_init_options.workdir_path
+    /// Field: `git_repository_init_options.workdir_path`
     pub fn set_workdir_path(&mut self, path: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let workdir_path_ptr = unsafe { &raw mut (*p).workdir_path };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data. The value is NULL or a `&'o CStr`'s pointer, as the
         // getter requires.
-        unsafe { addr_of_mut!((*p).workdir_path).write(path.map_or(ptr::null(), CStr::as_ptr)) }
+        unsafe { workdir_path_ptr.write(path.map_or(ptr::null(), CStr::as_ptr)) }
     }
 
     /// Sets the content of the new repository's `description` file; `None` keeps the
@@ -932,12 +997,15 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// built-in template: a reinitialisation and an external template ignore it. Read
     /// during each call, never kept.
     ///
-    /// Field: git_repository_init_options.description
+    /// Field: `git_repository_init_options.description`
     pub fn set_description(&mut self, description: Option<&'o CStr>) {
         let s = description.map_or(ptr::null(), CStr::as_ptr);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let description_ptr = unsafe { &raw mut (*p).description };
         // SAFETY: as `set_workdir_path`, for this field.
-        unsafe { addr_of_mut!((*p).description).write(s) }
+        unsafe { description_ptr.write(s) }
     }
 
     /// Sets the template directory a new repository is copied from; `None` means the
@@ -948,12 +1016,15 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// as invalid (an over-long component) fails the call with `GIT_EINVALIDSPEC`
     /// once the repository directory exists. Read during each call, never kept.
     ///
-    /// Field: git_repository_init_options.template_path
+    /// Field: `git_repository_init_options.template_path`
     pub fn set_template_path(&mut self, path: Option<&'o CStr>) {
         let s = path.map_or(ptr::null(), CStr::as_ptr);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let template_path_ptr = unsafe { &raw mut (*p).template_path };
         // SAFETY: as `set_workdir_path`, for this field.
-        unsafe { addr_of_mut!((*p).template_path).write(s) }
+        unsafe { template_path_ptr.write(s) }
     }
 
     /// Sets the branch `HEAD` points at: a name below `refs/heads/`, or a full
@@ -962,49 +1033,61 @@ impl<'o> InitOptionsMut<'_, 'o> {
     /// libgit2 writes the name to `HEAD` without checking that it is a valid reference
     /// name. Read during each call, never kept.
     ///
-    /// Field: git_repository_init_options.initial_head
+    /// Field: `git_repository_init_options.initial_head`
     pub fn set_initial_head(&mut self, head: Option<&'o CStr>) {
         let s = head.map_or(ptr::null(), CStr::as_ptr);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let initial_head_ptr = unsafe { &raw mut (*p).initial_head };
         // SAFETY: as `set_workdir_path`, for this field.
-        unsafe { addr_of_mut!((*p).initial_head).write(s) }
+        unsafe { initial_head_ptr.write(s) }
     }
 
     /// Sets the URL of an `origin` remote libgit2 adds once the repository is
     /// initialised; `None` adds none. Read during each call, never kept.
     ///
-    /// Field: git_repository_init_options.origin_url
+    /// Field: `git_repository_init_options.origin_url`
     pub fn set_origin_url(&mut self, url: Option<&'o CStr>) {
         let s = url.map_or(ptr::null(), CStr::as_ptr);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let origin_url_ptr = unsafe { &raw mut (*p).origin_url };
         // SAFETY: as `set_workdir_path`, for this field.
-        unsafe { addr_of_mut!((*p).origin_url).write(s) }
+        unsafe { origin_url_ptr.write(s) }
     }
 
     /// Sets the type of the new repository's object ids; `None` stores `0`, which
     /// libgit2 reads as [`OidType::default`]. A type other than the default is
     /// recorded as `extensions.objectformat`.
     ///
-    /// Field: git_repository_init_options.oid_type
+    /// Field: `git_repository_init_options.oid_type`
     pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
         let raw = oid_type.map_or(0, OidType::raw);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let oid_type_ptr = unsafe { &raw mut (*p).oid_type };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, and `raw` is 0 or a type libgit2 names.
-        unsafe { addr_of_mut!((*p).oid_type).write(raw) }
+        unsafe { oid_type_ptr.write(raw) }
     }
 
     /// Sets the storage format of the new repository's references; `None` stores `0`,
     /// which libgit2 reads as [`RefdbType::default`]. A format other than the default
     /// is recorded as `extensions.refstorage`.
     ///
-    /// Field: git_repository_init_options.refdb_type
+    /// Field: `git_repository_init_options.refdb_type`
     pub fn set_refdb_type(&mut self, refdb_type: Option<RefdbType>) {
         let raw = refdb_type.map_or(0, RefdbType::raw);
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let refdb_type_ptr = unsafe { &raw mut (*p).refdb_type };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, and `raw` is 0 or a format libgit2 names.
-        unsafe { addr_of_mut!((*p).refdb_type).write(raw) }
+        unsafe { refdb_type_ptr.write(raw) }
     }
 }
 
@@ -1033,7 +1116,7 @@ const _: () = assert!(
 /// [`from_raw`](Self::from_raw) gives `None` for `GIT_REPOSITORY_ITEM__LAST` and every
 /// value after it, which libgit2 would read past its item table with.
 ///
-/// Wraps: git_repository_item_t
+/// Wraps: `git_repository_item_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -1094,6 +1177,7 @@ impl Item {
 
     /// The variant whose C value is `raw`; `None` for `GIT_REPOSITORY_ITEM__LAST` and
     /// every value after it.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_repository_item_t) -> Option<Self> {
         // `ALL` is indexed by value and ends at `__LAST`, the bound of libgit2's table.
         const {
@@ -1113,6 +1197,7 @@ impl Item {
 
     /// The C value, as `git_repository_item_path` takes it; always below
     /// `GIT_REPOSITORY_ITEM__LAST`.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_item_t {
         self as ffi::git_repository_item_t
     }
@@ -1141,6 +1226,7 @@ pub struct UnnamedItem(ffi::git_repository_item_t);
 
 impl UnnamedItem {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_item_t {
         self.0
     }
@@ -1168,7 +1254,7 @@ impl std::error::Error for UnnamedItem {}
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`, a
 /// combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: git_repository_open_flag_t
+/// Wraps: `git_repository_open_flag_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -1210,6 +1296,7 @@ impl OpenFlag {
 
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_repository_open_flag_t) -> Option<Self> {
         let mut i = 0;
         while i < Self::ALL.len() {
@@ -1222,6 +1309,7 @@ impl OpenFlag {
     }
 
     /// The C value, a single bit.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_open_flag_t {
         self as ffi::git_repository_open_flag_t
     }
@@ -1255,6 +1343,7 @@ pub struct UnnamedOpenFlag(ffi::git_repository_open_flag_t);
 
 impl UnnamedOpenFlag {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_open_flag_t {
         self.0
     }
@@ -1280,7 +1369,7 @@ impl std::error::Error for UnnamedOpenFlag {}
 /// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
 /// [`unnamed_bits`](Self::unnamed_bits) the rest.
 ///
-/// Wraps: git_repository_open_flag_t
+/// Wraps: `git_repository_open_flag_t`
 /// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct OpenFlags(c_uint);
@@ -1298,31 +1387,37 @@ impl OpenFlags {
     };
 
     /// The set with no flag: the default search.
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
     /// The set of every bit of `bits`; bits that no [`OpenFlag`] names are kept.
+    #[must_use]
     pub const fn from_bits_retain(bits: c_uint) -> Self {
         Self(bits)
     }
 
     /// The bits of the set, as `git_repository_open_ext` takes them.
+    #[must_use]
     pub const fn bits(self) -> c_uint {
         self.0
     }
 
     /// The bits of the set that no [`OpenFlag`] names.
+    #[must_use]
     pub const fn unnamed_bits(self) -> c_uint {
         self.0 & !Self::NAMED
     }
 
     /// Whether the set has no bit, named or not.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     /// Whether `flag` is in the set.
+    #[must_use]
     pub const fn contains(self, flag: OpenFlag) -> bool {
         self.0 & flag.bit() != 0
     }
@@ -1338,6 +1433,7 @@ impl OpenFlags {
     }
 
     /// The named flags in the set, in ascending bit order.
+    #[must_use]
     pub fn iter(self) -> OpenFlagsIter {
         OpenFlagsIter { set: self, next: 0 }
     }
@@ -1415,7 +1511,7 @@ impl fmt::Debug for OpenFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("OpenFlags {")?;
         let mut sep = "";
-        for flag in self.iter() {
+        for flag in *self {
             write!(f, "{sep}{flag:?}")?;
             sep = " | ";
         }
@@ -1475,7 +1571,7 @@ impl core::iter::FusedIterator for OpenFlagsIter {}
 ///
 /// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name.
 ///
-/// Wraps: git_repository_state_t
+/// Wraps: `git_repository_state_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -1514,6 +1610,7 @@ pub enum RepositoryState {
 impl RepositoryState {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_repository_state_t) -> Option<Self> {
         match raw {
             ffi::GIT_REPOSITORY_STATE_NONE => Some(Self::Clean),
@@ -1533,11 +1630,13 @@ impl RepositoryState {
     }
 
     /// The C value, as libgit2 reports it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_state_t {
         self as ffi::git_repository_state_t
     }
 
     /// Whether no operation is in progress: the state is [`Clean`](Self::Clean).
+    #[must_use]
     pub const fn is_clean(self) -> bool {
         matches!(self, Self::Clean)
     }
@@ -1566,6 +1665,7 @@ pub struct UnnamedRepositoryState(ffi::git_repository_state_t);
 
 impl UnnamedRepositoryState {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_repository_state_t {
         self.0
     }
@@ -1645,8 +1745,8 @@ define_ctype!(
 /// runtime first, so the free is ordered after the initialisation that settled the
 /// allocator it frees into.
 ///
-/// Wraps: git_repository_free
-/// Wraps: git_repository_new
+/// Wraps: `git_repository_free`
+/// Wraps: `git_repository_new`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RepositoryFree;
 
@@ -1664,7 +1764,7 @@ unsafe impl CNew<Repository> for RepositoryFree {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
         // reported on live thread-local state.
-        let rc = unsafe { ffi::git_repository_new(&mut out) };
+        let rc = unsafe { ffi::git_repository_new(&raw mut out) };
         if rc != 0 {
             return None;
         }
@@ -1709,32 +1809,38 @@ impl RepositoryError {
 
     /// The returned code; `None` for one the header does not name
     /// ([`raw_code`](Self::raw_code) has it).
+    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
 
     /// The returned code, always negative.
+    #[must_use]
     pub fn raw_code(&self) -> c_int {
         self.code
     }
 
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         self.error.class()
     }
 
     /// The error's class as libgit2 stored it.
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
         self.error.raw_class()
     }
 
     /// The error message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         self.error.message()
     }
 
     /// The error, without the code.
+    #[must_use]
     pub fn error(&self) -> &ErrorBuf {
         &self.error
     }
@@ -1800,11 +1906,14 @@ pub(crate) fn unpinned() -> RepositoryError {
 }
 
 impl Repository {
-    /// A repository with no paths, backends or config (`is_bare`), for wiring custom
-    /// backends into; its objects are SHA-1 ids. Fails only when libgit2 runs out of
-    /// memory, or cannot be initialised.
+    /// A repository with no paths, backends or config (`is_bare`), for wiring custom backends into;
+    /// its objects are SHA-1 ids.
     ///
-    /// Wraps: git_repository_new
+    /// Wraps: `git_repository_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails only when libgit2 runs out of memory, or cannot be initialised.
     pub fn new() -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -1812,7 +1921,7 @@ impl Repository {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
         // reported on live thread-local state.
-        let rc = unsafe { ffi::git_repository_new(&mut out) };
+        let rc = unsafe { ffi::git_repository_new(&raw mut out) };
         // SAFETY: `git_repository_new` leaves `out` NULL on failure, or writes a fresh
         // repository the caller owns alone.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -1822,7 +1931,11 @@ impl Repository {
     ///
     /// libgit2 asserts the type is one it names, which [`OidType`] guarantees.
     ///
-    /// Wraps: git_repository_new_ext
+    /// Wraps: `git_repository_new_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`new`](Self::new) does.
     pub fn with_oid_type(oid_type: OidType) -> Result<RepositoryBox, RepositoryError> {
         let mut opts = NewOptions::new();
         opts.as_mut().set_oid_type(Some(oid_type));
@@ -1833,12 +1946,14 @@ impl Repository {
     /// one), or a working directory with one in `.git`. Parent directories are not
     /// searched.
     ///
+    /// Wraps: `git_repository_open`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when `path` does not resolve or holds no
     /// repository, with [`ErrorCode::Owner`] when the repository belongs to another
     /// user and is not a `safe.directory`, and otherwise with libgit2's error (an
     /// unsupported format version or extension, say).
-    ///
-    /// Wraps: git_repository_open
     pub fn open(path: &CStr) -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -1846,7 +1961,7 @@ impl Repository {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `path` a NUL-terminated string, read for
         // the call only. The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_open(&mut out, path.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut out, path.as_ptr()) };
         // SAFETY: `git_repository_open` NULLs `out` first and writes a fresh repository
         // the caller owns alone only on success, freeing its own on failure.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -1856,14 +1971,16 @@ impl Repository {
     /// its config for a working directory, its grafts or the environment, and without
     /// checking who owns it: a fast open for hosting.
     ///
-    /// Fails with [`ErrorCode::NotFound`] when `path` does not resolve or is not a
-    /// repository directory (a working directory is not), and otherwise with
-    /// libgit2's error.
-    ///
     /// libgit2 leaks the half-built repository when it fails after finding one (an
     /// unsupported format version or extension, an allocation failure).
     ///
-    /// Wraps: git_repository_open_bare
+    /// Wraps: `git_repository_open_bare`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when `path` does not resolve or is not a
+    /// repository directory (a working directory is not), and otherwise with
+    /// libgit2's error.
     pub fn open_bare(path: &CStr) -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -1871,7 +1988,7 @@ impl Repository {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `path` a NUL-terminated string, read for
         // the call only. The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_open_bare(&mut out, path.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open_bare(&raw mut out, path.as_ptr()) };
         // SAFETY: `git_repository_open_bare` writes a fresh repository the caller owns
         // alone only on success, and leaves the NULL slot alone otherwise.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -1882,9 +1999,6 @@ impl Repository {
     /// directory, the repository going in `path/.git`. An existing repository is
     /// reinitialised, its config refreshed and its references kept.
     ///
-    /// Fails with libgit2's error; with [`ErrorCode::Exists`] when a directory on the
-    /// way is a file.
-    ///
     /// libgit2 can fail after opening the repository (when its reference database
     /// cannot be set up), leaving it in the out slot, which is released here. One such
     /// failure, a reftable repository's `reftable` directory that cannot be made,
@@ -1892,7 +2006,12 @@ impl Repository {
     /// with `GIT_ERROR`, where C callers that test for a negative code take it for
     /// success.
     ///
-    /// Wraps: git_repository_init
+    /// Wraps: `git_repository_init`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error; with [`ErrorCode::Exists`] when a directory on the
+    /// way is a file.
     pub fn init(path: &CStr, bare: bool) -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -1901,7 +2020,7 @@ impl Repository {
         // SAFETY: `out` is a writable slot, NULL so a failure before the inner open
         // leaves it NULL, and `path` a NUL-terminated string, read for the call only.
         // The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_init(&mut out, path.as_ptr(), bare.into()) };
+        let rc = unsafe { ffi::git_repository_init(&raw mut out, path.as_ptr(), bare.into()) };
         // SAFETY: `git_repository_init` leaves `out` NULL, or writes the fresh
         // repository it opened, owned by the caller alone, whatever it returns.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -1915,15 +2034,6 @@ impl Repository {
     /// `.git` or that has a [working directory](InitOptionsMut::set_workdir_path) of its
     /// own; any other path is the working directory, the repository going in
     /// `path/.git`.
-    ///
-    /// Fails with libgit2's error: with [`ErrorCode::Exists`] when the path holds a
-    /// repository and [`InitFlag::NoReinit`] is set, or when a directory on the way is
-    /// a file; with `GIT_ERROR_INVALID` for options of a version libgit2 does not know.
-    /// As for `init`, libgit2 can fail after opening the repository, which is then
-    /// released here: when the `origin` remote of
-    /// [`set_origin_url`](InitOptionsMut::set_origin_url) cannot be added (a
-    /// reinitialised repository that has one fails with [`ErrorCode::Exists`] once it
-    /// is otherwise reinitialised), or when its reference storage cannot be set up.
     ///
     /// libgit2 writes to the options: it ORs its own internal bits into their
     /// [`flags`](InitOptionsRef::flags) (a path ending in `.git`, a working directory
@@ -1951,7 +2061,18 @@ impl Repository {
     /// # std::fs::remove_dir_all(&dir).unwrap();
     /// ```
     ///
-    /// Wraps: git_repository_init_ext
+    /// Wraps: `git_repository_init_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error: with [`ErrorCode::Exists`] when the path holds a
+    /// repository and [`InitFlag::NoReinit`] is set, or when a directory on the way is
+    /// a file; with `GIT_ERROR_INVALID` for options of a version libgit2 does not know.
+    /// As for `init`, libgit2 can fail after opening the repository, which is then
+    /// released here: when the `origin` remote of
+    /// [`set_origin_url`](InitOptionsMut::set_origin_url) cannot be added (a
+    /// reinitialised repository that has one fails with [`ErrorCode::Exists`] once it
+    /// is otherwise reinitialised), or when its reference storage cannot be set up.
     pub fn init_ext(
         path: &CStr,
         mut opts: InitOptionsMut<'_, '_>,
@@ -1969,7 +2090,7 @@ impl Repository {
         // leaves it NULL; `path` NUL-terminated; `opts` the exclusive handle's live
         // options, whose flags libgit2 writes and whose strings (NULL or borrowed for
         // `'o`, which outlives the handle) it reads for the call only. Runtime pinned.
-        let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), opts) };
+        let rc = unsafe { ffi::git_repository_init_ext(&raw mut out, path.as_ptr(), opts) };
         // SAFETY: `git_repository_init_ext` leaves `out` NULL, or writes the fresh
         // repository it opened, owned by the caller alone, whatever it returns.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -1987,8 +2108,6 @@ impl Repository {
     /// odb no repository owns yet, an `OdbArc<'static>`; the reference passed in is
     /// released once the repository holds its own.
     ///
-    /// Fails only when libgit2 runs out of memory, or cannot be initialised.
-    ///
     /// An odb a repository lent (`OdbArc<'r>`) is not accepted:
     ///
     /// ```compile_fail
@@ -2000,7 +2119,11 @@ impl Repository {
     /// }
     /// ```
     ///
-    /// Wraps: git_repository_wrap_odb
+    /// Wraps: `git_repository_wrap_odb`
+    ///
+    /// # Errors
+    ///
+    /// Fails only when libgit2 runs out of memory, or cannot be initialised.
     pub fn wrap_odb(odb: OdbArc<'static>) -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -2010,7 +2133,7 @@ impl Repository {
         // untouched) leaves it NULL; `odb` is a live odb no repository owns (`'static`),
         // of a type libgit2 names (every safe constructor gives one), which the new
         // repository takes a reference to and owns. The runtime is pinned.
-        let rc = unsafe { ffi::git_repository_wrap_odb(&mut out, odb.as_c_ptr()) };
+        let rc = unsafe { ffi::git_repository_wrap_odb(&raw mut out, odb.as_c_ptr()) };
         // SAFETY: `git_repository_wrap_odb` writes a fresh repository the caller owns
         // alone only on success.
         let repo = constructed(rc, unsafe { RepositoryBox::from_c(out) });
@@ -2039,7 +2162,8 @@ impl<'a> RepositoryRef<'a> {
     /// }
     /// ```
     ///
-    /// Wraps: git_repository_workdir
+    /// Wraps: `git_repository_workdir`
+    #[must_use]
     pub fn workdir(&self) -> Option<&'a CStr> {
         // SAFETY: a live repository on this thread; the routine only reads its
         // `is_bare` and `workdir` fields.
@@ -2060,12 +2184,6 @@ impl RepositoryMut<'_> {
     /// references, so that the state is [`RepositoryState::Clean`]. What is missing is
     /// skipped.
     ///
-    /// Fails with libgit2's error when one of them cannot be removed (with
-    /// `GIT_ERROR_OS` for a file, which libgit2 reports without an error of its own),
-    /// and with [`ErrorCode::NotFound`] for a repository without paths, which has no
-    /// git directory: libgit2 would remove those names from the process's working
-    /// directory.
-    ///
     /// It removes files through the exclusive handle alone:
     ///
     /// ```compile_fail,E0599
@@ -2076,7 +2194,15 @@ impl RepositoryMut<'_> {
     /// }
     /// ```
     ///
-    /// Wraps: git_repository_state_cleanup
+    /// Wraps: `git_repository_state_cleanup`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when one of them cannot be removed (with
+    /// `GIT_ERROR_OS` for a file, which libgit2 reports without an error of its own),
+    /// and with [`ErrorCode::NotFound`] for a repository without paths, which has no
+    /// git directory: libgit2 would remove those names from the process's working
+    /// directory.
     pub fn cleanup_state(&mut self) -> Result<(), RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -2165,12 +2291,14 @@ impl Repository {
     /// reports for it (`GIT_ERROR_INVALID`, "invalid argument: 'path'"), where a debug
     /// build aborts.
     ///
+    /// Wraps: `git_repository_open_ext`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when the search finds no repository
-    /// (GIT_ERROR_REPOSITORY, "could not find repository at '`start`'") or `start` does
+    /// (`GIT_ERROR_REPOSITORY`, "could not find repository at '`start`'") or `start` does
     /// not resolve, with [`ErrorCode::Owner`] when the repository belongs to another
     /// user and is not a `safe.directory`, and otherwise with libgit2's error.
-    ///
-    /// Wraps: git_repository_open_ext
     pub fn open_ext(
         start: Option<&CStr>,
         flags: OpenFlags,
@@ -2186,7 +2314,8 @@ impl Repository {
         // only under `FROM_ENV`, which reads it from the environment instead; `ceiling`
         // NULL or a NUL-terminated string; both read for the call only. The runtime is
         // pinned.
-        let rc = unsafe { ffi::git_repository_open_ext(&mut out, start, flags.bits(), ceiling) };
+        let rc =
+            unsafe { ffi::git_repository_open_ext(&raw mut out, start, flags.bits(), ceiling) };
         // SAFETY: `git_repository_open_ext` NULLs `out` first and writes a fresh
         // repository the caller owns alone only on success, freeing its own on failure.
         constructed(rc, unsafe { RepositoryBox::from_c(out) })
@@ -2197,12 +2326,14 @@ impl Repository {
     /// out slot, which stops after the search. The repository found is not checked
     /// further (its format, its owner), so `open_ext` can still fail on it.
     ///
+    /// Wraps: `git_repository_open_ext`
+    ///
+    /// # Errors
+    ///
     /// `false` when the search returns `GIT_ENOTFOUND` (no repository, or a `start`
     /// that does not resolve); other failures, an unparsable
     /// `$GIT_DISCOVERY_ACROSS_FILESYSTEM` under [`OpenFlag::FromEnv`] among them, are
     /// errors. `start` and `ceiling_dirs` are read as `open_ext` reads them.
-    ///
-    /// Wraps: git_repository_open_ext
     pub fn exists_ext(
         start: Option<&CStr>,
         flags: OpenFlags,
@@ -2228,12 +2359,14 @@ impl Repository {
     /// directory of its `.git` file, as [`open`](Self::open) opens it. The repository
     /// is independent of `worktree`, which may go first.
     ///
+    /// Wraps: `git_repository_open_from_worktree`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when the directory holds no repository. A worktree
     /// whose recorded `gitdir` does not end in `.git` fails with `-1`, for which
     /// libgit2 sets no error: it is reported as `GIT_ERROR_WORKTREE`, "worktree gitdir
     /// does not end in '.git'".
-    ///
-    /// Wraps: git_repository_open_from_worktree
     pub fn open_from_worktree(worktree: WorktreeRef<'_>) -> Result<RepositoryBox, RepositoryError> {
         // A worktree is built by libgit2 only, so the runtime is pinned already.
         clear();
@@ -2242,7 +2375,7 @@ impl Repository {
         // `gitlink_path` libgit2 only reads, keeping no pointer into it. The runtime was
         // pinned to build the worktree.
         let rc = unsafe {
-            ffi::git_repository_open_from_worktree(&mut out, worktree.as_ptr().cast_mut())
+            ffi::git_repository_open_from_worktree(&raw mut out, worktree.as_ptr().cast_mut())
         };
         // SAFETY: `git_repository_open_from_worktree` NULLs `out` first and writes a
         // fresh repository (from `git_repository_open`) the caller owns alone only on
@@ -2291,7 +2424,8 @@ impl<'a> RepositoryRef<'a> {
     /// let _ = path;
     /// ```
     ///
-    /// Wraps: git_repository_path
+    /// Wraps: `git_repository_path`
+    #[must_use]
     pub fn path(&self) -> Option<&'a CStr> {
         // SAFETY: a live repository, only read.
         let path = unsafe { ffi::git_repository_path(self.as_ptr()) };
@@ -2307,7 +2441,13 @@ impl<'a> RepositoryRef<'a> {
     /// The type of the object ids the repository stores. Every repository has a named
     /// one: opening one whose `extensions.objectformat` libgit2 does not know fails.
     ///
-    /// Wraps: git_repository_oid_type
+    /// Wraps: `git_repository_oid_type`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a repository's object id type is always a named one`, only if libgit2 breaks
+    /// its contract.
+    #[must_use]
     pub fn oid_type(&self) -> OidType {
         // SAFETY: a live repository, whose `oid_type` libgit2 only reads.
         let raw = unsafe { ffi::git_repository_oid_type(self.as_ptr().cast_mut()) };
@@ -2331,17 +2471,24 @@ impl<'a> RepositoryRef<'a> {
     /// drop(odb);
     /// ```
     ///
+    /// Wraps: `git_repository_odb`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` and libgit2's error when the odb cannot be loaded: always for a
     /// repository without a git directory (`GIT_ERROR_INVALID`, "path cannot exist in
     /// repository").
     ///
-    /// Wraps: git_repository_odb
+    /// # Panics
+    ///
+    /// Panics, with `git_repository_odb succeeded without an odb`, only if libgit2 breaks its
+    /// contract.
     pub fn odb(&self) -> Result<OdbArc<'a>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `self` a live repository on this thread,
         // whose odb libgit2 loads and installs through it on first use, a cache fill
         // `RepositoryRef` allows.
-        let rc = unsafe { ffi::git_repository_odb(&mut out, self.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_repository_odb(&raw mut out, self.as_ptr().cast_mut()) };
         status(rc)?;
         // SAFETY: on success `out` is one new counted reference to the odb the
         // repository owns, released by `git_odb_free` as `OdbFree` does; the repository
@@ -2369,12 +2516,22 @@ impl<'a> RepositoryRef<'a> {
     /// without a git directory gets a files backend whose paths resolve against the
     /// current directory.
     ///
-    /// Wraps: git_repository_refdb
+    /// Wraps: `git_repository_refdb`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when the reference database's backend cannot be opened,
+    /// or when it runs out of memory.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `git_repository_refdb succeeded without a refdb`, only if libgit2 breaks its
+    /// contract.
     pub fn refdb(&self) -> Result<RefdbArc<'a>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `self` a live repository on this thread,
         // whose refdb libgit2 opens and installs through it on first use, a cache fill.
-        let rc = unsafe { ffi::git_repository_refdb(&mut out, self.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_repository_refdb(&raw mut out, self.as_ptr().cast_mut()) };
         status(rc)?;
         // SAFETY: on success `out` is one new counted reference to the repository's
         // refdb, released by `git_refdb_free`; the repository the refdb points back at
@@ -2387,12 +2544,19 @@ impl<'a> RepositoryRef<'a> {
     /// The operation the repository is in the middle of, read from the marker files
     /// in its git directory (see [`RepositoryState`]).
     ///
+    /// Wraps: `git_repository_state`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` when libgit2 runs out of memory. A repository without a git
     /// directory is refused before the call, as a release build of libgit2 refuses it
     /// (`-1`, `GIT_ERROR_INVALID` "invalid argument: 'string'"), where a debug build
     /// aborts.
     ///
-    /// Wraps: git_repository_state
+    /// # Panics
+    ///
+    /// Panics, with `git_repository_state returned a state the header does not name`, only if
+    /// libgit2 breaks its contract.
     pub fn state(&self) -> Result<RepositoryState, RepositoryError> {
         if self.path().is_none() {
             set(ErrorClass::Invalid, c"invalid argument: 'string'");
@@ -2402,20 +2566,22 @@ impl<'a> RepositoryRef<'a> {
         // open its refdb through it, a cache fill.
         let rc = unsafe { ffi::git_repository_state(self.as_ptr().cast_mut()) };
         status(rc)?;
-        let state = RepositoryState::from_raw(rc as ffi::git_repository_state_t);
+        let state = RepositoryState::from_raw(rc.cast_unsigned());
         Ok(state.expect("git_repository_state returned a state the header does not name"))
     }
 
     /// The prepared commit message of the operation in progress: the contents of the
     /// git directory's `MERGE_MSG`, as stored (no NUL is added or stripped).
     ///
-    /// Fails with [`ErrorCode::NotFound`] when there is none (GIT_ERROR_OS, "could not
+    /// Wraps: `git_repository_message`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when there is none (`GIT_ERROR_OS`, "could not
     /// access message file"), or with libgit2's error when it cannot be read. A
     /// repository without a git directory is refused with [`ErrorCode::NotFound`]
-    /// (GIT_ERROR_INVALID, "path cannot exist in repository"): libgit2 would read
+    /// (`GIT_ERROR_INVALID`, "path cannot exist in repository"): libgit2 would read
     /// `MERGE_MSG` in the current directory.
-    ///
-    /// Wraps: git_repository_message
     pub fn message(&self) -> Result<BufVal, RepositoryError> {
         if self.path().is_none() {
             return Err(pathless());
@@ -2432,13 +2598,15 @@ impl<'a> RepositoryRef<'a> {
 
     /// Removes the git directory's `MERGE_MSG`.
     ///
+    /// Wraps: `git_repository_message_remove`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` when it cannot be removed, its absence included. libgit2 sets
     /// no error for that failure: it is reported as `GIT_ERROR_OS`, "could not remove
     /// message file: `strerror`". A repository without a git directory is refused as
     /// [`message`](Self::message) refuses it: libgit2 would remove `MERGE_MSG` from the
     /// current directory.
-    ///
-    /// Wraps: git_repository_message_remove
     pub fn remove_message(&self) -> Result<(), RepositoryError> {
         if self.path().is_none() {
             return Err(pathless());
@@ -2459,11 +2627,8 @@ impl<'a> RepositoryRef<'a> {
     /// Points `HEAD` at `refname`, recording a reflog entry (`checkout: moving from
     /// <old> to <new>`).
     ///
-    /// A branch (`refs/heads/...`), existing or not, makes `HEAD` a symbolic reference
-    /// to it; any other existing reference detaches `HEAD` at the commit it peels to.
-    /// Fails with [`ErrorCode::NotFound`] when `HEAD` itself is missing, or when
-    /// `refname` names no branch and no existing reference; with `-1` when the branch
-    /// is checked out in a linked worktree, or the reference does not peel to a commit.
+    /// A branch (`refs/heads/...`), existing or not, makes `HEAD` a symbolic reference to it; any
+    /// other existing reference detaches `HEAD` at the commit it peels to.
     ///
     /// The write goes through the repository's reference database and object database,
     /// shared counted objects, so it takes the shared handle. A repository without a
@@ -2471,7 +2636,13 @@ impl<'a> RepositoryRef<'a> {
     /// and writes `HEAD` relative to the current directory unless a reference database
     /// was installed.
     ///
-    /// Wraps: git_repository_set_head
+    /// Wraps: `git_repository_set_head`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when `HEAD` itself is missing, or when `refname` names no
+    /// branch and no existing reference; with `-1` when the branch is checked out in a linked
+    /// worktree, or the reference does not peel to a commit.
     pub fn set_head(&self, refname: &CStr) -> Result<(), RepositoryError> {
         let repo = self.as_ptr().cast_mut();
         // SAFETY: a live repository on this thread, whose refdb and odb libgit2 loads
@@ -2483,13 +2654,15 @@ impl<'a> RepositoryRef<'a> {
     /// Detaches `HEAD` at the commit `commit` names or peels to (a tag is peeled),
     /// recording a reflog entry named after the commit's id.
     ///
+    /// Wraps: `git_repository_set_head_detached`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when `HEAD` is missing or the object is
     /// not in the repository, with libgit2's error when it does not peel to a commit.
     /// An id whose type is not the repository's is refused before the call, with
-    /// GIT_ERROR_INVALID "specified object ID type does not match repository object ID
+    /// `GIT_ERROR_INVALID` "specified object ID type does not match repository object ID
     /// type": libgit2 would format it into a loose object's path of the wrong length.
-    ///
-    /// Wraps: git_repository_set_head_detached
     pub fn set_head_detached(&self, commit: OidRef<'_>) -> Result<(), RepositoryError> {
         id_fits(*self, commit)?;
         // SAFETY: a live repository on this thread; `commit` a live id of the
@@ -2506,7 +2679,16 @@ impl<'a> RepositoryRef<'a> {
     /// `commit` may come from another repository; its id must be of this repository's
     /// type, as `set_head_detached` requires, and name a commit present here.
     ///
-    /// Wraps: git_repository_set_head_detached_from_annotated
+    /// Wraps: `git_repository_set_head_detached_from_annotated`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`set_head_detached`](Self::set_head_detached) does, and with libgit2's generic
+    /// code for an id of another type than this repository's.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an annotated commit always has an id`, only if libgit2 breaks its contract.
     pub fn set_head_detached_from_annotated(
         &self,
         commit: AnnotatedCommitRef<'_, '_>,
@@ -2534,10 +2716,12 @@ impl RepositoryMut<'_> {
     /// updates, overriding `user.name` / `user.email`; `None` falls back to the
     /// configuration again. Both are copied.
     ///
+    /// Wraps: `git_repository_set_ident`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` when a copy runs out of memory, leaving the identity unchanged
     /// (libgit2 then leaks the name's copy when it is the email's that failed).
-    ///
-    /// Wraps: git_repository_set_ident
     pub fn set_ident(
         &mut self,
         name: Option<&CStr>,
@@ -2556,10 +2740,12 @@ impl RepositoryMut<'_> {
     /// (`refs/namespaces/<namespace>/...`, as `GIT_NAMESPACE`); `None` removes it. The
     /// name is copied.
     ///
+    /// Wraps: `git_repository_set_namespace`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` when the copy runs out of memory, which leaves the repository
     /// without a namespace.
-    ///
-    /// Wraps: git_repository_set_namespace
     pub fn set_namespace(&mut self, namespace: Option<&CStr>) -> Result<(), RepositoryError> {
         let namespace = namespace.map_or(ptr::null(), CStr::as_ptr);
         // SAFETY: a live repository, written through the exclusive handle: libgit2
@@ -2577,14 +2763,16 @@ impl RepositoryMut<'_> {
     /// parent) and records `core.worktree` (removed in that case) and
     /// `core.bare = false` in its configuration.
     ///
+    /// Wraps: `git_repository_set_workdir`
+    ///
+    /// # Errors
+    ///
     /// Fails with `-1` when `workdir` does not resolve, and with libgit2's error when
     /// a write fails ([`ErrorCode::Exists`] when `workdir/.git` is not a file); the
     /// working directory then stays unchanged. A repository without a git directory
-    /// is refused with `update_gitlink` ([`ErrorCode::NotFound`], GIT_ERROR_INVALID
+    /// is refused with `update_gitlink` ([`ErrorCode::NotFound`], `GIT_ERROR_INVALID`
     /// "path cannot exist in repository"), where libgit2 dereferences its missing
     /// path.
-    ///
-    /// Wraps: git_repository_set_workdir
     pub fn set_workdir(
         &mut self,
         workdir: &CStr,
@@ -2673,7 +2861,7 @@ type MergeheadFn<'f> = dyn FnMut(OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f
 /// send(MergeheadCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: git_repository_mergehead_foreach_cb
+/// Wraps: `git_repository_mergehead_foreach_cb`
 /// Handwritten
 pub struct MergeheadCallback<'f> {
     f: &'f mut MergeheadFn<'f>,
@@ -2692,6 +2880,10 @@ impl<'f> MergeheadCallback<'f> {
 
     /// Calls the callback with `id`, through the trampoline libgit2 calls, and returns
     /// what libgit2 would read from it. A panic of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is never NULL"
+    )]
     pub fn call(&mut self, id: OidRef<'_>) -> ControlFlow<NonZero<c_int>> {
         let rc = self.walk_with(|callback, payload| {
             let callback = callback.expect("the trampoline is never NULL");
@@ -2715,7 +2907,7 @@ impl<'f> MergeheadCallback<'f> {
     ) -> R {
         let result = walk(Some(mergehead_with), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
-            std::panic::resume_unwind(panic);
+            panic::resume_unwind(panic);
         }
         result
     }
@@ -2748,7 +2940,7 @@ unsafe extern "C" fn mergehead_with(id: *const ffi::git_oid, payload: *mut c_voi
         // libgit2 never passes NULL; stop the walk rather than invent an id.
         return ErrorCode::User.raw();
     };
-    match std::panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(id))) {
+    match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(id))) {
         Ok(ControlFlow::Continue(())) => 0,
         Ok(ControlFlow::Break(code)) => code.get(),
         Err(panic) => {
@@ -2781,9 +2973,6 @@ fn answered(rc: c_int) -> Result<bool, RepositoryError> {
 /// by `:` (`GIT_PATH_LIST_SEPARATOR`): a ceiling directory is never searched itself,
 /// but `start` always is. `None` is an empty list.
 ///
-/// Fails with [`ErrorCode::NotFound`] when no repository is found, and with
-/// libgit2's error when `start` cannot be resolved or a `.git` file cannot be read.
-///
 /// The result is a fresh buffer: libgit2 overwrites the `git_buf` it is given
 /// without releasing what it held, which a fresh one does not hold.
 ///
@@ -2797,7 +2986,12 @@ fn answered(rc: c_int) -> Result<bool, RepositoryError> {
 /// assert_eq!(error.code(), Some(ErrorCode::NotFound));
 /// ```
 ///
-/// Wraps: git_repository_discover
+/// Wraps: `git_repository_discover`
+///
+/// # Errors
+///
+/// Fails with [`ErrorCode::NotFound`] when no repository is found, and with
+/// libgit2's error when `start` cannot be resolved or a `.git` file cannot be read.
 pub fn discover(
     start: &CStr,
     across_fs: bool,
@@ -2840,7 +3034,8 @@ impl<'a> RepositoryRef<'a> {
     ///
     /// Borrowed from the repository, which sets it once, when it opens.
     ///
-    /// Wraps: git_repository_commondir
+    /// Wraps: `git_repository_commondir`
+    #[must_use]
     pub fn commondir(&self) -> Option<&'a CStr> {
         // SAFETY: a live repository, only read; libgit2 asserts nothing else.
         let dir = unsafe { ffi::git_repository_commondir(self.as_ptr()) };
@@ -2851,7 +3046,8 @@ impl<'a> RepositoryRef<'a> {
 
     /// Whether the repository is bare, without a working directory.
     ///
-    /// Wraps: git_repository_is_bare
+    /// Wraps: `git_repository_is_bare`
+    #[must_use]
     pub fn is_bare(&self) -> bool {
         // SAFETY: a live repository, only read.
         unsafe { ffi::git_repository_is_bare(self.as_ptr()) != 0 }
@@ -2859,7 +3055,8 @@ impl<'a> RepositoryRef<'a> {
 
     /// Whether the repository is a linked worktree's, opened through its `.git` file.
     ///
-    /// Wraps: git_repository_is_worktree
+    /// Wraps: `git_repository_is_worktree`
+    #[must_use]
     pub fn is_worktree(&self) -> bool {
         // SAFETY: a live repository, only read.
         unsafe { ffi::git_repository_is_worktree(self.as_ptr()) != 0 }
@@ -2881,7 +3078,8 @@ impl<'a> RepositoryRef<'a> {
     /// let _ = namespace;
     /// ```
     ///
-    /// Wraps: git_repository_get_namespace
+    /// Wraps: `git_repository_get_namespace`
+    #[must_use]
     pub fn namespace(&self) -> Option<&'a CStr> {
         // SAFETY: a live repository, only read; the routine casts away no constness.
         let namespace = unsafe { ffi::git_repository_get_namespace(self.as_ptr().cast_mut()) };
@@ -2897,11 +3095,12 @@ impl<'a> RepositoryRef<'a> {
     /// Borrowed from the repository, which keeps them until they are replaced (by an
     /// exclusive borrow) or the repository is freed.
     ///
-    /// Wraps: git_repository_ident
+    /// Wraps: `git_repository_ident`
+    #[must_use]
     pub fn ident(&self) -> (Option<&'a CStr>, Option<&'a CStr>) {
         let (mut name, mut email) = (ptr::null(), ptr::null());
         // SAFETY: two writable slots and a live repository, only read.
-        let rc = unsafe { ffi::git_repository_ident(&mut name, &mut email, self.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_ident(&raw mut name, &raw mut email, self.as_ptr()) };
         debug_assert_eq!(rc, 0, "git_repository_ident cannot fail");
         // SAFETY: each is NULL or the repository's own copy, which only an exclusive
         // borrow of the repository replaces or frees, so live for `'a`.
@@ -2916,9 +3115,11 @@ impl<'a> RepositoryRef<'a> {
     /// without paths ([`Repository::new`]) lacks: it then looks for `shallow` in the
     /// process's current directory.
     ///
-    /// Fails with libgit2's error when the file cannot be examined.
+    /// Wraps: `git_repository_is_shallow`
     ///
-    /// Wraps: git_repository_is_shallow
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when the file cannot be examined.
     pub fn is_shallow(&self) -> Result<bool, RepositoryError> {
         // SAFETY: a live repository, only read.
         answered(unsafe { ffi::git_repository_is_shallow(self.as_ptr().cast_mut()) })
@@ -2928,11 +3129,13 @@ impl<'a> RepositoryRef<'a> {
     /// its common directory or its working directory, with a trailing `/` for a
     /// directory.
     ///
+    /// Wraps: `git_repository_item_path`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] for an item the repository cannot have: one
     /// under a working directory in a bare repository, anything in a repository without
     /// paths ([`Repository::new`]).
-    ///
-    /// Wraps: git_repository_item_path
     pub fn item_path(&self, item: Item) -> Result<BufVal, RepositoryError> {
         let mut out = Buf::new();
         let buf = out.as_mut().as_mut_ptr();
@@ -2962,14 +3165,16 @@ impl<'a> RepositoryRef<'a> {
     /// drop(config);
     /// ```
     ///
-    /// Fails with libgit2's error (code `-1`) when a configuration file cannot be read.
+    /// Wraps: `git_repository_config`
     ///
-    /// Wraps: git_repository_config
+    /// # Errors
+    ///
+    /// Fails with libgit2's error (code `-1`) when a configuration file cannot be read.
     pub fn config(&self) -> Result<ConfigArc<'a>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose config cache libgit2
         // fills through this shared handle: the repository is used on this thread only.
-        let rc = unsafe { ffi::git_repository_config(&mut out, self.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_repository_config(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             // `out` may hold the repository's own reference, which is not ours.
             return failed(rc);
@@ -2985,14 +3190,17 @@ impl<'a> RepositoryRef<'a> {
     /// A config of its own, which no repository owns and whose backends read no
     /// repository (they copied the entries), so it outlives this one.
     ///
-    /// Fails with libgit2's error when a configuration file cannot be read.
+    /// Wraps: `git_repository_config_snapshot`
     ///
-    /// Wraps: git_repository_config_snapshot
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when a configuration file cannot be read.
     pub fn config_snapshot(&self) -> Result<ConfigBox<'static>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose config cache libgit2
         // fills through this shared handle: the repository is used on this thread only.
-        let rc = unsafe { ffi::git_repository_config_snapshot(&mut out, self.as_ptr().cast_mut()) };
+        let rc =
+            unsafe { ffi::git_repository_config_snapshot(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             return failed(rc);
         }
@@ -3009,15 +3217,17 @@ impl<'a> RepositoryRef<'a> {
     ///
     /// The index outlives the repository, which disowns it when freed.
     ///
+    /// Wraps: `git_repository_index`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error (code `-1`) when the index cannot be read, and for a
     /// repository without paths ([`Repository::new`]).
-    ///
-    /// Wraps: git_repository_index
     pub fn index(&self) -> Result<IndexArc, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose index cache libgit2 fills
         // through this shared handle: the repository is used on this thread only.
-        let rc = unsafe { ffi::git_repository_index(&mut out, self.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_repository_index(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             // `out` may hold the repository's own reference, which is not ours.
             return failed(rc);
@@ -3036,10 +3246,12 @@ impl<'a> RepositoryRef<'a> {
     /// itself when it is under the working directory, and no filters otherwise; an
     /// empty `as_path` applies none.
     ///
+    /// Wraps: `git_repository_hashfile`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when the file cannot be read, a filter fails (as
     /// `core.safecrlf` can), or the path is too long.
-    ///
-    /// Wraps: git_repository_hashfile
     pub fn hash_file(
         &self,
         path: &CStr,
@@ -3061,10 +3273,6 @@ impl<'a> RepositoryRef<'a> {
     /// The reference `HEAD` resolves to: the branch it names, or `HEAD` itself when it
     /// is detached.
     ///
-    /// Fails with [`ErrorCode::UnbornBranch`] when the branch `HEAD` names does not
-    /// exist yet, with [`ErrorCode::NotFound`] when there is no `HEAD`, and otherwise
-    /// with libgit2's error.
-    ///
     /// The reference reads the repository it came from, so it lives no longer than
     /// this borrow of it:
     ///
@@ -3077,12 +3285,18 @@ impl<'a> RepositoryRef<'a> {
     /// }
     /// ```
     ///
-    /// Wraps: git_repository_head
+    /// Wraps: `git_repository_head`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::UnbornBranch`] when the branch `HEAD` names does not
+    /// exist yet, with [`ErrorCode::NotFound`] when there is no `HEAD`, and otherwise
+    /// with libgit2's error.
     pub fn head(&self) -> Result<ReferenceBox<'a>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live repository, whose reference database
         // libgit2 loads through this shared handle on this thread only.
-        let rc = unsafe { ffi::git_repository_head(&mut out, self.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_repository_head(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             return failed(rc);
         }
@@ -3095,10 +3309,12 @@ impl<'a> RepositoryRef<'a> {
     /// Whether `HEAD` is detached: a direct reference, to an object the repository
     /// has. A `HEAD` naming a missing object reads as not detached.
     ///
+    /// Wraps: `git_repository_head_detached`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error (code `-1`) when `HEAD` or the object database cannot
     /// be read.
-    ///
-    /// Wraps: git_repository_head_detached
     pub fn is_head_detached(&self) -> Result<bool, RepositoryError> {
         // SAFETY: a live repository, whose object and reference databases libgit2 loads
         // through this shared handle on this thread only.
@@ -3108,10 +3324,12 @@ impl<'a> RepositoryRef<'a> {
     /// Whether the branch `HEAD` names does not exist yet: a new repository's, before
     /// its first commit.
     ///
+    /// Wraps: `git_repository_head_unborn`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error, always as code `-1`, when `HEAD` cannot be read or
     /// resolved.
-    ///
-    /// Wraps: git_repository_head_unborn
     pub fn is_head_unborn(&self) -> Result<bool, RepositoryError> {
         // SAFETY: a live repository, whose reference database libgit2 loads through this
         // shared handle on this thread only.
@@ -3121,10 +3339,12 @@ impl<'a> RepositoryRef<'a> {
     /// Whether the repository is empty: `HEAD` names the initial branch (`master`, or
     /// `init.defaultBranch`), and there is no reference at all.
     ///
+    /// Wraps: `git_repository_is_empty`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when there is no `HEAD`, and with libgit2's
     /// error when the configuration or the references cannot be read.
-    ///
-    /// Wraps: git_repository_is_empty
     pub fn is_empty(&self) -> Result<bool, RepositoryError> {
         // SAFETY: a live repository, whose reference database and config libgit2 loads
         // through this shared handle on this thread only.
@@ -3140,11 +3360,13 @@ impl<'a> RepositoryRef<'a> {
     /// [`UnattachedReference`], with the same name, target and peeled id, which may
     /// outlive this repository too.
     ///
+    /// Wraps: `git_repository_head_for_worktree`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when there is no worktree `name` (a
     /// repository without paths ([`Repository::new`]) has none) or the branch its
     /// `HEAD` names does not exist yet, and otherwise with libgit2's error.
-    ///
-    /// Wraps: git_repository_head_for_worktree
     pub fn head_for_worktree(
         &self,
         name: &CStr,
@@ -3154,36 +3376,43 @@ impl<'a> RepositoryRef<'a> {
         // SAFETY: a writable slot, a live repository with a common directory, only
         // read, and a NUL-terminated name, read for the call.
         let rc = unsafe {
-            ffi::git_repository_head_for_worktree(&mut out, self.as_ptr().cast_mut(), name.as_ptr())
+            ffi::git_repository_head_for_worktree(
+                &raw mut out,
+                self.as_ptr().cast_mut(),
+                name.as_ptr(),
+            )
         };
         if rc < 0 {
             return failed(rc);
         }
-        // SAFETY: on success, `out` is a fresh reference the caller owns, resolved to the
-        // end so direct, whose repository libgit2 has already freed: each getter reads
-        // only its fields, whose strings and ids live until it is freed below, past the
-        // copy, which takes its name, target and peeled id (set only for a packed tag's
-        // reference). `git_reference_free` gives back its database count, which the
-        // database, not the repository, keeps.
-        unsafe {
-            let name = CStr::from_ptr(ffi::git_reference_name(out));
-            let target = OidRef::from_ptr(ffi::git_reference_target(out).cast_mut());
-            let peel = OidRef::from_ptr(ffi::git_reference_target_peel(out).cast_mut());
-            let copy = target
-                .ok_or_else(last)
-                .and_then(|target| UnattachedReference::direct(name, target, peel))
-                .map_err(|error| RepositoryError { code: -1, error });
-            ffi::git_reference_free(out);
-            copy
-        }
+        // On success, `out` is a fresh reference the caller owns, resolved to the end so
+        // direct, whose repository libgit2 has already freed: each getter reads only its
+        // fields, whose strings and ids live until it is freed below, past the copy, which
+        // takes its name, target and peeled id (set only for a packed tag's reference).
+        // SAFETY: `out` is live, as above.
+        let name = unsafe { ffi::git_reference_name(out) };
+        // SAFETY: the name is NUL-terminated and lives until `out` is freed below, past the copy.
+        let name = unsafe { CStr::from_ptr(name) };
+        // SAFETY: as above.
+        let target = unsafe { ffi::git_reference_target(out) };
+        // SAFETY: the target id lives until `out` is freed below.
+        let target = unsafe { OidRef::from_ptr(target.cast_mut()) };
+        // SAFETY: as above.
+        let peel = unsafe { ffi::git_reference_target_peel(out) };
+        // SAFETY: NULL, or the peeled id, which lives until `out` is freed below.
+        let peel = unsafe { OidRef::from_ptr(peel.cast_mut()) };
+        let copy = target
+            .ok_or_else(last)
+            .and_then(|target| UnattachedReference::direct(name, target, peel))
+            .map_err(|error| RepositoryError { code: -1, error });
+        // SAFETY: the reference is freed once, after its last read; `git_reference_free` gives back
+        // its database count, which the database, not the repository, keeps.
+        unsafe { ffi::git_reference_free(out) };
+        copy
     }
 
     /// Whether the `HEAD` of the linked worktree `name` is detached: a direct
     /// reference, whether or not the repository has its object.
-    ///
-    /// Fails with [`ErrorCode::NotFound`] when there is no worktree `name` (a
-    /// repository without paths ([`Repository::new`]) has none) or the branch its
-    /// `HEAD` names does not exist yet, and otherwise with libgit2's error.
     ///
     /// `git_repository_head_detached_for_worktree` tests the type of the reference
     /// `HEAD` resolves to, which is direct whatever `HEAD` is, so it answers 1 for an
@@ -3192,12 +3421,20 @@ impl<'a> RepositoryRef<'a> {
     /// `HEAD` itself: it is exactly when `HEAD` is direct. The failures are the C
     /// routine's.
     ///
-    /// Replaces: git_repository_head_detached_for_worktree
+    /// Replaces: `git_repository_head_detached_for_worktree`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when there is no worktree `name` (a
+    /// repository without paths ([`Repository::new`]) has none) or the branch its
+    /// `HEAD` names does not exist yet, and otherwise with libgit2's error.
     pub fn is_head_detached_for_worktree(&self, name: &CStr) -> Result<bool, RepositoryError> {
         let head = self.head_for_worktree(name)?;
-        // SAFETY: a live reference the box owns; its name lives as long as it does,
-        // past the comparison.
-        let resolved = unsafe { CStr::from_ptr(ffi::git_reference_name(head.as_ref().as_ptr())) };
+        // SAFETY: a live reference the box owns.
+        let resolved = unsafe { ffi::git_reference_name(head.as_ref().as_ptr()) };
+        // SAFETY: its name is NUL-terminated and lives as long as the box does, past the
+        // comparison.
+        let resolved = unsafe { CStr::from_ptr(resolved) };
         Ok(resolved == c"HEAD")
     }
 
@@ -3205,12 +3442,14 @@ impl<'a> RepositoryRef<'a> {
     /// at, recording the move in `HEAD`'s reflog. An already detached `HEAD` is
     /// rewritten in place.
     ///
+    /// Wraps: `git_repository_detach_head`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::UnbornBranch`] when the branch `HEAD` names does not
     /// exist yet, with libgit2's error when `HEAD` resolves to anything but a commit (a
     /// tag included, which the header says is peeled; `HEAD` is then left alone), and
     /// when `HEAD` or its log cannot be written.
-    ///
-    /// Wraps: git_repository_detach_head
     pub fn detach_head(&self) -> Result<(), RepositoryError> {
         // SAFETY: a live repository, whose databases libgit2 loads and whose `HEAD` it
         // rewrites through this shared handle on this thread only; no handle reads
@@ -3229,9 +3468,6 @@ impl<'a> RepositoryRef<'a> {
     /// `git_commit_parent` and the other lookups through it read: so the array
     /// carries this borrow's `'a`, as the commits it lends do.
     ///
-    /// Fails with libgit2's error when `HEAD` cannot be resolved to a commit, or
-    /// `MERGE_HEAD` cannot be read or names something other than a commit.
-    ///
     /// This is `git_repository_commit_parents` composed from the routines it calls,
     /// for two of its defects:
     ///
@@ -3249,7 +3485,16 @@ impl<'a> RepositoryRef<'a> {
     ///
     /// Otherwise it gives what libgit2 gives, with the same errors.
     ///
-    /// Replaces: git_repository_commit_parents
+    /// Replaces: `git_repository_commit_parents`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when `HEAD` cannot be resolved to a commit, or
+    /// `MERGE_HEAD` cannot be read or names something other than a commit.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a peel succeeded without an object`, only if libgit2 breaks its contract.
     pub fn commit_parents(&self) -> Result<CommitArrayVal<'a>, RepositoryError> {
         let repo = self.as_ptr().cast_mut();
         // `HEAD` as `git_revparse_ext(.., "HEAD")` finds it: no id or description, so
@@ -3259,7 +3504,7 @@ impl<'a> RepositoryRef<'a> {
         let mut reference = ptr::null_mut();
         // SAFETY: a writable slot, a live repository, used on this thread only, and a
         // NUL-terminated name.
-        let rc = unsafe { ffi::git_reference_dwim(&mut reference, repo, c"HEAD".as_ptr()) };
+        let rc = unsafe { ffi::git_reference_dwim(&raw mut reference, repo, c"HEAD".as_ptr()) };
         if rc == ErrorCode::NotFound.raw() {
             return Ok(CommitArray::new());
         }
@@ -3267,17 +3512,13 @@ impl<'a> RepositoryRef<'a> {
             return failed(rc);
         }
         let mut head = ptr::null_mut();
-        // SAFETY: a writable slot; `reference` is the resolved, so direct, reference the
-        // lookup handed out, whose target lives until it is freed below, after the call;
-        // `GIT_OBJECT_ANY` accepts any object.
-        let rc = unsafe {
-            ffi::git_object_lookup(
-                &mut head,
-                repo,
-                ffi::git_reference_target(reference),
-                ffi::GIT_OBJECT_ANY,
-            )
-        };
+        // SAFETY: `reference` is the resolved, so direct, reference the lookup handed out, whose
+        // target lives until it is freed below, after the call.
+        let target = unsafe { ffi::git_reference_target(reference) };
+        // SAFETY: a writable slot, the live repository and that target; `GIT_OBJECT_ANY` accepts
+        // any object.
+        let rc =
+            unsafe { ffi::git_object_lookup(&raw mut head, repo, target, ffi::GIT_OBJECT_ANY) };
         // SAFETY: the reference is released once, whatever the lookup returned.
         unsafe { ffi::git_reference_free(reference) };
         if rc == ErrorCode::NotFound.raw() {
@@ -3289,7 +3530,7 @@ impl<'a> RepositoryRef<'a> {
         let mut first = ptr::null_mut();
         // SAFETY: `head` is the object the lookup handed out, which the caller owns, and
         // `first` a writable slot. `GIT_OBJECT_COMMIT` is a target libgit2 accepts.
-        let rc = unsafe { ffi::git_object_peel(&mut first, head, ffi::GIT_OBJECT_COMMIT) };
+        let rc = unsafe { ffi::git_object_peel(&raw mut first, head, ffi::GIT_OBJECT_COMMIT) };
         // SAFETY: `head` is released once; the peel took a reference of its own.
         unsafe { ffi::git_object_free(head) };
         if rc < 0 {
@@ -3347,7 +3588,7 @@ unsafe extern "C" fn collect_parent(oid: *const ffi::git_oid, payload: *mut c_vo
     let repo = parents.repo.as_ptr().cast_mut();
     // SAFETY: a writable slot, the live repository the collection was made for, used on
     // this thread only, and a live id of the repository's type (libgit2 parsed it so).
-    if unsafe { ffi::git_commit_lookup(&mut commit, repo, oid) } < 0 {
+    if unsafe { ffi::git_commit_lookup(&raw mut commit, repo, oid) } < 0 {
         return -1;
     }
     // SAFETY: on success one counted reference to a live commit of the collection's
@@ -3434,7 +3675,7 @@ type FetchheadFn<'f> = dyn FnMut(FetchheadEntry<'_>) -> ControlFlow<()> + 'f;
 /// [`for_each_fetchhead`](RepositoryRef::for_each_fetchhead) resumes the panic once C
 /// has returned.
 ///
-/// Wraps: git_repository_fetchhead_foreach_cb
+/// Wraps: `git_repository_fetchhead_foreach_cb`
 /// Handwritten
 pub struct FetchheadForeachCallback<'f> {
     callback: &'f mut FetchheadFn<'f>,
@@ -3459,6 +3700,10 @@ impl<'f> FetchheadForeachCallback<'f> {
 
     /// Calls the callback with `entry` through its C function, as libgit2 does, and
     /// returns what it answered. A panic of the closure is resumed here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is always set"
+    )]
     pub fn call(&mut self, entry: FetchheadEntry<'_>) -> ControlFlow<()> {
         let (callback, payload) = self.raw();
         let callback = callback.expect("the trampoline is always set");
@@ -3497,6 +3742,7 @@ impl<'f> FetchheadForeachCallback<'f> {
 
     /// Whether the last call stopped the iteration: the closure returned `Break`, or
     /// panicked. Tells the callback's `GIT_EUSER` from libgit2's own errors.
+    #[must_use]
     pub fn stopped(&self) -> bool {
         self.stopped
     }
@@ -3604,7 +3850,13 @@ impl RepositoryRef<'_> {
     /// "`git_repository_fetchhead_foreach` callback returned -7" as the thread's error
     /// unless one is set already (by a libgit2 call the closure made, say).
     ///
-    /// Wraps: git_repository_fetchhead_foreach
+    /// Wraps: `git_repository_fetchhead_foreach`
+    ///
+    /// # Errors
+    ///
+    /// Fails with `GIT_ERROR_FETCHHEAD` and the line's number for a malformed line, after the
+    /// entries before it were seen; with [`ErrorCode::NotFound`] when there is no `FETCH_HEAD`, and
+    /// for a repository without paths.
     pub fn for_each_fetchhead(
         &self,
         callback: &mut FetchheadForeachCallback<'_>,
@@ -3942,21 +4194,18 @@ mod unit_tests {
         #[test]
         fn unnamed_values_are_refused_with_their_value() {
             for raw in probes() {
-                match STATES.iter().find(|(r, _)| *r == raw) {
-                    Some((_, state)) => assert_eq!(RepositoryState::from_raw(raw), Some(*state)),
-                    None => {
-                        assert_eq!(RepositoryState::from_raw(raw), None);
-                        let err = RepositoryState::try_from(raw).unwrap_err();
-                        assert_eq!(err, UnnamedRepositoryState(raw));
-                        assert_eq!(err.raw(), raw);
-                        assert_eq!(
-                            err.to_string(),
-                            format!(
-                                "libgit2 repository state {raw} is not named by git2/repository.h"
-                            )
-                        );
-                        assert!(err.source().is_none());
-                    }
+                if let Some((_, state)) = STATES.iter().find(|(r, _)| *r == raw) {
+                    assert_eq!(RepositoryState::from_raw(raw), Some(*state));
+                } else {
+                    assert_eq!(RepositoryState::from_raw(raw), None);
+                    let err = RepositoryState::try_from(raw).unwrap_err();
+                    assert_eq!(err, UnnamedRepositoryState(raw));
+                    assert_eq!(err.raw(), raw);
+                    assert_eq!(
+                        err.to_string(),
+                        format!("libgit2 repository state {raw} is not named by git2/repository.h")
+                    );
+                    assert!(err.source().is_none());
                 }
             }
         }
@@ -3977,7 +4226,7 @@ mod unit_tests {
             );
             for raw in probes() {
                 let state = core::hint::black_box(RepositoryState::from_raw(raw));
-                assert_eq!(state.map(RepositoryState::raw).unwrap_or(raw), raw);
+                assert_eq!(state.map_or(raw, RepositoryState::raw), raw);
             }
         }
 
@@ -4019,7 +4268,7 @@ mod unit_tests {
                     "crustify-repository-unit-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = fs::remove_dir_all(&path);
+                drop(fs::remove_dir_all(&path));
                 let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
                 Self { path, c_path }
             }
@@ -4045,7 +4294,7 @@ mod unit_tests {
 
         impl Drop for Scratch {
             fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.path);
+                drop(fs::remove_dir_all(&self.path));
             }
         }
 
@@ -4074,9 +4323,9 @@ mod unit_tests {
         static REFUSING: AtomicBool = AtomicBool::new(false);
 
         unsafe extern "C" {
-            fn malloc(n: usize) -> *mut core::ffi::c_void;
-            fn realloc(p: *mut core::ffi::c_void, n: usize) -> *mut core::ffi::c_void;
-            fn free(p: *mut core::ffi::c_void);
+            fn malloc(n: usize) -> *mut c_void;
+            fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
+            fn free(p: *mut c_void);
         }
 
         /// libc's allocator, refusing everything while `REFUSING` is set.
@@ -4119,7 +4368,7 @@ mod unit_tests {
             // every member set; libgit2 copies it before anything is allocated.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };
@@ -4196,13 +4445,11 @@ mod unit_tests {
         /// `git_repository_is_bare` and `git_repository_oid_type` of a live repository.
         fn bare_and_type(repo: &RepositoryBox) -> (c_int, ffi::git_oid_t) {
             let raw = repo.as_ref().as_ptr();
-            // SAFETY: `raw` addresses the box's live repository, only read by both calls.
-            unsafe {
-                (
-                    ffi::git_repository_is_bare(raw),
-                    ffi::git_repository_oid_type(raw.cast_mut()),
-                )
-            }
+            // SAFETY: `raw` addresses the box's live repository, only read.
+            let bare = unsafe { ffi::git_repository_is_bare(raw) };
+            // SAFETY: as above.
+            let kind = unsafe { ffi::git_repository_oid_type(raw.cast_mut()) };
+            (bare, kind)
         }
 
         #[test]
@@ -4272,14 +4519,14 @@ mod unit_tests {
         }
 
         /// The adoption plumbing releases a repository C left in the slot of a failed
-        /// call, after the error is copied (LSan flags a leak, ASan a double free).
+        /// call, after the error is copied (`LSan` flags a leak, `ASan` a double free).
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn constructed_releases_a_repository_left_by_a_failure() {
             assert!(runtime_pinned());
             let mut out = ptr::null_mut();
             // SAFETY: `out` is a writable slot; the runtime is pinned.
-            assert_eq!(unsafe { ffi::git_repository_new(&mut out) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_new(&raw mut out) }, 0);
             assert!(!out.is_null());
             // SAFETY: `out` is the fresh repository just made, owned here alone.
             let repo = unsafe { RepositoryBox::from_c(out) };
@@ -4287,7 +4534,7 @@ mod unit_tests {
             assert_eq!(error.code(), Some(ErrorCode::Exists));
             let mut out = ptr::null_mut();
             // SAFETY: `out` is a writable slot; the runtime is pinned.
-            assert_eq!(unsafe { ffi::git_repository_new(&mut out) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_new(&raw mut out) }, 0);
             // SAFETY: as above.
             let repo = unsafe { RepositoryBox::from_c(out) };
             let error = constructed(1, repo).unwrap_err();
@@ -4322,7 +4569,7 @@ mod unit_tests {
             let mut out = ptr::null_mut();
             // SAFETY: `out` is a writable slot and the path NUL-terminated; the runtime is
             // pinned.
-            let rc = unsafe { ffi::git_repository_init(&mut out, c_side.c_path.as_ptr(), 1) };
+            let rc = unsafe { ffi::git_repository_init(&raw mut out, c_side.c_path.as_ptr(), 1) };
             let c_error = last();
             // SAFETY: C leaves the repository it opened in `out`, owned here; freed once.
             unsafe { ffi::git_repository_free(out) };
@@ -4414,6 +4661,10 @@ mod unit_tests {
         }
 
         #[test]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn each_setter_writes_its_field_only() {
             let s: Vec<CString> = ["work", "desc", "tpl", "trunk", "url"]
                 .iter()
@@ -4563,7 +4814,7 @@ mod unit_tests {
                 "crustify-repository-routines-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             path
         }
@@ -4642,10 +4893,10 @@ mod unit_tests {
             let dir = scratch("stale");
             let mut repo = Repository::init(&c_path(&dir), true).unwrap();
             lay_state(&dir);
-            crate::libgit2::util::sys::errors::set(ErrorClass::Odb, c"stale");
+            set(ErrorClass::Odb, c"stale");
             repo.as_mut().cleanup_state().unwrap();
             assert_eq!(last().class(), Some(ErrorClass::None));
-            assert!(state_left(&dir).is_empty());
+            assert!(state_left(&dir).is_empty(), "{:?}", state_left(&dir));
             drop(repo);
             fs::remove_dir_all(&dir).unwrap();
         }
@@ -4684,7 +4935,7 @@ mod unit_tests {
                     "crustify-repository-routines-unit-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = fs::remove_dir_all(&path);
+                drop(fs::remove_dir_all(&path));
                 fs::create_dir_all(&path).unwrap();
                 Self(path.canonicalize().unwrap())
             }
@@ -4696,7 +4947,7 @@ mod unit_tests {
 
         impl Drop for Scratch {
             fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.0);
+                drop(fs::remove_dir_all(&self.0));
             }
         }
 
@@ -4731,11 +4982,12 @@ mod unit_tests {
 
         /// A bare repository whose `MERGE_HEAD` lists [`IDS`].
         fn merging(scratch: &Scratch) -> RepositoryBox {
+            use std::fmt::Write as _;
             let repo = Repository::init(&scratch.c("repo"), true).unwrap();
-            let lines: String = IDS
-                .iter()
-                .map(|id| format!("{}\n", id.to_str().unwrap()))
-                .collect();
+            let lines = IDS.iter().fold(String::new(), |mut lines, id| {
+                let _ = writeln!(lines, "{}", id.to_str().unwrap());
+                lines
+            });
             fs::write(scratch.0.join("repo/MERGE_HEAD"), lines).unwrap();
             repo
         }
@@ -4748,14 +5000,10 @@ mod unit_tests {
         }
 
         unsafe extern "C" fn record(id: *const ffi::git_oid, payload: *mut c_void) -> c_int {
-            // SAFETY: the tests pass a live `Recorder` as the payload and libgit2 a live
-            // id; both are used for the call only.
-            let (recorder, id) = unsafe {
-                (
-                    &mut *payload.cast::<Recorder>(),
-                    OidRef::from_ptr(id.cast_mut()).unwrap(),
-                )
-            };
+            // SAFETY: the tests pass a live `Recorder` as the payload, used for the call only.
+            let recorder = unsafe { &mut *payload.cast::<Recorder>() };
+            // SAFETY: libgit2 passes a live id, used for the call only.
+            let id = unsafe { OidRef::from_ptr(id.cast_mut()) }.unwrap();
             recorder.seen.push(id.to_hex_string().unwrap());
             if recorder.seen.len() == recorder.stop_at {
                 recorder.code
@@ -4815,8 +5063,8 @@ mod unit_tests {
             };
             let mut callback = MergeheadCallback::new(&mut f);
             let mut rc = 0;
-            let panic = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                callback.walk_with(|cb, payload| rc = walk(&repo, cb, payload))
+            let panic = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| rc = walk(&repo, cb, payload));
             }));
             // The panic stopped the walk at the first id, without unwinding through C,
             // and resumed once it returned.
@@ -4839,19 +5087,19 @@ mod unit_tests {
             let mut callback = MergeheadCallback::new(&mut f);
             let id = Oid::zero(OidType::Sha1);
             let mut codes = Vec::new();
-            let panic = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let panic = panic::catch_unwind(AssertUnwindSafe(|| {
                 callback.walk_with(|cb, payload| {
                     let cb = cb.unwrap();
-                    // SAFETY: the payload is the live callback, used by nothing else
-                    // during the walk; NULL, then a live id, are the ids under test.
-                    unsafe {
-                        codes.push(cb(ptr::null(), payload));
-                        codes.push(cb(id.as_ref().as_ptr(), payload));
-                        // A walk that ignored the stop calls again: the pending panic
-                        // keeps the closure from running.
-                        codes.push(cb(id.as_ref().as_ptr(), payload));
-                    }
-                })
+                    // SAFETY: the payload is the live callback, used by nothing else during the
+                    // walk; NULL is an id under test.
+                    codes.push(unsafe { cb(ptr::null(), payload) });
+                    // SAFETY: as above, with a live id.
+                    codes.push(unsafe { cb(id.as_ref().as_ptr(), payload) });
+                    // A walk that ignored the stop calls again: the pending panic keeps the closure
+                    // from running.
+                    // SAFETY: as above.
+                    codes.push(unsafe { cb(id.as_ref().as_ptr(), payload) });
+                });
             }));
             assert_eq!(*panic.unwrap_err().downcast::<&str>().unwrap(), "first");
             drop(callback);
@@ -4864,13 +5112,15 @@ mod unit_tests {
             // SAFETY: the runtime is pinned by the repository the callers built; the
             // error is copied before the next libgit2 call.
             let e = unsafe { ffi::git_error_last() };
-            // SAFETY: `git_error_last` returns a live error with a message.
-            unsafe {
-                (
-                    (*e).klass,
-                    CStr::from_ptr((*e).message).to_string_lossy().into(),
-                )
-            }
+            // SAFETY: `git_error_last` returns a live error.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message = unsafe { (*e).message };
+            // SAFETY: its message is a NUL-terminated string, copied before the next libgit2 call.
+            (
+                klass,
+                unsafe { CStr::from_ptr(message) }.to_string_lossy().into(),
+            )
         }
 
         #[test]
@@ -4883,7 +5133,7 @@ mod unit_tests {
             let rc = unsafe { ffi::git_repository_message_remove(repo.as_c_ptr()) };
             assert_eq!(
                 (rc, c_last()),
-                (-1, (ffi::GIT_ERROR_NONE as c_int, "no error".into()))
+                (-1, (ffi::GIT_ERROR_NONE.cast_signed(), "no error".into()))
             );
 
             let error = repo.as_ref().remove_message().unwrap_err();
@@ -4917,7 +5167,8 @@ mod unit_tests {
 
             let mut wt = ptr::null_mut();
             // SAFETY: a live slot, repository and name.
-            let rc = unsafe { ffi::git_worktree_lookup(&mut wt, main.as_c_ptr(), c"wt".as_ptr()) };
+            let rc =
+                unsafe { ffi::git_worktree_lookup(&raw mut wt, main.as_c_ptr(), c"wt".as_ptr()) };
             assert_eq!(rc, 0, "{:?}", c_last());
             // SAFETY: the fresh worktree, owned here.
             let wt = unsafe { WorktreeBox::from_c(wt) }.unwrap();
@@ -4925,11 +5176,11 @@ mod unit_tests {
             clear();
             let mut out = ptr::null_mut();
             // SAFETY: a live slot and worktree.
-            let rc = unsafe { ffi::git_repository_open_from_worktree(&mut out, wt.as_c_ptr()) };
+            let rc = unsafe { ffi::git_repository_open_from_worktree(&raw mut out, wt.as_c_ptr()) };
             assert!(out.is_null());
             assert_eq!(
                 (rc, c_last()),
-                (-1, (ffi::GIT_ERROR_NONE as c_int, "no error".into()))
+                (-1, (ffi::GIT_ERROR_NONE.cast_signed(), "no error".into()))
             );
 
             let error = Repository::open_from_worktree(wt.as_ref()).unwrap_err();
@@ -5009,7 +5260,7 @@ mod unit_tests {
                 assert_eq!(
                     c_last(),
                     (
-                        ffi::GIT_ERROR_INVALID as c_int,
+                        ffi::GIT_ERROR_INVALID.cast_signed(),
                         "invalid argument: 'string'".into()
                     )
                 );
@@ -5090,7 +5341,7 @@ mod unit_tests {
                     "crustify-repository-routines-unit-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = fs::remove_dir_all(&root);
+                drop(fs::remove_dir_all(&root));
                 for &(name, to) in fixtures {
                     let to = root.join(to);
                     copy_tree(&Path::new(RESOURCES).join(name), &to);
@@ -5120,14 +5371,16 @@ mod unit_tests {
 
         impl Drop for Sandbox {
             fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.0);
+                drop(fs::remove_dir_all(&self.0));
             }
         }
 
         /// A live object's id, in hex.
         fn hex(object: *const ffi::git_object) -> String {
-            // SAFETY: the tests pass objects their arrays keep alive; the id is copied.
-            let id = unsafe { OidRef::from_ptr(ffi::git_object_id(object).cast_mut()) };
+            // SAFETY: the tests pass objects their arrays keep alive.
+            let id = unsafe { ffi::git_object_id(object) };
+            // SAFETY: the id lives with the object; it is copied below.
+            let id = unsafe { OidRef::from_ptr(id.cast_mut()) };
             id.unwrap().to_hex_string().unwrap()
         }
 
@@ -5159,7 +5412,8 @@ mod unit_tests {
             fn of(repo: &RepositoryBox) -> Self {
                 let mut raw = ffi::git_commitarray::default();
                 // SAFETY: an empty array and a live repository.
-                let rc = unsafe { ffi::git_repository_commit_parents(&mut raw, repo.as_c_ptr()) };
+                let rc =
+                    unsafe { ffi::git_repository_commit_parents(&raw mut raw, repo.as_c_ptr()) };
                 assert_eq!(rc, 0);
                 Self(raw)
             }
@@ -5167,8 +5421,13 @@ mod unit_tests {
             /// The objects C put in the array, which it keeps alive.
             fn objects(&self) -> Vec<*const ffi::git_object> {
                 (0..self.0.count)
-                    // SAFETY: libgit2 filled `count` live object pointers.
-                    .map(|i| unsafe { *self.0.commits.add(i) }.cast_const().cast())
+                    .map(|i| {
+                        // SAFETY: libgit2 filled `count` live object pointers, so `i < count` stays
+                        // within them.
+                        let slot = unsafe { self.0.commits.add(i) };
+                        // SAFETY: as above, `slot` addresses an initialised object pointer.
+                        unsafe { *slot }.cast_const().cast()
+                    })
                     .collect()
             }
         }
@@ -5177,7 +5436,7 @@ mod unit_tests {
             fn drop(&mut self) {
                 // SAFETY: what libgit2 filled, released once; `git_commit_free` releases
                 // any object type alike.
-                unsafe { ffi::git_commitarray_dispose(&mut self.0) };
+                unsafe { ffi::git_commitarray_dispose(&raw mut self.0) };
             }
         }
 
@@ -5185,7 +5444,7 @@ mod unit_tests {
         /// collected, `git_repository_commit_parents` frees that commit with `free`
         /// while the object cache holds it (a use after free on its next lookup, or
         /// when the repository is freed). The wrapper reports the failure, and the
-        /// commit stays cached and usable: ASan watches the lookups and the free.
+        /// commit stays cached and usable: `ASan` watches the lookups and the free.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn a_bad_merge_head_fails_without_freeing_cached_commits() {
@@ -5234,7 +5493,7 @@ mod unit_tests {
 
         /// Corrects C: with `HEAD` naming a missing object, `git_revparse_ext` (which
         /// `git_repository_commit_parents` calls) leaks `HEAD`'s reference. The wrapper
-        /// gives no parents, as C does, and LSan sees nothing left over.
+        /// gives no parents, as C does, and `LSan` sees nothing left over.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn a_head_at_a_missing_object_gives_no_parents_without_leaking() {
@@ -5273,7 +5532,7 @@ mod unit_tests {
             let tag = c.objects()[0];
             let commit = ffi::GIT_OBJECT_COMMIT;
             // SAFETY: a live tag object and a writable slot; the peel is freed below.
-            let rc = unsafe { ffi::git_object_peel(&mut peeled, tag, commit) };
+            let rc = unsafe { ffi::git_object_peel(&raw mut peeled, tag, commit) };
             assert_eq!(rc, 0);
             assert_eq!(ids(&rust), [hex(peeled)]);
             // SAFETY: the peel's own reference, released once.
@@ -5363,14 +5622,15 @@ mod unit_tests {
                 .unwrap();
             let raw = head.as_ref().as_ptr();
             // SAFETY: a live reference the box owns; its fields outlive the reads.
-            unsafe {
-                assert_eq!(
-                    CStr::from_ptr(ffi::git_reference_name(raw)),
-                    c"refs/heads/testrepo-worktree"
-                );
-                assert_eq!(ffi::git_reference_type(raw), ffi::GIT_REFERENCE_DIRECT);
-                assert!(ffi::git_reference_target_peel(raw).is_null());
-            }
+            let name = unsafe { ffi::git_reference_name(raw) };
+            // SAFETY: the name is NUL-terminated, live as above.
+            let ret = unsafe { CStr::from_ptr(name) };
+            assert_eq!(ret, c"refs/heads/testrepo-worktree");
+            // SAFETY: as above.
+            let ret = unsafe { ffi::git_reference_type(raw) };
+            assert_eq!(ret, ffi::GIT_REFERENCE_DIRECT);
+            // SAFETY: as above.
+            assert!(unsafe { ffi::git_reference_target_peel(raw) }.is_null());
         }
 
         fn entry(id: &Oid) -> FetchheadEntry<'_> {
@@ -5460,7 +5720,7 @@ mod unit_tests {
                 "crustify-repository-init-ext-unit-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             path
         }
@@ -5502,7 +5762,9 @@ mod unit_tests {
                 let mut out = ptr::null_mut();
                 // SAFETY: a writable slot, a NUL-terminated path and live options whose
                 // strings outlive the call.
-                let rc = unsafe { ffi::git_repository_init_ext(&mut out, path.as_ptr(), &mut c) };
+                let rc = unsafe {
+                    ffi::git_repository_init_ext(&raw mut out, path.as_ptr(), &raw mut c)
+                };
                 assert_eq!(rc, 0);
                 // SAFETY: the fresh repository, freed once.
                 unsafe { ffi::git_repository_free(out) };
@@ -5564,7 +5826,7 @@ mod unit_tests {
 
         /// `git_repository_init` returns 1 with a live repository when a reftable
         /// repository's `reftable` directory cannot be made; `init_ext` reads that as a
-        /// failure too, and frees the repository (LSan in the sanitized runs).
+        /// failure too, and frees the repository (`LSan` in the sanitized runs).
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn init_ext_fails_and_frees_on_a_positive_return() {

@@ -25,7 +25,7 @@ use libgit2::libgit2::util::errors::ErrorBuf;
 
 /// Takes a `git_libgit2_init` reference that is never released.
 fn init() {
-    core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
+    let _ = core::mem::ManuallyDrop::new(libgit2::libgit2::core::global::init().unwrap());
 }
 
 /// The thread's last libgit2 error, read through C: its class and message.
@@ -36,10 +36,14 @@ fn c_last() -> (c_int, String) {
     assert!(!e.is_null());
     // SAFETY: `e` is live (above), with a NUL-terminated message; both are copied out
     // before any other libgit2 call.
+    let klass = unsafe { (*e).klass };
+    // SAFETY: as above.
+    let message2 = unsafe { (*e).message };
+    // SAFETY: as above.
     unsafe {
         (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+            klass,
+            CStr::from_ptr(message2).to_string_lossy().into_owned(),
         )
     }
 }
@@ -59,7 +63,7 @@ impl TempDir {
     fn new(tag: &str) -> Self {
         let path =
             std::env::temp_dir().join(format!("crustify-odb-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -72,7 +76,7 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        drop(fs::remove_dir_all(&self.0));
     }
 }
 
@@ -105,7 +109,7 @@ fn c_built(rc: c_int, out: *mut ffi::git_odb) -> Result<COdb, (c_int, String)> {
 fn c_new() -> Result<COdb, (c_int, String)> {
     let mut out = ptr::null_mut();
     // SAFETY: `out` is a writable slot, filled with a fresh reference on success.
-    let rc = unsafe { ffi::git_odb_new(&mut out) };
+    let rc = unsafe { ffi::git_odb_new(&raw mut out) };
     c_built(rc, out)
 }
 
@@ -121,14 +125,14 @@ fn c_new_ext(opts: Option<&ffi::git_odb_options>) -> Result<COdb, (c_int, String
     let opts = opts.map_or(ptr::null(), ptr::from_ref);
     // SAFETY: `out` is a writable slot; `opts` is NULL or a live options struct, read
     // for the call only.
-    let rc = unsafe { ffi::git_odb_new_ext(&mut out, opts) };
+    let rc = unsafe { ffi::git_odb_new_ext(&raw mut out, opts) };
     c_built(rc, out)
 }
 
 fn c_open(dir: &CStr) -> Result<COdb, (c_int, String)> {
     let mut out = ptr::null_mut();
     // SAFETY: `out` is a writable slot; `dir` is NUL-terminated, read for the call.
-    let rc = unsafe { ffi::git_odb_open(&mut out, dir.as_ptr()) };
+    let rc = unsafe { ffi::git_odb_open(&raw mut out, dir.as_ptr()) };
     c_built(rc, out)
 }
 
@@ -136,7 +140,7 @@ fn c_open_ext(dir: &CStr, opts: Option<&ffi::git_odb_options>) -> Result<COdb, (
     let mut out = ptr::null_mut();
     let opts = opts.map_or(ptr::null(), ptr::from_ref);
     // SAFETY: as `c_open`; `opts` is NULL or a live options struct, read for the call.
-    let rc = unsafe { ffi::git_odb_open_ext(&mut out, dir.as_ptr(), opts) };
+    let rc = unsafe { ffi::git_odb_open_ext(&raw mut out, dir.as_ptr(), opts) };
     c_built(rc, out)
 }
 
@@ -165,6 +169,10 @@ enum Seen {
 
 /// The thread's last error with the random suffix of a loose backend's temporary
 /// file name (`tmp_object_git2_<hex>`) blanked, so two writes' failures compare.
+#[expect(
+    clippy::items_after_statements,
+    reason = "each helper item sits beside the steps that use it"
+)]
 fn c_last_normalized() -> (c_int, String) {
     let (class, mut message) = c_last();
     const TMP: &str = "tmp_object_git2_";
@@ -191,7 +199,7 @@ fn step(odb: *mut ffi::git_odb, op: Op<'_>) -> Seen {
             // read for the call only.
             let rc = unsafe {
                 ffi::git_odb_write(
-                    &mut id,
+                    &raw mut id,
                     odb,
                     data.as_ptr().cast(),
                     data.len(),
@@ -208,7 +216,9 @@ fn step(odb: *mut ffi::git_odb, op: Op<'_>) -> Seen {
             let id = ffi::git_oid { type_, id };
             let (mut len, mut kind) = (usize::MAX, ffi::git_object_t::MAX);
             // SAFETY: `len` and `kind` are writable slots; `id` is a live `git_oid`.
-            let rc = unsafe { ffi::git_odb_read_header(&mut len, &mut kind, odb, &id) };
+            let rc = unsafe {
+                ffi::git_odb_read_header(&raw mut len, &raw mut kind, odb, &raw const id)
+            };
             if rc == 0 {
                 Seen::Header(kind, len)
             } else {
@@ -218,7 +228,7 @@ fn step(odb: *mut ffi::git_odb, op: Op<'_>) -> Seen {
         Op::Exists((type_, id)) => {
             let id = ffi::git_oid { type_, id };
             // SAFETY: `id` is a live `git_oid`, read for the call only.
-            Seen::Exists(unsafe { ffi::git_odb_exists(odb, &id) })
+            Seen::Exists(unsafe { ffi::git_odb_exists(odb, &raw const id) })
         }
     }
 }
@@ -457,7 +467,8 @@ impl Repo {
     fn wrap(odb: *mut ffi::git_odb) -> Self {
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a writable slot; `odb` is live.
-        assert_eq!(unsafe { ffi::git_repository_wrap_odb(&mut repo, odb) }, 0);
+        let ret = unsafe { ffi::git_repository_wrap_odb(&raw mut repo, odb) };
+        assert_eq!(ret, 0);
         Self(repo)
     }
 
@@ -465,7 +476,7 @@ impl Repo {
     fn odb(&self) -> COdb {
         let mut odb = ptr::null_mut();
         // SAFETY: `self.0` is live; the result is a new reference to its odb.
-        assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, self.0) }, 0);
+        assert_eq!(unsafe { ffi::git_repository_odb(&raw mut odb, self.0) }, 0);
         COdb(odb)
     }
 }
@@ -516,7 +527,7 @@ fn a_shared_odb_lives_as_long_as_in_c() {
     let rust = {
         let raw = rust_repo.odb();
         let adopted = raw.0;
-        core::mem::forget(raw);
+        let _ = core::mem::ManuallyDrop::new(raw);
         // The test's own reference, handed to the Rust owner the wrapper of
         // `git_repository_odb` will return, borrowing `rust_repo`.
         // SAFETY: `adopted` is the one reference `git_repository_odb` just returned, to

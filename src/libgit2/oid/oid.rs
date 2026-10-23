@@ -60,7 +60,7 @@ use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 /// the repository's type), and its routines that return a type answer `0` when they
 /// have none. [`from_raw`](Self::from_raw) gives `None` for all of them.
 ///
-/// Wraps: git_oid_t
+/// Wraps: `git_oid_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -75,6 +75,7 @@ pub enum OidType {
 impl OidType {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_oid_t) -> Option<Self> {
         match raw {
             ffi::GIT_OID_SHA1 => Some(Self::Sha1),
@@ -84,12 +85,14 @@ impl OidType {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_oid_t {
         self as ffi::git_oid_t
     }
 
     /// The size in bytes of an id of this type (`GIT_OID_SHA1_SIZE`,
     /// `GIT_OID_SHA256_SIZE`).
+    #[must_use]
     pub const fn size(self) -> usize {
         match self {
             Self::Sha1 => ffi::GIT_OID_SHA1_SIZE as usize,
@@ -99,6 +102,7 @@ impl OidType {
 
     /// The length in hex digits of an id of this type (`GIT_OID_SHA1_HEXSIZE`,
     /// `GIT_OID_SHA256_HEXSIZE`).
+    #[must_use]
     pub const fn hex_size(self) -> usize {
         match self {
             Self::Sha1 => ffi::GIT_OID_SHA1_HEXSIZE as usize,
@@ -139,6 +143,7 @@ pub struct UnnamedOidType(ffi::git_oid_t);
 
 impl UnnamedOidType {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_oid_t {
         self.0
     }
@@ -206,10 +211,12 @@ impl Oid {
     /// Parses the hex id `s` of type `kind`: exactly 40 characters for SHA1, 64 for
     /// SHA256, in either case.
     ///
+    /// Wraps: `git_oid_from_string`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, for a non-hex character or a string of another
     /// length.
-    ///
-    /// Wraps: git_oid_from_string
     pub fn from_string(s: &CStr, kind: OidType) -> Result<Oid, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -228,11 +235,14 @@ impl Oid {
     /// Parses the hex prefix `prefix` of an id of type `kind`, zeroing the rest; an
     /// odd-length prefix leaves the last byte's low nibble zero.
     ///
-    /// `prefix` need not be NUL-terminated. Fails, with libgit2's error, for an empty
-    /// prefix, one longer than the type's [`hex_size`](OidType::hex_size), or a non-hex
-    /// character.
+    /// `prefix` need not be NUL-terminated.
     ///
-    /// Wraps: git_oid_from_prefix
+    /// Wraps: `git_oid_from_prefix`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, for an empty prefix, one longer than the type's
+    /// [`hex_size`](OidType::hex_size), or a non-hex character.
     pub fn from_prefix(prefix: &[u8], kind: OidType) -> Result<Oid, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -256,12 +266,14 @@ impl Oid {
     /// The id of type `kind` whose raw bytes are `raw`: exactly
     /// [`kind.size()`](OidType::size) of them, 20 for SHA1 and 32 for SHA256.
     ///
+    /// Wraps: `git_oid_from_raw`
+    ///
+    /// # Errors
+    ///
     /// C reads as many bytes as the type needs from a pointer with no length; a `raw` of
     /// another length is refused here before the call, with a `GIT_ERROR_INVALID`
     /// "unable to parse OID - invalid raw length" error set on the thread as libgit2
     /// sets its own.
-    ///
-    /// Wraps: git_oid_from_raw
     pub fn from_raw(raw: &[u8], kind: OidType) -> Result<Oid, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -289,6 +301,7 @@ impl Oid {
     /// typeless `GIT_OID_NONE`, it has a type, so every formatter accepts it.
     ///
     /// Handwritten
+    #[must_use]
     pub fn zero(kind: OidType) -> Oid {
         let mut oid = Oid::zeroed();
         oid.as_mut().set_kind(kind);
@@ -311,7 +324,8 @@ impl<'a> OidRef<'a> {
     /// The type of the id; `None` for 0 (no type, as in a zeroed oid) or any other
     /// byte the header does not name, which [`raw_kind`](Self::raw_kind) has.
     ///
-    /// Field: git_oid.type
+    /// Field: `git_oid.type`
+    #[must_use]
     pub fn kind(&self) -> Option<OidType> {
         OidType::from_raw(self.raw_kind().into())
     }
@@ -319,39 +333,52 @@ impl<'a> OidRef<'a> {
     /// The type of the id as libgit2 stores it, a `git_oid_t` value in one byte:
     /// whatever byte C left there, named or not.
     ///
-    /// Field: git_oid.type
+    /// Field: `git_oid.type`
+    #[must_use]
     pub fn raw_kind(&self) -> u8 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let type_ptr = unsafe { &raw const (*self.as_ptr()).type_ };
         // SAFETY: a read through the shared handle's pointer to a live `git_oid`; any
         // byte is a valid `u8`.
-        unsafe { addr_of!((*self.as_ptr()).type_).read() }
+        unsafe { type_ptr.read() }
     }
 
     /// The raw id bytes, copied out: all 32, of which a SHA1 id uses the first 20 and
     /// libgit2's parsers zero the rest.
     ///
-    /// Field: git_oid.id
+    /// Field: `git_oid.id`
+    #[must_use]
     pub fn id(&self) -> [u8; MAX_SIZE] {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let id_ptr = unsafe { &raw const (*self.as_ptr()).id };
         // SAFETY: a read through the shared handle's pointer to a live `git_oid`; every
         // byte array is valid.
-        unsafe { addr_of!((*self.as_ptr()).id).read() }
+        unsafe { id_ptr.read() }
     }
 
     /// The raw id bytes, borrowed in place as a run of 32 for as long as the oid is.
     ///
-    /// Field: git_oid.id
+    /// Field: `git_oid.id`
+    #[must_use]
     pub fn id_bytes(&self) -> CSlice<'a, u8> {
-        // SAFETY: the field projected from the shared handle's pointer to a live
-        // `git_oid` is 32 initialised bytes, non-NULL, which outlive `'a` with it; the
-        // run reads them only, as the handle does.
-        unsafe {
-            let id = addr_of!((*self.as_ptr()).id).cast::<u8>().cast_mut();
-            CSlice::from_raw_parts(NonNull::new_unchecked(id), MAX_SIZE)
+        {
+            // SAFETY: the field projected from the shared handle's pointer to a live
+            // `git_oid` is 32 initialised bytes, non-NULL, which outlive `'a` with it; the
+            // run reads them only, as the handle does.
+            let id = unsafe { addr_of!((*self.as_ptr()).id).cast::<u8>().cast_mut() };
+            // SAFETY: as above.
+            let value2 = unsafe { NonNull::new_unchecked(id) };
+            // SAFETY: as above.
+            unsafe { CSlice::from_raw_parts(value2, MAX_SIZE) }
         }
     }
 
     /// A copy of the oid, as a value of its own.
     ///
-    /// Wraps: git_oid_cpy
+    /// Wraps: `git_oid_cpy`
+    #[must_use]
     pub fn to_oid(&self) -> Oid {
         let mut oid = Oid::zeroed();
         oid.as_mut().copy_from(*self);
@@ -389,7 +416,8 @@ impl OidRef<'_> {
     /// `len` compares the high nibble of the last byte. A `len` beyond
     /// `GIT_OID_MAX_HEXSIZE` compares all 32 id bytes, and 0 only the types.
     ///
-    /// Wraps: git_oid_ncmp
+    /// Wraps: `git_oid_ncmp`
+    #[must_use]
     pub fn eq_prefix(&self, other: OidRef<'_>, len: usize) -> bool {
         // SAFETY: two shared handles to live `git_oid`s, possibly the same one, read for
         // the call only; libgit2 caps `len` at `GIT_OID_MAX_HEXSIZE` digits, so it reads
@@ -399,7 +427,8 @@ impl OidRef<'_> {
 
     /// Whether all 32 id bytes are zero, whatever the type byte holds.
     ///
-    /// Wraps: git_oid_is_zero
+    /// Wraps: `git_oid_is_zero`
+    #[must_use]
     pub fn is_zero(&self) -> bool {
         // SAFETY: a shared handle to a live `git_oid`, of which libgit2 reads the 32 id
         // bytes for the call only.
@@ -416,7 +445,8 @@ impl OidRef<'_> {
     /// -1, which a byte difference of -1 also is. Check the string first, with
     /// [`Oid::from_prefix`], where that matters.
     ///
-    /// Wraps: git_oid_strcmp
+    /// Wraps: `git_oid_strcmp`
+    #[must_use]
     pub fn cmp_hex(&self, hex: &CStr) -> Ordering {
         // SAFETY: a shared handle to a live `git_oid`, of which libgit2 reads at most the
         // id's size in bytes; `hex` is NUL-terminated, and libgit2 checks for the NUL
@@ -428,7 +458,8 @@ impl OidRef<'_> {
     /// Whether [`cmp_hex`](Self::cmp_hex) finds `hex` equal to this id: `hex` is a hex
     /// prefix of it (or longer, its extra digits ignored).
     ///
-    /// Wraps: git_oid_streq
+    /// Wraps: `git_oid_streq`
+    #[must_use]
     pub fn eq_hex(&self, hex: &CStr) -> bool {
         // SAFETY: as in `cmp_hex`: libgit2 reads at most the id's bytes, and `hex` up to
         // its NUL; neither is retained.
@@ -438,10 +469,12 @@ impl OidRef<'_> {
     /// Formats the id as its [`hex_size`](OidType::hex_size) lowercase hex digits at the
     /// start of `out`, and returns them; the rest of `out` is left as it was.
     ///
+    /// Wraps: `git_oid_fmt`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
     /// nothing.
-    ///
-    /// Wraps: git_oid_fmt
     pub fn format<'b>(&self, out: &'b mut [u8; MAX_HEX_SIZE]) -> Result<&'b str, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -461,10 +494,12 @@ impl OidRef<'_> {
     /// past the id's [`hex_size`](OidType::hex_size), `out` is zero-filled instead, and
     /// the digits returned are all of them. Nothing is NUL-terminated otherwise.
     ///
+    /// Wraps: `git_oid_nfmt`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
     /// nothing.
-    ///
-    /// Wraps: git_oid_nfmt
     pub fn format_prefix<'b>(&self, out: &'b mut [u8]) -> Result<&'b str, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -484,10 +519,12 @@ impl OidRef<'_> {
     /// first two hex digits, a `/`, then the rest, one byte longer than its
     /// [`hex_size`](OidType::hex_size). Returns it; the rest of `out` is left as it was.
     ///
+    /// Wraps: `git_oid_pathfmt`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, writing
     /// nothing.
-    ///
-    /// Wraps: git_oid_pathfmt
     pub fn format_path<'b>(
         &self,
         out: &'b mut [u8; MAX_HEX_SIZE + 1],
@@ -503,7 +540,7 @@ impl OidRef<'_> {
         if rc != 0 {
             return Err(last());
         }
-        Ok(hex_str(&out[..self.hex_len() + 1]))
+        Ok(hex_str(&out[..=self.hex_len()]))
     }
 
     /// Formats the id into `out` as a NUL-terminated string, truncated to
@@ -512,11 +549,18 @@ impl OidRef<'_> {
     /// gives the empty string, writing nothing and reporting nothing, whatever the
     /// type.
     ///
+    /// Wraps: `git_oid_tostr`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, for an oid of a type libgit2 does not know, having
     /// written only a NUL at the start of `out`: C returns that empty string and leaves
     /// the error on the thread.
     ///
-    /// Wraps: git_oid_tostr
+    /// # Panics
+    ///
+    /// Panics, with `git_oid_tostr NUL-terminates within its buffer`, only if libgit2 breaks its
+    /// contract.
     pub fn format_cstr<'b>(&self, out: &'b mut [u8]) -> Result<&'b CStr, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -544,13 +588,15 @@ impl OidRef<'_> {
     /// The id's hex form, formatted by libgit2 into its per-thread string and copied out
     /// before that is overwritten.
     ///
+    /// Wraps: `git_oid_tostr_s`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, when libgit2 cannot allocate the string, and for an
     /// oid of a type libgit2 does not know: C formats nothing then, and returns the
     /// thread's string as the last call left it, unwritten and unterminated on the
     /// thread's first call. It is refused here before the call instead, with the
     /// `GIT_ERROR_INVALID` "unable to parse OID - unknown type" error C sets.
-    ///
-    /// Wraps: git_oid_tostr_s
     pub fn to_hex_string(&self) -> Result<String, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -575,6 +621,10 @@ impl OidRef<'_> {
 
     /// The number of hex digits libgit2 formats the id with: its type's
     /// [`hex_size`](OidType::hex_size), 0 for a type libgit2 does not know.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers hold a reference to the value"
+    )]
     fn hex_len(&self) -> usize {
         self.kind().map_or(0, OidType::hex_size)
     }
@@ -588,7 +638,7 @@ fn hex_str(digits: &[u8]) -> &str {
 impl<'b> PartialEq<OidRef<'b>> for OidRef<'_> {
     /// Whether the two oids are byte for byte the same, type included.
     ///
-    /// Wraps: git_oid_equal
+    /// Wraps: `git_oid_equal`
     fn eq(&self, other: &OidRef<'b>) -> bool {
         // SAFETY: two shared handles to live `git_oid`s, possibly the same one, compared
         // with `memcmp` for the call only.
@@ -616,7 +666,7 @@ impl Ord for OidRef<'_> {
     /// Orders the two oids as libgit2 does: `memcmp` over all 33 bytes, so by type
     /// first, then by raw id.
     ///
-    /// Wraps: git_oid_cmp
+    /// Wraps: `git_oid_cmp`
     fn cmp(&self, other: &Self) -> Ordering {
         // SAFETY: two shared handles to live `git_oid`s, possibly the same one, compared
         // with `memcmp` for the call only.
@@ -654,42 +704,54 @@ impl Ord for Oid {
 impl OidMut<'_> {
     /// Replaces the type.
     ///
-    /// Field: git_oid.type
+    /// Field: `git_oid.type`
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "every `git_oid_t` constant fits the byte libgit2 stores it in"
+    )]
     pub fn set_kind(&mut self, kind: OidType) {
-        // Every `git_oid_t` constant fits the byte libgit2 stores it in.
         self.set_raw_kind(kind.raw() as u8);
     }
 
     /// Replaces the type byte. Any value is accepted: libgit2 rejects or ignores a type
     /// it does not know.
     ///
-    /// Field: git_oid.type
+    /// Field: `git_oid.type`
     pub fn set_raw_kind(&mut self, kind: u8) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let type_ptr = unsafe { &raw mut (*self.as_mut_ptr()).type_ };
         // SAFETY: a write through the exclusive handle's pointer to a live `git_oid`;
         // the field is a plain byte.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).type_).write(kind) }
+        unsafe { type_ptr.write(kind) }
     }
 
     /// Replaces all 32 raw id bytes.
     ///
-    /// Field: git_oid.id
+    /// Field: `git_oid.id`
     pub fn set_id(&mut self, id: [u8; MAX_SIZE]) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let id_ptr = unsafe { &raw mut (*self.as_mut_ptr()).id };
         // SAFETY: a write through the exclusive handle's pointer to a live `git_oid`;
         // the field is plain bytes.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).id).write(id) }
+        unsafe { id_ptr.write(id) }
     }
 
     /// The raw id bytes, borrowed exclusively in place as a run of 32, for editing
     /// some of them.
     ///
-    /// Field: git_oid.id
+    /// Field: `git_oid.id`
     pub fn id_mut(&mut self) -> CSliceMut<'_, u8> {
-        // SAFETY: the field projected from the exclusive handle's pointer to a live
-        // `git_oid` is 32 initialised bytes, non-NULL; the run borrows this handle
-        // mutably, so nothing else reaches them while it lives.
-        unsafe {
-            let id = addr_of_mut!((*self.as_mut_ptr()).id).cast::<u8>();
-            CSliceMut::from_raw_parts(NonNull::new_unchecked(id), MAX_SIZE)
+        {
+            // SAFETY: the field projected from the exclusive handle's pointer to a live
+            // `git_oid` is 32 initialised bytes, non-NULL; the run borrows this handle
+            // mutably, so nothing else reaches them while it lives.
+            let id = unsafe { addr_of_mut!((*self.as_mut_ptr()).id).cast::<u8>() };
+            // SAFETY: as above.
+            let value2 = unsafe { NonNull::new_unchecked(id) };
+            // SAFETY: as above.
+            unsafe { CSliceMut::from_raw_parts(value2, MAX_SIZE) }
         }
     }
 
@@ -707,7 +769,7 @@ impl OidMut<'_> {
     /// oid.as_mut().copy_from(src);
     /// ```
     ///
-    /// Wraps: git_oid_cpy
+    /// Wraps: `git_oid_cpy`
     pub fn copy_from(&mut self, src: OidRef<'_>) {
         // SAFETY: `out` is the exclusive handle's pointer to a live `git_oid` and `src`
         // a shared handle's to another live one: the exclusive borrow rules out their
@@ -738,7 +800,7 @@ impl OidMut<'_> {
 /// }
 /// ```
 ///
-/// Wraps: git_oid_shorten
+/// Wraps: `git_oid_shorten`
 /// Handwritten
 #[repr(transparent)]
 pub struct OidShortener<'s>(ffi::git_oid_shorten, PhantomData<(*const (), &'s [u8])>);
@@ -789,21 +851,28 @@ unsafe impl Send for OidShortener<'_> {}
 // routine taking a `const git_oid_shorten *` — so shared access reads nothing.
 unsafe impl Sync for OidShortener<'_> {}
 
-impl<'a, 's> OidShortenerRef<'a, 's> {
+impl OidShortenerRef<'_, '_> {
     /// Read-only pointer to the C object.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_oid_shorten {
         self.0.as_non_null().as_ptr().cast()
     }
 }
 
-impl<'a, 's> OidShortenerMut<'a, 's> {
+impl<'s> OidShortenerMut<'_, 's> {
     /// Writable pointer to the C object, for `git_oid_shorten_add`.
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_oid_shorten {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> OidShortenerRef<'_, 's> {
         self.0
     }
@@ -820,8 +889,6 @@ impl<'a, 's> OidShortenerMut<'a, 's> {
     /// libgit2 reads the first 40 digits of `id` (a SHA1 id's length) and no further: a
     /// longer id, such as a SHA256 one, is shortened on those. It keeps pointers into
     /// them for later additions to read, so `id` is borrowed for the shortener's `'s`.
-    ///
-    /// Fails, with libgit2's error:
     ///
     /// - when `id` does not start with 40 hex digits. C validates only the digits it walks before
     ///   finding a free slot, and keeps the rest for a later addition to index its trie with,
@@ -841,7 +908,11 @@ impl<'a, 's> OidShortenerMut<'a, 's> {
     /// (the thread's error buffer has already failed to grow, which leaves it unusable
     /// for the thread's lifetime) aborts too, rather than risk the next addition.
     ///
-    /// Wraps: git_oid_shorten_add
+    /// Wraps: `git_oid_shorten_add`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error:
     pub fn add(&mut self, id: &'s str) -> Result<usize, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -901,7 +972,7 @@ impl fmt::Debug for OidShortenerMut<'_, '_> {
 /// Releases a shortener through `git_oid_shorten_free`, which frees its trie and then
 /// the struct, and never touches the text ids it borrowed.
 ///
-/// Wraps: git_oid_shorten_free
+/// Wraps: `git_oid_shorten_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OidShortenerFree;
@@ -925,6 +996,10 @@ impl<'s> OidShortener<'s> {
     /// A new, empty shortener whose results are never below `min_length`, even where a
     /// shorter prefix would be unique.
     ///
+    /// Wraps: `git_oid_shorten_new`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, when libgit2 runs out of memory or `min_length` does
     /// not survive a round trip through a C `int`, as libgit2 requires: it must be at
     /// most `i32::MAX`, or the sign extension of a negative `int` (`usize::MAX` reads
@@ -932,15 +1007,13 @@ impl<'s> OidShortener<'s> {
     /// length with an assertion, which aborts the process in a debug build of libgit2;
     /// it is refused here before the call instead, with the `GIT_ERROR_INVALID` error a
     /// release build of libgit2 sets.
-    ///
-    /// Wraps: git_oid_shorten_new
     pub fn new(min_length: usize) -> Result<OidShortenerBox<'s>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
         }
-        // C's `(size_t)((int)min_length) == min_length`: `as` truncates, then
-        // sign-extends back.
-        if min_length as c_int as usize != min_length {
+        // C's `(size_t)((int)min_length) == min_length`: the length, read as signed,
+        // must fit an `int`.
+        if c_int::try_from(min_length.cast_signed()).is_err() {
             set(
                 ErrorClass::Invalid,
                 c"invalid argument: '(size_t)((int)min_length) == min_length'",
@@ -1047,7 +1120,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -1153,7 +1226,8 @@ mod unit_tests {
     fn copy_from_and_to_oid_copy_every_byte() {
         let mut src = Oid::zeroed();
         src.as_mut().set_raw_kind(0xAB);
-        src.as_mut().set_id(core::array::from_fn(|i| i as u8));
+        src.as_mut()
+            .set_id(core::array::from_fn(|i| i.to_le_bytes()[0]));
         let mut dst = Oid::zeroed();
         dst.as_mut().set_id([0xFF; MAX_SIZE]);
         dst.as_mut().copy_from(src.as_ref());
@@ -1221,13 +1295,17 @@ mod unit_tests {
             );
         }
         // Sign-extended negative `int`s round-trip, as in C.
-        for min_length in [c_int::MAX as usize, c_int::MIN as usize, usize::MAX] {
+        for min_length in [
+            c_int::MAX as usize,
+            isize::try_from(c_int::MIN).unwrap().cast_unsigned(),
+            usize::MAX,
+        ] {
             assert!(OidShortener::new(min_length).is_ok(), "{min_length}");
         }
     }
 
     /// Adopting a raw `git_oid_shorten_new` result, and the drop plumbing: each owner
-    /// releases its shortener once (LSan, in the asan variant, flags a leak, ASan a
+    /// releases its shortener once (`LSan`, in the asan variant, flags a leak, `ASan` a
     /// double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1430,7 +1508,7 @@ mod unit_tests {
         let r = long.as_ref();
         {
             let short = oids[2];
-            assert!(r == short.as_ref());
+            assert_eq!(r, short.as_ref());
         }
     }
 
@@ -1562,7 +1640,7 @@ mod unit_tests {
                 for id in &ids[..15] {
                     assert_eq!(b.as_mut().add(id), Ok(1));
                 }
-                let _ = b.as_mut().add(&ids[15]);
+                drop(b.as_mut().add(&ids[15]));
                 unreachable!("add returned with the trie lost");
             },
         );
@@ -1574,7 +1652,7 @@ mod unit_tests {
         for kind in [OidType::Sha1, OidType::Sha256] {
             let zero = Oid::zero(kind);
             assert_eq!(zero.as_ref().kind(), Some(kind));
-            assert_eq!(zero.as_ref().raw_kind(), kind.raw() as u8);
+            assert_eq!(zero.as_ref().raw_kind(), u8::try_from(kind.raw()).unwrap());
             assert_eq!(zero.as_ref().id(), [0; MAX_SIZE]);
             let mut by_hand = Oid::zeroed();
             by_hand.as_mut().set_kind(kind);
@@ -1607,7 +1685,7 @@ mod unit_tests {
     }
 
     /// `std`'s default hasher over a value.
-    fn rust_hash<T: core::hash::Hash>(value: &T) -> u64 {
+    fn rust_hash<T: Hash>(value: &T) -> u64 {
         use std::hash::{BuildHasher, RandomState};
         thread_local!(static STATE: RandomState = RandomState::new());
         STATE.with(|s| s.hash_one(value))

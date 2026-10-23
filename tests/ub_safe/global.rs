@@ -5,8 +5,8 @@
 //! `Runtime` releases exactly the reference it took, from any thread, so the count
 //! never goes negative, and no safe wrapper's state is torn down under it: wrappers
 //! that need libgit2 pin a reference of their own for the rest of the process. The
-//! tests take and release references across threads (TSan), drop references while
-//! pinned objects are live (ASan), and cycle libgit2 through full shutdowns.
+//! tests take and release references across threads (`TSan`), drop references while
+//! pinned objects are live (`ASan`), and cycle libgit2 through full shutdowns.
 
 use std::thread;
 
@@ -98,7 +98,7 @@ fn dropping_the_runtime_keeps_pinned_state() {
             assert!(extensions.as_ref().iter().any(|e| e == c"noop"));
             assert!(agent.to_bytes().starts_with(b"libgit2 "));
             drop(extensions);
-            let _ = last();
+            drop(last());
             for _ in 0..3 {
                 let r = init().unwrap();
                 assert_eq!(r.count().get(), 2);
@@ -134,7 +134,7 @@ fn cycling_races_pinning() {
             s.spawn(|| {
                 for _ in 0..10 {
                     assert!(common::search_path(common::SearchPathLevel::Global).is_ok());
-                    let _ = last();
+                    drop(last());
                 }
             });
         });

@@ -47,7 +47,7 @@ fn open(name: &CStr) -> *mut ffi::git_repository {
     // directories.
     let rc = unsafe {
         ffi::git_repository_open_ext(
-            &mut repo,
+            &raw mut repo,
             path.as_ptr(),
             ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
             ptr::null(),
@@ -62,13 +62,9 @@ fn hex(commit: *mut ffi::git_commit) -> String {
     let mut out = [0u8; 41];
     // SAFETY: `commit` is a live commit its array keeps alive; its id is formatted
     // into `out`, 41 writable bytes, NUL included.
-    unsafe {
-        ffi::git_oid_tostr(
-            out.as_mut_ptr().cast(),
-            out.len(),
-            ffi::git_commit_id(commit),
-        )
-    };
+    let commit_id = unsafe { ffi::git_commit_id(commit) };
+    // SAFETY: as above.
+    unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), commit_id) };
     CStr::from_bytes_until_nul(&out)
         .unwrap()
         .to_str()
@@ -82,8 +78,12 @@ type Record = (usize, Vec<String>);
 /// The C side's view of `raw`: `count` and the id of each of its commits.
 fn c_record(raw: &ffi::git_commitarray) -> Record {
     let ids = (0..raw.count)
-        // SAFETY: libgit2 left `commits` holding `count` live commit pointers.
-        .map(|i| hex(unsafe { *raw.commits.add(i) }))
+        .map(|i| {
+            // SAFETY: libgit2 left `commits` holding `count` commit pointers, and `i < count`.
+            let slot = unsafe { raw.commits.add(i) };
+            // SAFETY: as above, a live commit pointer.
+            hex(unsafe { *slot })
+        })
         .collect();
     (raw.count, ids)
 }
@@ -126,7 +126,7 @@ fn empty_arrays_match() {
     let mut array: CommitArrayVal<'_> = CommitArray::new();
     assert_eq!(c_record(&raw), rust_record(array.as_ref()));
     // SAFETY: `raw` holds nothing; the dispose accepts the empty array.
-    unsafe { ffi::git_commitarray_dispose(&mut raw) };
+    unsafe { ffi::git_commitarray_dispose(&raw mut raw) };
     array.as_mut().clear();
     assert_eq!(c_record(&raw), rust_record(array.as_ref()));
     let back = array.into_inner().into_raw();
@@ -149,7 +149,7 @@ fn filled_arrays_match_through_their_lifecycle() {
         assert_eq!(raw.commits.is_null(), array.as_ref().get(0).is_none());
 
         // SAFETY: `raw` owns what libgit2 filled it with, released once.
-        unsafe { ffi::git_commitarray_dispose(&mut raw) };
+        unsafe { ffi::git_commitarray_dispose(&raw mut raw) };
         array.as_mut().clear();
         assert_eq!(
             c_record(&raw),
@@ -170,7 +170,7 @@ fn filled_arrays_match_through_their_lifecycle() {
         assert_eq!(rust_record(array.as_ref()), filled, "{name:?}: refill");
 
         // SAFETY: `raw` owns its refill, released once.
-        unsafe { ffi::git_commitarray_dispose(&mut raw) };
+        unsafe { ffi::git_commitarray_dispose(&raw mut raw) };
         drop(array);
         assert_eq!(c_record(&raw), (0, Vec::new()));
         for repo in [c_repo, rust_repo] {
@@ -225,12 +225,12 @@ mod header {
                 "crustify-commit-header-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let mut repo = ptr::null_mut();
             // SAFETY: `repo` receives the repository this side frees; the path is
             // NUL-terminated.
-            let rc = unsafe { ffi::git_repository_init(&mut repo, path.as_ptr(), 1) };
+            let rc = unsafe { ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1) };
             assert_eq!(rc, 0);
             let (mut builder, mut tree_id, mut tree) =
                 (ptr::null_mut(), ffi::git_oid::default(), ptr::null_mut());
@@ -238,21 +238,35 @@ mod header {
             // SAFETY: `repo` is open; each out-parameter receives an object this side
             // frees; the strings are NUL-terminated.
             unsafe {
-                assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
-                assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-                ffi::git_treebuilder_free(builder);
-                assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &tree_id), 0);
+                assert_eq!(
+                    ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut tree_id, builder), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_treebuilder_free(builder) };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut tree, repo, &raw const tree_id),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe {
                 assert_eq!(
                     ffi::git_signature_new(
-                        &mut sig,
+                        &raw mut sig,
                         c"A U Thor".as_ptr(),
                         c"author@example.com".as_ptr(),
-                        987654321,
+                        987_654_321,
                         90
                     ),
                     0
                 );
-            }
+            };
             Self {
                 dir,
                 repo,
@@ -282,7 +296,7 @@ mod header {
             // initialised with this header's version.
             let rc = unsafe {
                 ffi::git_commit_create_ext(
-                    &mut id,
+                    &raw mut id,
                     self.repo,
                     self.sig,
                     self.sig,
@@ -290,7 +304,7 @@ mod header {
                     self.tree,
                     parents.len(),
                     parents.as_ptr(),
-                    &opts,
+                    &raw const opts,
                 )
             };
             if rc != 0 {
@@ -299,19 +313,36 @@ mod header {
             let mut hex = [0u8; 41];
             let (mut odb, mut obj, mut commit) =
                 (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
-            // SAFETY: `id` names the commit just written; each out-parameter receives an
-            // object this side frees; `hex` has room for 40 digits and the NUL.
-            let raw = unsafe {
-                ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &id);
-                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
-                assert_eq!(ffi::git_odb_read(&mut obj, odb, &id), 0);
-                let data = ffi::git_odb_object_data(obj).cast::<u8>();
-                let raw = std::slice::from_raw_parts(data, ffi::git_odb_object_size(obj)).to_vec();
-                ffi::git_odb_object_free(obj);
-                ffi::git_odb_free(odb);
-                assert_eq!(ffi::git_commit_lookup(&mut commit, self.repo, &id), 0);
-                if let Some(old) = self.tip.replace(commit) {
-                    ffi::git_commit_free(old);
+            let raw = {
+                // SAFETY: `id` names the commit just written; each out-parameter receives an
+                // object this side frees; `hex` has room for 40 digits and the NUL.
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &raw const id) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, self.repo), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_odb_read(&raw mut obj, odb, &raw const id), 0) };
+                // SAFETY: as above.
+                let data = unsafe { ffi::git_odb_object_data(obj).cast::<u8>() };
+                // SAFETY: as above.
+                let odb_object_size = unsafe { ffi::git_odb_object_size(obj) };
+                // SAFETY: as above.
+                let raw = unsafe { std::slice::from_raw_parts(data, odb_object_size).to_vec() };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_object_free(obj) };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
+                // SAFETY: as above.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_commit_lookup(&raw mut commit, self.repo, &raw const id),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                unsafe {
+                    if let Some(old) = self.tip.replace(commit) {
+                        ffi::git_commit_free(old);
+                    }
                 }
                 raw
             };
@@ -331,11 +362,14 @@ mod header {
                 if let Some(tip) = self.tip {
                     ffi::git_commit_free(tip);
                 }
-                ffi::git_signature_free(self.sig);
-                ffi::git_tree_free(self.tree);
-                ffi::git_repository_free(self.repo);
             }
-            let _ = std::fs::remove_dir_all(&self.dir);
+            // SAFETY: as above.
+            unsafe { ffi::git_signature_free(self.sig) };
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(self.tree) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -378,6 +412,10 @@ mod header {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn git_commit_create_ext_reads_headers_as_c_arrays() {
         let (mut c, mut rust) = (Side::new("c"), Side::new("rust"));
 
@@ -510,27 +548,37 @@ mod commit_owner {
 
     fn view(p: *const ffi::git_object) -> (String, ffi::git_object_t) {
         let mut out = [0u8; 41];
-        // SAFETY: `p` is a live object; its id is formatted into 41 writable bytes.
-        unsafe {
-            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
+        {
+            // SAFETY: `p` is a live object; its id is formatted into 41 writable bytes.
+            let object_id = unsafe { ffi::git_object_id(p) };
+            // SAFETY: as above.
+            unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), object_id) };
             let hex = CStr::from_bytes_until_nul(&out)
                 .unwrap()
                 .to_str()
                 .unwrap()
                 .to_owned();
-            (hex, ffi::git_object_type(p))
+            // SAFETY: as above.
+            unsafe { (hex, ffi::git_object_type(p)) }
         }
     }
 
     fn c_failed(rc: c_int) -> Outcome {
-        // SAFETY: after a failure the thread's error is set and live until the next
-        // libgit2 call, after the copy.
-        let (class, message) = unsafe {
-            let e = ffi::git_error_last();
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        let (class, message) = {
+            // SAFETY: after a failure the thread's error is set and live until the next
+            // libgit2 call, after the copy.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         };
         Outcome::Failed(rc, class, message)
     }
@@ -547,7 +595,7 @@ mod commit_owner {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -579,10 +627,14 @@ mod commit_owner {
             let id = oid(hex);
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, a live repository and a live id of its type.
-            let rc = unsafe {
-                match len {
-                    None => ffi::git_commit_lookup(&mut out, self.repo, &id),
-                    Some(len) => ffi::git_commit_lookup_prefix(&mut out, self.repo, &id, len),
+            let rc = match len {
+                // SAFETY: as above.
+                None => unsafe { ffi::git_commit_lookup(&raw mut out, self.repo, &raw const id) },
+                Some(len) => {
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_commit_lookup_prefix(&raw mut out, self.repo, &raw const id, len)
+                    }
                 }
             };
             if rc < 0 {
@@ -605,7 +657,7 @@ mod commit_owner {
             let first = self.held.remove(0);
             let mut copy = ptr::null_mut();
             // SAFETY: a writable slot and a live commit, whose reference is held.
-            assert_eq!(unsafe { ffi::git_commit_dup(&mut copy, first) }, 0);
+            assert_eq!(unsafe { ffi::git_commit_dup(&raw mut copy, first) }, 0);
             // SAFETY: the reference held, released once.
             unsafe { ffi::git_commit_free(first) };
             let object: *mut ffi::git_object = copy.cast();
@@ -708,8 +760,9 @@ mod commit_owner {
             let id = oid(hex);
             let mut object = ptr::null_mut();
             // SAFETY: a writable slot, a live repository and a live id.
-            let rc =
-                unsafe { ffi::git_object_lookup(&mut object, c_repo, &id, ffi::GIT_OBJECT_ANY) };
+            let rc = unsafe {
+                ffi::git_object_lookup(&raw mut object, c_repo, &raw const id, ffi::GIT_OBJECT_ANY)
+            };
             assert_eq!(rc, 0);
             // SAFETY: a live object.
             let c_is_commit = unsafe { ffi::git_object_type(object) } == ffi::GIT_OBJECT_COMMIT;
@@ -853,31 +906,35 @@ mod getters {
                 "crustify-commit-getters-equiv-{}-{side}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let (mut repo, mut odb) = (ptr::null_mut(), ptr::null_mut());
             let mut ids = Vec::new();
             // SAFETY: writable slots and a NUL-terminated path; the odb and repository
             // are released once, after the writes, each of which reads its data for the
             // call only.
+            unsafe { assert_eq!(ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo), 0) };
+            // SAFETY: as above.
             unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
-                assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
                 for raw in crafted() {
                     let mut id = ffi::git_oid::default();
                     let rc = ffi::git_odb_write(
-                        &mut id,
+                        &raw mut id,
                         odb,
                         raw.as_ptr().cast(),
                         raw.len(),
                         ffi::GIT_OBJECT_COMMIT,
                     );
                     assert_eq!(rc, 0);
-                    ids.push(hex(&id));
+                    ids.push(hex(&raw const id));
                 }
-                ffi::git_odb_free(odb);
-                ffi::git_repository_free(repo);
             }
+            // SAFETY: as above.
+            unsafe { ffi::git_odb_free(odb) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(repo) };
             Self { dir, ids }
         }
 
@@ -888,7 +945,7 @@ mod getters {
 
     impl Drop for Crafted {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -911,7 +968,7 @@ mod getters {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -947,47 +1004,74 @@ mod getters {
     }
 
     fn c_record(commit: *mut ffi::git_commit) -> Record {
-        // SAFETY: `commit` is a live commit of a live repository, read through its
-        // accessors; each string or id is copied at once, the header buffer disposed.
-        unsafe {
-            let encoding = ffi::git_commit_message_encoding(commit);
-            let summary = ffi::git_commit_summary(commit);
-            let count = ffi::git_commit_parentcount(commit);
-            let parents = probes(count)
-                .into_iter()
-                .map(|n| {
-                    let id = ffi::git_commit_parent_id(commit, n);
-                    (!id.is_null()).then(|| hex(id))
-                })
-                .collect();
+        {
+            // SAFETY: `commit` is a live commit of a live repository, read through its
+            // accessors; each string or id is copied at once, the header buffer disposed.
+            let encoding = unsafe { ffi::git_commit_message_encoding(commit) };
+            // SAFETY: as above.
+            let summary = unsafe { ffi::git_commit_summary(commit) };
+            // SAFETY: as above.
+            let count = unsafe { ffi::git_commit_parentcount(commit) };
+            // SAFETY: as above.
+            let parents = unsafe {
+                probes(count)
+                    .into_iter()
+                    .map(|n| {
+                        let id = ffi::git_commit_parent_id(commit, n);
+                        (!id.is_null()).then(|| hex(id))
+                    })
+                    .collect()
+            };
             let fields = FIELDS
                 .iter()
                 .map(|field| {
                     let mut buf = ffi::git_buf::default();
-                    let rc = ffi::git_commit_header_field(&mut buf, commit, field.as_ptr());
+                    // SAFETY: as above.
+                    let rc = unsafe {
+                        ffi::git_commit_header_field(&raw mut buf, commit, field.as_ptr())
+                    };
                     let result = if rc < 0 {
-                        let e = ffi::git_error_last();
-                        Err((rc, (*e).klass, bytes((*e).message)))
+                        // SAFETY: as above.
+                        let e = unsafe { ffi::git_error_last() };
+                        // SAFETY: as above.
+                        Err((rc, unsafe { (*e).klass }, bytes(unsafe { (*e).message })))
                     } else {
                         Ok(bytes(buf.ptr))
                     };
-                    ffi::git_buf_dispose(&mut buf);
+                    // SAFETY: as above.
+                    unsafe { ffi::git_buf_dispose(&raw mut buf) };
                     result
                 })
                 .collect();
+            // SAFETY: as above.
+            let id = unsafe { ffi::git_commit_id(commit) };
+            // SAFETY: as above.
+            let owner = unsafe { ffi::git_commit_owner(commit) };
+            // SAFETY: the commit's live repository.
+            let owner = unsafe { ffi::git_repository_path(owner) };
+            // SAFETY: as above.
+            let message = unsafe { ffi::git_commit_message(commit) };
+            // SAFETY: as above.
+            let raw = unsafe { ffi::git_commit_message_raw(commit) };
+            // SAFETY: as above.
+            let header = unsafe { ffi::git_commit_raw_header(commit) };
+            // SAFETY: as above.
+            let time = unsafe { ffi::git_commit_time(commit) };
+            // SAFETY: as above.
+            let offset = unsafe { ffi::git_commit_time_offset(commit) };
+            // SAFETY: as above.
+            let tree = unsafe { ffi::git_commit_tree_id(commit) };
+            // Each string and id lives with the commit and is copied at once.
             Record {
-                id: hex(ffi::git_commit_id(commit)),
-                owner: bytes(ffi::git_repository_path(ffi::git_commit_owner(commit))),
-                message: bytes(ffi::git_commit_message(commit)),
-                raw: bytes(ffi::git_commit_message_raw(commit)),
+                id: hex(id),
+                owner: bytes(owner),
+                message: bytes(message),
+                raw: bytes(raw),
                 encoding: (!encoding.is_null()).then(|| bytes(encoding)),
-                header: bytes(ffi::git_commit_raw_header(commit)),
+                header: bytes(header),
                 summary: (!summary.is_null()).then(|| bytes(summary)),
-                time: (
-                    ffi::git_commit_time(commit),
-                    ffi::git_commit_time_offset(commit),
-                ),
-                tree: hex(ffi::git_commit_tree_id(commit)),
+                time: (time, offset),
+                tree: hex(tree),
                 count,
                 parents,
                 fields,
@@ -1035,7 +1119,7 @@ mod getters {
         // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut repo,
+                &raw mut repo,
                 path.as_ptr(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -1048,7 +1132,7 @@ mod getters {
     fn c_lookup(repo: *mut ffi::git_repository, hex: &str) -> *mut ffi::git_commit {
         let mut commit = ptr::null_mut();
         // SAFETY: a writable slot, a live repository and an id of its type.
-        let rc = unsafe { ffi::git_commit_lookup(&mut commit, repo, &oid(hex)) };
+        let rc = unsafe { ffi::git_commit_lookup(&raw mut commit, repo, &oid(hex)) };
         assert_eq!(rc, 0, "{hex}");
         commit
     }
@@ -1078,7 +1162,7 @@ mod getters {
             Repository::open(&rust_crafted.path()).unwrap(),
         ];
         let sets: [Vec<String>; 2] = [
-            TESTREPO_COMMITS.iter().map(|s| s.to_string()).collect(),
+            TESTREPO_COMMITS.iter().map(ToString::to_string).collect(),
             c_crafted.ids.clone(),
         ];
         for (side, ids) in sets.iter().enumerate() {
@@ -1112,10 +1196,9 @@ mod getters {
                     let mut copy = ptr::null_mut();
                     // SAFETY: a writable slot and a live commit; then its reference,
                     // released once, the copy keeping the commit.
-                    unsafe {
-                        assert_eq!(ffi::git_commit_dup(&mut copy, c), 0);
-                        ffi::git_commit_free(c);
-                    }
+                    unsafe { assert_eq!(ffi::git_commit_dup(&raw mut copy, c), 0) };
+                    // SAFETY: as above.
+                    unsafe { ffi::git_commit_free(c) };
                     copy
                 })
                 .collect();
@@ -1205,27 +1288,37 @@ mod navigation {
 
     fn view(p: *const ffi::git_object) -> (String, ffi::git_object_t) {
         let mut out = [0u8; 41];
-        // SAFETY: `p` is a live object; its id is formatted into 41 writable bytes.
-        unsafe {
-            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
+        {
+            // SAFETY: `p` is a live object; its id is formatted into 41 writable bytes.
+            let object_id = unsafe { ffi::git_object_id(p) };
+            // SAFETY: as above.
+            unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), object_id) };
             let hex = CStr::from_bytes_until_nul(&out)
                 .unwrap()
                 .to_str()
                 .unwrap()
                 .to_owned();
-            (hex, ffi::git_object_type(p))
+            // SAFETY: as above.
+            unsafe { (hex, ffi::git_object_type(p)) }
         }
     }
 
     fn c_failed(rc: c_int) -> Outcome {
-        // SAFETY: after a failure the thread's error is set and live until the next
-        // libgit2 call, after the copy.
-        let (class, message) = unsafe {
-            let e = ffi::git_error_last();
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        let (class, message) = {
+            // SAFETY: after a failure the thread's error is set and live until the next
+            // libgit2 call, after the copy.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         };
         Outcome::Failed(rc, class, message)
     }
@@ -1242,7 +1335,7 @@ mod navigation {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -1276,33 +1369,35 @@ mod navigation {
                 "crustify-commit-navigation-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let mut repo = ptr::null_mut();
             // SAFETY: `repo` receives the repository this side frees; the path is
             // NUL-terminated.
-            let rc = unsafe { ffi::git_repository_init(&mut repo, path.as_ptr(), 1) };
+            let rc = unsafe { ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1) };
             assert_eq!(rc, 0);
             let mut odb = ptr::null_mut();
             // SAFETY: `repo` is open; `odb` receives one reference, freed below.
-            assert_eq!(unsafe { ffi::git_repository_odb(&mut odb, repo) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_odb(&raw mut odb, repo) }, 0);
             let write = |data: &str, kind: ffi::git_object_t| {
                 let mut id = ffi::git_oid::default();
                 // SAFETY: `odb` is live; `data` is read for the call only.
                 let rc = unsafe {
-                    ffi::git_odb_write(&mut id, odb, data.as_ptr().cast(), data.len(), kind)
+                    ffi::git_odb_write(&raw mut id, odb, data.as_ptr().cast(), data.len(), kind)
                 };
                 assert_eq!(rc, 0);
                 hex(&id)
             };
             let commit = |tree: &str, parents: &[&str], message: &str| {
+                use std::fmt::Write as _;
                 let mut raw = format!("tree {tree}\n");
                 for parent in parents {
-                    raw.push_str(&format!("parent {parent}\n"));
+                    let _ = writeln!(raw, "parent {parent}");
                 }
-                raw.push_str(&format!(
-                    "author {SIGNATURE}\ncommitter {SIGNATURE}\n\n{message}\n"
-                ));
+                let _ = writeln!(
+                    raw,
+                    "author {SIGNATURE}\ncommitter {SIGNATURE}\n\n{message}"
+                );
                 write(&raw, ffi::GIT_OBJECT_COMMIT)
             };
             let blob = write("not a tree\n", ffi::GIT_OBJECT_BLOB);
@@ -1325,7 +1420,7 @@ mod navigation {
         fn drop(&mut self) {
             // SAFETY: the side's repository, freed once, after every object of it.
             unsafe { ffi::git_repository_free(self.repo) };
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -1354,7 +1449,7 @@ mod navigation {
         fn base(&mut self, repo: *mut ffi::git_repository, hex: &str) {
             let mut commit = ptr::null_mut();
             // SAFETY: a writable slot, a live repository and a live id of its type.
-            let rc = unsafe { ffi::git_commit_lookup(&mut commit, repo, &oid(hex)) };
+            let rc = unsafe { ffi::git_commit_lookup(&raw mut commit, repo, &oid(hex)) };
             assert_eq!(rc, 0, "{hex}");
             self.bases.push(commit);
         }
@@ -1364,16 +1459,19 @@ mod navigation {
             let mut out: *mut ffi::git_object = ptr::null_mut();
             // SAFETY: a writable slot of the routine's type and a live commit, whose
             // repository is live and used on this thread only.
-            let rc = unsafe {
-                match op {
-                    Op::Parent(n) => {
-                        ffi::git_commit_parent(ptr::from_mut(&mut out).cast(), base, n)
-                    }
-                    Op::Ancestor(n) => {
+            let rc = match op {
+                Op::Parent(n) => {
+                    // SAFETY: as above.
+                    unsafe { ffi::git_commit_parent(ptr::from_mut(&mut out).cast(), base, n) }
+                }
+                Op::Ancestor(n) => {
+                    // SAFETY: as above.
+                    unsafe {
                         ffi::git_commit_nth_gen_ancestor(ptr::from_mut(&mut out).cast(), base, n)
                     }
-                    Op::Tree => ffi::git_commit_tree(ptr::from_mut(&mut out).cast(), base),
                 }
+                // SAFETY: as above.
+                Op::Tree => unsafe { ffi::git_commit_tree(ptr::from_mut(&mut out).cast(), base) },
             };
             if rc < 0 {
                 return c_failed(rc);
@@ -1572,6 +1670,10 @@ mod array_moves {
     ];
 
     /// C's `from_commits`: a fresh libgit2 buffer owning `commits`' references.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn c_from(commits: Vec<*mut ffi::git_commit>) -> ffi::git_commitarray {
         if commits.is_empty() {
             return ffi::git_commitarray::default();
@@ -1583,7 +1685,9 @@ mod array_moves {
         assert!(!buf.is_null());
         for (i, &commit) in commits.iter().enumerate() {
             // SAFETY: `buf` holds `commits.len()` pointer slots.
-            unsafe { buf.add(i).write(commit) };
+            let add = unsafe { buf.add(i) };
+            // SAFETY: as above.
+            unsafe { add.write(commit) };
         }
         ffi::git_commitarray {
             commits: buf,
@@ -1594,14 +1698,18 @@ mod array_moves {
     /// C's `take`: the references moved out, the buffer freed, the struct emptied.
     fn c_take(array: &mut ffi::git_commitarray) -> Vec<*mut ffi::git_commit> {
         let taken = (0..array.count)
-            // SAFETY: the array holds `count` live commit pointers.
-            .map(|i| unsafe { *array.commits.add(i) })
+            .map(|i| {
+                // SAFETY: the array holds `count` commit pointers, and `i < count`.
+                let slot = unsafe { array.commits.add(i) };
+                // SAFETY: as above, a live commit pointer.
+                unsafe { *slot }
+            })
             .collect();
         if !array.commits.is_null() {
             // SAFETY: the buffer came from `git_odb_backend_data_alloc`; its references
             // moved out above.
             unsafe {
-                ffi::git_odb_backend_data_free(ptr::null_mut(), array.commits.cast_mut().cast())
+                ffi::git_odb_backend_data_free(ptr::null_mut(), array.commits.cast_mut().cast());
             };
         }
         *array = ffi::git_commitarray::default();
@@ -1627,13 +1735,14 @@ mod array_moves {
             .map(|hex| {
                 let mut id = ffi::git_oid::default();
                 // SAFETY: a writable oid and a NUL-terminated 40-digit hex string.
-                let rc =
-                    unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+                let rc = unsafe {
+                    ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1)
+                };
                 assert_eq!(rc, 0);
                 let mut commit = ptr::null_mut();
                 // SAFETY: a writable slot, a live repository and a live id; the
                 // reference goes into the C array below.
-                let rc = unsafe { ffi::git_commit_lookup(&mut commit, c_repo, &id) };
+                let rc = unsafe { ffi::git_commit_lookup(&raw mut commit, c_repo, &raw const id) };
                 assert_eq!(rc, 0);
                 commit
             })
@@ -1686,7 +1795,7 @@ mod array_moves {
         compare(&c, &rust, "refill");
 
         // SAFETY: `c` owns its commit and buffer, released once.
-        unsafe { ffi::git_commitarray_dispose(&mut c) };
+        unsafe { ffi::git_commitarray_dispose(&raw mut c) };
         drop(rust.as_mut().take());
         let empty = CommitArray::from_commits(Vec::new()).unwrap();
         compare(&c, &empty, "dispose");
@@ -1745,7 +1854,7 @@ mod create_ext_options {
         // SAFETY: a writable struct and the header's version.
         let rc = unsafe {
             ffi::git_commit_create_ext_options_init(
-                &mut c,
+                &raw mut c,
                 ffi::GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION,
             )
         };
@@ -1790,7 +1899,7 @@ mod create_ext_options {
         if rc < 0 {
             // SAFETY: a named class and a NUL-terminated message, which libgit2 copies.
             let set = unsafe {
-                ffi::git_error_set_str(ffi::GIT_ERROR_CALLBACK as c_int, REFUSED.as_ptr())
+                ffi::git_error_set_str(ffi::GIT_ERROR_CALLBACK.cast_signed(), REFUSED.as_ptr())
             };
             assert_eq!(set, 0);
         }
@@ -1932,7 +2041,7 @@ mod create_ext_options {
                 "crustify-commit-options-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let (mut repo, mut builder, mut tree_id, mut tree, mut sig) = (
                 ptr::null_mut(),
@@ -1943,23 +2052,38 @@ mod create_ext_options {
             );
             // SAFETY: writable slots and NUL-terminated strings; each object is freed on
             // drop.
+            unsafe { assert_eq!(ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1), 0) };
+            // SAFETY: as above.
             unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
-                assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
-                assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-                ffi::git_treebuilder_free(builder);
-                assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &tree_id), 0);
+                assert_eq!(
+                    ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut tree_id, builder), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_treebuilder_free(builder) };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut tree, repo, &raw const tree_id),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe {
                 assert_eq!(
                     ffi::git_signature_new(
-                        &mut sig,
+                        &raw mut sig,
                         c"A U Thor".as_ptr(),
                         c"a@example.com".as_ptr(),
-                        123456789,
+                        123_456_789,
                         60
                     ),
                     0
                 );
-            }
+            };
             let signer = Rc::new(Signer {
                 rc: Cell::new(0),
                 calls: Cell::new(0),
@@ -1997,7 +2121,7 @@ mod create_ext_options {
             // borrows, callback and payload outlive the call.
             let rc = unsafe {
                 ffi::git_commit_create_ext(
-                    &mut id,
+                    &raw mut id,
                     self.repo,
                     self.sig,
                     self.sig,
@@ -2012,7 +2136,11 @@ mod create_ext_options {
             let calls = self.signer.calls.get();
             if rc < 0 {
                 // SAFETY: after a failure the thread's error is set, and copied at once.
-                let message = unsafe { CStr::from_ptr((*ffi::git_error_last()).message) };
+                let error_last = unsafe { ffi::git_error_last() };
+                // SAFETY: as above.
+                let message2 = unsafe { (*error_last).message };
+                // SAFETY: as above.
+                let message = unsafe { CStr::from_ptr(message2) };
                 return (
                     rc,
                     message.to_string_lossy().into_owned(),
@@ -2024,22 +2152,39 @@ mod create_ext_options {
             let (mut odb, mut obj, mut commit) =
                 (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
             let mut hex = [0u8; 41];
-            // SAFETY: the commit just written, read back and copied; the tip replaced
-            // releases the previous one.
-            let raw = unsafe {
-                ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &id);
-                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
-                assert_eq!(ffi::git_odb_read(&mut obj, odb, &id), 0);
-                let data = std::slice::from_raw_parts(
-                    ffi::git_odb_object_data(obj).cast::<u8>(),
-                    ffi::git_odb_object_size(obj),
-                );
+            let raw = {
+                // SAFETY: the commit just written, read back and copied; the tip replaced
+                // releases the previous one.
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &raw const id) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, self.repo), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_odb_read(&raw mut obj, odb, &raw const id), 0) };
+                // SAFETY: as above.
+                let odb_object_data = unsafe { ffi::git_odb_object_data(obj) };
+                // SAFETY: as above.
+                let odb_object_size = unsafe { ffi::git_odb_object_size(obj) };
+                // SAFETY: as above.
+                let data = unsafe {
+                    std::slice::from_raw_parts(odb_object_data.cast::<u8>(), odb_object_size)
+                };
                 let raw = String::from_utf8(data.to_vec()).unwrap();
-                ffi::git_odb_object_free(obj);
-                ffi::git_odb_free(odb);
-                assert_eq!(ffi::git_commit_lookup(&mut commit, self.repo, &id), 0);
-                if let Some(old) = self.tip.replace(commit) {
-                    ffi::git_commit_free(old);
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_object_free(obj) };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
+                // SAFETY: as above.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_commit_lookup(&raw mut commit, self.repo, &raw const id),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                unsafe {
+                    if let Some(old) = self.tip.replace(commit) {
+                        ffi::git_commit_free(old);
+                    }
                 }
                 raw
             };
@@ -2054,26 +2199,32 @@ mod create_ext_options {
         /// The id the reference `name` resolves to, through one symbolic hop, in hex.
         fn target(&self, name: &CStr) -> Option<String> {
             let mut reference = ptr::null_mut();
-            // SAFETY: a live repository and NUL-terminated names; each reference is
-            // released once, its target copied first.
-            unsafe {
-                if ffi::git_reference_lookup(&mut reference, self.repo, name.as_ptr()) != 0 {
-                    return None;
+            {
+                // SAFETY: a live repository and NUL-terminated names; each reference is
+                // released once, its target copied first.
+                unsafe {
+                    if ffi::git_reference_lookup(&raw mut reference, self.repo, name.as_ptr()) != 0
+                    {
+                        return None;
+                    }
                 }
-                if ffi::git_reference_type(reference) == ffi::GIT_REFERENCE_SYMBOLIC {
-                    let next = CString::from(CStr::from_ptr(ffi::git_reference_symbolic_target(
-                        reference,
-                    )));
-                    ffi::git_reference_free(reference);
+                // SAFETY: as above.
+                if unsafe { ffi::git_reference_type(reference) } == ffi::GIT_REFERENCE_SYMBOLIC {
+                    // SAFETY: as above, a symbolic reference.
+                    let target = unsafe { ffi::git_reference_symbolic_target(reference) };
+                    // SAFETY: its target is NUL-terminated and lives with it; it is copied.
+                    let next = CString::from(unsafe { CStr::from_ptr(target) });
+                    // SAFETY: as above, freed once.
+                    unsafe { ffi::git_reference_free(reference) };
                     return self.target(&next);
                 }
                 let mut hex = [0u8; 41];
-                ffi::git_oid_tostr(
-                    hex.as_mut_ptr().cast(),
-                    hex.len(),
-                    ffi::git_reference_target(reference),
-                );
-                ffi::git_reference_free(reference);
+                // SAFETY: as above.
+                let reference_target = unsafe { ffi::git_reference_target(reference) };
+                // SAFETY: as above.
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), reference_target) };
+                // SAFETY: as above.
+                unsafe { ffi::git_reference_free(reference) };
                 Some(
                     CStr::from_bytes_until_nul(&hex)
                         .unwrap()
@@ -2092,11 +2243,14 @@ mod create_ext_options {
                 if let Some(tip) = self.tip {
                     ffi::git_commit_free(tip);
                 }
-                ffi::git_signature_free(self.sig);
-                ffi::git_tree_free(self.tree);
-                ffi::git_repository_free(self.repo);
             }
-            let _ = std::fs::remove_dir_all(&self.dir);
+            // SAFETY: as above.
+            unsafe { ffi::git_signature_free(self.sig) };
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(self.tree) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -2138,14 +2292,14 @@ mod create_ext_options {
                     c_headers.as_ptr()
                 },
                 extra_headers_len: c_headers.len(),
-                sign: step.sign.map(|_| sign as _),
+                sign: step.sign.and(Some(sign)),
                 payload: if step.sign.is_some() {
                     c.payload()
                 } else {
                     ptr::null_mut()
                 },
             };
-            let expected = c.create(step, &c_opts);
+            let expected = c.create(step, &raw const c_opts);
 
             let mut signer = SignatureCallback::new(&mut sign_rust);
             let mut options = CreateExtOptions::new();
@@ -2244,7 +2398,7 @@ mod create_options {
         };
         // SAFETY: a writable struct and the header's version.
         let rc = unsafe {
-            ffi::git_commit_create_options_init(&mut c, ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION)
+            ffi::git_commit_create_options_init(&raw mut c, ffi::GIT_COMMIT_CREATE_OPTIONS_VERSION)
         };
         assert_eq!(rc, 0);
         let rust = CreateOptions::new();
@@ -2286,6 +2440,10 @@ mod create_options {
     /// are the side's own, `false` leaves the field unset for the default. `null` passes
     /// no options at all (NULL, `None`), whatever the fields say.
     #[derive(Clone, Copy, Debug)]
+    #[expect(
+        clippy::struct_excessive_bools,
+        reason = "each flag is one independent option of a step"
+    )]
     struct Step {
         pre: Pre,
         op: Op,
@@ -2324,6 +2482,10 @@ mod create_options {
         }
     };
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the scenario's steps, listed in order"
+    )]
     fn script() -> Vec<Step> {
         vec![
             // The empty tree on an unborn `HEAD` changes nothing.
@@ -2593,21 +2755,24 @@ mod create_options {
     }
 
     impl Side {
+        #[expect(
+            clippy::too_many_lines,
+            reason = "the fixture builds its objects one call at a time"
+        )]
         fn new(tag: &str) -> Self {
             init();
             let dir = std::env::temp_dir().join(format!(
                 "crustify-commit-create-options-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = CString::new(dir.to_str().unwrap()).unwrap();
             let mut repo = ptr::null_mut();
             // SAFETY: a writable slot and a NUL-terminated path; the repository is freed
             // at once, and opened again once its configuration names the identity.
-            unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
-                ffi::git_repository_free(repo);
-            }
+            unsafe { assert_eq!(ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(repo) };
             let config = dir.join("config");
             let mut text = std::fs::read_to_string(&config).unwrap();
             text.push_str("[user]\n\tname = Default Identity\n\temail = default@example.com\n");
@@ -2622,63 +2787,83 @@ mod create_options {
                 ptr::null(),
             );
             let (mut author, mut committer) = (ptr::null_mut(), ptr::null_mut());
-            // SAFETY: writable slots, NUL-terminated strings and buffers of the given
-            // lengths, and the live repository; the builder is freed once, the rest when
-            // the side drops.
-            unsafe {
-                for (i, tree) in trees.iter_mut().enumerate() {
-                    assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
-                    if i == 1 {
-                        let data = b"blob\n";
-                        assert_eq!(
+            for (i, tree) in trees.iter_mut().enumerate() {
+                assert_eq!(
+                    // SAFETY: writable slots, NUL-terminated strings and buffers of the given
+                    // lengths, and the live repository; the builder is freed once, the rest when
+                    // the side drops.
+                    unsafe { ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()) },
+                    0
+                );
+                if i == 1 {
+                    let data = b"blob\n";
+                    assert_eq!(
+                        // SAFETY: as above.
+                        unsafe {
                             ffi::git_blob_create_from_buffer(
-                                &mut blob_id,
+                                &raw mut blob_id,
                                 repo,
                                 data.as_ptr().cast(),
-                                data.len()
-                            ),
-                            0
-                        );
-                        assert_eq!(
+                                data.len(),
+                            )
+                        },
+                        0
+                    );
+                    assert_eq!(
+                        // SAFETY: as above.
+                        unsafe {
                             ffi::git_treebuilder_insert(
-                                &mut entry,
+                                &raw mut entry,
                                 builder,
                                 c"file".as_ptr(),
-                                &blob_id,
-                                ffi::GIT_FILEMODE_BLOB
-                            ),
-                            0
-                        );
-                    }
-                    assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-                    ffi::git_treebuilder_free(builder);
-                    assert_eq!(ffi::git_tree_lookup(tree, repo, &tree_id), 0);
+                                &raw const blob_id,
+                                ffi::GIT_FILEMODE_BLOB,
+                            )
+                        },
+                        0
+                    );
                 }
+                // SAFETY: as above.
+                let ret = unsafe { ffi::git_treebuilder_write(&raw mut tree_id, builder) };
+                assert_eq!(ret, 0);
+                // SAFETY: as above.
+                unsafe { ffi::git_treebuilder_free(builder) };
+                // SAFETY: as above.
+                let ret = unsafe { ffi::git_tree_lookup(tree, repo, &raw const tree_id) };
+                assert_eq!(ret, 0);
+            }
+
+            // SAFETY: as above.
+            unsafe {
                 assert_eq!(
                     ffi::git_signature_new(
-                        &mut author,
+                        &raw mut author,
                         c"A U Thor".as_ptr(),
                         c"author@example.com".as_ptr(),
-                        123456789,
+                        123_456_789,
                         60
                     ),
                     0
                 );
+            };
+            // SAFETY: as above.
+            unsafe {
                 assert_eq!(
                     ffi::git_signature_new(
-                        &mut committer,
+                        &raw mut committer,
                         c"Com Mitter".as_ptr(),
                         c"committer@example.com".as_ptr(),
-                        987654321,
+                        987_654_321,
                         -90
                     ),
                     0
                 );
-            }
+            };
             let tree_ids = trees.map(|t| {
-                // SAFETY: the tree just looked up, live until the side drops; its id is
-                // copied out.
-                let id = unsafe { (*ffi::git_tree_id(t)).id };
+                // SAFETY: the tree just looked up, live until the side drops.
+                let id = unsafe { ffi::git_tree_id(t) };
+                // SAFETY: its id lives with it; it is copied out.
+                let id = unsafe { (*id).id };
                 Oid::from_raw(&id[..20], OidType::Sha1).unwrap()
             });
             Self {
@@ -2692,8 +2877,8 @@ mod create_options {
                 committer,
                 history: Vec::new(),
                 signer: Rc::new(Signer {
-                    rc: Default::default(),
-                    calls: Default::default(),
+                    rc: std::cell::Cell::default(),
+                    calls: std::cell::Cell::default(),
                 }),
             }
         }
@@ -2712,7 +2897,7 @@ mod create_options {
             match step.pre {
                 Pre::Nothing => {}
                 Pre::MergeHead(at) => {
-                    std::fs::write(merge_head, format!("{}\n", self.history[at])).unwrap()
+                    std::fs::write(merge_head, format!("{}\n", self.history[at])).unwrap();
                 }
                 Pre::NoMergeHead => std::fs::remove_file(merge_head).unwrap(),
                 Pre::BreakIdentity => {
@@ -2762,42 +2947,56 @@ mod create_options {
             // SAFETY: the side's live objects; `opts` addresses live options whose
             // borrows, callback and payload outlive the call; messages are NUL-terminated
             // or NULL where the routine allows it.
-            let rc = unsafe {
-                match step.op {
-                    Op::Create(tree) => ffi::git_commit_create_from_tree(
-                        &mut id,
+            let rc = match step.op {
+                // SAFETY: as above.
+                Op::Create(tree) => unsafe {
+                    ffi::git_commit_create_from_tree(
+                        &raw mut id,
                         self.c(),
                         self.trees[tree],
                         c"options\n".as_ptr(),
                         opts,
-                    ),
-                    Op::Amend(tree, message) => ffi::git_commit_amend_from_tree(
-                        &mut id,
+                    )
+                },
+                // SAFETY: as above.
+                Op::Amend(tree, message) => unsafe {
+                    ffi::git_commit_amend_from_tree(
+                        &raw mut id,
                         self.c(),
                         self.trees[tree],
                         message.map_or(ptr::null(), CStr::as_ptr),
                         opts,
-                    ),
-                    Op::Stage(..) => ffi::git_commit_create_from_stage(
-                        &mut id,
+                    )
+                },
+                // SAFETY: as above.
+                Op::Stage(..) => unsafe {
+                    ffi::git_commit_create_from_stage(
+                        &raw mut id,
                         self.c(),
                         c"options\n".as_ptr(),
                         opts,
-                    ),
-                    Op::AmendStage(_, _, message) => ffi::git_commit_amend_from_stage(
-                        &mut id,
+                    )
+                },
+                // SAFETY: as above.
+                Op::AmendStage(_, _, message) => unsafe {
+                    ffi::git_commit_amend_from_stage(
+                        &raw mut id,
                         self.c(),
                         message.map_or(ptr::null(), CStr::as_ptr),
                         opts,
-                    ),
-                }
+                    )
+                },
             };
             if rc < 0 {
-                // SAFETY: after a failure the thread's error is set, and copied at once.
-                let error = unsafe {
-                    let e = ffi::git_error_last();
-                    let message = CStr::from_ptr((*e).message);
-                    ((*e).klass, message.to_string_lossy().into_owned())
+                let error = {
+                    // SAFETY: after a failure the thread's error is set, and copied at once.
+                    let e = unsafe { ffi::git_error_last() };
+                    // SAFETY: as above.
+                    let message2 = unsafe { (*e).message };
+                    // SAFETY: as above.
+                    let message = unsafe { CStr::from_ptr(message2) };
+                    // SAFETY: as above.
+                    unsafe { ((*e).klass, message.to_string_lossy().into_owned()) }
                 };
                 return self.failed(rc, error);
             }
@@ -2834,18 +3033,21 @@ mod create_options {
             // SAFETY: the live repository and its tree; the index reference is released
             // once; the entry is zeroed but for its mode, id and NUL-terminated path,
             // which libgit2 copies.
-            unsafe {
-                assert_eq!(ffi::git_repository_index(&mut index, self.c()), 0);
-                assert_eq!(ffi::git_index_read_tree(index, self.trees[tree]), 0);
-                if extra {
-                    let mut entry: ffi::git_index_entry = std::mem::zeroed();
-                    entry.mode = ffi::GIT_FILEMODE_BLOB;
-                    entry.id = self.blob;
-                    entry.path = c"other".as_ptr();
-                    assert_eq!(ffi::git_index_add(index, &entry), 0);
-                }
-                ffi::git_index_free(index);
+            unsafe { assert_eq!(ffi::git_repository_index(&raw mut index, self.c()), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_read_tree(index, self.trees[tree]), 0) };
+            if extra {
+                // SAFETY: as above.
+                let mut entry: ffi::git_index_entry = unsafe { std::mem::zeroed() };
+                entry.mode = ffi::GIT_FILEMODE_BLOB;
+                entry.id = self.blob;
+                entry.path = c"other".as_ptr();
+                // SAFETY: as above.
+                assert_eq!(unsafe { ffi::git_index_add(index, &raw const entry) }, 0);
             }
+
+            // SAFETY: as above.
+            unsafe { ffi::git_index_free(index) };
         }
 
         /// The id of the tree of the index with the extra entry, written into this
@@ -2854,22 +3056,24 @@ mod create_options {
             self.stage(1, true);
             let (mut index, mut id) = (ptr::null_mut(), ffi::git_oid::default());
             // SAFETY: the live repository; the index reference is released once.
-            unsafe {
-                assert_eq!(ffi::git_repository_index(&mut index, self.c()), 0);
-                assert_eq!(ffi::git_index_write_tree(&mut id, index), 0);
-                ffi::git_index_free(index);
-            }
+            unsafe { assert_eq!(ffi::git_repository_index(&raw mut index, self.c()), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_write_tree(&raw mut id, index), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_index_free(index) };
             id
         }
 
         /// Whether the object database holds the tree of the index with the extra entry.
         fn staged_written(&self) -> bool {
             let mut odb = ptr::null_mut();
-            // SAFETY: the live repository and an id; the odb reference is released once.
-            unsafe {
-                assert_eq!(ffi::git_repository_odb(&mut odb, self.c()), 0);
-                let found = ffi::git_odb_exists(odb, &self.staged) == 1;
-                ffi::git_odb_free(odb);
+            {
+                // SAFETY: the live repository and an id; the odb reference is released once.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, self.c()), 0) };
+                // SAFETY: as above.
+                let found = unsafe { ffi::git_odb_exists(odb, &raw const self.staged) == 1 };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
                 found
             }
         }
@@ -2877,18 +3081,25 @@ mod create_options {
         /// The raw text of the commit `id`.
         fn raw(&self, id: &ffi::git_oid) -> String {
             let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
-            // SAFETY: the commit just written is read back and copied; each object is
-            // released once.
-            unsafe {
-                assert_eq!(ffi::git_repository_odb(&mut odb, self.c()), 0);
-                assert_eq!(ffi::git_odb_read(&mut obj, odb, id), 0);
-                let data = std::slice::from_raw_parts(
-                    ffi::git_odb_object_data(obj).cast::<u8>(),
-                    ffi::git_odb_object_size(obj),
-                );
+            {
+                // SAFETY: the commit just written is read back and copied; each object is
+                // released once.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, self.c()), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_odb_read(&raw mut obj, odb, id), 0) };
+                // SAFETY: as above.
+                let odb_object_data = unsafe { ffi::git_odb_object_data(obj) };
+                // SAFETY: as above.
+                let odb_object_size = unsafe { ffi::git_odb_object_size(obj) };
+                // SAFETY: as above.
+                let data = unsafe {
+                    std::slice::from_raw_parts(odb_object_data.cast::<u8>(), odb_object_size)
+                };
                 let raw = String::from_utf8(data.to_vec()).unwrap();
-                ffi::git_odb_object_free(obj);
-                ffi::git_odb_free(odb);
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_object_free(obj) };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
                 raw
             }
         }
@@ -2902,7 +3113,7 @@ mod create_options {
                         let at = self.position(parent.trim_end());
                         format!("parent #{at:?}\n")
                     } else if let Some(at) = line.find(DEFAULT_IDENTITY) {
-                        format!("{}<time>\n", &line[..at + DEFAULT_IDENTITY.len() + 1])
+                        format!("{}<time>\n", &line[..=(at + DEFAULT_IDENTITY.len())])
                     } else {
                         line.to_owned()
                     }
@@ -2917,14 +3128,20 @@ mod create_options {
         /// The position of the commit `HEAD` resolves to in the side's history.
         fn head(&self) -> Option<usize> {
             let mut head = ptr::null_mut();
-            // SAFETY: the live repository; the reference is released once, its target
-            // copied first.
-            unsafe {
-                if ffi::git_repository_head(&mut head, self.c()) != 0 {
-                    return None;
+            {
+                // SAFETY: the live repository; the reference is released once, its target
+                // copied first.
+                unsafe {
+                    if ffi::git_repository_head(&raw mut head, self.c()) != 0 {
+                        return None;
+                    }
                 }
-                let target = hex(&*ffi::git_reference_target(head));
-                ffi::git_reference_free(head);
+                // SAFETY: as above.
+                let target = unsafe { ffi::git_reference_target(head) };
+                // SAFETY: as above, the target id lives with the reference.
+                let target = hex(unsafe { &*target });
+                // SAFETY: as above.
+                unsafe { ffi::git_reference_free(head) };
                 self.position(&target)
             }
         }
@@ -2933,15 +3150,17 @@ mod create_options {
     impl Drop for Side {
         fn drop(&mut self) {
             // SAFETY: each object is released once, the repository last.
+            unsafe { ffi::git_signature_free(self.author) };
+            // SAFETY: as above.
+            unsafe { ffi::git_signature_free(self.committer) };
+            // SAFETY: as above.
             unsafe {
-                ffi::git_signature_free(self.author);
-                ffi::git_signature_free(self.committer);
                 for tree in self.trees {
                     ffi::git_tree_free(tree);
                 }
             }
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -2956,7 +3175,7 @@ mod create_options {
             .to_owned()
     }
 
-    /// Alone in a child: committing takes the time through glibc's `tzset`, which TSan
+    /// Alone in a child: committing takes the time through glibc's `tzset`, which `TSan`
     /// reports against any concurrent caller.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2978,10 +3197,13 @@ mod create_options {
         let staged = Side::new("staged").write_staged();
         (c.staged, rust.staged) = (staged, staged);
         assert!(!c.staged_written() && !rust.staged_written());
-        let author =
-            SignatureView::new(c"A U Thor", c"author@example.com", Time::new(123456789, 60));
+        let author = SignatureView::new(
+            c"A U Thor",
+            c"author@example.com",
+            Time::new(123_456_789, 60),
+        );
         let committer =
-            Signature::new(c"Com Mitter", c"committer@example.com", 987654321, -90).unwrap();
+            Signature::new(c"Com Mitter", c"committer@example.com", 987_654_321, -90).unwrap();
         // The Rust side's header runs, built before the options that borrow them.
         let runs: Vec<Vec<Header<'static>>> = script
             .iter()
@@ -3023,14 +3245,21 @@ mod create_options {
                     c_headers.as_ptr()
                 },
                 extra_headers_len: c_headers.len(),
-                sign: step.sign.map(|_| sign as _),
+                sign: step.sign.and(Some(sign)),
                 payload: if step.sign.is_some() {
                     Rc::as_ptr(&c.signer).cast_mut().cast()
                 } else {
                     ptr::null_mut()
                 },
             };
-            let expected = c.run(step, if step.null { ptr::null() } else { &c_opts });
+            let expected = c.run(
+                step,
+                if step.null {
+                    ptr::null()
+                } else {
+                    &raw const c_opts
+                },
+            );
 
             let mut signer = SignatureCallback::new(&mut sign_rust);
             let mut options = CreateOptions::new();
@@ -3094,9 +3323,10 @@ mod signatures {
     const TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
     fn content(parents: &[&str], extra: &str, message: &str) -> String {
+        use std::fmt::Write as _;
         let mut s = format!("tree {TREE}\n");
         for p in parents {
-            s += &format!("parent {p}\n");
+            let _ = writeln!(s, "parent {p}");
         }
         s + "author A U Thor <a@example.com> 1700000000 +0100\n\
              committer C O Mitter <c@example.com> 1700000001 -0200\n"
@@ -3117,18 +3347,19 @@ mod signatures {
                 "crustify-commit-sig-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let repo =
                 Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), true).unwrap();
             let mut tree = ffi::git_oid::default();
             let mut odb = ptr::null_mut();
             // SAFETY: writable slots and the live repository; an empty tree is written from
             // a live (non-NULL) empty buffer, and the odb reference released once.
+            unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo.as_c_ptr()), 0) };
+            // SAFETY: as above.
             unsafe {
-                assert_eq!(ffi::git_repository_odb(&mut odb, repo.as_c_ptr()), 0);
                 assert_eq!(
                     ffi::git_odb_write(
-                        &mut tree,
+                        &raw mut tree,
                         odb,
                         c"".as_ptr().cast(),
                         0,
@@ -3136,8 +3367,9 @@ mod signatures {
                     ),
                     0
                 );
-                ffi::git_odb_free(odb);
-            }
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_odb_free(odb) };
             Self {
                 dir,
                 repo: Some(repo),
@@ -3148,20 +3380,27 @@ mod signatures {
     impl Drop for Side {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
     fn c_failure(code: c_int) -> Failure {
-        // SAFETY: after init `git_error_last` never returns NULL; its message is
-        // NUL-terminated, copied before the next libgit2 call.
-        unsafe {
-            let e = ffi::git_error_last();
-            (
-                code,
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        {
+            // SAFETY: after init `git_error_last` never returns NULL; its message is
+            // NUL-terminated, copied before the next libgit2 call.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    code,
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         }
     }
 
@@ -3180,7 +3419,7 @@ mod signatures {
         // SAFETY: a writable id, the live repository, NUL-terminated or NULL strings.
         let rc = unsafe {
             ffi::git_commit_create_with_signature(
-                &mut id,
+                &raw mut id,
                 side.repo.as_ref().unwrap().as_c_ptr(),
                 text.as_ptr(),
                 sig.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
@@ -3219,23 +3458,28 @@ mod signatures {
         let field = opt(field);
         let mut oid = ffi::git_oid::default();
         oid.id[..20].copy_from_slice(&id);
-        oid.type_ = ffi::GIT_OID_SHA1 as _;
+        oid.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         let (mut sig, mut data) = (ffi::git_buf::default(), ffi::git_buf::default());
-        // SAFETY: two zeroed buffers, the live repository, a live SHA-1 id, and a NULL
-        // or non-empty field; each buffer is disposed once after its copy.
-        unsafe {
-            let rc = ffi::git_commit_extract_signature(
-                &mut sig,
-                &mut data,
-                side.repo.as_ref().unwrap().as_c_ptr(),
-                &mut oid,
-                field.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
-            );
-            let copy = |b: &ffi::git_buf| {
-                if b.ptr.is_null() {
-                    Vec::new()
-                } else {
-                    std::slice::from_raw_parts(b.ptr.cast::<u8>(), b.size).to_vec()
+        {
+            // SAFETY: two zeroed buffers, the live repository, a live SHA-1 id, and a NULL
+            // or non-empty field; each buffer is disposed once after its copy.
+            let rc = unsafe {
+                ffi::git_commit_extract_signature(
+                    &raw mut sig,
+                    &raw mut data,
+                    side.repo.as_ref().unwrap().as_c_ptr(),
+                    &raw mut oid,
+                    field.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                )
+            };
+            // SAFETY: as above.
+            let copy = unsafe {
+                |b: &ffi::git_buf| {
+                    if b.ptr.is_null() {
+                        Vec::new()
+                    } else {
+                        std::slice::from_raw_parts(b.ptr.cast::<u8>(), b.size).to_vec()
+                    }
                 }
             };
             let out = if rc < 0 {
@@ -3243,8 +3487,10 @@ mod signatures {
             } else {
                 Ok((copy(&sig), copy(&data)))
             };
-            ffi::git_buf_dispose(&mut sig);
-            ffi::git_buf_dispose(&mut data);
+            // SAFETY: as above.
+            unsafe { ffi::git_buf_dispose(&raw mut sig) };
+            // SAFETY: as above.
+            unsafe { ffi::git_buf_dispose(&raw mut data) };
             out
         }
     }
@@ -3271,10 +3517,18 @@ mod signatures {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn signatures_match_c() {
+        use std::fmt::Write as _;
         let (c, rust) = (Side::new("c"), Side::new("rust"));
         let root = c_create(&c, &content(&[], "", "root\n"), None, None).unwrap();
-        let root_hex: String = root.iter().map(|b| format!("{b:02x}")).collect();
+        let root_hex = root.iter().fold(String::new(), |mut hex, b| {
+            let _ = write!(hex, "{b:02x}");
+            hex
+        });
         let sig = "-----BEGIN PGP SIGNATURE-----\n\nabc\ndef\n-----END PGP SIGNATURE-----";
         let creates: Vec<(String, Option<&str>, Option<&str>)> = vec![
             (content(&[], "", "root\n"), None, None),
@@ -3354,7 +3608,7 @@ mod signatures {
             // SAFETY: a writable id, the live repository, a live buffer.
             let rc = unsafe {
                 ffi::git_blob_create_from_buffer(
-                    &mut id,
+                    &raw mut id,
                     rust.repo.as_ref().unwrap().as_c_ptr(),
                     c"b".as_ptr().cast(),
                     1,
@@ -3364,7 +3618,7 @@ mod signatures {
             // SAFETY: as above, on the C side's repository.
             let rc = unsafe {
                 ffi::git_blob_create_from_buffer(
-                    &mut id,
+                    &raw mut id,
                     c.repo.as_ref().unwrap().as_c_ptr(),
                     c"b".as_ptr().cast(),
                     1,
@@ -3397,15 +3651,22 @@ mod signatures {
 
 /// The calling thread's last error class and message.
 fn c_last() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-    // NUL-terminated string, live until the next libgit2 call on this thread, after the
-    // copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, live until the next libgit2 call on this thread, after the
+        // copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -3476,13 +3737,25 @@ mod reading {
 
     fn c_sig(s: *const ffi::git_signature) -> Sig {
         // SAFETY: a live signature with both strings, read and copied at once.
+        let name2 = unsafe { (*s).name };
+        // SAFETY: as above.
+        let cstr = unsafe { CStr::from_ptr(name2) };
+        // SAFETY: as above.
+        let email2 = unsafe { (*s).email };
+        // SAFETY: as above.
+        let cstr2 = unsafe { CStr::from_ptr(email2) };
+        // SAFETY: as above.
+        let time = unsafe { (*s).when.time };
+        // SAFETY: as above.
+        let offset2 = unsafe { (*s).when.offset };
+        // SAFETY: as above.
         unsafe {
             (
-                CStr::from_ptr((*s).name).to_string_lossy().into_owned(),
-                CStr::from_ptr((*s).email).to_string_lossy().into_owned(),
-                (*s).when.time,
-                (*s).when.offset,
-                (*s).when.sign as u8,
+                cstr.to_string_lossy().into_owned(),
+                cstr2.to_string_lossy().into_owned(),
+                time,
+                offset2,
+                ((*s).when.sign).cast_unsigned(),
             )
         }
     }
@@ -3519,13 +3792,12 @@ mod reading {
         for map in [ptr::null(), mailmap] {
             for author in [true, false] {
                 let mut out = ptr::null_mut();
-                // SAFETY: a writable slot, the live commit and a NULL or live mailmap.
-                let rc = unsafe {
-                    if author {
-                        ffi::git_commit_author_with_mailmap(&mut out, commit, map)
-                    } else {
-                        ffi::git_commit_committer_with_mailmap(&mut out, commit, map)
-                    }
+                let rc = if author {
+                    // SAFETY: a writable slot, the live commit and a NULL or live mailmap.
+                    unsafe { ffi::git_commit_author_with_mailmap(&raw mut out, commit, map) }
+                } else {
+                    // SAFETY: as above.
+                    unsafe { ffi::git_commit_committer_with_mailmap(&raw mut out, commit, map) }
                 };
                 copies.push(if rc < 0 {
                     let (class, message) = super::c_last();
@@ -3552,7 +3824,7 @@ mod reading {
         let mut c_mailmap = ptr::null_mut();
         // SAFETY: a writable slot and `MAILMAP.len()` readable bytes.
         let rc = unsafe {
-            ffi::git_mailmap_from_buffer(&mut c_mailmap, MAILMAP.as_ptr().cast(), MAILMAP.len())
+            ffi::git_mailmap_from_buffer(&raw mut c_mailmap, MAILMAP.as_ptr().cast(), MAILMAP.len())
         };
         assert_eq!(rc, 0);
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/c/");
@@ -3566,11 +3838,17 @@ mod reading {
             // SAFETY: writable slots, a 40-digit id and the live repository.
             unsafe {
                 assert_eq!(
-                    ffi::git_oid_from_string(&mut raw, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
+                    ffi::git_oid_from_string(&raw mut raw, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
                     0
                 );
-                assert_eq!(ffi::git_commit_lookup(&mut commit, c_repo, &raw), 0);
-            }
+            };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_commit_lookup(&raw mut commit, c_repo, &raw const raw),
+                    0
+                );
+            };
             let expected = c_view(commit, c_mailmap);
             // SAFETY: the commit, released once.
             unsafe { ffi::git_commit_free(commit) };
@@ -3606,10 +3884,9 @@ mod reading {
             assert_eq!(got, expected, "{hex}");
         }
         // SAFETY: the C side's objects, released once.
-        unsafe {
-            ffi::git_mailmap_free(c_mailmap);
-            ffi::git_repository_free(c_repo);
-        }
+        unsafe { ffi::git_mailmap_free(c_mailmap) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
     }
 }
 
@@ -3625,7 +3902,7 @@ mod reading {
 /// After every step the sides compare the outcome (the new id, the buffer, or the code,
 /// class and message of the failure) and where their `HEAD` and `refs/heads/side`
 /// point. Equal ids mean equal contents. Reference writes reach glibc's timezone state,
-/// which another test's would race (TSan), so the script runs in an isolated child.
+/// which another test's would race (`TSan`), so the script runs in an isolated child.
 ///
 /// Documented divergence, outside these comparisons: the wrappers refuse a tree or a
 /// parent of another repository (libgit2 asserts on the first, and drops the second
@@ -3684,7 +3961,7 @@ mod creating {
             &'static CStr,
             Vec<usize>,
         ),
-        /// The commit, update_ref, author, committer, encoding, message, whether to
+        /// The commit, `update_ref`, author, committer, encoding, message, whether to
         /// pass the tree.
         Amend(
             usize,
@@ -3769,7 +4046,7 @@ mod creating {
             "crustify-equiv-commit-create-{}-{side}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let path = CString::new(dir.to_str().unwrap()).unwrap();
         (dir, path)
     }
@@ -3799,14 +4076,16 @@ mod creating {
             let (mut repo, mut tree, mut id) =
                 (ptr::null_mut(), ptr::null_mut(), ffi::git_oid::default());
             // SAFETY: writable slots, NUL-terminated strings, the live repository.
+            unsafe { assert_eq!(ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1), 0) };
+            // SAFETY: as above.
             unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
                 assert_eq!(
-                    ffi::git_oid_from_string(&mut id, EMPTY_TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                    ffi::git_oid_from_string(&raw mut id, EMPTY_TREE.as_ptr(), ffi::GIT_OID_SHA1),
                     0
                 );
-                assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &id), 0);
-            }
+            };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_tree_lookup(&raw mut tree, repo, &raw const id), 0) };
             Self {
                 dir,
                 repo,
@@ -3827,7 +4106,7 @@ mod creating {
                 when: ffi::git_time {
                     time: who.2,
                     offset: who.3,
-                    sign: if who.3 < 0 { b'-' } else { b'+' } as _,
+                    sign: (if who.3 < 0 { b'-' } else { b'+' }).cast_signed(),
                 },
             }
         }
@@ -3850,12 +4129,20 @@ mod creating {
             }
             let mut commit = ptr::null_mut();
             // SAFETY: a writable slot, the live repository and the id just written.
-            let rc = unsafe { ffi::git_commit_lookup(&mut commit, self.repo, id) };
+            let rc = unsafe { ffi::git_commit_lookup(&raw mut commit, self.repo, id) };
             assert_eq!(rc, 0);
             self.commits.push(commit);
             Ok(Self::hex(id))
         }
 
+        #[expect(
+            clippy::too_many_lines,
+            reason = "one arm per kind of step, as the scenario lists them"
+        )]
+        #[expect(
+            clippy::many_single_char_names,
+            reason = "short names for the sides and values the steps compare"
+        )]
         fn run(&mut self, step: &Step) -> Outcome {
             let s = |c: Option<&CStr>| c.map_or(ptr::null(), CStr::as_ptr);
             let mut id = ffi::git_oid::default();
@@ -3870,11 +4157,11 @@ mod creating {
                     // over static strings, NULL or NUL-terminated strings.
                     let rc = unsafe {
                         ffi::git_commit_create(
-                            &mut id,
+                            &raw mut id,
                             self.repo,
                             s(*update_ref),
-                            &a,
-                            &c,
+                            &raw const a,
+                            &raw const c,
                             s(*enc),
                             msg.as_ptr(),
                             self.tree,
@@ -3890,38 +4177,45 @@ mod creating {
                     let (r, t, u, m) = (self.repo, self.tree, s(*update_ref), msg.as_ptr());
                     // SAFETY: as above, the parents passed variadically, as many as the
                     // count says.
-                    let rc = unsafe {
-                        match parents.len() {
-                            0 => ffi::git_commit_create_v(
-                                &mut id,
+                    let rc = match parents.len() {
+                        // SAFETY: as above.
+                        0 => unsafe {
+                            ffi::git_commit_create_v(
+                                &raw mut id,
                                 r,
                                 u,
-                                &w,
-                                &w,
+                                &raw const w,
+                                &raw const w,
                                 ptr::null(),
                                 m,
                                 t,
                                 0,
-                            ),
-                            2 => ffi::git_commit_create_v(
-                                &mut id,
+                            )
+                        },
+                        // SAFETY: as above.
+                        2 => unsafe {
+                            ffi::git_commit_create_v(
+                                &raw mut id,
                                 r,
                                 u,
-                                &w,
-                                &w,
+                                &raw const w,
+                                &raw const w,
                                 ptr::null(),
                                 m,
                                 t,
                                 2,
                                 p(0),
                                 p(1),
-                            ),
-                            4 => ffi::git_commit_create_v(
-                                &mut id,
+                            )
+                        },
+                        // SAFETY: as above.
+                        4 => unsafe {
+                            ffi::git_commit_create_v(
+                                &raw mut id,
                                 r,
                                 u,
-                                &w,
-                                &w,
+                                &raw const w,
+                                &raw const w,
                                 ptr::null(),
                                 m,
                                 t,
@@ -3930,9 +4224,9 @@ mod creating {
                                 p(1),
                                 p(2),
                                 p(3),
-                            ),
-                            n => unreachable!("{n} parents"),
-                        }
+                            )
+                        },
+                        n => unreachable!("{n} parents"),
                     };
                     self.written(rc, &id)
                 }
@@ -3946,10 +4240,10 @@ mod creating {
                     // SAFETY: a zeroed buffer libgit2 fills; as in `Create`.
                     let rc = unsafe {
                         ffi::git_commit_create_buffer(
-                            &mut buf,
+                            &raw mut buf,
                             self.repo,
-                            &w,
-                            &w,
+                            &raw const w,
+                            &raw const w,
                             s(*enc),
                             msg.as_ptr(),
                             self.tree,
@@ -3960,13 +4254,16 @@ mod creating {
                     if rc < 0 {
                         return Self::failed(rc);
                     }
-                    // SAFETY: libgit2 left `size` initialised bytes at `ptr`; released once.
-                    let text = unsafe {
-                        let t = String::from_utf8(
-                            std::slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size).to_vec(),
-                        )
-                        .unwrap();
-                        ffi::git_buf_dispose(&mut buf);
+                    let text = {
+                        // SAFETY: libgit2 left `size` initialised bytes at `ptr`; released once.
+                        let t = unsafe {
+                            String::from_utf8(
+                                std::slice::from_raw_parts(buf.ptr.cast::<u8>(), buf.size).to_vec(),
+                            )
+                            .unwrap()
+                        };
+                        // SAFETY: as above.
+                        unsafe { ffi::git_buf_dispose(&raw mut buf) };
                         t
                     };
                     Ok(text)
@@ -3997,15 +4294,15 @@ mod creating {
                     // SAFETY: as in `Create`; options over live strings and headers.
                     let rc = unsafe {
                         ffi::git_commit_create_ext(
-                            &mut id,
+                            &raw mut id,
                             self.repo,
-                            &w,
-                            &w,
+                            &raw const w,
+                            &raw const w,
                             msg.as_ptr(),
                             self.tree,
                             ps.len(),
                             ps.as_ptr(),
-                            &opts,
+                            &raw const opts,
                         )
                     };
                     self.written(rc, &id)
@@ -4013,12 +4310,12 @@ mod creating {
                 Step::Amend(i, update_ref, a, c, enc, msg, tree) => {
                     let (a, c) = (a.map(Self::sig), c.map(Self::sig));
                     let sp = |x: &Option<ffi::git_signature>| {
-                        x.as_ref().map_or(ptr::null(), |x| x as *const _)
+                        x.as_ref().map_or(ptr::null(), ptr::from_ref)
                     };
                     // SAFETY: as in `Create`; NULL parts are the commit's own.
                     let rc = unsafe {
                         ffi::git_commit_amend(
-                            &mut id,
+                            &raw mut id,
                             self.commits[*i],
                             s(*update_ref),
                             sp(&a),
@@ -4041,13 +4338,19 @@ mod creating {
                 for &c in &self.commits {
                     ffi::git_commit_free(c);
                 }
-                ffi::git_tree_free(self.tree);
-                ffi::git_repository_free(self.repo);
             }
-            let _ = std::fs::remove_dir_all(&self.dir);
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(self.tree) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn rust_failed(e: RepositoryError) -> Outcome {
         Err((
             e.raw_code(),
@@ -4199,7 +4502,7 @@ mod creating {
         assert_eq!(failures, 6);
         drop(commits);
         drop(rust);
-        let _ = std::fs::remove_dir_all(dir);
+        drop(std::fs::remove_dir_all(dir));
     }
 
     /// Turns every loose fan-out directory `objects/xx` that the repository at `dir`
@@ -4280,6 +4583,6 @@ mod creating {
         assert_eq!(failures, steps.len() - 1);
         drop(commits);
         drop(rust);
-        let _ = std::fs::remove_dir_all(dir);
+        drop(std::fs::remove_dir_all(dir));
     }
 }

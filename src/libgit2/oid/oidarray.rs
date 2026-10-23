@@ -85,7 +85,7 @@ unsafe impl Sync for OidArrayMut<'_> {}
 /// against the first `git_libgit2_init` another thread may be running. Nothing orders
 /// an empty array after that initialisation, since nothing allocated for it.
 ///
-/// Wraps: git_oidarray_dispose
+/// Wraps: `git_oidarray_dispose`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OidArrayDispose;
@@ -101,7 +101,9 @@ unsafe impl CDispose<OidArray> for OidArrayDispose {
     unsafe fn c_dispose(&self, ptr: NonNull<OidArray>) {
         let raw: *mut ffi::git_oidarray = ptr.as_ptr().cast();
         // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_oidarray`.
-        let ids = unsafe { addr_of!((*raw).ids).read() };
+        let ids_ptr = unsafe { addr_of!((*raw).ids) };
+        // SAFETY: as above.
+        let ids = unsafe { ids_ptr.read() };
         if ids.is_null() {
             return;
         }
@@ -154,21 +156,24 @@ impl<'a> OidArrayRef<'a> {
     /// The number of ids; 0 without a buffer, whatever `count` says, as
     /// [`ids`](Self::ids) reads it.
     ///
-    /// Field: git_oidarray.count
+    /// Field: `git_oidarray.count`
+    #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
         // SAFETY: reads through the shared handle's pointer to a live `git_oidarray`;
         // any `size_t` is a valid `usize`.
-        let (ids, count) = unsafe {
-            (
-                addr_of!((*array).ids).read(),
-                addr_of!((*array).count).read(),
-            )
-        };
+        let ids_ptr2 = unsafe { addr_of!((*array).ids) };
+        // SAFETY: as above.
+        let read2 = unsafe { ids_ptr2.read() };
+        // SAFETY: as above.
+        let count_ptr = unsafe { addr_of!((*array).count) };
+        // SAFETY: as above.
+        let (ids, count) = unsafe { (read2, count_ptr.read()) };
         if ids.is_null() { 0 } else { count }
     }
 
     /// Whether the array holds no ids.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -176,11 +181,15 @@ impl<'a> OidArrayRef<'a> {
     /// The ids, borrowed in place as a run of [`len`](Self::len) handles for as long as
     /// the array is.
     ///
-    /// Field: git_oidarray.ids
+    /// Field: `git_oidarray.ids`
+    #[must_use]
     pub fn ids(&self) -> CSlice<'a, Oid> {
         let len = self.len();
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let ids_ptr = unsafe { &raw const (*self.as_ptr()).ids };
         // SAFETY: a read through the shared handle's pointer to a live `git_oidarray`.
-        let ids = unsafe { addr_of!((*self.as_ptr()).ids).read() };
+        let ids = unsafe { ids_ptr.read() };
         match NonNull::new(ids.cast::<Oid>()) {
             // SAFETY: per the handles' invariant a non-NULL `ids` addresses at least
             // `count` initialised `git_oid`s (`Oid` is transparent over one), owned by
@@ -206,6 +215,7 @@ impl<'a> OidArrayRef<'a> {
     /// let array = OidArray::new();
     /// let copy: OidArrayVal = array.clone();
     /// ```
+    #[must_use]
     pub fn to_oid_array(&self) -> Option<OidArrayVal> {
         let src = self.ids();
         let mut copy = OdbDataArrayFree::new_uninit::<Oid>(src.len())?;
@@ -241,12 +251,15 @@ impl OidArrayMut<'_> {
     /// The ids, borrowed exclusively in place as a run of handles, for editing them, as
     /// libgit2 reverses a result in place.
     ///
-    /// Field: git_oidarray.ids
+    /// Field: `git_oidarray.ids`
     pub fn ids_mut(&mut self) -> CSliceMut<'_, Oid> {
         let len = self.as_ref().len();
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let ids_ptr = unsafe { &raw const (*self.as_mut_ptr()).ids };
         // SAFETY: a read through the exclusive handle's pointer to a live
         // `git_oidarray`.
-        let ids = unsafe { addr_of!((*self.as_mut_ptr()).ids).read() };
+        let ids = unsafe { ids_ptr.read() };
         match NonNull::new(ids.cast::<Oid>()) {
             // SAFETY: per the handles' invariant a non-NULL `ids` addresses at least
             // `count` initialised ids owned by the array; this handle is borrowed
@@ -259,8 +272,8 @@ impl OidArrayMut<'_> {
 
     /// Replaces the ids, and with them the count, releasing the ones held before.
     ///
-    /// Field: git_oidarray.ids
-    /// Field: git_oidarray.count
+    /// Field: `git_oidarray.ids`
+    /// Field: `git_oidarray.count`
     pub fn set_ids(&mut self, ids: OdbDataVec<Oid>) {
         drop(self.take_ids());
         let (ids, count) = ids.into_raw_parts();
@@ -269,25 +282,39 @@ impl OidArrayMut<'_> {
         // `git_oidarray`, whose previous buffer `take_ids` released. `ids` is NULL with
         // `count == 0`, or `count` ids in libgit2's allocator whose ownership the array
         // takes over, which keeps the handles' invariant.
-        unsafe {
-            addr_of_mut!((*array).ids).write(ids.cast());
-            addr_of_mut!((*array).count).write(count);
-        }
+        let ids_ptr2 = unsafe { addr_of_mut!((*array).ids) };
+        // SAFETY: as above.
+        unsafe { ids_ptr2.write(ids.cast()) };
+        // SAFETY: as above.
+        let count_ptr2 = unsafe { addr_of_mut!((*array).count) };
+        // SAFETY: as above.
+        unsafe { count_ptr2.write(count) };
     }
 
     /// Takes the ids out, leaving the array empty: what `git_oidarray_dispose` would
     /// release, owned.
     ///
-    /// Field: git_oidarray.ids
+    /// Field: `git_oidarray.ids`
     pub fn take_ids(&mut self) -> OdbDataVec<Oid> {
         let array = self.as_mut_ptr();
-        // SAFETY: reads, then writes the empty array, through the exclusive handle's
-        // pointer to a live `git_oidarray`.
-        let (ids, count) = unsafe {
-            let ids = addr_of!((*array).ids).read();
-            let count = addr_of!((*array).count).read();
-            addr_of_mut!((*array).ids).write(ptr::null_mut());
-            addr_of_mut!((*array).count).write(0);
+        let (ids, count) = {
+            // SAFETY: reads, then writes the empty array, through the exclusive handle's
+            // pointer to a live `git_oidarray`.
+            let ids_ptr2 = unsafe { addr_of!((*array).ids) };
+            // SAFETY: as above.
+            let ids = unsafe { ids_ptr2.read() };
+            // SAFETY: as above.
+            let count_ptr2 = unsafe { addr_of!((*array).count) };
+            // SAFETY: as above.
+            let count = unsafe { count_ptr2.read() };
+            // SAFETY: as above.
+            let ids_ptr2 = unsafe { addr_of_mut!((*array).ids) };
+            // SAFETY: as above.
+            unsafe { ids_ptr2.write(ptr::null_mut()) };
+            // SAFETY: as above.
+            let count_ptr2 = unsafe { addr_of_mut!((*array).count) };
+            // SAFETY: as above.
+            unsafe { count_ptr2.write(0) };
             (ids, count)
         };
         // SAFETY: per the handles' invariant `ids` is NULL with `count == 0`, or at
@@ -302,12 +329,15 @@ impl OidArrayMut<'_> {
     /// Shortens the array to its first `len` ids; nothing changes when it holds no more
     /// than that. The buffer is kept, and released whole on dispose.
     ///
-    /// Field: git_oidarray.count
+    /// Field: `git_oidarray.count`
     pub fn truncate(&mut self, len: usize) {
         if len < self.as_ref().len() {
+            // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+            // projection forms no reference to it.
+            let count_ptr = unsafe { &raw mut (*self.as_mut_ptr()).count };
             // SAFETY: a write through the exclusive handle's pointer to a live
             // `git_oidarray`; a smaller count keeps the buffer at least `count` long.
-            unsafe { addr_of_mut!((*self.as_mut_ptr()).count).write(len) }
+            unsafe { count_ptr.write(len) }
         }
     }
 }
@@ -322,7 +352,7 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use core::ffi::{CStr, c_int, c_void};
+    use core::ffi::{CStr, c_void};
     use core::mem::size_of;
     use std::process::Command;
     use std::sync::atomic::AtomicBool;
@@ -402,8 +432,9 @@ mod unit_tests {
     fn oid(seed: u8) -> Oid {
         let mut oid = Oid::zeroed();
         oid.as_mut().set_kind(OidType::Sha1);
-        oid.as_mut()
-            .set_id(core::array::from_fn(|i| seed.wrapping_add(i as u8)));
+        oid.as_mut().set_id(core::array::from_fn(|i| {
+            seed.wrapping_add(i.to_le_bytes()[0])
+        }));
         oid
     }
 
@@ -475,7 +506,7 @@ mod unit_tests {
             count: 3,
         };
         // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
-        let mut m = unsafe { OidArrayMut::from_ptr(&mut broken) }.unwrap();
+        let mut m = unsafe { OidArrayMut::from_ptr(&raw mut broken) }.unwrap();
         assert_eq!(m.as_ref().len(), 0);
         assert!(m.as_ref().ids().is_empty() && m.ids_mut().is_empty());
         assert_eq!(format!("{m:?}"), "[]");
@@ -498,7 +529,7 @@ mod unit_tests {
         // SAFETY: `raw` is live for the handle's use and addresses 4 ids, which the
         // test keeps alive; no other handle reaches it meanwhile. The buffer is never
         // released through the handle: every take below hands it back raw.
-        let mut m = unsafe { OidArrayMut::from_ptr(&mut raw) }.unwrap();
+        let mut m = unsafe { OidArrayMut::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(contents(m.as_ref()), expected(&[0, 10, 20, 30]));
         {
             let mut run = m.ids_mut();
@@ -530,8 +561,8 @@ mod unit_tests {
         assert_eq!(storage[1].as_ref().id(), [1; 32]);
     }
 
-    /// Copies, edits and replacements each release every buffer once (LSan, in the
-    /// asan variant, flags a leak, ASan a double free).
+    /// Copies, edits and replacements each release every buffer once (`LSan`, in the
+    /// asan variant, flags a leak, `ASan` a double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn owned_arrays_copy_edit_and_release() {
@@ -587,7 +618,7 @@ mod unit_tests {
     }
 
     /// The dispose policy, driven by hand on a bare value: its ids are freed once
-    /// (LSan flags a leak otherwise).
+    /// (`LSan` flags a leak otherwise).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn dispose_policy_releases_the_ids() {
@@ -599,8 +630,8 @@ mod unit_tests {
 
     /// libgit2 fills an owner's storage in place, as the `git_merge_bases` wrapper
     /// will through the crate-internal seam: the `git_array` buffer it hands over is
-    /// read through the handles and released by the owner's drop (LSan flags a leak,
-    /// ASan an allocator mismatch, BSan a foreign write the handles do not cover).
+    /// read through the handles and released by the owner's drop (`LSan` flags a leak,
+    /// `ASan` an allocator mismatch, `BSan` a foreign write the handles do not cover).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn c_fills_an_owner_in_place() {
@@ -614,7 +645,7 @@ mod unit_tests {
         // directories.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut repo,
+                &raw mut repo,
                 path.as_ptr().cast(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -624,7 +655,8 @@ mod unit_tests {
         let parse = |hex: &CStr| {
             let mut oid = ffi::git_oid::default();
             // SAFETY: `oid` is writable and `hex` NUL-terminated.
-            let rc = unsafe { ffi::git_oid_from_string(&mut oid, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+            let rc =
+                unsafe { ffi::git_oid_from_string(&raw mut oid, hex.as_ptr(), ffi::GIT_OID_SHA1) };
             assert_eq!(rc, 0);
             oid
         };
@@ -636,7 +668,14 @@ mod unit_tests {
         // handle for the call; `repo` is open, `one` and `two` live ids. On success
         // `out` owns a buffer from libgit2's allocator, which keeps the handles'
         // invariant and the owner's drop releases.
-        let rc = unsafe { ffi::git_merge_bases(array.as_mut().as_mut_ptr(), repo, &one, &two) };
+        let rc = unsafe {
+            ffi::git_merge_bases(
+                array.as_mut().as_mut_ptr(),
+                repo,
+                &raw const one,
+                &raw const two,
+            )
+        };
         assert_eq!(rc, 0);
         let r = array.as_ref();
         assert_eq!(r.len(), 2);
@@ -669,7 +708,7 @@ mod unit_tests {
 
     /// Handles over a C-owned `git_oidarray`, as libgit2 hands a callback one: the
     /// setters' buffers are what `git_oidarray_dispose` releases, and C's buffers what
-    /// they release (ASan flags an allocator mismatch, LSan a leak).
+    /// they release (`ASan` flags an allocator mismatch, `LSan` a leak).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn handles_over_a_c_owned_array() {
@@ -681,24 +720,26 @@ mod unit_tests {
         let ids = ids.cast::<ffi::git_oid>();
         for (i, seed) in [7u8, 8].into_iter().enumerate() {
             // SAFETY: `ids` holds two `git_oid`s; `Oid` is transparent over one.
-            unsafe { ids.add(i).cast::<Oid>().write(oid(seed)) };
+            let add = unsafe { ids.add(i) };
+            // SAFETY: as above.
+            unsafe { add.cast::<Oid>().write(oid(seed)) };
         }
         let mut raw = ffi::git_oidarray { ids, count: 2 };
 
         // SAFETY: `raw` is live for the handle's use and owns `ids` (two ids from
         // libgit2's allocator); no other handle reaches it meanwhile.
-        let mut m = unsafe { OidArrayMut::from_ptr(&mut raw) }.unwrap();
+        let mut m = unsafe { OidArrayMut::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(contents(m.as_ref()), expected(&[7, 8]));
         m.ids_mut().get_mut(1).unwrap().copy_from(oid(70).as_ref());
         // Replacing frees C's buffer through `git__free`.
         m.set_ids(OdbDataVec::from_slice(&[oid(1), oid(2), oid(3)]).unwrap());
         assert_eq!(raw.count, 3);
         // SAFETY: `raw` is live and only read here.
-        let r = unsafe { OidArrayRef::from_ptr(&mut raw) }.unwrap();
+        let r = unsafe { OidArrayRef::from_ptr(&raw mut raw) }.unwrap();
         assert_eq!(contents(r), expected(&[1, 2, 3]));
         // C releases the buffer Rust stored.
         // SAFETY: `raw` owns `ids`, from libgit2's allocator, and is not used again.
-        unsafe { ffi::git_oidarray_dispose(&mut raw) };
+        unsafe { ffi::git_oidarray_dispose(&raw mut raw) };
 
         // An array that breaks the invariant with a NULL `ids` and a count reads as
         // empty through every accessor, and is reset without a free, rather than
@@ -708,7 +749,7 @@ mod unit_tests {
             count: 3,
         };
         // SAFETY: `broken` is live for the handle's use; nothing else reaches it.
-        let mut m = unsafe { OidArrayMut::from_ptr(&mut broken) }.unwrap();
+        let mut m = unsafe { OidArrayMut::from_ptr(&raw mut broken) }.unwrap();
         assert_eq!(m.as_ref().len(), 0);
         assert!(m.as_ref().is_empty());
         assert!(m.as_ref().ids().is_empty());
@@ -734,7 +775,7 @@ mod unit_tests {
                 // allocated.
                 let rc = unsafe {
                     ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                        ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                         allocator.as_ref().as_ptr(),
                     )
                 };
@@ -766,7 +807,7 @@ mod unit_tests {
                 // SAFETY: as in `copies_out_of_memory_are_none`.
                 let rc = unsafe {
                     ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                        ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                         allocator.as_ref().as_ptr(),
                     )
                 };

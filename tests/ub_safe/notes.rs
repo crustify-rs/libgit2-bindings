@@ -7,6 +7,10 @@ use libgit2::libgit2::repository::repository::Repository;
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::no_effect_underscore_binding,
+    reason = "the copy itself is what the test exercises"
+)]
 fn construction_release_and_reborrows() {
     let repo = Repository::open(c"c/tests/resources/testrepo.git").unwrap();
     let id = Oid::from_string(c"d07b0f9a8c89f1d9e74dc4fce6421dec5ef8a659", OidType::Sha1).unwrap();
@@ -53,7 +57,7 @@ fn non_commit_targets_are_refused() {
     use libgit2::libgit2::object::blob;
     use libgit2::libgit2::util::errors::ErrorCode;
     let path = std::env::temp_dir().join(format!("crustify-ub-notes-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
     let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let repo = Repository::init(&cpath, true).unwrap();
     let blob = blob::create_from_buffer(repo.as_ref(), b"note\n").unwrap();
@@ -89,11 +93,11 @@ fn non_commit_targets_are_refused() {
     std::fs::remove_dir_all(path).unwrap();
 }
 
-/// `sizeof(tree_iterator)` on x86_64, the iterator allocation of both constructors.
+/// `sizeof(tree_iterator)` on `x86_64`, the iterator allocation of both constructors.
 const TREE_ITERATOR_SIZE: usize = 336;
 
 /// The iterator allocation fails after C took its root-tree lookup: both constructors
-/// report the failure, C releases the tree (LSan), and the same call succeeds once
+/// report the failure, C releases the tree (`LSan`), and the same call succeeds once
 /// memory is back. Process-wide allocator, so alone in a child.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]

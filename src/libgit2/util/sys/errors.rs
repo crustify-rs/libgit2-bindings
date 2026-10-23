@@ -55,7 +55,9 @@ pub(crate) fn runtime_pinned() -> bool {
     let pinned = PINNED.get_or_init(|| init().ok()).is_some();
     // SAFETY: `__errno_location` returns the calling thread's `errno`, valid for writes
     // for the thread's lifetime.
-    unsafe { libc::__errno_location().write(errno) };
+    let value = unsafe { libc::__errno_location() };
+    // SAFETY: as above.
+    unsafe { value.write(errno) };
     pinned
 }
 
@@ -65,7 +67,7 @@ pub(crate) fn runtime_pinned() -> bool {
 /// Also resets the thread's `errno` to 0, as libgit2 does, unless the thread's error
 /// state cannot be allocated.
 ///
-/// Wraps: git_error_clear
+/// Wraps: `git_error_clear`
 pub fn clear() {
     if runtime_pinned() {
         // SAFETY: no arguments; the runtime is pinned, so the thread state is looked up
@@ -98,7 +100,7 @@ pub fn clear() {
 /// libgit2::libgit2::util::sys::errors::set(libgit2::ffi::GIT_ERROR_INVALID, c"bad");
 /// ```
 ///
-/// Wraps: git_error_set
+/// Wraps: `git_error_set`
 pub fn set(class: ErrorClass, message: &CStr) {
     if runtime_pinned() {
         // SAFETY: a `"%s"` format with the one NUL-terminated string argument it
@@ -120,7 +122,7 @@ pub fn set(class: ErrorClass, message: &CStr) {
 /// error is `GIT_ERROR_NOMEMORY`. Once the thread's buffer is out of memory, the
 /// previous error stays, whatever the class (see the module docs).
 ///
-/// Wraps: git_error_set
+/// Wraps: `git_error_set`
 pub fn set_without_message(class: ErrorClass) {
     if runtime_pinned() {
         // SAFETY: a NULL format, which libgit2 checks before formatting, so no variadic
@@ -132,11 +134,14 @@ pub fn set_without_message(class: ErrorClass) {
 
 /// Sets the calling thread's last error to a verbatim copy of `message` in `class`.
 ///
-/// Unlike [`set`], it never consults `errno`, and it reports whether the message was
-/// stored. On failure the last error is `GIT_ERROR_NOMEMORY`, or the previous one when
-/// the thread's buffer is already out of memory (see the module docs).
+/// Unlike [`set`], it never consults `errno`, and it reports whether the message was stored.
 ///
-/// Wraps: git_error_set_str
+/// Wraps: `git_error_set_str`
+///
+/// # Errors
+///
+/// On failure the last error is `GIT_ERROR_NOMEMORY`, or the previous one when the thread's buffer
+/// is already out of memory (see the module docs).
 pub fn set_str(class: ErrorClass, message: &CStr) -> Result<(), MessageNotStored> {
     if !runtime_pinned() {
         return Err(MessageNotStored);
@@ -155,7 +160,7 @@ pub fn set_str(class: ErrorClass, message: &CStr) -> Result<(), MessageNotStored
 /// Use it to report an allocation failure: unlike [`set_str`] it needs no storage for
 /// the message, beyond the thread's error state on its first use.
 ///
-/// Wraps: git_error_set_oom
+/// Wraps: `git_error_set_oom`
 pub fn set_oom() {
     if runtime_pinned() {
         // SAFETY: no arguments; the runtime is pinned, so the thread state is looked up
@@ -212,7 +217,9 @@ mod unit_tests {
 
     fn set_errno(value: c_int) {
         // SAFETY: the calling thread's `errno`, valid for writes.
-        unsafe { libc::__errno_location().write(value) }
+        let value2 = unsafe { libc::__errno_location() };
+        // SAFETY: as above.
+        unsafe { value2.write(value) }
     }
 
     fn errno() -> c_int {
@@ -221,11 +228,16 @@ mod unit_tests {
 
     /// `git_error_last()`'s class and message, copied out.
     fn last_error() -> (c_int, Vec<u8>) {
-        // SAFETY: `git_error_last` never returns NULL, and its message lives until the
-        // next libgit2 call on this thread; both are copied out before one.
-        unsafe {
-            let e = ffi::git_error_last();
-            ((*e).klass, CStr::from_ptr((*e).message).to_bytes().to_vec())
+        {
+            // SAFETY: `git_error_last` never returns NULL, and its message lives until the
+            // next libgit2 call on this thread; both are copied out before one.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe { (klass, CStr::from_ptr(message2).to_bytes().to_vec()) }
         }
     }
 
@@ -340,7 +352,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };

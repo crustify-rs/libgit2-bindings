@@ -8,7 +8,7 @@ use libgit2::libgit2::repository::repository::Repository;
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reference_owners_and_reborrows_release_once() {
     let path = std::env::temp_dir().join(format!("crustify-ub-tx-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
     let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let repo = Repository::init(&cpath, true).unwrap();
     for _ in 0..8 {
@@ -32,7 +32,7 @@ fn reference_owners_and_reborrows_release_once() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn config_lock_borrows_and_abort_releases_backend() {
     let path = std::env::temp_dir().join(format!("crustify-ub-tx-config-{}", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    drop(std::fs::remove_file(&path));
     let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
     let mut config = Config::new().unwrap();
     assert!(

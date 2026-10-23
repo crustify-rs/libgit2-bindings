@@ -162,7 +162,7 @@ use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 /// }
 /// ```
 ///
-/// Wraps: git_filter_list
+/// Wraps: `git_filter_list`
 /// Handwritten
 #[repr(transparent)]
 pub struct FilterList<'r>(
@@ -206,7 +206,7 @@ unsafe impl<'r> CCell for FilterList<'r> {
         Self: 'a;
 }
 
-impl<'a, 'r> FilterListRef<'a, 'r> {
+impl<'r> FilterListRef<'_, 'r> {
     /// Borrows the list at `ptr`; `None` if it is NULL.
     ///
     /// # Safety
@@ -214,7 +214,6 @@ impl<'a, 'r> FilterListRef<'a, 'r> {
     /// `ptr` must be NULL or address a live filter list, built for a repository that
     /// outlives `'r`, which stays live for `'a` and is not written through another
     /// handle meanwhile.
-    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_filter_list) -> Option<Self> {
         // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
         // live `git_filter_list` that outlives `'a` and is not written meanwhile.
@@ -222,20 +221,32 @@ impl<'a, 'r> FilterListRef<'a, 'r> {
     }
 
     /// Read-only pointer to the C object.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_filter_list {
         self.0.as_non_null().as_ptr().cast()
     }
 }
 
-impl<'a, 'r> FilterListMut<'a, 'r> {
+impl<'r> FilterListMut<'_, 'r> {
     /// Borrows the list at `ptr` exclusively; `None` if it is NULL.
     ///
     /// # Safety
     ///
     /// As [`FilterListRef::from_ptr`], plus: nothing else reaches the list while the
     /// result lives.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_filter_list) -> Option<Self> {
         // SAFETY: the caller upholds `FilterListRef::from_ptr`'s contract and
         // exclusivity.
@@ -243,12 +254,12 @@ impl<'a, 'r> FilterListMut<'a, 'r> {
     }
 
     /// Writable pointer to the C object.
-    #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_filter_list {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> FilterListRef<'_, 'r> {
         self.0
     }
@@ -277,7 +288,7 @@ impl fmt::Debug for FilterListMut<'_, '_> {
 /// The free reads neither the repository nor the path; it reaches each filter the list
 /// holds, which the registry keeps (see the [module docs](self#the-repository)).
 ///
-/// Wraps: git_filter_list_free
+/// Wraps: `git_filter_list_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FilterListFree;
@@ -313,10 +324,10 @@ pub(crate) fn relative(path: &CStr) -> Result<(), ErrorBuf> {
 
 /// The list a loading constructor returning `rc` wrote, `None` for none, or libgit2's
 /// error. libgit2 writes no list on failure.
-fn loaded<'r>(
+fn loaded(
     rc: c_int,
-    list: Option<FilterListBox<'r>>,
-) -> Result<Option<FilterListBox<'r>>, ErrorBuf> {
+    list: Option<FilterListBox<'_>>,
+) -> Result<Option<FilterListBox<'_>>, ErrorBuf> {
     if rc < 0 {
         drop(list);
         return Err(last());
@@ -357,8 +368,6 @@ impl<'r> FilterList<'r> {
     /// filters are then added (`git_filter_list_push`, `git2/sys/filter.h`). The list
     /// has no path.
     ///
-    /// Fails, with libgit2's out-of-memory error, when the list cannot be allocated.
-    ///
     /// The list keeps `repo`, which its filters read when it is applied: it borrows
     /// `repo` for `'r`, and the repository cannot go first:
     ///
@@ -376,7 +385,11 @@ impl<'r> FilterList<'r> {
     /// Raw seam: `mode` is a raw `git_filter_mode_t` and `flags` a raw
     /// `git_filter_flag_t` set until those are wrapped; libgit2 accepts every value.
     ///
-    /// Wraps: git_filter_list_new
+    /// Wraps: `git_filter_list_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's out-of-memory error, when the list cannot be allocated.
     pub fn new(
         repo: RepositoryRef<'r>,
         mode: ffi::git_filter_mode_t,
@@ -391,8 +404,9 @@ impl<'r> FilterList<'r> {
         // repository, which the list keeps for `'r`, the handle's borrow, on this
         // thread, which neither leaves. The runtime is pinned, so a failure is reported
         // on live thread-local state.
-        let rc =
-            unsafe { ffi::git_filter_list_new(&mut out, repo.as_ptr().cast_mut(), mode, flags) };
+        let rc = unsafe {
+            ffi::git_filter_list_new(&raw mut out, repo.as_ptr().cast_mut(), mode, flags)
+        };
         // SAFETY: on success `out` is a fresh list nothing else references, released by
         // `git_filter_list_free` as `FilterListFree` does; on failure it is NULL. Its
         // repository outlives `'r`.
@@ -416,10 +430,6 @@ impl<'r> FilterList<'r> {
     /// only [`load_ext`](Self::load_ext) takes, here the zero id, which libgit2 skips as
     /// missing.
     ///
-    /// Fails, with libgit2's error, when the attributes cannot be read (with
-    /// `GIT_FILTER_ATTRIBUTES_FROM_HEAD`, when `HEAD` is unborn), or a filter's `check`
-    /// fails.
-    ///
     /// The list keeps `repo`, as [`new`](Self::new) does:
     ///
     /// ```compile_fail,E0505
@@ -435,7 +445,13 @@ impl<'r> FilterList<'r> {
     ///
     /// Raw seam: `mode` and `flags` as for [`new`](Self::new).
     ///
-    /// Wraps: git_filter_list_load
+    /// Wraps: `git_filter_list_load`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when the attributes cannot be read (with
+    /// `GIT_FILTER_ATTRIBUTES_FROM_HEAD`, when `HEAD` is unborn), or a filter's `check`
+    /// fails.
     pub fn load(
         repo: RepositoryRef<'r>,
         path: &CStr,
@@ -450,10 +466,12 @@ impl<'r> FilterList<'r> {
     /// while it decides whether to apply. The list keeps neither the blob nor its id,
     /// and libgit2's built-in filters do not read it.
     ///
+    /// Wraps: `git_filter_list_load`
+    ///
+    /// # Errors
+    ///
     /// Refuses, with a `GIT_ERROR_FILTER` error "the object is not a blob", an object
     /// of another type, which libgit2 would read as a blob.
-    ///
-    /// Wraps: git_filter_list_load
     pub fn load_with_blob(
         repo: RepositoryRef<'r>,
         blob: ObjectRef<'_, '_>,
@@ -487,7 +505,7 @@ impl<'r> FilterList<'r> {
         // live for the call, as a `LiveBlob` is, its id read for the filters' checks;
         // `path` NUL-terminated, copied. The runtime is pinned: the filter registry and its lock
         // exist, and a failure is reported on live thread-local state.
-        let rc = unsafe { ffi::git_filter_list_load(&mut out, repo, blob, path, mode, flags) };
+        let rc = unsafe { ffi::git_filter_list_load(&raw mut out, repo, blob, path, mode, flags) };
         // SAFETY: `out` is NULL (no filter applies, or a failure), or a fresh list
         // nothing else references, released by `git_filter_list_free` as
         // `FilterListFree` does. Its repository outlives `'r`.
@@ -502,7 +520,11 @@ impl<'r> FilterList<'r> {
     /// Raw seam: `opts` is the raw `git_filter_options` until it is wrapped, and `mode`
     /// as for [`new`](Self::new).
     ///
-    /// Wraps: git_filter_list_load_ext
+    /// Wraps: `git_filter_list_load_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`load`](Self::load) does.
     pub fn load_ext(
         repo: RepositoryRef<'r>,
         path: &CStr,
@@ -516,7 +538,11 @@ impl<'r> FilterList<'r> {
     /// [`load_with_blob`](Self::load_with_blob) is for [`load`](Self::load): an object
     /// of type blob, refused otherwise.
     ///
-    /// Wraps: git_filter_list_load_ext
+    /// Wraps: `git_filter_list_load_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`load_with_blob`](Self::load_with_blob) does.
     pub fn load_ext_with_blob(
         repo: RepositoryRef<'r>,
         blob: ObjectRef<'_, '_>,
@@ -549,7 +575,8 @@ impl<'r> FilterList<'r> {
         // SAFETY: as in `load_from`; `opts` is NULL or a live `git_filter_options`, only
         // read (copied into the session) for the call: libgit2 is built with
         // `GIT_DEPRECATE_HARD`, so the `reserved` pointer is never read.
-        let rc = unsafe { ffi::git_filter_list_load_ext(&mut out, repo, blob, path, mode, opts) };
+        let rc =
+            unsafe { ffi::git_filter_list_load_ext(&raw mut out, repo, blob, path, mode, opts) };
         // SAFETY: as in `load_from`.
         loaded(rc, unsafe { FilterListBox::from_c(out) })
     }
@@ -572,7 +599,7 @@ pub(crate) fn initialise_builtin_filters() {
         // SAFETY: `list` is a writable slot, left NULL on failure; no repository, which
         // the list only keeps, and it is never applied. The caller pinned the runtime.
         let rc = unsafe {
-            ffi::git_filter_list_new(&mut list, ptr::null_mut(), ffi::GIT_FILTER_TO_ODB, 0)
+            ffi::git_filter_list_new(&raw mut list, ptr::null_mut(), ffi::GIT_FILTER_TO_ODB, 0)
         };
         if rc < 0 || list.is_null() {
             return;
@@ -644,7 +671,7 @@ mod unit_tests {
             assert!(runtime_pinned());
             let path = std::env::temp_dir()
                 .join(format!("crustify-filter-unit-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let repo = Repository::init(&c_path, false).unwrap();
             std::fs::write(
@@ -666,7 +693,7 @@ mod unit_tests {
     impl Drop for Workdir {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -811,7 +838,7 @@ mod unit_tests {
     }
 
     /// The free policy, driven by hand and through the box, releases lists with filter
-    /// state (`crlf` keeps a payload its `cleanup` frees) once each (LSan, ASan); a list
+    /// state (`crlf` keeps a payload its `cleanup` frees) once each (`LSan`, `ASan`); a list
     /// given back to C with `into_c` is freed by `git_filter_list_free`.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -827,7 +854,7 @@ mod unit_tests {
                 let raw = list.into_c();
                 // SAFETY: `raw` is the live list given up above, released once.
                 unsafe {
-                    FilterListFree.c_drop(NonNull::new(raw).unwrap().cast::<FilterList<'_>>())
+                    FilterListFree.c_drop(NonNull::new(raw).unwrap().cast::<FilterList<'_>>());
                 };
 
                 let list = FilterList::load(wd.repo(), c"a.id", ffi::GIT_FILTER_TO_ODB, 0)
@@ -841,7 +868,7 @@ mod unit_tests {
                 // SAFETY: a writable slot, the live repository and a NUL-terminated path.
                 let rc = unsafe {
                     ffi::git_filter_list_load(
-                        &mut out,
+                        &raw mut out,
                         wd.repo().as_ptr().cast_mut(),
                         ptr::null_mut(),
                         c"b.txt".as_ptr(),

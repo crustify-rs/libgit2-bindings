@@ -5,7 +5,7 @@
 //! Taking a string out of a `git_buf` moved to `core::buffer`'s `BufMut::take_str`,
 //! whose adoption, `Buf::from_raw`, `tests/ub_unsafe/buffer.rs` covers.
 
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{CStr, c_char};
 use std::mem::size_of;
 use std::{ptr, thread};
 
@@ -38,7 +38,9 @@ fn c_array(items: &[Option<&CStr>], capacity: usize) -> *mut *mut c_char {
             OdbDataStrFree::dup(s).unwrap().into_raw()
         });
         // SAFETY: `i < capacity` slots of `arr` are writable.
-        unsafe { arr.add(i).write(s) };
+        let add = unsafe { arr.add(i) };
+        // SAFETY: as above.
+        unsafe { add.write(s) };
     }
     arr
 }
@@ -118,7 +120,7 @@ fn refuses_a_null_element_and_leaves_ownership() {
             count: 3,
         };
         // SAFETY: `array` owns its array and strings; `git__free(NULL)` is a no-op.
-        unsafe { ffi::git_strarray_dispose(&mut array) };
+        unsafe { ffi::git_strarray_dispose(&raw mut array) };
     }
 }
 
@@ -132,7 +134,8 @@ fn adopts_what_libgit2_hands_out() {
     };
     // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills from a
     // `git_vector`, so the array may have spare capacity.
-    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS.cast_signed(), &raw mut out) };
     assert_eq!(rc, 0);
     // SAFETY: libgit2's output, owned by the caller and handed over whole.
     let v = unsafe { OdbDataStrVec::from_raw_parts(out.strings, out.count) }.unwrap();

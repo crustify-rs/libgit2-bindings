@@ -101,7 +101,7 @@ const INIT: ffi::git_buf = ffi::git_buf {
 /// `git__allocator` without synchronisation against the first `git_libgit2_init` another
 /// thread may be running. Nothing orders an unallocated buffer after that initialisation.
 ///
-/// Wraps: git_buf_dispose
+/// Wraps: `git_buf_dispose`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BufDispose;
@@ -116,7 +116,9 @@ unsafe impl CDispose<Buf> for BufDispose {
     unsafe fn c_dispose(&self, ptr: NonNull<Buf>) {
         let raw: *mut ffi::git_buf = ptr.as_ptr().cast();
         // SAFETY: per `c_dispose`'s contract `raw` addresses a live `git_buf`.
-        let reserved = unsafe { addr_of!((*raw).reserved).read() };
+        let reserved_ptr = unsafe { addr_of!((*raw).reserved) };
+        // SAFETY: as above.
+        let reserved = unsafe { reserved_ptr.read() };
         if reserved == 0 {
             return;
         }
@@ -144,6 +146,7 @@ impl Buf {
     /// bytes.
     ///
     /// `None` when the allocation fails, or libgit2 cannot be initialised.
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<BufVal> {
         if bytes.is_empty() {
             return Some(Self::new());
@@ -194,6 +197,7 @@ impl Buf {
 
     /// The raw `git_buf`, ownership included: C code releases it with `git_buf_dispose`
     /// or passes it to a libgit2 routine to fill again.
+    #[must_use]
     pub fn into_raw(self) -> ffi::git_buf {
         self.0
     }
@@ -205,13 +209,17 @@ impl<'a> BufRef<'a> {
         let buf = self.as_ptr();
         // SAFETY: reads through the shared handle's pointer to a live `git_buf`; any
         // `size_t` is a valid `usize`.
-        let (reserved, data, size) = unsafe {
-            (
-                addr_of!((*buf).reserved).read(),
-                addr_of!((*buf).ptr).read(),
-                addr_of!((*buf).size).read(),
-            )
-        };
+        let reserved_ptr = unsafe { addr_of!((*buf).reserved) };
+        // SAFETY: as above.
+        let read2 = unsafe { reserved_ptr.read() };
+        // SAFETY: as above.
+        let ptr_ptr = unsafe { addr_of!((*buf).ptr) };
+        // SAFETY: as above.
+        let read3 = unsafe { ptr_ptr.read() };
+        // SAFETY: as above.
+        let size_ptr = unsafe { addr_of!((*buf).size) };
+        // SAFETY: as above.
+        let (reserved, data, size) = unsafe { (read2, read3, size_ptr.read()) };
         if reserved == 0 {
             (0, ptr::null(), 0)
         } else {
@@ -222,12 +230,14 @@ impl<'a> BufRef<'a> {
     /// The number of bytes held, the terminating NUL excluded; 0 for a buffer owning
     /// nothing, whatever `size` says, as [`as_bytes`](Self::as_bytes) reads it.
     ///
-    /// Field: git_buf.size
+    /// Field: `git_buf.size`
+    #[must_use]
     pub fn len(&self) -> usize {
         self.parts().2
     }
 
     /// Whether the buffer holds no bytes.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -235,7 +245,8 @@ impl<'a> BufRef<'a> {
     /// The size of the allocation the buffer owns, the room for the terminating NUL
     /// included, which libgit2 reuses before reallocating; 0 when it owns none.
     ///
-    /// Field: git_buf.reserved
+    /// Field: `git_buf.reserved`
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.parts().0
     }
@@ -243,7 +254,8 @@ impl<'a> BufRef<'a> {
     /// The contents, borrowed in place for as long as the buffer is, NUL bytes included;
     /// empty for a buffer owning nothing.
     ///
-    /// Field: git_buf.ptr
+    /// Field: `git_buf.ptr`
+    #[must_use]
     pub fn as_bytes(&self) -> &'a [u8] {
         match self.parts() {
             (0, _, _) => &[],
@@ -256,6 +268,7 @@ impl<'a> BufRef<'a> {
 
     /// The contents up to the first NUL byte, as C code reads `ptr`: all of them unless
     /// they hold a NUL of their own. Empty for a buffer owning nothing.
+    #[must_use]
     pub fn as_c_str(&self) -> &'a CStr {
         match self.parts() {
             (0, _, _) => c"",
@@ -269,6 +282,10 @@ impl<'a> BufRef<'a> {
     }
 
     /// The contents as UTF-8; an error when they are not.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the [`Utf8Error`] of the first invalid byte.
     pub fn to_str(&self) -> Result<&'a str, Utf8Error> {
         core::str::from_utf8(self.as_bytes())
     }
@@ -286,6 +303,7 @@ impl<'a> BufRef<'a> {
     /// let buf = Buf::new();
     /// let copy: BufVal = buf.clone();
     /// ```
+    #[must_use]
     pub fn to_buf(&self) -> Option<BufVal> {
         Buf::from_bytes(self.as_bytes())
     }
@@ -319,9 +337,9 @@ impl BufMut<'_> {
 
     /// Replaces the contents with `value`'s, releasing the ones held before.
     ///
-    /// Field: git_buf.ptr
-    /// Field: git_buf.reserved
-    /// Field: git_buf.size
+    /// Field: `git_buf.ptr`
+    /// Field: `git_buf.reserved`
+    /// Field: `git_buf.size`
     pub fn set(&mut self, value: BufVal) {
         let raw = value.into_inner().into_raw();
         // SAFETY: `raw` comes out of a `BufVal`, so it keeps the invariant, and its owner
@@ -332,9 +350,9 @@ impl BufMut<'_> {
     /// Takes the contents out, leaving the buffer empty and owning nothing
     /// (`GIT_BUF_INIT`): what `git_buf_dispose` would release, owned.
     ///
-    /// Field: git_buf.ptr
-    /// Field: git_buf.reserved
-    /// Field: git_buf.size
+    /// Field: `git_buf.ptr`
+    /// Field: `git_buf.reserved`
+    /// Field: `git_buf.size`
     pub fn take(&mut self) -> BufVal {
         let buf = self.as_mut_ptr();
         // SAFETY: reads the struct, then writes the empty buffer, through the exclusive
@@ -352,8 +370,8 @@ impl BufMut<'_> {
     /// `None` when that allocation fails, or libgit2 cannot be initialised; the buffer is
     /// left as it was.
     ///
-    /// Field: git_buf.ptr
-    /// Field: git_buf.size
+    /// Field: `git_buf.ptr`
+    /// Field: `git_buf.size`
     pub fn set_bytes(&mut self, bytes: &[u8]) -> Option<()> {
         let (reserved, data, _) = self.as_ref().parts();
         if bytes.len() < reserved {
@@ -361,11 +379,15 @@ impl BufMut<'_> {
             // SAFETY: per the handles' invariant `data` is an owned allocation of
             // `reserved` bytes, which this exclusive handle may write; `bytes.len() + 1`
             // of them fit. `ptr::copy` tolerates `bytes` overlapping it.
-            unsafe {
-                ptr::copy(bytes.as_ptr(), data, bytes.len());
-                data.add(bytes.len()).write(0);
-                addr_of_mut!((*self.as_mut_ptr()).size).write(bytes.len());
-            }
+            unsafe { ptr::copy(bytes.as_ptr(), data, bytes.len()) };
+            // SAFETY: as above.
+            let value2 = unsafe { data.add(bytes.len()) };
+            // SAFETY: as above.
+            unsafe { value2.write(0) };
+            // SAFETY: as above.
+            let value2 = unsafe { addr_of_mut!((*self.as_mut_ptr()).size) };
+            // SAFETY: as above.
+            unsafe { value2.write(bytes.len()) };
             return Some(());
         }
         if bytes.is_empty() {
@@ -379,7 +401,7 @@ impl BufMut<'_> {
     /// Replaces the contents with `s`, adopting its allocation without a copy; the old
     /// contents are released.
     ///
-    /// Field: git_buf.ptr
+    /// Field: `git_buf.ptr`
     pub fn set_str(&mut self, s: OdbDataStr) {
         let size = s.len();
         let data = s.into_raw();
@@ -402,7 +424,7 @@ impl BufMut<'_> {
     /// contents past one are not represented, though the whole allocation is still
     /// released. [`take_bytes`](Self::take_bytes) keeps them.
     ///
-    /// Field: git_buf.ptr
+    /// Field: `git_buf.ptr`
     pub fn take_str(&mut self) -> Option<OdbDataStr> {
         let raw = self.take().into_inner().into_raw();
         if raw.reserved == 0 {
@@ -418,7 +440,7 @@ impl BufMut<'_> {
     /// leaving the buffer empty and owning nothing: what `git_buf_dispose` would release,
     /// owned. Empty and unallocated when the buffer owns no allocation.
     ///
-    /// Field: git_buf.ptr
+    /// Field: `git_buf.ptr`
     pub fn take_bytes(&mut self) -> OdbDataVec<u8> {
         let raw = self.take().into_inner().into_raw();
         if raw.reserved == 0 {
@@ -447,7 +469,7 @@ const _: () = assert!(size_of::<c_char>() == size_of::<u8>());
 
 #[cfg(test)]
 mod unit_tests {
-    use core::ffi::{c_int, c_void};
+    use core::ffi::c_void;
     use core::mem::size_of;
     use std::process::Command;
     use std::sync::atomic::AtomicBool;
@@ -527,7 +549,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -619,7 +641,7 @@ mod unit_tests {
         // SAFETY: `raw_buf` is live for the handle's use and owns 8 bytes the test keeps
         // alive, NUL-terminated at 5; no other handle reaches it meanwhile. It is never
         // released through the handle: the take below hands it back raw.
-        let mut m = unsafe { BufMut::from_ptr(&mut raw_buf) }.unwrap();
+        let mut m = unsafe { BufMut::from_ptr(&raw mut raw_buf) }.unwrap();
         let r = m.as_ref();
         assert_eq!((r.len(), r.capacity()), (5, 8));
         assert_eq!(r.as_bytes(), b"hello");
@@ -650,7 +672,7 @@ mod unit_tests {
     }
 
     /// Every constructor, copy, move and replacement releases each allocation once
-    /// (LSan, in the asan variant, flags a leak, ASan a double free).
+    /// (`LSan`, in the asan variant, flags a leak, `ASan` a double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn owned_buffers_copy_move_and_release() {
@@ -730,13 +752,13 @@ mod unit_tests {
                 assert!(runtime_pinned());
                 let opt = |opt: u32, s: *const c_char| {
                     // SAFETY: both options copy the string, or restore the default for NULL.
-                    assert_eq!(unsafe { ffi::git_libgit2_opts(opt as c_int, s) }, 0);
+                    assert_eq!(unsafe { ffi::git_libgit2_opts(opt.cast_signed(), s) }, 0);
                 };
                 let get = |opt: u32, buf: &mut BufVal| {
                     let mut raw = buf.as_mut().take().into_inner().into_raw();
                     // SAFETY: both options take a `git_buf *` that is zeroed or owns a
                     // libgit2 allocation, which they reuse or replace.
-                    let rc = unsafe { ffi::git_libgit2_opts(opt as c_int, &raw mut raw) };
+                    let rc = unsafe { ffi::git_libgit2_opts(opt.cast_signed(), &raw mut raw) };
                     assert_eq!(rc, 0);
                     // SAFETY: `raw` is as libgit2 left it.
                     buf.as_mut().set(unsafe { Buf::from_raw(raw) });

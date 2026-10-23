@@ -148,6 +148,10 @@ fn independent_thread_local_diffs() {
 /// `id_abbrev` follows the repository's.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario, its steps run and compared in order"
+)]
 fn foreign_object_id_type_inputs_stay_in_bounds() {
     let res = format!("{}/c/tests/resources", env!("CARGO_MANIFEST_DIR"));
     let bare256 =
@@ -164,7 +168,7 @@ fn foreign_object_id_type_inputs_stay_in_bounds() {
     )
     .unwrap();
     let dir = std::env::temp_dir().join(format!("crustify-diff-sha256-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
     let mut opts = InitOptions::new();
     opts.as_mut().set_oid_type(Some(OidType::Sha256));
     opts.as_mut().set_flags(InitFlag::Mkpath.into());
@@ -177,7 +181,10 @@ fn foreign_object_id_type_inputs_stay_in_bounds() {
     let tree1 = fixture.tree(b"old\n");
     let index1 = Index::new().unwrap();
     let r256 = repo256.as_ref();
-    let (sha1, sha256) = (OidType::Sha1.raw() as u8, OidType::Sha256.raw() as u8);
+    let (sha1, sha256) = (
+        u8::try_from(OidType::Sha1.raw()).unwrap(),
+        u8::try_from(OidType::Sha256.raw()).unwrap(),
+    );
     let (added, deleted, modified) = (
         ffi::GIT_DELTA_ADDED,
         ffi::GIT_DELTA_DELETED,
@@ -254,5 +261,5 @@ fn foreign_object_id_type_inputs_stay_in_bounds() {
     drop(tree256);
     drop(bare256);
     drop(repo256);
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
 }

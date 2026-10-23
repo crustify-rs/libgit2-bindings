@@ -43,22 +43,24 @@ impl Signature {
     /// `user.email` (read from a snapshot of every level), at the current time in the
     /// local timezone, as [`Signature::now`] builds it.
     ///
+    /// Concurrent calls are sound, and race as [`Signature::now`] does under
+    /// `ThreadSanitizer`, on glibc's copy of `TZ`.
+    ///
+    /// Wraps: `git_signature_default`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
     /// (class `GIT_ERROR_CONFIG`, "config value '…' was not found") when either is not
     /// set, with libgit2's error when the configuration cannot be read, and as
     /// [`Signature::now`] fails for a value it refuses (an empty one, or one holding an
     /// angle bracket).
-    ///
-    /// Concurrent calls are sound, and race as [`Signature::now`] does under
-    /// ThreadSanitizer, on glibc's copy of `TZ`.
-    ///
-    /// Wraps: git_signature_default
     pub fn default(repo: RepositoryRef<'_>) -> Result<SignatureBox, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; `repo` is a live
         // repository on this thread, whose configuration libgit2 loads and snapshots
         // through this shared handle, as `RepositoryRef` allows, keeping nothing of it.
-        let rc = unsafe { ffi::git_signature_default(&mut out, repo.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_signature_default(&raw mut out, repo.as_ptr().cast_mut()) };
         // SAFETY: NULL on failure, or a fresh signature from `git_signature_now` the
         // caller owns alone, released by `git_signature_free` as `SignatureBox` does.
         adopted(rc, unsafe { SignatureBox::from_c(out) })
@@ -71,10 +73,6 @@ impl Signature {
     /// the current time in the local timezone. The committer likewise, from the
     /// `GIT_COMMITTER_*` variables. Without dates, both share one current time.
     ///
-    /// Fails as [`default_author_from_env`](Self::default_author_from_env) fails for the
-    /// author, else as [`default_committer_from_env`](Self::default_committer_from_env)
-    /// fails for the committer.
-    ///
     /// libgit2 leaks the author's strings when the committer fails after the author
     /// was built. So the committer is first built alone, and dropped: only once that
     /// succeeds does libgit2 build both, together. When it fails, the author is built
@@ -84,9 +82,15 @@ impl Signature {
     /// leak.
     ///
     /// Concurrent calls are sound, and race as [`Signature::now`] does under
-    /// ThreadSanitizer, on glibc's copy of `TZ`.
+    /// `ThreadSanitizer`, on glibc's copy of `TZ`.
     ///
-    /// Wraps: git_signature_default_from_env
+    /// Wraps: `git_signature_default_from_env`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`default_author_from_env`](Self::default_author_from_env) fails for the
+    /// author, else as [`default_committer_from_env`](Self::default_committer_from_env)
+    /// fails for the committer.
     pub fn default_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<(SignatureBox, SignatureBox), RepositoryError> {
@@ -105,25 +109,26 @@ impl Signature {
         // snapshots through this shared handle, keeping nothing of it.
         let rc = unsafe {
             ffi::git_signature_default_from_env(
-                &mut author,
-                &mut committer,
+                &raw mut author,
+                &raw mut committer,
                 repo.as_ptr().cast_mut(),
             )
         };
         // SAFETY: on success each slot holds a fresh signature from `git_signature_new`
         // the caller owns alone, released by `git_signature_free` as `SignatureBox`
         // does; on failure both stay NULL.
-        let (author, committer) = unsafe {
-            (
-                SignatureBox::from_c(author),
-                SignatureBox::from_c(committer),
-            )
-        };
+        let value2 = unsafe { SignatureBox::from_c(author) };
+        // SAFETY: as above.
+        let (author, committer) = unsafe { (value2, SignatureBox::from_c(committer)) };
         Ok((adopted(rc, author)?, adopted(rc, committer)?))
     }
 
     /// The author git would record in `repo`, from the environment first:
     /// [`default_from_env`](Self::default_from_env)'s author, built alone.
+    ///
+    /// Wraps: `git_signature_default_from_env`
+    ///
+    /// # Errors
     ///
     /// Fails with [`ErrorCode::NotFound`](crate::libgit2::util::errors::ErrorCode::NotFound)
     /// (class `GIT_ERROR_CONFIG`) when neither `GIT_AUTHOR_NAME` nor `user.name` is
@@ -132,8 +137,6 @@ impl Signature {
     /// value it refuses; and with `-1` when `GIT_AUTHOR_DATE` does not parse, for which
     /// libgit2 sets no error of its own: the error is whatever libgit2 left last, such
     /// as a configuration file it did not find.
-    ///
-    /// Wraps: git_signature_default_from_env
     pub fn default_author_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<SignatureBox, RepositoryError> {
@@ -142,7 +145,11 @@ impl Signature {
         // slot NULL, which libgit2 skips; `repo` a live repository on this thread, whose
         // configuration libgit2 loads and snapshots through this shared handle.
         let rc = unsafe {
-            ffi::git_signature_default_from_env(&mut out, ptr::null_mut(), repo.as_ptr().cast_mut())
+            ffi::git_signature_default_from_env(
+                &raw mut out,
+                ptr::null_mut(),
+                repo.as_ptr().cast_mut(),
+            )
         };
         // SAFETY: NULL on failure, or a fresh signature from `git_signature_new` the
         // caller owns alone, released by `git_signature_free` as `SignatureBox` does.
@@ -154,14 +161,23 @@ impl Signature {
     /// [`default_author_from_env`](Self::default_author_from_env) does, from the
     /// `GIT_COMMITTER_*` variables.
     ///
-    /// Wraps: git_signature_default_from_env
+    /// Wraps: `git_signature_default_from_env`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`default_author_from_env`](Self::default_author_from_env) does, from the
+    /// `GIT_COMMITTER_*` variables.
     pub fn default_committer_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<SignatureBox, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: as in `default_author_from_env`, with the author's slot NULL.
         let rc = unsafe {
-            ffi::git_signature_default_from_env(ptr::null_mut(), &mut out, repo.as_ptr().cast_mut())
+            ffi::git_signature_default_from_env(
+                ptr::null_mut(),
+                &raw mut out,
+                repo.as_ptr().cast_mut(),
+            )
         };
         // SAFETY: as in `default_author_from_env`.
         adopted(rc, unsafe { SignatureBox::from_c(out) })
@@ -196,7 +212,7 @@ mod unit_tests {
 
     /// Runs `body` alone in a child process, where nothing has initialised libgit2,
     /// with git's identity variables unset but for `env`; with `tolerate_leaks`,
-    /// LeakSanitizer is off there.
+    /// `LeakSanitizer` is off there.
     fn isolated(test: &str, env: &[(&str, &str)], tolerate_leaks: bool, body: fn()) {
         let name = test.split_once("::").map_or(test, |(_, rest)| rest);
         if std::env::var(CHILD).as_deref() == Ok(name) {
@@ -258,7 +274,7 @@ mod unit_tests {
             _: i32,
         ) -> Option<NonNull<u8>> {
             let fresh = p.is_none();
-            let p = p.map_or(core::ptr::null_mut(), |p| p.as_ptr().cast());
+            let p = p.map_or(ptr::null_mut(), |p| p.as_ptr().cast());
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             let q = NonNull::new(unsafe { realloc(p, len) }.cast());
             LIVE.fetch_add(isize::from(fresh && q.is_some()), SeqCst);
@@ -279,7 +295,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -299,7 +315,7 @@ mod unit_tests {
                 "crustify-signature-unit-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             std::fs::create_dir_all(path.join("levels")).unwrap();
             let levels = CString::new(path.join("levels").to_str().unwrap()).unwrap();
             for level in [
@@ -330,7 +346,7 @@ mod unit_tests {
     impl Drop for TempRepo {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -339,7 +355,7 @@ mod unit_tests {
     /// The corrected divergence: when the author is built and the committer then fails,
     /// `git_signature_default_from_env` frees the author with `git__free`, keeping its
     /// two strings; `default_from_env` reports the committer's failure, with the error
-    /// libgit2 leaves, and leaves no block behind. The child runs with LeakSanitizer
+    /// libgit2 leaves, and leaves no block behind. The child runs with `LeakSanitizer`
     /// off, as the C call leaks; the counting allocator stands in for it.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -361,8 +377,8 @@ mod unit_tests {
                 // SAFETY: two writable slots and a live repository on this thread.
                 let rc = unsafe {
                     ffi::git_signature_default_from_env(
-                        &mut author,
-                        &mut committer,
+                        &raw mut author,
+                        &raw mut committer,
                         repo.as_ptr().cast_mut(),
                     )
                 };

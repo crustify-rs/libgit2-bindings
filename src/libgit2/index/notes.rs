@@ -42,7 +42,7 @@ use crate::libgit2::util::errors::ErrorCode;
 /// send::<NoteIteratorBox<'static>>();
 /// ```
 ///
-/// Wraps: git_iterator
+/// Wraps: `git_iterator`
 /// Handwritten
 #[repr(transparent)]
 pub struct NoteIterator<'r>(ffi::git_note_iterator, PhantomData<(*const (), &'r ())>);
@@ -77,8 +77,14 @@ unsafe impl<'r> CCell for NoteIterator<'r> {
         Self: 'a;
 }
 
-impl<'a, 'r> NoteIteratorRef<'a, 'r> {
-    #[allow(dead_code)] // Seam for the later note traversal symbols.
+impl NoteIteratorRef<'_, '_> {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_note_iterator {
         self.0.as_non_null().as_ptr().cast()
     }
@@ -86,6 +92,7 @@ impl<'a, 'r> NoteIteratorRef<'a, 'r> {
 
 impl<'r> NoteIteratorMut<'_, 'r> {
     /// Reborrows shared for no longer than this handle.
+    #[must_use]
     pub fn as_ref(&self) -> NoteIteratorRef<'_, 'r> {
         self.0
     }
@@ -95,7 +102,13 @@ impl<'r> NoteIteratorMut<'_, 'r> {
         NoteIteratorMut(self.0, PhantomData)
     }
 
-    #[allow(dead_code)] // Seam for the later note traversal symbols.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_note_iterator {
         self.0.0.as_non_null().as_ptr().cast()
     }
@@ -104,7 +117,7 @@ impl<'r> NoteIteratorMut<'_, 'r> {
 /// Releases the iterator's owned traversal storage and tree references through C.
 /// No external state is needed and no repository reference is released.
 ///
-/// Wraps: git_note_iterator_free
+/// Wraps: `git_note_iterator_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoteIteratorFree;
@@ -151,11 +164,8 @@ fn default_ref(repo: RepositoryRef<'_>) -> Result<CString, RepositoryError> {
 }
 
 impl<'r> NoteIterator<'r> {
-    /// Opens notes at `notes_ref`, or at the repository's default notes reference
-    /// (`core.notesRef`, else `refs/notes/commits`). The name is read during the call,
-    /// not retained. A missing or invalid reference, a target that is not a commit, a
-    /// notes tree missing from the object database and allocation failures return
-    /// libgit2's error.
+    /// Opens notes at `notes_ref`, or at the repository's default notes reference (`core.notesRef`,
+    /// else `refs/notes/commits`). The name is read during the call, not retained.
     ///
     /// Composed in Rust: `git_note_iterator_new` ignores a failed commit lookup
     /// (reference to a missing object or a non-commit) and then frees an
@@ -167,18 +177,22 @@ impl<'r> NoteIterator<'r> {
     ///
     /// [`ConfigRef::entry`]: crate::libgit2::config::config::ConfigRef::entry
     ///
-    /// Wraps: git_note_iterator_new
+    /// Wraps: `git_note_iterator_new`
+    ///
+    /// # Errors
+    ///
+    /// A missing or invalid reference, a target that is not a commit, a notes tree missing from the
+    /// object database and allocation failures return libgit2's error.
     pub fn new(
         repo: RepositoryRef<'r>,
         notes_ref: Option<&CStr>,
     ) -> Result<NoteIteratorBox<'r>, RepositoryError> {
         let default;
-        let name = match notes_ref {
-            Some(name) => name,
-            None => {
-                default = default_ref(repo)?;
-                default.as_c_str()
-            }
+        let name = if let Some(name) = notes_ref {
+            name
+        } else {
+            default = default_ref(repo)?;
+            default.as_c_str()
         };
         let mut id = Oid::zeroed();
         // SAFETY: `id` is a writable id, set only on success; `repo` is live on this
@@ -208,7 +222,16 @@ impl<'r> NoteIterator<'r> {
     /// allocation failure or the tree's removal from the object database between the
     /// two reads can still reach the defect.
     ///
-    /// Wraps: git_note_commit_iterator_new
+    /// Wraps: `git_note_commit_iterator_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when the commit's tree is missing from the object database, or
+    /// when it runs out of memory.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: successful note iterator is non-null"
+    )]
     pub fn from_commit(commit: CommitRef<'_, 'r>) -> Result<NoteIteratorBox<'r>, RepositoryError> {
         let tree = commit.tree()?;
         let mut out = ptr::null_mut();
@@ -217,7 +240,8 @@ impl<'r> NoteIterator<'r> {
         // on success and releases every temporary on failure. Its tree lookup finds
         // `tree`, held until it returns, in the cache or rereads it, so it fails
         // only in the C defect documented above.
-        let rc = unsafe { ffi::git_note_commit_iterator_new(&mut out, commit.as_ptr().cast_mut()) };
+        let rc =
+            unsafe { ffi::git_note_commit_iterator_new(&raw mut out, commit.as_ptr().cast_mut()) };
         drop(tree);
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
@@ -240,12 +264,12 @@ mod unit_tests {
     fn scratch(tag: &str) -> std::path::PathBuf {
         let path =
             std::env::temp_dir().join(format!("crustify-notes-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         path
     }
 
     fn open(path: &Path) -> crate::libgit2::repository::repository::RepositoryBox {
-        Repository::open(&std::ffi::CString::new(path.to_str().unwrap()).unwrap()).unwrap()
+        Repository::open(&CString::new(path.to_str().unwrap()).unwrap()).unwrap()
     }
 
     fn write_ref(path: &Path, name: &str, id: &Oid) {
@@ -260,11 +284,7 @@ mod unit_tests {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn missing_tree_returns_error_without_invalid_free() {
         let path = scratch("missing-tree");
-        let repo = Repository::init(
-            &std::ffi::CString::new(path.to_str().unwrap()).unwrap(),
-            true,
-        )
-        .unwrap();
+        let repo = Repository::init(&CString::new(path.to_str().unwrap()).unwrap(), true).unwrap();
         // Store an intentionally incomplete object graph: no safe commit builder
         // accepts a missing tree, so use the raw object writer only for this fixture.
         let content = b"tree 1111111111111111111111111111111111111111\nauthor A <a@b> 1 +0000\ncommitter A <a@b> 1 +0000\n\nnotes\n";
@@ -274,7 +294,7 @@ mod unit_tests {
         // The ODB accepts arbitrary bytes; the commit parser validates them below.
         let rc = unsafe {
             ffi::git_odb_write(
-                &mut raw_id,
+                &raw mut raw_id,
                 odb.as_c_ptr(),
                 content.as_ptr().cast(),
                 content.len(),
@@ -306,13 +326,7 @@ mod unit_tests {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn non_commit_targets_return_lookup_error() {
         let path = scratch("non-commit");
-        drop(
-            Repository::init(
-                &std::ffi::CString::new(path.to_str().unwrap()).unwrap(),
-                true,
-            )
-            .unwrap(),
-        );
+        drop(Repository::init(&CString::new(path.to_str().unwrap()).unwrap(), true).unwrap());
         let repo = open(&path);
         let blob = blob::create_from_buffer(repo.as_ref(), b"not a commit\n").unwrap();
         let empty_tree =
@@ -363,13 +377,7 @@ mod unit_tests {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn unparsable_configuration_fails_the_default_name() {
         let path = scratch("bad-config");
-        drop(
-            Repository::init(
-                &std::ffi::CString::new(path.to_str().unwrap()).unwrap(),
-                true,
-            )
-            .unwrap(),
-        );
+        drop(Repository::init(&CString::new(path.to_str().unwrap()).unwrap(), true).unwrap());
         let repo = open(&path);
         assert_eq!(
             NoteIterator::new(repo.as_ref(), None).err().unwrap().code(),

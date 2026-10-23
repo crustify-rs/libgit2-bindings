@@ -5,13 +5,13 @@
 //!
 //! Each builds owned signatures from a snapshot of the repository's configuration and
 //! from the environment: they outlive the repository and its configuration, which are
-//! dropped before they are read (ASan), and every failure releases what libgit2 built.
+//! dropped before they are read (`ASan`), and every failure releases what libgit2 built.
 //! In particular, the pair whose committer fails after its author is built, on which
 //! libgit2 itself leaks the author's strings, must leak nothing through the wrapper
-//! (LSan). Identities of up to a megabyte are read and copied (ASan). Each case runs in
+//! (`LSan`). Identities of up to a megabyte are read and copied (`ASan`). Each case runs in
 //! a child process whose environment it sets, its other configuration levels pointed at
 //! an empty directory, on one thread: every call reads the local time zone through
-//! glibc's `mktime`, whose `tzset` TSan reports against any concurrent caller, so no
+//! glibc's `mktime`, whose `tzset` `TSan` reports against any concurrent caller, so no
 //! test runs them on threads. Every test calls libgit2, so Miri skips them all.
 
 use std::ffi::{CStr, CString};
@@ -67,7 +67,7 @@ impl TempRepo {
             "crustify-signature-ub-{}-{tag}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         std::fs::create_dir_all(path.join("levels")).unwrap();
         isolate_config_levels(&path.join("levels"));
         let repo_path = path.join("repo.git");
@@ -90,7 +90,7 @@ impl TempRepo {
 impl Drop for TempRepo {
     fn drop(&mut self) {
         drop(self.repo.take());
-        let _ = std::fs::remove_dir_all(&self.path);
+        drop(std::fs::remove_dir_all(&self.path));
     }
 }
 
@@ -132,7 +132,7 @@ fn signatures_outlive_their_repository() {
 }
 
 /// Failures release what libgit2 built, the pair whose committer fails after its
-/// author included, on which libgit2 alone would leak the author (LSan).
+/// author included, on which libgit2 alone would leak the author (`LSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn failures_release_everything() {

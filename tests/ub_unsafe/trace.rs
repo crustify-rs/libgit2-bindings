@@ -5,8 +5,8 @@
 //! Its contract is that the adopted C function may be called with any named level
 //! and any C string live for the call, from any thread, concurrently and reentrantly,
 //! for the rest of the process. The functions adopted here meet it, so calls through
-//! the callback must race nothing (TSan), read the message only while it lives
-//! (ASan), and reach the function exactly as a direct call does; libgit2's own calls,
+//! the callback must race nothing (`TSan`), read the message only while it lives
+//! (`ASan`), and reach the function exactly as a direct call does; libgit2's own calls,
 //! once it is installed, too, even after every `TraceCallback` is gone.
 
 use std::ffi::{CStr, CString, c_char, c_int};
@@ -198,9 +198,9 @@ fn serve_404() -> CString {
                     Ok(n) => request.extend_from_slice(&chunk[..n]),
                 }
             }
-            let _ = stream.write_all(
+            drop(stream.write_all(
                 b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            );
+            ));
         }
     });
     CString::new(format!("http://127.0.0.1:{port}/repo.git")).unwrap()
@@ -573,7 +573,7 @@ mod config {
                 assert_eq!(CALLS.swap(0, SeqCst), 1);
                 let rest = take(&FIRST);
                 // The rest of the connection reached the replacement.
-                assert!(!rest.is_empty());
+                assert!(!rest.is_empty(), "{rest:?}");
                 assert!(rest.iter().any(|(_, m)| m.starts_with(b"Received:\n")));
                 // SAFETY: as above.
                 unsafe { trace::clear() };

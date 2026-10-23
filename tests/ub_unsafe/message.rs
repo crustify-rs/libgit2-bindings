@@ -4,7 +4,7 @@
 //! `MessageTrailer::from_raw` adopts a `git_message_trailer` whose two strings the
 //! caller vouches for: non-NULL, NUL-terminated, live and unchanged for `'t`. Each test
 //! honours that contract and checks that the adopted trailer then reads exactly those
-//! strings, and nothing past them (ASan, Miri), up to the end of `'t`:
+//! strings, and nothing past them (`ASan`, Miri), up to the end of `'t`:
 //!
 //! - trailers the safe API built and gave back (`MessageTrailer::new` → `into_raw`), including
 //!   empty and long strings, which run under Miri;
@@ -14,7 +14,7 @@
 //!   read one byte too far leaves the allocation).
 //!
 //! Adopted trailers are then copied, written through their exclusive handle and read
-//! from several threads (TSan), as any trailer may be.
+//! from several threads (`TSan`), as any trailer may be.
 //!
 //! `MessageTrailerArray::from_raw` adopts a `git_message_trailer_array` whose buffers
 //! the caller gives up: NULL or libgit2's allocations, with at least `count` trailers
@@ -24,7 +24,7 @@
 //! block without a trailer buffer (a message without trailers), and a NULL trailer
 //! buffer with a stale `count`. Each adopted array reads its trailers back, is taken
 //! from, refilled and cleared, crosses threads, and is freed exactly once by its last
-//! owner (ASan: double free, use after free; LSan: leaks). The NULL states run under
+//! owner (`ASan`: double free, use after free; `LSan`: leaks). The NULL states run under
 //! Miri.
 
 use std::ffi::{CStr, CString, c_char};
@@ -104,7 +104,9 @@ fn parsed_trailers_are_adopted_until_the_array_is_freed() {
         let mut adopted = Vec::new();
         for i in 0..trailers.len() {
             // SAFETY: `i < len`, so the trailer is in the array's buffer, read as a copy.
-            let raw = unsafe { trailers.as_ptr().add(i).read() };
+            let add = unsafe { trailers.as_ptr().add(i) };
+            // SAFETY: as above.
+            let raw = unsafe { add.read() };
             let expected = (c_string(raw.key), c_string(raw.value));
             // SAFETY: libgit2 set both strings, non-NULL and NUL-terminated, in the
             // array's block, which nothing writes and which lives until `array` drops
@@ -143,7 +145,9 @@ fn c_pairs(raw: &ffi::git_message_trailer_array) -> Vec<(CString, CString)> {
     (0..raw.count)
         .map(|i| {
             // SAFETY: `i < count`, within the trailer buffer libgit2 filled.
-            let t = unsafe { raw.trailers.add(i).read() };
+            let add2 = unsafe { raw.trailers.add(i) };
+            // SAFETY: as above.
+            let t = unsafe { add2.read() };
             (c_string(t.key), c_string(t.value))
         })
         .collect()
@@ -204,7 +208,7 @@ fn arrays_given_back_by_the_safe_api_are_adopted() {
         let mut again = adopted.into_inner().into_raw();
         assert_eq!(c_pairs(&again), expected);
         // SAFETY: given up once more, and freed once by C.
-        unsafe { ffi::git_message_trailer_array_free(&mut again) };
+        unsafe { ffi::git_message_trailer_array_free(&raw mut again) };
     }
 }
 

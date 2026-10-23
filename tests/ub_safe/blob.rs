@@ -4,10 +4,10 @@
 //!
 //! libgit2 reads the slice it is given, up to four bytes at once when it looks for a
 //! byte-order mark, and nothing else. Each input sits in an exact-length heap buffer,
-//! so ASan flags any read past it, with every byte-order mark cut short at the end of
+//! so `ASan` flags any read past it, with every byte-order mark cut short at the end of
 //! its buffer; the empty slice hands libgit2 a dangling pointer it must not read. The
-//! slice is written between calls (BSan: libgit2 keeps no pointer into it), and read
-//! from many threads at once (TSan: libgit2 touches no shared state).
+//! slice is written between calls (`BSan`: libgit2 keeps no pointer into it), and read
+//! from many threads at once (`TSan`: libgit2 touches no shared state).
 
 use std::thread;
 
@@ -51,7 +51,7 @@ fn inputs() -> Vec<Vec<u8>> {
 fn empty_slices_are_not_read() {
     assert!(!data_is_binary(&[]));
     assert!(!data_is_binary(&exact(b"")));
-    assert!(!data_is_binary(&Vec::<u8>::with_capacity(0)));
+    assert!(!data_is_binary(&Vec::<u8>::new()));
     let some = exact(b"abc");
     assert!(!data_is_binary(&some[3..]));
 }
@@ -126,12 +126,12 @@ fn concurrent_calls_share_nothing() {
 ///
 /// `FilterFlag` is a fieldless enum over C's `git_blob_filter_flag_t`. The only safe
 /// way in from a raw value is `from_raw` / `try_from`, which must reject every value
-/// without a variant rather than produce an invalid discriminant (which Miri and UBSan
+/// without a variant rather than produce an invalid discriminant (which Miri and `UBSan`
 /// would flag on the next read); an `as` cast to it does not compile (`compile_fail/`).
 /// `FilterFlags` keeps any `u32`, so its operations must stay in range for every bit
-/// pattern, its shifts and masks included (UBSan). Nothing here reaches libgit2, so
+/// pattern, its shifts and masks included (`UBSan`). Nothing here reaches libgit2, so
 /// every test runs under Miri; both types are plain values, `Send` and `Sync` by
-/// construction, with nothing shared to race (TSan) and no pointer to retain (BSan).
+/// construction, with nothing shared to race (`TSan`) and no pointer to retain (`BSan`).
 mod filter_flags {
     use std::collections::HashSet;
     use std::hint::black_box;
@@ -164,10 +164,14 @@ mod filter_flags {
             if let Some(flag) = FilterFlag::from_raw(black_box(raw)) {
                 // Reading the discriminant back validates it.
                 assert_eq!(flag.raw(), raw);
-                assert!(!format!("{flag:?}").is_empty());
+                assert_ne!(format!("{flag:?}"), "");
                 seen.insert(flag);
             } else {
-                assert_eq!(FilterFlag::try_from(raw).map_err(|e| e.raw()), Err(raw));
+                assert_eq!(
+                    FilterFlag::try_from(raw)
+                        .map_err(libgit2::libgit2::object::blob::UnnamedFilterFlag::raw),
+                    Err(raw)
+                );
             }
         }
         assert_eq!(seen.len(), FilterFlag::ALL.len());
@@ -179,7 +183,7 @@ mod filter_flags {
         // value must never alias a variant, nor a variant read as `None`.
         for raw in probes() {
             let flag = black_box(FilterFlag::from_raw(raw));
-            assert_eq!(flag.map(FilterFlag::raw).unwrap_or(raw), raw);
+            assert_eq!(flag.map_or(raw, FilterFlag::raw), raw);
         }
     }
 
@@ -192,7 +196,7 @@ mod filter_flags {
             assert!(named.len() <= FilterFlag::ALL.len());
             assert!(named.iter().all(|&f| set.contains(f)));
             assert_eq!(set.into_iter().count(), named.len());
-            assert!(!format!("{set:?}").is_empty());
+            assert_ne!(format!("{set:?}"), "");
             let truncated = FilterFlags::from_bits_truncate(bits);
             assert_eq!(truncated.unnamed_bits(), 0);
             assert_eq!(truncated.bits() | set.unnamed_bits(), bits);
@@ -226,7 +230,7 @@ mod filter_flags {
                 })
                 .collect();
             for h in handles {
-                assert!(h.join().unwrap().bits() & shared.bits() == shared.bits());
+                assert_eq!(h.join().unwrap().bits() & shared.bits(), shared.bits());
             }
         });
     }
@@ -241,15 +245,15 @@ mod filter_flags {
 /// cache limit is set: every owner gives back its one reference exactly once, and
 /// every clone, `to_blob` and conversion takes or moves exactly one. A miscount frees a
 /// blob (and its reference to the object database's copy of the content) that another
-/// owner or the cache still reads, which ASan flags when C reads the content back, or
-/// leaks it, which LSan does. The tests share blobs between lookups, clones and object
+/// owner or the cache still reads, which `ASan` flags when C reads the content back, or
+/// leaks it, which `LSan` does. The tests share blobs between lookups, clones and object
 /// conversions, drop them in every order, run with blobs cached and evicted under
 /// their owners (isolated children), and fail every lookup they can: wrong type,
 /// missing, ambiguous, no object database, and an id of another type than the
 /// repository's, which must be refused before C formats it out of bounds. libgit2
 /// copies the id it is given: the tests overwrite and free each id right after its
-/// lookup (BSan). The content is read back from heap buffers of exactly its length,
-/// empty and large included (ASan).
+/// lookup (`BSan`). The content is read back from heap buffers of exactly its length,
+/// empty and large included (`ASan`).
 ///
 /// A blob is neither `Send` nor `Sync`, so there is no thread test (doctests); it, its
 /// handles and its clones cannot outlive the repository, nor a handle its owner, nor a
@@ -396,7 +400,7 @@ mod owner {
         }
     }
 
-    /// Every failure leaves no blob behind (LSan), and its code and class.
+    /// Every failure leaves no blob behind (`LSan`), and its code and class.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn failures_leave_nothing_behind() {
@@ -506,7 +510,7 @@ mod owner {
         let sizes = [0usize, 1, 7, 8000, 8001, 1 << 16];
         let mut blobs = Vec::new();
         for (i, &len) in sizes.iter().enumerate() {
-            let data: Vec<u8> = (0..len).map(|b| (b * 31 + i) as u8).collect();
+            let data: Vec<u8> = (0..len).map(|b| (b * 31 + i).to_le_bytes()[0]).collect();
             let id = write_raw(&repo, &data, ffi::GIT_OBJECT_BLOB);
             let blob = Blob::lookup(boxed, id.as_ref()).unwrap();
             assert_eq!(content(&blob), data, "{len}");
@@ -563,11 +567,11 @@ mod owner {
 /// The options are a plain value: their accessors project fields of Rust-owned
 /// storage, and libgit2 reads them in place and copies them for one call. The tests
 /// write every field through every handle, including the embedded id through its own
-/// handle (Miri), keep a dangling `reserved` pointer that nothing may read (ASan, Miri),
+/// handle (Miri), keep a dangling `reserved` pointer that nothing may read (`ASan`, Miri),
 /// and hand options libgit2 refuses (every bad version) and accepts (every flag bit) to
-/// `git_blob_filter`, rewriting them between calls (BSan: libgit2 keeps no pointer into
+/// `git_blob_filter`, rewriting them between calls (`BSan`: libgit2 keeps no pointer into
 /// them). They are `Send` and `Sync`: copies cross threads, and one value is read from
-/// many at once (TSan).
+/// many at once (`TSan`).
 mod filter_options {
     use std::ffi::{CStr, CString};
     use std::ptr::NonNull;
@@ -582,7 +586,7 @@ mod filter_options {
     /// bytes, or the code it failed with.
     fn filter(
         blob: &libgit2::libgit2::object::blob::BlobArc<'_>,
-        path: &std::ffi::CStr,
+        path: &CStr,
         opts: Option<&mut FilterOptions>,
     ) -> Result<Vec<u8>, std::ffi::c_int> {
         let out = blob.as_ref().filter(path, opts.map(|o| o.as_ref()));
@@ -668,7 +672,8 @@ mod filter_options {
                         let mut mine = *shared;
                         let mut m = mine.as_mut();
                         m.set_flags(r.flags() | flag);
-                        m.attr_commit_id_mut().set_raw_kind(flag.raw() as u8);
+                        m.attr_commit_id_mut()
+                            .set_raw_kind(u8::try_from(flag.raw()).unwrap());
                         assert!(mine.as_ref().flags().contains(flag));
                         assert_eq!(r.version(), 1);
                         mine
@@ -677,7 +682,10 @@ mod filter_options {
                 .collect();
             for (h, flag) in handles.into_iter().zip(FilterFlag::ALL) {
                 let mine = h.join().unwrap();
-                assert_eq!(mine.as_ref().attr_commit_id().raw_kind(), flag.raw() as u8);
+                assert_eq!(
+                    mine.as_ref().attr_commit_id().raw_kind(),
+                    u8::try_from(flag.raw()).unwrap()
+                );
             }
         });
         assert_eq!(shared.as_ref().flags(), FilterFlags::OPTIONS_DEFAULT);
@@ -727,11 +735,7 @@ mod filter_options {
         assert_eq!(filter(&crlf, as_txt, Some(&mut *opts)).unwrap(), plain);
         assert_eq!(filter(&binary, as_txt, Some(&mut *opts)).unwrap(), b"");
         opts.as_mut().set_flags(FilterFlags::empty());
-        assert!(
-            !filter(&binary, as_txt, Some(&mut *opts))
-                .unwrap()
-                .is_empty()
-        );
+        assert_ne!(filter(&binary, as_txt, Some(&mut *opts)).unwrap(), b"");
 
         opts.as_mut()
             .set_flags(FilterFlags::from_bits_retain(u32::MAX));
@@ -762,16 +766,16 @@ mod filter_options {
 /// `create_from_disk`, and `create_from_stream` with its `BlobWriter`.
 ///
 /// libgit2 reads each input for the call only: every buffer and path is an exact-length
-/// heap allocation, overwritten and freed right after the call (ASan flags a read past
-/// it, BSan a pointer libgit2 kept). A writer owns libgit2's blob stream, its file buffer
-/// and temporary file, which committing or dropping releases once (ASan: double free;
-/// LSan: leak; the temporary file must be gone either way), whatever was written, past
+/// heap allocation, overwritten and freed right after the call (`ASan` flags a read past
+/// it, `BSan` a pointer libgit2 kept). A writer owns libgit2's blob stream, its file buffer
+/// and temporary file, which committing or dropping releases once (`ASan`: double free;
+/// `LSan`: leak; the temporary file must be gone either way), whatever was written, past
 /// the stream's 2 MiB buffer included. Repositories without paths, bare ones, missing
 /// files, directories and symbolic links take every failure path. The writers that load
 /// filters order libgit2's first, unsynchronised initialisation of its built-in filters
 /// among themselves, not with raw loads elsewhere in this binary, so each test loading
 /// filters runs alone in a child: one of them writes blobs through filters on several
-/// threads at once (TSan). A writer, like its
+/// threads at once (`TSan`). A writer, like its
 /// repository, stays on one thread, and outlives neither (doctests).
 mod writing {
     use std::ffi::{CStr, CString};
@@ -807,7 +811,7 @@ mod writing {
         fn new(tag: &str, bare: bool) -> Self {
             let dir =
                 std::env::temp_dir().join(format!("crustify-blob-ub-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let repo = Repository::init(&cstring(&dir), bare).unwrap();
             if !bare {
                 std::fs::write(dir.join(".gitattributes"), ATTRIBUTES).unwrap();
@@ -851,7 +855,7 @@ mod writing {
     impl Drop for Work {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -891,7 +895,7 @@ mod writing {
             &[0, 1, 7, 4096, 65_537, 3 << 20]
         };
         for &len in sizes {
-            let mut data: Box<[u8]> = (0..len).map(|i| (i % 253) as u8).collect();
+            let mut data: Box<[u8]> = (0..len).map(|i| u8::try_from(i % 253).unwrap()).collect();
             let id = create_from_buffer(repo, &data).unwrap();
             let again = create_from_buffer(repo, &data.clone()).unwrap();
             data.fill(0xA5);
@@ -1088,7 +1092,7 @@ mod writing {
     }
 
     /// Each thread writes blobs into its own repository through filters at once: the
-    /// built-in filters are initialised once, before any of their loads (TSan). Alone in
+    /// built-in filters are initialised once, before any of their loads (`TSan`). Alone in
     /// a child, where nothing else loads a filter list first.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1128,11 +1132,11 @@ mod writing {
 /// copy of it: every byte is read back, for blobs of many sizes (empty, around the 8000
 /// bytes `is_binary` looks at, and past libgit2's stream buffer), through every holder
 /// (lookups, clones, `to_blob`, an object view), and after the other holders of a shared
-/// blob are gone (ASan: a slice longer than its allocation, a use after free). The id
+/// blob are gone (`ASan`: a slice longer than its allocation, a use after free). The id
 /// and the repository are borrowed the same way. `filter` copies the content into a
 /// buffer it owns, which is read after the blob and its repository are gone and
-/// released once (ASan, LSan); filter lists race on their first load, so those tests run
-/// in isolated children. Each thread reads blobs of its own repository at once (TSan).
+/// released once (`ASan`, `LSan`); filter lists race on their first load, so those tests run
+/// in isolated children. Each thread reads blobs of its own repository at once (`TSan`).
 /// Content outliving its blob and a repository outliving its borrow are doctests. Every
 /// test calls libgit2, so Miri skips them all.
 mod reading {
@@ -1151,7 +1155,9 @@ mod reading {
 
     /// Bytes `0, 1, 2, ...` wrapping at 251, `len` of them, with a NUL at `nul` if any.
     fn bytes(len: usize, nul: Option<usize>) -> Vec<u8> {
-        let mut v: Vec<u8> = (0..len).map(|i| (i % 251) as u8 | 0x20).collect();
+        let mut v: Vec<u8> = (0..len)
+            .map(|i| u8::try_from(i % 251).unwrap() | 0x20)
+            .collect();
         if let Some(i) = nul.filter(|&i| i < len) {
             v[i] = 0;
         }

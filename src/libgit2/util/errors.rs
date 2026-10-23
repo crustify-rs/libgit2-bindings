@@ -22,7 +22,6 @@
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
-use core::ptr::addr_of;
 use std::ffi::CString;
 
 use ffibox::define_ctype;
@@ -38,7 +37,7 @@ macro_rules! c_enum {
     (
         $(#[$meta:meta])*
         pub enum $name:ident {
-            $($(#[$vmeta:meta])* $variant:ident = $c:path,)*
+            $($(#[$vmeta:meta])* $variant:ident = $c:expr,)*
         }
         $(#[$umeta:meta])*
         pub struct $unnamed:ident($what:literal);
@@ -48,7 +47,7 @@ macro_rules! c_enum {
         #[repr(i32)]
         #[non_exhaustive]
         pub enum $name {
-            $($(#[$vmeta])* $variant = $c as c_int,)*
+            $($(#[$vmeta])* $variant = $c,)*
         }
 
         impl $name {
@@ -110,7 +109,7 @@ c_enum! {
     /// value, or a negative one the header does not name, gives `None` from
     /// [`from_raw`](Self::from_raw).
     ///
-    /// Wraps: git_error_code
+    /// Wraps: `git_error_code`
     /// Handwritten
     pub enum ErrorCode {
         /// No error occurred; the call was successful.
@@ -200,83 +199,83 @@ c_enum! {
     /// `int`, which user code may set to a value the header does not name; such a
     /// value gives `None` from [`from_raw`](Self::from_raw).
     ///
-    /// Wraps: git_error_t
+    /// Wraps: `git_error_t`
     /// Handwritten
     pub enum ErrorClass {
         /// No error.
-        None = ffi::GIT_ERROR_NONE,
+        None = ffi::GIT_ERROR_NONE.cast_signed(),
         /// Out of memory.
-        NoMemory = ffi::GIT_ERROR_NOMEMORY,
+        NoMemory = ffi::GIT_ERROR_NOMEMORY.cast_signed(),
         /// An operating-system call failed.
-        Os = ffi::GIT_ERROR_OS,
+        Os = ffi::GIT_ERROR_OS.cast_signed(),
         /// Invalid input or operation.
-        Invalid = ffi::GIT_ERROR_INVALID,
+        Invalid = ffi::GIT_ERROR_INVALID.cast_signed(),
         /// References.
-        Reference = ffi::GIT_ERROR_REFERENCE,
+        Reference = ffi::GIT_ERROR_REFERENCE.cast_signed(),
         /// zlib compression.
-        Zlib = ffi::GIT_ERROR_ZLIB,
+        Zlib = ffi::GIT_ERROR_ZLIB.cast_signed(),
         /// Repositories.
-        Repository = ffi::GIT_ERROR_REPOSITORY,
+        Repository = ffi::GIT_ERROR_REPOSITORY.cast_signed(),
         /// Configuration.
-        Config = ffi::GIT_ERROR_CONFIG,
+        Config = ffi::GIT_ERROR_CONFIG.cast_signed(),
         /// Regular expressions.
-        Regex = ffi::GIT_ERROR_REGEX,
+        Regex = ffi::GIT_ERROR_REGEX.cast_signed(),
         /// The object database.
-        Odb = ffi::GIT_ERROR_ODB,
+        Odb = ffi::GIT_ERROR_ODB.cast_signed(),
         /// The index.
-        Index = ffi::GIT_ERROR_INDEX,
+        Index = ffi::GIT_ERROR_INDEX.cast_signed(),
         /// Objects.
-        Object = ffi::GIT_ERROR_OBJECT,
+        Object = ffi::GIT_ERROR_OBJECT.cast_signed(),
         /// Networking.
-        Net = ffi::GIT_ERROR_NET,
+        Net = ffi::GIT_ERROR_NET.cast_signed(),
         /// Tags.
-        Tag = ffi::GIT_ERROR_TAG,
+        Tag = ffi::GIT_ERROR_TAG.cast_signed(),
         /// Trees.
-        Tree = ffi::GIT_ERROR_TREE,
+        Tree = ffi::GIT_ERROR_TREE.cast_signed(),
         /// The pack indexer.
-        Indexer = ffi::GIT_ERROR_INDEXER,
+        Indexer = ffi::GIT_ERROR_INDEXER.cast_signed(),
         /// TLS.
-        Ssl = ffi::GIT_ERROR_SSL,
+        Ssl = ffi::GIT_ERROR_SSL.cast_signed(),
         /// Submodules.
-        Submodule = ffi::GIT_ERROR_SUBMODULE,
+        Submodule = ffi::GIT_ERROR_SUBMODULE.cast_signed(),
         /// Threading.
-        Thread = ffi::GIT_ERROR_THREAD,
+        Thread = ffi::GIT_ERROR_THREAD.cast_signed(),
         /// Stashes.
-        Stash = ffi::GIT_ERROR_STASH,
+        Stash = ffi::GIT_ERROR_STASH.cast_signed(),
         /// Checkout.
-        Checkout = ffi::GIT_ERROR_CHECKOUT,
+        Checkout = ffi::GIT_ERROR_CHECKOUT.cast_signed(),
         /// `FETCH_HEAD`.
-        FetchHead = ffi::GIT_ERROR_FETCHHEAD,
+        FetchHead = ffi::GIT_ERROR_FETCHHEAD.cast_signed(),
         /// Merges.
-        Merge = ffi::GIT_ERROR_MERGE,
+        Merge = ffi::GIT_ERROR_MERGE.cast_signed(),
         /// SSH.
-        Ssh = ffi::GIT_ERROR_SSH,
+        Ssh = ffi::GIT_ERROR_SSH.cast_signed(),
         /// Filters.
-        Filter = ffi::GIT_ERROR_FILTER,
+        Filter = ffi::GIT_ERROR_FILTER.cast_signed(),
         /// Reverts.
-        Revert = ffi::GIT_ERROR_REVERT,
+        Revert = ffi::GIT_ERROR_REVERT.cast_signed(),
         /// A user callback.
-        Callback = ffi::GIT_ERROR_CALLBACK,
+        Callback = ffi::GIT_ERROR_CALLBACK.cast_signed(),
         /// Cherry-picks.
-        CherryPick = ffi::GIT_ERROR_CHERRYPICK,
+        CherryPick = ffi::GIT_ERROR_CHERRYPICK.cast_signed(),
         /// `git describe`.
-        Describe = ffi::GIT_ERROR_DESCRIBE,
+        Describe = ffi::GIT_ERROR_DESCRIBE.cast_signed(),
         /// Rebases.
-        Rebase = ffi::GIT_ERROR_REBASE,
+        Rebase = ffi::GIT_ERROR_REBASE.cast_signed(),
         /// The filesystem.
-        Filesystem = ffi::GIT_ERROR_FILESYSTEM,
+        Filesystem = ffi::GIT_ERROR_FILESYSTEM.cast_signed(),
         /// Patches.
-        Patch = ffi::GIT_ERROR_PATCH,
+        Patch = ffi::GIT_ERROR_PATCH.cast_signed(),
         /// Worktrees.
-        Worktree = ffi::GIT_ERROR_WORKTREE,
+        Worktree = ffi::GIT_ERROR_WORKTREE.cast_signed(),
         /// Hashing.
-        Sha = ffi::GIT_ERROR_SHA,
+        Sha = ffi::GIT_ERROR_SHA.cast_signed(),
         /// HTTP.
-        Http = ffi::GIT_ERROR_HTTP,
+        Http = ffi::GIT_ERROR_HTTP.cast_signed(),
         /// libgit2 itself.
-        Internal = ffi::GIT_ERROR_INTERNAL,
+        Internal = ffi::GIT_ERROR_INTERNAL.cast_signed(),
         /// Grafts.
-        Grafts = ffi::GIT_ERROR_GRAFTS,
+        Grafts = ffi::GIT_ERROR_GRAFTS.cast_signed(),
     }
 
     /// An error class that this version of libgit2's header does not name, which user
@@ -291,7 +290,7 @@ c_enum! {
 impl From<ErrorClass> for ffi::git_error_t {
     fn from(class: ErrorClass) -> ffi::git_error_t {
         // Every class is non-negative, so the value is unchanged.
-        class.raw() as ffi::git_error_t
+        class.raw().cast_unsigned()
     }
 }
 
@@ -328,10 +327,14 @@ impl<'a> ErrorRef<'a> {
     /// The error message, borrowed from the error. libgit2 never publishes a NULL
     /// message; one reads as empty.
     ///
-    /// Field: git_error.message
+    /// Field: `git_error.message`
+    #[must_use]
     pub fn message(&self) -> &'a CStr {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let message_ptr = unsafe { &raw const (*self.as_ptr()).message };
         // SAFETY: a read through the shared handle's pointer to a live `git_error`.
-        let message = unsafe { addr_of!((*self.as_ptr()).message).read() };
+        let message = unsafe { message_ptr.read() };
         if message.is_null() {
             return c"";
         }
@@ -343,20 +346,26 @@ impl<'a> ErrorRef<'a> {
     /// The error's class; `None` for a class the header does not name, which user
     /// code can set through `git_error_set_str` ([`raw_class`](Self::raw_class) has it).
     ///
-    /// Field: git_error.klass
+    /// Field: `git_error.klass`
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         ErrorClass::from_raw(self.raw_class())
     }
 
     /// The error's class as libgit2 stores it, whether or not the header names it.
     ///
-    /// Field: git_error.klass
+    /// Field: `git_error.klass`
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let klass_ptr = unsafe { &raw const (*self.as_ptr()).klass };
         // SAFETY: a read through the shared handle's pointer to a live `git_error`.
-        unsafe { addr_of!((*self.as_ptr()).klass).read() }
+        unsafe { klass_ptr.read() }
     }
 
     /// An owned copy of the error, which outlives it.
+    #[must_use]
     pub fn to_error_buf(&self) -> ErrorBuf {
         ErrorBuf {
             class: self.raw_class(),
@@ -411,16 +420,19 @@ impl ErrorBuf {
 
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         ErrorClass::from_raw(self.class)
     }
 
     /// The error's class as libgit2 stored it, whether or not the header names it.
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
         self.class
     }
 
     /// The error message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         &self.message
     }
@@ -471,7 +483,12 @@ impl std::error::Error for ErrorBuf {}
 /// that static error only when libgit2 cannot be initialised, without calling
 /// libgit2: a failed initialisation can leave the thread state without a key.
 ///
-/// Wraps: git_error_last
+/// Wraps: `git_error_last`
+///
+/// # Panics
+///
+/// Panics, with `git_error_last never returns NULL`, only if libgit2 breaks its contract.
+#[must_use]
 pub fn last() -> ErrorBuf {
     if !runtime_pinned() {
         return ErrorBuf {
@@ -534,23 +551,25 @@ mod unit_tests {
     ///
     /// The handle is used only before the next libgit2 call on this thread.
     fn last() -> (ErrorRef<'static>, Vec<u8>, c_int) {
-        // SAFETY: `git_error_last` never returns NULL; the error and its message stay
-        // live and unchanged until the next libgit2 call on this thread, which every
-        // caller makes only after it is done with the handle.
-        unsafe {
-            let e = ffi::git_error_last();
-            let c_message = CStr::from_ptr((*e).message).to_bytes().to_vec();
-            (
-                ErrorRef::from_ptr(e.cast_mut()).unwrap(),
-                c_message,
-                (*e).klass,
-            )
+        {
+            // SAFETY: `git_error_last` never returns NULL; the error and its message stay
+            // live and unchanged until the next libgit2 call on this thread, which every
+            // caller makes only after it is done with the handle.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            let c_message = unsafe { CStr::from_ptr(message2).to_bytes().to_vec() };
+            // SAFETY: as above.
+            let value = unsafe { ErrorRef::from_ptr(e.cast_mut()) };
+            // SAFETY: as above.
+            unsafe { (value.unwrap(), c_message, (*e).klass) }
         }
     }
 
     fn set_str(class: ffi::git_error_t, message: &CStr) {
         // SAFETY: `message` is a live C string, which libgit2 copies.
-        let rc = unsafe { ffi::git_error_set_str(class as c_int, message.as_ptr()) };
+        let rc = unsafe { ffi::git_error_set_str(class.cast_signed(), message.as_ptr()) };
         assert_eq!(rc, 0);
     }
 
@@ -650,7 +669,7 @@ mod unit_tests {
     }
 
     /// The copy survives the thread's message buffer being rewritten and reallocated,
-    /// which leaves a borrowed message dangling; ASan flags a copy that aliases it.
+    /// which leaves a borrowed message dangling; `ASan` flags a copy that aliases it.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn copy_survives_the_next_error() {
@@ -763,7 +782,7 @@ mod unit_tests {
         // member set; libgit2 copies it before anything is allocated.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -834,7 +853,7 @@ mod unit_tests {
                 REFUSING.store(false, SeqCst);
                 assert!(!runtime_pinned(), "libgit2 could not initialise");
                 assert_eq!(buf.class(), Some(ErrorClass::Invalid));
-                assert_eq!(buf.raw_class(), ffi::GIT_ERROR_INVALID as c_int);
+                assert_eq!(buf.raw_class(), ffi::GIT_ERROR_INVALID.cast_signed());
                 assert_eq!(buf.message(), c"library has not been initialized");
                 assert_eq!(super::last(), buf);
             },

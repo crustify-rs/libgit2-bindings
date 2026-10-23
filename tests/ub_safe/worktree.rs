@@ -6,7 +6,7 @@
 /// `PruneFlag` is a fieldless enum over C's `git_worktree_prune_t`. The only safe way
 /// in from a raw value is `from_raw` / `try_from`, which must reject every value
 /// without a variant rather than produce an invalid discriminant (which Miri and
-/// UBSan would flag on the next read); an `as` cast to it does not compile
+/// `UBSan` would flag on the next read); an `as` cast to it does not compile
 /// (`compile_fail/`). `PruneFlags` keeps any `u32`, so its operations must stay in
 /// range for every bit pattern.
 ///
@@ -14,15 +14,15 @@
 /// pointer, so these tests exercise every getter and setter on every holder Rust has
 /// for one (a local, a heap slot, an element of a run that moves when it grows, a
 /// copy), through reborrows, and across threads under the `Send` / `Sync` the crate
-/// asserts (TSan). A misaligned projection or a write through the shared handle would
+/// asserts (`TSan`). A misaligned projection or a write through the shared handle would
 /// be flagged by Miri and ASan/UBSan. Handles that outlive their value, aliased
 /// handles and setters on the shared handle do not compile (the type's
 /// `compile_fail` doctests). Only `PruneOptions::new` calls libgit2
 /// (`git_worktree_prune_options_init`, which copies a template into the value): it
 /// runs from many threads at once, and before anything initialised libgit2, for
-/// ASan and TSan; everything else also runs under Miri, from values built by
+/// `ASan` and `TSan`; everything else also runs under Miri, from values built by
 /// conversion. libgit2 keeps no pointer to the options past a call, so there is no
-/// foreign write or retained pointer to race (BSan).
+/// foreign write or retained pointer to race (`BSan`).
 mod prune_options {
     use std::collections::HashSet;
     use std::collections::hash_map::DefaultHasher;
@@ -77,10 +77,14 @@ mod prune_options {
             if let Some(flag) = PruneFlag::from_raw(black_box(raw)) {
                 // Reading the discriminant back validates it.
                 assert_eq!(flag.raw(), raw);
-                assert!(!format!("{flag:?}").is_empty());
+                assert_ne!(format!("{flag:?}"), "");
                 seen.insert(flag);
             } else {
-                assert_eq!(PruneFlag::try_from(raw).map_err(|e| e.raw()), Err(raw));
+                assert_eq!(
+                    PruneFlag::try_from(raw)
+                        .map_err(libgit2::libgit2::repository::worktree::UnnamedPruneFlag::raw),
+                    Err(raw)
+                );
             }
         }
         assert_eq!(seen.len(), PruneFlag::ALL.len());
@@ -92,7 +96,7 @@ mod prune_options {
         // value must never alias a variant, nor a variant read as `None`.
         for raw in probes() {
             let flag = black_box(PruneFlag::from_raw(raw));
-            assert_eq!(flag.map(PruneFlag::raw).unwrap_or(raw), raw);
+            assert_eq!(flag.map_or(raw, PruneFlag::raw), raw);
         }
     }
 
@@ -105,7 +109,7 @@ mod prune_options {
             assert!(named.len() <= PruneFlag::ALL.len());
             assert!(named.iter().all(|&f| set.contains(f)));
             assert_eq!(set.into_iter().count(), named.len());
-            assert!(!format!("{set:?}").is_empty());
+            assert_ne!(format!("{set:?}"), "");
             for flag in PruneFlag::ALL {
                 set.insert(flag);
                 assert!(set.contains(flag));
@@ -150,7 +154,7 @@ mod prune_options {
         let shared = m.as_ref();
         let copy = shared;
         assert_eq!(read(copy), (1, 2));
-        assert!(!format!("{m:?}").is_empty());
+        assert_ne!(format!("{m:?}"), "");
         m.set_version(7);
         assert_eq!(read(opts.as_ref()), (7, 2));
     }
@@ -253,7 +257,7 @@ mod prune_options {
     }
 
     /// `new` copies libgit2's template into a fresh value on each call: concurrent
-    /// calls share nothing for TSan to flag, and each result is the default.
+    /// calls share nothing for `TSan` to flag, and each result is the default.
     fn new_from_many_threads() {
         thread::scope(|s| {
             let handles: Vec<_> = (0..8)
@@ -299,10 +303,10 @@ mod prune_options {
 /// handles it lends, and the `git_worktree_free` policy.
 ///
 /// Worktrees come from `Worktree::lookup`, and are read and locked through their
-/// handles. Each box must release its struct and six strings exactly once (ASan: double
-/// free, use after free; LSan: leak), on whichever thread drops it, and shared boxes
-/// must race nothing (TSan). libgit2 writes a worktree in place (`git_worktree_lock`)
-/// between Rust reborrows of its handles (BSan). Handles that outlive their box and
+/// handles. Each box must release its struct and six strings exactly once (`ASan`: double
+/// free, use after free; `LSan`: leak), on whichever thread drops it, and shared boxes
+/// must race nothing (`TSan`). libgit2 writes a worktree in place (`git_worktree_lock`)
+/// between Rust reborrows of its handles (`BSan`). Handles that outlive their box and
 /// aliased exclusive handles do not compile (doctests on `WorktreeBox`); the box is not
 /// `Clone` (doctest). Every test calls libgit2, so none runs under Miri.
 mod worktree_box {
@@ -361,6 +365,10 @@ mod worktree_box {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::no_effect_underscore_binding,
+        reason = "the copy itself is what the test exercises"
+    )]
     fn worktree_outlives_its_repository() {
         let repo = WorktreeRepo::new("outlive");
         repo.add("wt");
@@ -389,7 +397,7 @@ mod worktree_box {
             .map(|w| thread::spawn(move || w.as_ref().name().to_owned()))
             .collect();
         let read: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        assert_eq!(read, names.map(|n| n.to_owned()));
+        assert_eq!(read, names.map(ToOwned::to_owned));
     }
 
     #[test]
@@ -453,14 +461,14 @@ mod worktree_box {
 /// borrowed reference and the checkout options' borrowed strings, and keeps no pointer
 /// to any of them. A misaligned projection, a stale reference pointer or a write through
 /// the shared handle would be flagged by Miri and ASan/UBSan; the reference and the
-/// options must be released exactly once, in either order allowed (LSan, ASan). Options
+/// options must be released exactly once, in either order allowed (`LSan`, `ASan`). Options
 /// that outlive their reference or its repository, an exclusive handle to a borrowed
 /// reference, a shrunk exclusive handle, `Send` and `Clone` do not compile (the type's
 /// `compile_fail` doctests). The options are neither `Send` nor `Sync`, so each thread
 /// builds its own: `AddOptions::new` (a template copy) runs from many threads at once
-/// and before anything initialised libgit2 (ASan, TSan). libgit2 only reads the options
+/// and before anything initialised libgit2 (`ASan`, `TSan`). libgit2 only reads the options
 /// during a call and writes nothing through them, so Rust reborrows between calls race
-/// no foreign write (BSan). Every test calls libgit2, so none runs under Miri; the
+/// no foreign write (`BSan`). Every test calls libgit2, so none runs under Miri; the
 /// accessors run there in the crate's unit tests, on a template built in Rust.
 mod add_options {
     use std::ffi::CString;
@@ -512,7 +520,7 @@ mod add_options {
             assert_eq!(read(black_box(&run[round as usize]).as_ref()), expected);
         }
         for (i, opts) in run.iter().enumerate() {
-            assert_eq!(read(opts.as_ref()).4, (i as u32) << 4);
+            assert_eq!(read(opts.as_ref()).4, u32::try_from(i).unwrap() << 4);
         }
     }
 
@@ -741,16 +749,16 @@ mod add_options {
 /// `list`, the readers on `WorktreeRef` and the lock routines on `WorktreeMut`.
 ///
 /// The strings `name` and `path` return borrow the worktree and must stay readable
-/// for as long as its handle (ASan: use after free; a string outliving its box does not
+/// for as long as its handle (`ASan`: use after free; a string outliving its box does not
 /// compile, doctest on `WorktreeRef::name`). The arrays and buffers the routines fill
 /// (`list`, whose filtering moves strings within the array and frees the dropped ones,
-/// and `lock_reason`) must release every allocation once, failed calls included (ASan,
-/// LSan). The readers run on many threads at once through one shared box, as the
-/// worktree's `Sync` claims, while only the exclusive handle locks (TSan; locking
+/// and `lock_reason`) must release every allocation once, failed calls included (`ASan`,
+/// `LSan`). The readers run on many threads at once through one shared box, as the
+/// worktree's `Sync` claims, while only the exclusive handle locks (`TSan`; locking
 /// through a shared handle does not compile, doctest on `WorktreeMut::lock`). A
 /// repository without paths, whose NULL common directory libgit2 would pass to
 /// `strlen`, must be refused before C (ASan/UBSan: NULL dereference). C writes the
-/// `locked` bit between Rust reborrows (BSan). Every test calls libgit2, so none runs
+/// `locked` bit between Rust reborrows (`BSan`). Every test calls libgit2, so none runs
 /// under Miri.
 mod routines {
     use std::sync::Barrier;
@@ -981,15 +989,15 @@ mod routines {
 /// directories and files, checks it out, and hands back a `WorktreeBox` it looked up.
 ///
 /// The box copies every string it holds, so it outlives the repository it was added to
-/// and the options and reference the add read (ASan: no use after free). Every failing
+/// and the options and reference the add read (`ASan`: no use after free). Every failing
 /// add releases what libgit2 allocated for it, and the repository the inner checkout
-/// opened, and returns no worktree (LSan, ASan): a missing parent directory, an existing
+/// opened, and returns no worktree (`LSan`, ASan): a missing parent directory, an existing
 /// working or administrative directory, a reference that is not a branch or that is
 /// checked out, a failed checkout. A repository without paths, whose NULL common
 /// directory libgit2 would join and then assert on, is refused before the call
 /// (UBSan/ASan would flag the NULL read; the unit tests check the working directory
-/// is untouched). Repositories are not `Send`, so each thread adds to its own (TSan).
-/// Adds that create a branch take the time through glibc's `tzset`, which TSan reports
+/// is untouched). Repositories are not `Send`, so each thread adds to its own (`TSan`).
+/// Adds that create a branch take the time through glibc's `tzset`, which `TSan` reports
 /// against other threads: those run alone in a child. Every test calls libgit2, so
 /// none runs under Miri.
 mod adding {
@@ -1087,11 +1095,11 @@ mod adding {
     }
 
     /// A reference of another repository lends its name: the add reads the lent
-    /// reference and the repository's own of that name for the call only (ASan: the
+    /// reference and the repository's own of that name for the call only (`ASan`: the
     /// lender and its reference go first, the worktree still reads its copies), and
     /// releases the reference it looked up itself whether the add succeeds, fails after
     /// the lookup (the branch checked out already), or finds no branch of that name in
-    /// the repository (LSan).
+    /// the repository (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn lent_references_are_read_for_the_call_only() {

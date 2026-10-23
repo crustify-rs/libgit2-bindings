@@ -121,11 +121,11 @@ fn model(mode: WalkMode, reply: Reply) -> Walked {
     let rc = expected(mode, TREE, "", reply, &mut visits);
     let error = if rc < 0 {
         (
-            ffi::GIT_ERROR_CALLBACK as c_int,
+            ffi::GIT_ERROR_CALLBACK.cast_signed(),
             format!("git_tree_walk callback returned {rc}"),
         )
     } else {
-        (ffi::GIT_ERROR_NONE as c_int, "no error".to_owned())
+        (ffi::GIT_ERROR_NONE.cast_signed(), "no error".to_owned())
     };
     (rc, visits, error)
 }
@@ -138,15 +138,22 @@ fn init() {
 
 /// The calling thread's last error class and message.
 fn last_error() -> (c_int, String) {
-    // SAFETY: the runtime is initialised; `git_error_last` never returns NULL then,
-    // and its message is a NUL-terminated string live until the next libgit2 call on
-    // this thread, after the copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: the runtime is initialised; `git_error_last` never returns NULL then,
+        // and its message is a NUL-terminated string live until the next libgit2 call on
+        // this thread, after the copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -163,17 +170,17 @@ impl TreeRepo {
         init();
         let path =
             std::env::temp_dir().join(format!("crustify-tree-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a live slot and `c_path` NUL-terminated; `1` asks for a
         // bare repository.
-        let rc = unsafe { ffi::git_repository_init(&mut repo, c_path.as_ptr(), 1) };
+        let rc = unsafe { ffi::git_repository_init(&raw mut repo, c_path.as_ptr(), 1) };
         assert_eq!(rc, 0);
         let id = write_tree(repo, TREE);
         let mut tree = ptr::null_mut();
         // SAFETY: `tree` is a live slot, `repo` a live repository and `id` a live oid.
-        let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo, &id) };
+        let rc = unsafe { ffi::git_tree_lookup(&raw mut tree, repo, &raw const id) };
         assert_eq!(rc, 0);
         Self { path, repo, tree }
     }
@@ -198,11 +205,10 @@ impl TreeRepo {
 impl Drop for TreeRepo {
     fn drop(&mut self) {
         // SAFETY: the tree and repository are live and released once, the tree first.
-        unsafe {
-            ffi::git_tree_free(self.tree);
-            ffi::git_repository_free(self.repo);
-        }
-        let _ = fs::remove_dir_all(&self.path);
+        unsafe { ffi::git_tree_free(self.tree) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(self.repo) };
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -210,7 +216,7 @@ impl Drop for TreeRepo {
 fn write_tree(repo: *mut ffi::git_repository, nodes: &[Node]) -> ffi::git_oid {
     let mut builder = ptr::null_mut();
     // SAFETY: `builder` is a live slot and `repo` a live repository; no source tree.
-    let rc = unsafe { ffi::git_treebuilder_new(&mut builder, repo, ptr::null()) };
+    let rc = unsafe { ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()) };
     assert_eq!(rc, 0);
     for node in nodes {
         let (id, mode) = match node {
@@ -219,7 +225,7 @@ fn write_tree(repo: *mut ffi::git_repository, nodes: &[Node]) -> ffi::git_oid {
                 // SAFETY: `id` is a writable oid and `name` readable for its length.
                 let rc = unsafe {
                     ffi::git_blob_create_from_buffer(
-                        &mut id,
+                        &raw mut id,
                         repo,
                         name.as_ptr().cast(),
                         name.len(),
@@ -234,16 +240,21 @@ fn write_tree(repo: *mut ffi::git_repository, nodes: &[Node]) -> ffi::git_oid {
         // SAFETY: `builder` is live, `name` NUL-terminated and `id` a live oid, read
         // for the call only; no entry is asked back.
         let rc = unsafe {
-            ffi::git_treebuilder_insert(ptr::null_mut(), builder, name.as_ptr(), &id, mode)
+            ffi::git_treebuilder_insert(
+                ptr::null_mut(),
+                builder,
+                name.as_ptr(),
+                &raw const id,
+                mode,
+            )
         };
         assert_eq!(rc, 0);
     }
     let mut id = ffi::git_oid::default();
     // SAFETY: `id` is a writable oid and `builder` live; it is freed once, after.
-    unsafe {
-        assert_eq!(ffi::git_treebuilder_write(&mut id, builder), 0);
-        ffi::git_treebuilder_free(builder);
-    }
+    unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut id, builder), 0) };
+    // SAFETY: as above.
+    unsafe { ffi::git_treebuilder_free(builder) };
     id
 }
 
@@ -260,19 +271,14 @@ unsafe extern "C" fn record(
     entry: *const ffi::git_tree_entry,
     payload: *mut c_void,
 ) -> c_int {
-    // SAFETY: `TreeRepo::walk` passes a live, otherwise unreached `Walk`; libgit2
-    // passes a NUL-terminated root and a live entry whose name is NUL-terminated, all
-    // live for the call, and both strings are copied before it returns.
-    let (walk, root, name) = unsafe {
-        (
-            &mut *payload.cast::<Walk>(),
-            CStr::from_ptr(root).to_str().unwrap().to_owned(),
-            CStr::from_ptr(ffi::git_tree_entry_name(entry))
-                .to_str()
-                .unwrap()
-                .to_owned(),
-        )
-    };
+    // SAFETY: `TreeRepo::walk` passes a live, otherwise unreached `Walk`.
+    let walk = unsafe { &mut *payload.cast::<Walk>() };
+    // SAFETY: libgit2 passes a NUL-terminated root, live for the call; it is copied.
+    let root = unsafe { CStr::from_ptr(root) }.to_str().unwrap().to_owned();
+    // SAFETY: libgit2 passes a live entry for the call.
+    let name = unsafe { ffi::git_tree_entry_name(entry) };
+    // SAFETY: the entry's name is NUL-terminated, live with it; it is copied.
+    let name = unsafe { CStr::from_ptr(name) }.to_str().unwrap().to_owned();
     let rc = (walk.reply)(&root, &name);
     walk.visits.push((root, name));
     rc
@@ -321,28 +327,25 @@ fn modes_are_the_values_git_tree_walk_accepts() {
     let mut walked = HashSet::new();
     for raw in probes() {
         let c = repo.walk(raw, walk_on);
-        match WalkMode::from_raw(raw) {
-            Some(mode) => {
-                assert_eq!(c, model(mode, walk_on), "mode {raw}");
-                assert_eq!(mode.raw(), raw);
-                assert_eq!(WalkMode::try_from(raw), Ok(mode));
-                walked.insert(mode);
-            }
-            None => {
-                let refused = (
-                    -1,
-                    Vec::new(),
-                    (
-                        ffi::GIT_ERROR_INVALID as c_int,
-                        "invalid walking mode for tree walk".to_owned(),
-                    ),
-                );
-                assert_eq!(c, refused, "mode {raw}");
-                assert_eq!(
-                    WalkMode::try_from(raw).map_err(UnnamedWalkMode::raw),
-                    Err(raw)
-                );
-            }
+        if let Some(mode) = WalkMode::from_raw(raw) {
+            assert_eq!(c, model(mode, walk_on), "mode {raw}");
+            assert_eq!(mode.raw(), raw);
+            assert_eq!(WalkMode::try_from(raw), Ok(mode));
+            walked.insert(mode);
+        } else {
+            let refused = (
+                -1,
+                Vec::new(),
+                (
+                    ffi::GIT_ERROR_INVALID.cast_signed(),
+                    "invalid walking mode for tree walk".to_owned(),
+                ),
+            );
+            assert_eq!(c, refused, "mode {raw}");
+            assert_eq!(
+                WalkMode::try_from(raw).map_err(UnnamedWalkMode::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(walked.len(), MODES.len());
@@ -398,9 +401,9 @@ fn callback_results_act_as_each_mode_documents() {
                 model(*mode, reply),
                 "{what}, {mode:?}"
             );
-            let refused = repo.walk(MODES.len() as ffi::git_treewalk_mode, reply);
+            let refused = repo.walk(u32::try_from(MODES.len()).unwrap(), reply);
             assert_eq!(refused.0, -1);
-            assert!(refused.1.is_empty());
+            assert!(refused.1.is_empty(), "{:?}", refused.1);
         }
     }
 }
@@ -471,15 +474,22 @@ mod builder {
 
     /// The calling thread's last error class and message.
     fn c_last() -> (c_int, String) {
-        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-        // NUL-terminated string, both live until the next libgit2 call on this thread,
-        // after the copy.
-        unsafe {
-            let e = ffi::git_error_last();
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        {
+            // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+            // NUL-terminated string, both live until the next libgit2 call on this thread,
+            // after the copy.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         }
     }
 
@@ -504,7 +514,7 @@ mod builder {
         let mut id = [0; 32];
         id[..20].fill(byte);
         ffi::git_oid {
-            type_: ffi::GIT_OID_SHA1 as u8,
+            type_: u8::try_from(ffi::GIT_OID_SHA1).unwrap(),
             id,
         }
     }
@@ -521,7 +531,7 @@ mod builder {
         fn new(tag: &str) -> Self {
             let path = std::env::temp_dir()
                 .join(format!("crustify-tree-equiv-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
             let repo = Repository::init(&c_path, true).unwrap();
             Self {
@@ -538,7 +548,7 @@ mod builder {
     impl Drop for TempRepo {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -555,7 +565,7 @@ mod builder {
         };
         let mut tree = ptr::null_mut();
         // SAFETY: a writable slot, the box's live repository and a live id of its type.
-        let rc = unsafe { ffi::git_tree_lookup(&mut tree, repo.as_c_ptr(), &id) };
+        let rc = unsafe { ffi::git_tree_lookup(&raw mut tree, repo.as_c_ptr(), &raw const id) };
         assert_eq!(rc, 0);
         NonNull::new(tree).unwrap()
     }
@@ -573,15 +583,18 @@ mod builder {
 
     /// The names `tree` holds.
     fn names(tree: NonNull<ffi::git_tree>) -> Vec<CString> {
-        // SAFETY: a live tree, only read; each name is copied out while it lives.
-        unsafe {
-            (0..ffi::git_tree_entrycount(tree.as_ptr()))
-                .map(|i| {
-                    let entry = ffi::git_tree_entry_byindex(tree.as_ptr(), i);
-                    CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned()
-                })
-                .collect()
-        }
+        // SAFETY: a live tree, only read.
+        let count = unsafe { ffi::git_tree_entrycount(tree.as_ptr()) };
+        (0..count)
+            .map(|i| {
+                // SAFETY: as above; `i` is below the entry count.
+                let entry = unsafe { ffi::git_tree_entry_byindex(tree.as_ptr(), i) };
+                // SAFETY: a live entry of the tree.
+                let name = unsafe { ffi::git_tree_entry_name(entry) };
+                // SAFETY: its name is NUL-terminated, copied out while it lives.
+                unsafe { CStr::from_ptr(name) }.to_owned()
+            })
+            .collect()
     }
 
     /// What a builder holds, as its routines report it.
@@ -594,26 +607,32 @@ mod builder {
 
     /// Reads `builder`'s state, `names` being every name either side ever held.
     fn state(builder: *mut ffi::git_treebuilder, names: &BTreeSet<CString>) -> State {
-        // SAFETY: a live builder, unaliased during the reads; each entry `get` returns lives
-        // until the builder next changes, after its read; `out` is writable, and the
-        // builder's repository outlives it.
-        unsafe {
-            let count = ffi::git_treebuilder_entrycount(builder);
+        {
+            // SAFETY: a live builder, unaliased during the reads; each entry `get` returns lives
+            // until the builder next changes, after its read; `out` is writable, and the
+            // builder's repository outlives it.
+            let count = unsafe { ffi::git_treebuilder_entrycount(builder) };
             let modes = names
                 .iter()
                 .map(|name| {
-                    let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
+                    // SAFETY: as above.
+                    let entry = unsafe { ffi::git_treebuilder_get(builder, name.as_ptr()) };
                     (
                         name.clone(),
-                        (!entry.is_null()).then(|| ffi::git_tree_entry_filemode_raw(entry)),
+                        (!entry.is_null())
+                            // SAFETY: as above.
+                            .then(|| unsafe { ffi::git_tree_entry_filemode_raw(entry) }),
                     )
                 })
                 .collect();
             let mut out = ffi::git_oid::default();
-            let written = if ffi::git_treebuilder_write(&mut out, builder) < 0 {
-                Err(c_last())
-            } else {
-                Ok(hex(&out))
+            // SAFETY: as above.
+            let written = unsafe {
+                if ffi::git_treebuilder_write(&raw mut out, builder) < 0 {
+                    Err(c_last())
+                } else {
+                    Ok(hex(&out))
+                }
             };
             State {
                 count,
@@ -687,7 +706,7 @@ mod builder {
         let source = source.map_or(ptr::null(), |t| t.as_ptr().cast_const());
         // SAFETY: a writable slot, the box's live repository, which outlives the builder,
         // and NULL or a live tree.
-        let rc = unsafe { ffi::git_treebuilder_new(&mut builder, repo.as_c_ptr(), source) };
+        let rc = unsafe { ffi::git_treebuilder_new(&raw mut builder, repo.as_c_ptr(), source) };
         assert_eq!(rc, 0, "{:?}", c_last());
         let mut states = vec![state(builder, names)];
         for step in steps {
@@ -736,6 +755,10 @@ mod builder {
 
     /// Runs `steps` on both sides, from a builder seeded with the tree `seed` of the
     /// fixture repository `fixture` (or an empty one), and compares every state.
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "the closure lets each handle reborrow for its own lifetime, which the method path cannot"
+    )]
     fn compare(tag: &str, seed: Option<(&str, &str, OidType)>, steps: &[Step]) -> Vec<State> {
         let c_repo = TempRepo::new(&format!("{tag}-c"));
         let rust_repo = TempRepo::new(&format!("{tag}-rust"));
@@ -756,7 +779,7 @@ mod builder {
         let c_states = c_run(c_repo.repo(), c_tree, steps, &all);
         let rust_states = rust_run(
             rust_repo.repo(),
-            rust_tree.as_ref().map(|t| t.as_ref()),
+            rust_tree.as_ref().map(|x| x.as_ref()),
             steps,
             &all,
         );
@@ -951,15 +974,16 @@ mod builder {
         }
 
         fn view(entry: *const ffi::git_tree_entry) -> View {
-            // SAFETY: a live entry, only read; its name and id live with it and are
-            // copied at once.
-            unsafe {
-                (
-                    CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned(),
-                    hex(&*ffi::git_tree_entry_id(entry)),
-                    ffi::git_tree_entry_filemode_raw(entry),
-                )
-            }
+            // SAFETY: a live entry, only read.
+            let name = unsafe { ffi::git_tree_entry_name(entry) };
+            // SAFETY: as above.
+            let id = unsafe { ffi::git_tree_entry_id(entry) };
+            // SAFETY: as above.
+            let mode = unsafe { ffi::git_tree_entry_filemode_raw(entry) };
+            // SAFETY: the name is NUL-terminated and lives with the entry; it is copied.
+            let name = unsafe { CStr::from_ptr(name) }.to_owned();
+            // SAFETY: the id lives with the entry; it is copied.
+            (name, hex(unsafe { &*id }), mode)
         }
 
         /// A bare repository holding a blob of `content\n` and the empty tree, written raw
@@ -970,20 +994,30 @@ mod builder {
             let mut blob = ffi::git_oid::default();
             let mut tree = ffi::git_oid::default();
             let mut builder = ptr::null_mut();
-            // SAFETY: writable ids and slot, the live repository and 8 readable bytes; the
-            // builder is freed once.
-            unsafe {
+            {
                 let data = b"content\n";
-                let rc = ffi::git_blob_create_from_buffer(
-                    &mut blob,
-                    repo,
-                    data.as_ptr().cast(),
-                    data.len(),
-                );
+                // SAFETY: writable ids and slot, the live repository and 8 readable bytes; the
+                // builder is freed once.
+                let rc = unsafe {
+                    ffi::git_blob_create_from_buffer(
+                        &raw mut blob,
+                        repo,
+                        data.as_ptr().cast(),
+                        data.len(),
+                    )
+                };
                 assert_eq!(rc, 0);
-                assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
-                assert_eq!(ffi::git_treebuilder_write(&mut tree, builder), 0);
-                ffi::git_treebuilder_free(builder);
+                // SAFETY: as above.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut tree, builder), 0) };
+                // SAFETY: as above.
+                unsafe { ffi::git_treebuilder_free(builder) };
             }
             (temp, blob, tree)
         }
@@ -992,7 +1026,7 @@ mod builder {
             match spec {
                 Id::Byte(b) => id(b),
                 Id::Zero => ffi::git_oid {
-                    type_: ffi::GIT_OID_SHA1 as u8,
+                    type_: u8::try_from(ffi::GIT_OID_SHA1).unwrap(),
                     id: [0; 32],
                 },
                 Id::Blob => *blob,
@@ -1015,28 +1049,34 @@ mod builder {
         }
 
         fn c_snapshot(builder: *mut ffi::git_treebuilder, names: &BTreeSet<CString>) -> Snapshot {
-            // SAFETY: a live builder, unaliased during the reads; each entry `get`
-            // returns is read before the builder next changes; `out` is writable.
-            unsafe {
-                let modes = names
-                    .iter()
-                    .map(|name| {
-                        let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
-                        (name.clone(), (!entry.is_null()).then(|| view(entry).2))
-                    })
-                    .collect();
+            {
+                // SAFETY: a live builder, unaliased during the reads; each entry `get`
+                // returns is read before the builder next changes; `out` is writable.
+                let modes = unsafe {
+                    names
+                        .iter()
+                        .map(|name| {
+                            let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
+                            (name.clone(), (!entry.is_null()).then(|| view(entry).2))
+                        })
+                        .collect()
+                };
                 let mut out = ffi::git_oid::default();
-                let rc = ffi::git_treebuilder_write(&mut out, builder);
+                // SAFETY: as above.
+                let rc = unsafe { ffi::git_treebuilder_write(&raw mut out, builder) };
                 let written = if rc < 0 {
                     let (class, message) = c_last();
                     Err((rc, class, message))
                 } else {
                     Ok(hex(&out))
                 };
-                Snapshot {
-                    count: ffi::git_treebuilder_entrycount(builder),
-                    modes,
-                    written,
+                // SAFETY: as above.
+                unsafe {
+                    Snapshot {
+                        count: ffi::git_treebuilder_entrycount(builder),
+                        modes,
+                        written,
+                    }
                 }
             }
         }
@@ -1083,7 +1123,13 @@ mod builder {
                     // SAFETY: NULL or a writable slot, a live builder, unaliased, a
                     // NUL-terminated name and a live id, both copied.
                     let rc = unsafe {
-                        ffi::git_treebuilder_insert(slot, builder, name.as_ptr(), &id, mode.raw())
+                        ffi::git_treebuilder_insert(
+                            slot,
+                            builder,
+                            name.as_ptr(),
+                            &raw const id,
+                            mode.raw(),
+                        )
                     };
                     if rc < 0 {
                         return failed(rc);
@@ -1156,7 +1202,7 @@ mod builder {
             let mut c_builder = ptr::null_mut();
             // SAFETY: a writable slot and the live repository, which outlives the builder.
             let rc = unsafe {
-                ffi::git_treebuilder_new(&mut c_builder, c_temp.repo().as_c_ptr(), ptr::null())
+                ffi::git_treebuilder_new(&raw mut c_builder, c_temp.repo().as_c_ptr(), ptr::null())
             };
             assert_eq!(rc, 0);
             let mut rust_builder = TreeBuilder::new(rust_temp.repo().as_ref()).unwrap();
@@ -1194,8 +1240,9 @@ mod builder {
             let (blob, tree) = (id(1), id(2));
             let mut c_builder = ptr::null_mut();
             // SAFETY: a writable slot and the live repository, which outlives the builder.
-            let rc =
-                unsafe { ffi::git_treebuilder_new(&mut c_builder, c_repo.as_c_ptr(), ptr::null()) };
+            let rc = unsafe {
+                ffi::git_treebuilder_new(&raw mut c_builder, c_repo.as_c_ptr(), ptr::null())
+            };
             assert_eq!(rc, 0);
             let mut rust_builder = TreeBuilder::new(rust_repo.as_ref()).unwrap();
             for op in [
@@ -1255,8 +1302,10 @@ mod builder {
             entry: *const ffi::git_tree_entry,
             payload: *mut c_void,
         ) -> c_int {
-            // SAFETY: `payload` is the walk's state; `root` and `entry` live for the call.
-            let (walk, root) = unsafe { (&mut *payload.cast::<Walk<'_>>(), CStr::from_ptr(root)) };
+            // SAFETY: `payload` is the walk's state, reached only here for the call.
+            let walk = unsafe { &mut *payload.cast::<Walk<'_>>() };
+            // SAFETY: `root` is NUL-terminated and lives for the call.
+            let root = unsafe { CStr::from_ptr(root) };
             let seen = view(entry);
             let rc = (walk.rule)(root, &seen.0);
             walk.visits.push((root.to_owned(), seen));
@@ -1270,15 +1319,17 @@ mod builder {
             entry: *const ffi::git_tree_entry,
             payload: *mut c_void,
         ) -> c_int {
-            // SAFETY: as in `c_callback`; the copy is a fresh entry the bridge owns.
-            let (walk, root, copy) = unsafe {
+            let (walk, root, copy) = {
                 let mut out = ptr::null_mut();
-                assert_eq!(ffi::git_tree_entry_dup(&mut out, entry), 0);
-                (
-                    &mut *payload.cast::<Walk<'_>>(),
-                    CStr::from_ptr(root),
-                    TreeEntryBox::from_c(out).unwrap(),
-                )
+                // SAFETY: as in `c_callback`; the copy is a fresh entry the bridge owns.
+                unsafe { assert_eq!(ffi::git_tree_entry_dup(&raw mut out, entry), 0) };
+                // SAFETY: as above.
+                let walk = unsafe { &mut *payload.cast::<Walk<'_>>() };
+                // SAFETY: as above.
+                let root = unsafe { CStr::from_ptr(root) };
+                // SAFETY: `out` is the duplicate just made, owned here.
+                let entry = unsafe { TreeEntryBox::from_c(out) }.unwrap();
+                (walk, root, entry)
             };
             match walk.callback.as_mut().unwrap().call(root, copy.as_ref()) {
                 WalkAction::Continue => 0,
@@ -1326,7 +1377,7 @@ mod builder {
                 // `stopped` tells the closure's stop from libgit2's own failures.
                 assert_eq!(stopped, Some(answered_stop));
                 assert_eq!(answered_stop, rc == ErrorCode::User.raw());
-                assert!(c_visits.is_empty());
+                assert!(c_visits.is_empty(), "{c_visits:?}");
                 (rc, visits, c_last())
             } else {
                 (rc, c_visits, c_last())
@@ -1342,7 +1393,13 @@ mod builder {
                 // SAFETY: a writable slot and id, the live repository, NUL-terminated
                 // names and live ids, copied; the builder is freed once.
                 unsafe {
-                    assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
+                    assert_eq!(
+                        ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                unsafe {
                     for (name, id, mode) in entries {
                         let rc = ffi::git_treebuilder_insert(
                             ptr::null_mut(),
@@ -1353,9 +1410,11 @@ mod builder {
                         );
                         assert_eq!(rc, 0);
                     }
-                    assert_eq!(ffi::git_treebuilder_write(&mut out, builder), 0);
-                    ffi::git_treebuilder_free(builder);
                 }
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut out, builder), 0) };
+                // SAFETY: as above.
+                unsafe { ffi::git_treebuilder_free(builder) };
                 out
             };
             let (commit, tree) = (ffi::GIT_FILEMODE_COMMIT, ffi::GIT_FILEMODE_TREE);
@@ -1385,7 +1444,7 @@ mod builder {
                     let c = walk(tree, mode, rule, false);
                     let rust = walk(tree, mode, rule, true);
                     assert_eq!(c, rust, "mode {mode} rule {i}");
-                    assert!(!c.1.is_empty());
+                    assert!(!c.1.is_empty(), "{:?}", c.1);
                 }
             }
             let (_, visits, _) = walk(tree, ffi::GIT_TREEWALK_PRE, RULES[0], true);
@@ -1402,19 +1461,23 @@ mod builder {
             data.extend_from_slice(&[0x77; 20]);
             let mut odb = ptr::null_mut();
             let mut out = ffi::git_oid::default();
-            // SAFETY: a writable slot and id, the live repository, `data` read for the
-            // call; the odb reference is released once.
-            unsafe {
-                assert_eq!(ffi::git_repository_odb(&mut odb, repo), 0);
-                let rc = ffi::git_odb_write(
-                    &mut out,
-                    odb,
-                    data.as_ptr().cast(),
-                    data.len(),
-                    ffi::GIT_OBJECT_TREE,
-                );
+            {
+                // SAFETY: a writable slot and id, the live repository, `data` read for the
+                // call; the odb reference is released once.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo), 0) };
+                // SAFETY: as above.
+                let rc = unsafe {
+                    ffi::git_odb_write(
+                        &raw mut out,
+                        odb,
+                        data.as_ptr().cast(),
+                        data.len(),
+                        ffi::GIT_OBJECT_TREE,
+                    )
+                };
                 assert_eq!(rc, 0);
-                ffi::git_odb_free(odb);
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
             }
             out
         }
@@ -1566,7 +1629,7 @@ mod builder {
             for (i, name) in names.iter().enumerate() {
                 builder(Op::Insert(
                     name,
-                    Id::Byte(i as u8 * 7 + 1),
+                    Id::Byte(u8::try_from(i).unwrap() * 7 + 1),
                     FileMode::Commit,
                 ))
                 .unwrap();
@@ -1596,7 +1659,7 @@ mod builder {
             let mut c_builder = ptr::null_mut();
             // SAFETY: a writable slot and the live repository, which outlives the builder.
             let rc = unsafe {
-                ffi::git_treebuilder_new(&mut c_builder, c_temp.repo().as_c_ptr(), ptr::null())
+                ffi::git_treebuilder_new(&raw mut c_builder, c_temp.repo().as_c_ptr(), ptr::null())
             };
             assert_eq!(rc, 0);
             let mut rust_builder = TreeBuilder::new(rust_temp.repo().as_ref()).unwrap();
@@ -1680,6 +1743,10 @@ mod builder {
         /// Runs alone in a child process, since the allocator is process-global.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
+        #[expect(
+            clippy::too_many_lines,
+            reason = "one scenario, its steps run and compared in order"
+        )]
         fn routine_allocation_failures_match() {
             isolated(
                 concat!(module_path!(), "::routine_allocation_failures_match"),
@@ -1691,7 +1758,7 @@ mod builder {
                     };
                     // SAFETY: a fully set, libc-backed allocator, which libgit2 copies.
                     let rc = unsafe {
-                        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &allocator)
+                        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &allocator)
                     };
                     assert_eq!(rc, 0);
                     let c_temp = TempRepo::new("routines-oom-c");
@@ -1701,7 +1768,7 @@ mod builder {
                     // builder.
                     let rc = unsafe {
                         ffi::git_treebuilder_new(
-                            &mut c_builder,
+                            &raw mut c_builder,
                             c_temp.repo().as_c_ptr(),
                             ptr::null(),
                         )
@@ -1757,7 +1824,7 @@ mod builder {
                         // the builder.
                         let rc = unsafe {
                             ffi::git_treebuilder_new(
-                                &mut c_builder,
+                                &raw mut c_builder,
                                 c_temp.repo().as_c_ptr(),
                                 ptr::null(),
                             )
@@ -1773,7 +1840,7 @@ mod builder {
                         let c_write = || {
                             let mut out = ffi::git_oid::default();
                             // SAFETY: a writable id and a live builder, unaliased.
-                            let rc = unsafe { ffi::git_treebuilder_write(&mut out, c_builder) };
+                            let rc = unsafe { ffi::git_treebuilder_write(&raw mut out, c_builder) };
                             if rc < 0 {
                                 let (class, message) = c_last();
                                 Err((rc, class, message))
@@ -1813,7 +1880,7 @@ mod builder {
                     // SAFETY: NULL restores libgit2's default, libc-backed allocator.
                     let rc = unsafe {
                         ffi::git_libgit2_opts(
-                            ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                            ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                             ptr::null::<ffi::git_allocator>(),
                         )
                     };
@@ -1827,20 +1894,25 @@ mod builder {
             builder: *mut ffi::git_treebuilder,
             names: &BTreeSet<CString>,
         ) -> Snapshot {
-            // SAFETY: a live builder, unaliased during the reads; each entry `get` returns
-            // is read before the builder next changes.
-            unsafe {
-                let modes = names
-                    .iter()
-                    .map(|name| {
-                        let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
-                        (name.clone(), (!entry.is_null()).then(|| view(entry).2))
-                    })
-                    .collect();
-                Snapshot {
-                    count: ffi::git_treebuilder_entrycount(builder),
-                    modes,
-                    written: Ok(String::new()),
+            {
+                // SAFETY: a live builder, unaliased during the reads; each entry `get` returns
+                // is read before the builder next changes.
+                let modes = unsafe {
+                    names
+                        .iter()
+                        .map(|name| {
+                            let entry = ffi::git_treebuilder_get(builder, name.as_ptr());
+                            (name.clone(), (!entry.is_null()).then(|| view(entry).2))
+                        })
+                        .collect()
+                };
+                // SAFETY: as above.
+                unsafe {
+                    Snapshot {
+                        count: ffi::git_treebuilder_entrycount(builder),
+                        modes,
+                        written: Ok(String::new()),
+                    }
                 }
             }
         }
@@ -1941,7 +2013,7 @@ mod builder {
 
     /// A constructor fails its `k`-th allocation on both sides alike, for every `k` until
     /// it succeeds, empty and seeded with a nested tree; the half-built builder is freed
-    /// (ASan: leak, double free).
+    /// (`ASan`: leak, double free).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn allocation_failures_match() {
@@ -1956,7 +2028,7 @@ mod builder {
                 // SAFETY: a fully set allocator, which libgit2 copies; it is libc-backed, as
                 // libgit2's default is, so blocks allocated before stay valid.
                 let rc = unsafe {
-                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &allocator)
+                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &allocator)
                 };
                 assert_eq!(rc, 0);
 
@@ -1979,7 +2051,7 @@ mod builder {
                         // SAFETY: a writable slot, a live repository outliving the builder, and
                         // NULL or a live tree.
                         let rc = unsafe {
-                            ffi::git_treebuilder_new(&mut raw, c_repo.repo().as_c_ptr(), src)
+                            ffi::git_treebuilder_new(&raw mut raw, c_repo.repo().as_c_ptr(), src)
                         };
                         COUNTDOWN.store(0, SeqCst);
                         let c: Outcome = if rc < 0 {
@@ -2028,7 +2100,7 @@ mod builder {
                 // SAFETY: NULL restores libgit2's default, libc-backed allocator.
                 let rc = unsafe {
                     ffi::git_libgit2_opts(
-                        ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                        ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                         ptr::null::<ffi::git_allocator>(),
                     )
                 };
@@ -2056,7 +2128,13 @@ mod builder {
         // SAFETY: a writable id, the box's live repository, a live tree of it, and one live
         // update whose path is NUL-terminated.
         let rc = unsafe {
-            ffi::git_tree_create_updated(&mut out, repo.as_c_ptr(), baseline.as_ptr(), 1, &update)
+            ffi::git_tree_create_updated(
+                &raw mut out,
+                repo.as_c_ptr(),
+                baseline.as_ptr(),
+                1,
+                &raw const update,
+            )
         };
         if rc < 0 { Err(c_last()) } else { Ok(hex(&out)) }
     }
@@ -2099,7 +2177,7 @@ mod builder {
                 assert_eq!(
                     e,
                     (
-                        ffi::GIT_ERROR_TREE as c_int,
+                        ffi::GIT_ERROR_TREE.cast_signed(),
                         "unknown action for update".into()
                     )
                 );
@@ -2136,7 +2214,7 @@ mod builder {
                 // readable bytes.
                 let rc = unsafe {
                     ffi::git_blob_create_from_buffer(
-                        &mut out,
+                        &raw mut out,
                         repo.as_c_ptr(),
                         content.as_ptr().cast(),
                         content.len(),
@@ -2194,7 +2272,7 @@ mod builder {
         // `count` live updates whose paths are NUL-terminated, only read.
         let rc = unsafe {
             ffi::git_tree_create_updated(
-                &mut out,
+                &raw mut out,
                 repo.as_c_ptr(),
                 tree.map_or(ptr::null_mut(), NonNull::as_ptr),
                 count,
@@ -2428,21 +2506,28 @@ mod tree_entry {
         let mut out = [0u8; 65];
         // SAFETY: `p` is a live entry; its name and id live as long as it does and are
         // copied at once; `out` has 65 writable bytes.
+        let tree_entry_id = unsafe { ffi::git_tree_entry_id(p) };
+        // SAFETY: as above.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), tree_entry_id) };
+        // SAFETY: as above.
+        let tree_entry_name = unsafe { ffi::git_tree_entry_name(p) };
+        // SAFETY: as above.
+        let cstr = unsafe { CStr::from_ptr(tree_entry_name) };
+        // SAFETY: as above.
+        let tree_entry_filemode_raw = unsafe { ffi::git_tree_entry_filemode_raw(p) };
+        // SAFETY: as above.
+        let tree_entry_filemode = unsafe { ffi::git_tree_entry_filemode(p) };
+        // SAFETY: as above.
         unsafe {
-            ffi::git_oid_tostr(
-                out.as_mut_ptr().cast(),
-                out.len(),
-                ffi::git_tree_entry_id(p),
-            );
             View {
-                name: CStr::from_ptr(ffi::git_tree_entry_name(p)).to_owned(),
+                name: cstr.to_owned(),
                 id: CStr::from_bytes_until_nul(&out)
                     .unwrap()
                     .to_str()
                     .unwrap()
                     .to_owned(),
-                raw_mode: ffi::git_tree_entry_filemode_raw(p),
-                mode: ffi::git_tree_entry_filemode(p),
+                raw_mode: tree_entry_filemode_raw,
+                mode: tree_entry_filemode,
                 kind: ffi::git_tree_entry_type(p),
             }
         }
@@ -2457,7 +2542,7 @@ mod tree_entry {
     fn bypath(tree: *const ffi::git_tree, path: &CStr) -> *mut ffi::git_tree_entry {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot, a live tree and a NUL-terminated path.
-        let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree, path.as_ptr()) };
+        let rc = unsafe { ffi::git_tree_entry_bypath(&raw mut out, tree, path.as_ptr()) };
         assert_eq!(rc, 0, "{path:?}");
         out
     }
@@ -2466,7 +2551,7 @@ mod tree_entry {
     fn dup(entry: *const ffi::git_tree_entry) -> *mut ffi::git_tree_entry {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and a live entry, read for the call.
-        assert_eq!(unsafe { ffi::git_tree_entry_dup(&mut out, entry) }, 0);
+        assert_eq!(unsafe { ffi::git_tree_entry_dup(&raw mut out, entry) }, 0);
         out
     }
 
@@ -2485,21 +2570,32 @@ mod tree_entry {
         let mut c_repo = ptr::null_mut();
         let mut c_tree = ptr::null_mut();
         let mut c_id = ffi::git_oid::default();
-        // SAFETY: writable slots, a NUL-terminated path and hex id; the repository is open
-        // before the tree is looked up in it.
-        unsafe {
-            let rc = ffi::git_repository_open_ext(
-                &mut c_repo,
-                path.as_ptr(),
-                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
-                ptr::null(),
-            );
+        {
+            // SAFETY: writable slots, a NUL-terminated path and hex id; the repository is open
+            // before the tree is looked up in it.
+            let rc = unsafe {
+                ffi::git_repository_open_ext(
+                    &raw mut c_repo,
+                    path.as_ptr(),
+                    ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                    ptr::null(),
+                )
+            };
             assert_eq!(rc, 0);
-            assert_eq!(
-                ffi::git_oid_from_string(&mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
-                0
-            );
-            assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_oid_from_string(&raw mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut c_tree, c_repo, &raw const c_id),
+                    0
+                );
+            };
         }
         // The Rust side: its own repository, and the tree.
         let rust_repo = Repository::open(&path).unwrap();
@@ -2537,10 +2633,9 @@ mod tree_entry {
         }
         drop(rust_entries);
         // SAFETY: the tree and repository are released once, the tree first.
-        unsafe {
-            ffi::git_tree_free(c_tree);
-            ffi::git_repository_free(c_repo);
-        }
+        unsafe { ffi::git_tree_free(c_tree) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
         drop(rust_tree);
         drop(rust_repo);
         assert_eq!(views(&c_copies, &rust_copies), original);
@@ -2596,14 +2691,21 @@ mod tree_entry {
     }
 
     fn c_last() -> (c_int, String) {
-        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-        // NUL-terminated string, both live until the next libgit2 call on this thread.
-        unsafe {
-            let e = ffi::git_error_last();
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        {
+            // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+            // NUL-terminated string, both live until the next libgit2 call on this thread.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         }
     }
 
@@ -2615,20 +2717,31 @@ mod tree_entry {
         let mut c_repo = ptr::null_mut();
         let mut c_tree = ptr::null_mut();
         let mut c_id = ffi::git_oid::default();
-        // SAFETY: as in `copies_match_c`.
-        unsafe {
-            let rc = ffi::git_repository_open_ext(
-                &mut c_repo,
-                path.as_ptr(),
-                ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
-                ptr::null(),
-            );
+        {
+            // SAFETY: as in `copies_match_c`.
+            let rc = unsafe {
+                ffi::git_repository_open_ext(
+                    &raw mut c_repo,
+                    path.as_ptr(),
+                    ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
+                    ptr::null(),
+                )
+            };
             assert_eq!(rc, 0);
-            assert_eq!(
-                ffi::git_oid_from_string(&mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
-                0
-            );
-            assert_eq!(ffi::git_tree_lookup(&mut c_tree, c_repo, &c_id), 0);
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_oid_from_string(&raw mut c_id, TREE.as_ptr(), ffi::GIT_OID_SHA1),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut c_tree, c_repo, &raw const c_id),
+                    0
+                );
+            };
         }
         let rust_repo = Repository::open(&path).unwrap();
         let rust_tree = Tree::lookup(rust_repo.as_ref(), tree_id.as_ref()).unwrap();
@@ -2638,7 +2751,7 @@ mod tree_entry {
         for probe in PROBES {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, a live tree and a NUL-terminated path.
-            let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, c_tree, probe.as_ptr()) };
+            let rc = unsafe { ffi::git_tree_entry_bypath(&raw mut out, c_tree, probe.as_ptr()) };
             let c = if rc < 0 {
                 let (class, message) = c_last();
                 Found::Failed(rc, class, message)
@@ -2670,10 +2783,9 @@ mod tree_entry {
 
         // The tree and the repositories go; the entries are still read alike.
         // SAFETY: the tree and repository are released once, the tree first.
-        unsafe {
-            ffi::git_tree_free(c_tree);
-            ffi::git_repository_free(c_repo);
-        }
+        unsafe { ffi::git_tree_free(c_tree) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
         drop(commit);
         drop(rust_tree);
         drop(rust_repo);
@@ -2696,8 +2808,11 @@ mod tree_entry {
     fn looked(p: *const ffi::git_object) -> Looked {
         let mut out = [0u8; 65];
         // SAFETY: a live object; its id is formatted into 65 writable bytes.
+        let object_id = unsafe { ffi::git_object_id(p) };
+        // SAFETY: as above.
+        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), object_id) };
+        // SAFETY: as above.
         unsafe {
-            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
             Looked::Object(
                 CStr::from_bytes_until_nul(&out)
                     .unwrap()
@@ -2713,7 +2828,7 @@ mod tree_entry {
     fn c_to_object(repo: *mut ffi::git_repository, entry: *const ffi::git_tree_entry) -> Looked {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot, a live repository and a live entry of its id type.
-        let rc = unsafe { ffi::git_tree_entry_to_object(&mut out, repo, entry) };
+        let rc = unsafe { ffi::git_tree_entry_to_object(&raw mut out, repo, entry) };
         if rc < 0 {
             let (class, message) = c_last();
             return Looked::Failed(rc, class, message);
@@ -2760,7 +2875,7 @@ mod tree_entry {
         // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut repo,
+                &raw mut repo,
                 path.as_ptr(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -2779,7 +2894,7 @@ mod tree_entry {
                 "crustify-tree-entry-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             Self(path)
         }
 
@@ -2790,7 +2905,7 @@ mod tree_entry {
 
     impl Drop for Empty {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            drop(std::fs::remove_dir_all(&self.0));
         }
     }
 
@@ -2806,7 +2921,7 @@ mod tree_entry {
         let mut c_empty = ptr::null_mut();
         let c_empty_path = c_empty_dir.c_path();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_init(&mut c_empty, c_empty_path.as_ptr(), 1) };
+        let rc = unsafe { ffi::git_repository_init(&raw mut c_empty, c_empty_path.as_ptr(), 1) };
         assert_eq!(rc, 0);
         let mut c_trees = Vec::new();
         let mut c_entries = Vec::new();
@@ -2820,18 +2935,27 @@ mod tree_entry {
             // is copied at once.
             unsafe {
                 assert_eq!(
-                    ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1),
+                    ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1),
                     0
                 );
-                assert_eq!(ffi::git_tree_lookup(&mut tree, c_repo, &id), 0);
-                for i in 0..ffi::git_tree_entrycount(tree) {
-                    let entry = ffi::git_tree_entry_byindex(tree, i);
-                    paths.push((
-                        hex,
-                        CStr::from_ptr(ffi::git_tree_entry_name(entry)).to_owned(),
-                    ));
-                    c_entries.push(entry);
-                }
+            };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut tree, c_repo, &raw const id),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            let count = unsafe { ffi::git_tree_entrycount(tree) };
+            for i in 0..count {
+                // SAFETY: as above; `i` is below the entry count.
+                let entry = unsafe { ffi::git_tree_entry_byindex(tree, i) };
+                // SAFETY: a live entry of the tree.
+                let name = unsafe { ffi::git_tree_entry_name(entry) };
+                // SAFETY: its name is NUL-terminated, copied at once.
+                paths.push((hex, unsafe { CStr::from_ptr(name) }.to_owned()));
+                c_entries.push(entry);
             }
             c_trees.push(tree);
         }
@@ -2877,9 +3001,12 @@ mod tree_entry {
         // SAFETY: the trees and repositories are released once, the trees first; the
         // copies hold nothing of them.
         unsafe {
-            c_trees.into_iter().for_each(|t| ffi::git_tree_free(t));
-            ffi::git_repository_free(c_repo);
+            for t in c_trees {
+                ffi::git_tree_free(t);
+            }
         }
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
         drop(rust_repo);
         let c_repo = open_raw(&path);
         let rust_repo = Repository::open(&path).unwrap();
@@ -2894,9 +3021,11 @@ mod tree_entry {
             for e in c_copies {
                 ffi::git_tree_entry_free(e.cast_mut());
             }
-            ffi::git_repository_free(c_repo);
-            ffi::git_repository_free(c_empty);
         }
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_repo) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_empty) };
     }
 }
 
@@ -2989,26 +3118,29 @@ mod tree_object {
     /// C's view of a live tree.
     fn found(tree: *mut ffi::git_tree) -> Outcome {
         let object = tree.cast::<ffi::git_object>();
-        // SAFETY: `tree` is a live tree, a `git_object` of type tree; each entry, its
-        // name and id live as long as it and are copied at once.
-        unsafe {
-            let entries = (0..ffi::git_tree_entrycount(tree))
+        {
+            // SAFETY: `tree` is a live tree, a `git_object` of type tree.
+            let count = unsafe { ffi::git_tree_entrycount(tree) };
+            let entries = (0..count)
                 .map(|i| {
-                    let e = ffi::git_tree_entry_byindex(tree, i);
-                    (
-                        CStr::from_ptr(ffi::git_tree_entry_name(e))
-                            .to_string_lossy()
-                            .into_owned(),
-                        ffi::git_tree_entry_filemode_raw(e),
-                        hex_of(ffi::git_tree_entry_id(e)),
-                    )
+                    // SAFETY: as above; `i` is below the entry count.
+                    let e = unsafe { ffi::git_tree_entry_byindex(tree, i) };
+                    // SAFETY: a live entry, whose name lives as long as it.
+                    let name = unsafe { ffi::git_tree_entry_name(e) };
+                    // SAFETY: as above, NUL-terminated and copied at once.
+                    let name = unsafe { CStr::from_ptr(name) }
+                        .to_string_lossy()
+                        .into_owned();
+                    // SAFETY: a live entry.
+                    let mode = unsafe { ffi::git_tree_entry_filemode_raw(e) };
+                    // SAFETY: a live entry, whose id lives as long as it and is copied at once.
+                    (name, mode, hex_of(unsafe { ffi::git_tree_entry_id(e) }))
                 })
                 .collect();
-            Outcome::Found(
-                hex_of(ffi::git_object_id(object)),
-                ffi::git_object_type(object),
-                entries,
-            )
+            // SAFETY: as above.
+            let object_id = unsafe { ffi::git_object_id(object) };
+            // SAFETY: as above.
+            unsafe { Outcome::Found(hex_of(object_id), ffi::git_object_type(object), entries) }
         }
     }
 
@@ -3033,7 +3165,7 @@ mod tree_object {
             // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
             let rc = unsafe {
                 ffi::git_repository_open_ext(
-                    &mut repo,
+                    &raw mut repo,
                     path.as_ptr(),
                     ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                     ptr::null(),
@@ -3049,7 +3181,7 @@ mod tree_object {
         fn pathless() -> Self {
             let mut repo = ptr::null_mut();
             // SAFETY: a writable slot.
-            assert_eq!(unsafe { ffi::git_repository_new(&mut repo) }, 0);
+            assert_eq!(unsafe { ffi::git_repository_new(&raw mut repo) }, 0);
             Self {
                 repo,
                 held: Vec::new(),
@@ -3063,7 +3195,7 @@ mod tree_object {
             // SAFETY: a writable id, and `hex.len()` readable bytes of hex digits.
             let rc = unsafe {
                 ffi::git_oid_from_prefix(
-                    &mut id,
+                    &raw mut id,
                     step.hex.as_ptr().cast(),
                     step.hex.len(),
                     ffi::GIT_OID_SHA1,
@@ -3073,10 +3205,14 @@ mod tree_object {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, the live repository, and a live id of its type
             // read for the call.
-            let rc = unsafe {
-                match step.len {
-                    None => ffi::git_tree_lookup(&mut out, self.repo, &id),
-                    Some(len) => ffi::git_tree_lookup_prefix(&mut out, self.repo, &id, len),
+            let rc = match step.len {
+                // SAFETY: as above.
+                None => unsafe { ffi::git_tree_lookup(&raw mut out, self.repo, &raw const id) },
+                Some(len) => {
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_tree_lookup_prefix(&raw mut out, self.repo, &raw const id, len)
+                    }
                 }
             };
             if rc < 0 {
@@ -3097,7 +3233,7 @@ mod tree_object {
                 .map(|&t| {
                     let mut out = ptr::null_mut();
                     // SAFETY: `t` is a live reference this side holds.
-                    assert_eq!(unsafe { ffi::git_tree_dup(&mut out, t) }, 0);
+                    assert_eq!(unsafe { ffi::git_tree_dup(&raw mut out, t) }, 0);
                     assert_eq!(out, t);
                     out
                 })
@@ -3117,8 +3253,9 @@ mod tree_object {
                 for &t in &self.held {
                     ffi::git_tree_free(t);
                 }
-                ffi::git_repository_free(self.repo);
             }
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
         }
     }
 
@@ -3253,7 +3390,7 @@ mod tree_object {
     fn lookups_of_unparsable_trees_match_c() {
         init();
         let path = std::env::temp_dir().join(format!("crustify-tree-equiv-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let path_str = path.to_str().unwrap().to_owned();
         let leaf: Vec<u8> = b"100644 leaf\0".iter().copied().chain([0x5A; 20]).collect();
         let objects: Vec<(Vec<u8>, ffi::git_object_t)> = vec![
@@ -3289,7 +3426,7 @@ mod tree_object {
                     // SAFETY: a live odb, a writable id, `data` read for the call.
                     let rc = unsafe {
                         ffi::git_odb_write(
-                            &mut id,
+                            &raw mut id,
                             odb.as_c_ptr(),
                             data.as_ptr().cast(),
                             data.len(),
@@ -3297,7 +3434,7 @@ mod tree_object {
                         )
                     };
                     assert_eq!(rc, 0);
-                    hex_of(&id)
+                    hex_of(&raw const id)
                 })
                 .collect()
         };
@@ -3309,7 +3446,7 @@ mod tree_object {
         let rust = Repository::open(&CString::new(path_str.as_str()).unwrap()).unwrap();
         assert_eq!(compare(CSide::open(&path_str), &rust, &steps), 4);
         drop(rust);
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
     }
 
     /// What a getter gave: the entry as the side's own getters read it (name, raw file
@@ -3362,11 +3499,11 @@ mod tree_object {
             tail.id[31] = 1;
             probes.push(tail);
             let mut wide = *id;
-            wide.type_ = ffi::GIT_OID_SHA256 as u8;
+            wide.type_ = u8::try_from(ffi::GIT_OID_SHA256).unwrap();
             probes.push(wide);
         }
         let mut missing = ffi::git_oid {
-            type_: ffi::GIT_OID_SHA1 as u8,
+            type_: u8::try_from(ffi::GIT_OID_SHA1).unwrap(),
             id: [0; 32],
         };
         probes.push(missing);
@@ -3378,13 +3515,18 @@ mod tree_object {
     /// C's view of the entry `e`, or nothing.
     fn c_entry(e: *const ffi::git_tree_entry) -> Option<Entry> {
         // SAFETY: NULL or a live entry of a live tree; its name and id are copied at once.
+        unsafe { e.as_ref()? };
+        // SAFETY: as above.
+        let tree_entry_name = unsafe { ffi::git_tree_entry_name(e) };
+        // SAFETY: as above.
+        let cstr = unsafe { CStr::from_ptr(tree_entry_name) };
+        // SAFETY: as above.
+        let tree_entry_filemode_raw = unsafe { ffi::git_tree_entry_filemode_raw(e) };
+        // SAFETY: as above.
         unsafe {
-            e.as_ref()?;
             Some((
-                CStr::from_ptr(ffi::git_tree_entry_name(e))
-                    .to_string_lossy()
-                    .into_owned(),
-                ffi::git_tree_entry_filemode_raw(e),
+                cstr.to_string_lossy().into_owned(),
+                tree_entry_filemode_raw,
                 hex_of(ffi::git_tree_entry_id(e)),
             ))
         }
@@ -3411,31 +3553,47 @@ mod tree_object {
 
     /// The C side's reads of a live tree, with the probes.
     fn c_read(tree: *mut ffi::git_tree, names: &[CString], ids: &[ffi::git_oid]) -> Read {
-        // SAFETY: a live tree of a live repository, only read; every returned entry and
-        // id lives with it and is copied at once; the probes are live for each call.
-        unsafe {
-            let len = ffi::git_tree_entrycount(tree);
-            let path = ffi::git_repository_path(ffi::git_tree_owner(tree));
+        {
+            // SAFETY: a live tree of a live repository, only read; every returned entry and
+            // id lives with it and is copied at once; the probes are live for each call.
+            let len = unsafe { ffi::git_tree_entrycount(tree) };
+            // SAFETY: as above.
+            let tree_owner = unsafe { ffi::git_tree_owner(tree) };
+            // SAFETY: as above.
+            let path = unsafe { ffi::git_repository_path(tree_owner) };
+            // SAFETY: as above.
+
             Read {
-                id: hex_of(ffi::git_tree_id(tree)),
-                owner: path
-                    .as_ref()
-                    .map(|_| CStr::from_ptr(path).to_string_lossy().into_owned()),
+                // SAFETY: as above.
+                id: hex_of(unsafe { ffi::git_tree_id(tree) }),
+                // SAFETY: as above.
+                owner: unsafe { path.as_ref() }.map(|_| {
+                    // SAFETY: as above.
+                    unsafe { CStr::from_ptr(path) }
+                        .to_string_lossy()
+                        .into_owned()
+                }),
                 len,
                 in_order: (0..len)
-                    .map(|i| c_entry(ffi::git_tree_entry_byindex(tree, i)).unwrap())
+                    // SAFETY: as above.
+                    .map(|i| c_entry(unsafe { ffi::git_tree_entry_byindex(tree, i) }).unwrap())
                     .collect(),
                 by_index: indices(len)
                     .into_iter()
-                    .map(|i| got(|| c_entry(ffi::git_tree_entry_byindex(tree, i))))
+                    // SAFETY: as above.
+                    .map(|i| got(|| c_entry(unsafe { ffi::git_tree_entry_byindex(tree, i) })))
                     .collect(),
                 by_name: names
                     .iter()
-                    .map(|n| got(|| c_entry(ffi::git_tree_entry_byname(tree, n.as_ptr()))))
+                    .map(|n| {
+                        // SAFETY: as above.
+                        got(|| c_entry(unsafe { ffi::git_tree_entry_byname(tree, n.as_ptr()) }))
+                    })
                     .collect(),
                 by_id: ids
                     .iter()
-                    .map(|id| got(|| c_entry(ffi::git_tree_entry_byid(tree, id))))
+                    // SAFETY: as above.
+                    .map(|id| got(|| c_entry(unsafe { ffi::git_tree_entry_byid(tree, id) })))
                     .collect(),
             }
         }
@@ -3500,10 +3658,14 @@ mod tree_object {
                 .held
                 .last()
                 .map(|&t| {
-                    // SAFETY: a live tree; each entry's id is copied at once.
                     (0..entries.len())
-                        .map(|i| unsafe {
-                            *ffi::git_tree_entry_id(ffi::git_tree_entry_byindex(t, i))
+                        .map(|i| {
+                            // SAFETY: a live tree and an index below its entry count.
+                            let entry = unsafe { ffi::git_tree_entry_byindex(t, i) };
+                            // SAFETY: a live entry of the tree.
+                            let id = unsafe { ffi::git_tree_entry_id(entry) };
+                            // SAFETY: the id lives with the entry; it is copied.
+                            unsafe { *id }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -3708,7 +3870,7 @@ mod tree_updates {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable id and a NUL-terminated hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
@@ -3716,28 +3878,41 @@ mod tree_updates {
     /// Every entry of the tree `id` in `repo`, recursively, as C reads them.
     fn entries(repo: *mut ffi::git_repository, id: &ffi::git_oid, prefix: &str) -> Vec<Entry> {
         let mut tree = ptr::null_mut();
-        // SAFETY: a writable slot, a live repository and id; the tree is read, then
-        // released once.
-        unsafe {
-            assert_eq!(
-                ffi::git_tree_lookup(&mut tree, repo, id),
-                0,
-                "{:?}",
-                last_error()
-            );
+        {
+            // SAFETY: a writable slot, a live repository and id; the tree is read, then
+            // released once.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut tree, repo, id),
+                    0,
+                    "{:?}",
+                    last_error()
+                );
+            };
             let mut out = Vec::new();
-            for i in 0..ffi::git_tree_entrycount(tree) {
-                let entry = ffi::git_tree_entry_byindex(tree, i);
-                let name = CStr::from_ptr(ffi::git_tree_entry_name(entry));
+            // SAFETY: as above.
+            let count = unsafe { ffi::git_tree_entrycount(tree) };
+            for i in 0..count {
+                // SAFETY: as above; `i` is below the entry count.
+                let entry = unsafe { ffi::git_tree_entry_byindex(tree, i) };
+                // SAFETY: a live entry of the tree.
+                let name = unsafe { ffi::git_tree_entry_name(entry) };
+                // SAFETY: its name is NUL-terminated and lives with it.
+                let name = unsafe { CStr::from_ptr(name) };
                 let path = format!("{prefix}{}", name.to_str().unwrap());
-                let mode = ffi::git_tree_entry_filemode_raw(entry);
-                let entry_id = *ffi::git_tree_entry_id(entry);
-                out.push((path.clone(), mode, hex(&entry_id)));
+                // SAFETY: a live entry.
+                let mode = unsafe { ffi::git_tree_entry_filemode_raw(entry) };
+                // SAFETY: as above.
+                let id = unsafe { ffi::git_tree_entry_id(entry) };
+                // SAFETY: the id lives with the entry; it is copied.
+                let entry_id = unsafe { *id };
+                out.push((path.clone(), mode, hex(&raw const entry_id)));
                 if mode == ffi::GIT_FILEMODE_TREE {
                     out.extend(entries(repo, &entry_id, &format!("{path}/")));
                 }
             }
-            ffi::git_tree_free(tree);
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(tree) };
             out
         }
     }
@@ -3768,7 +3943,7 @@ mod tree_updates {
                 "crustify-tree-update-equiv-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             copy_dir(Path::new(TESTREPO), &path);
             Self(path)
         }
@@ -3780,7 +3955,7 @@ mod tree_updates {
 
     impl Drop for Sandbox {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            drop(std::fs::remove_dir_all(&self.0));
         }
     }
 
@@ -3804,14 +3979,18 @@ mod tree_updates {
         let mut tree = ptr::null_mut();
         if let Some(base) = base {
             // SAFETY: a writable slot, a live repository and id.
-            assert_eq!(unsafe { ffi::git_tree_lookup(&mut tree, repo, base) }, 0);
+            let ret = unsafe { ffi::git_tree_lookup(&raw mut tree, repo, base) };
+            assert_eq!(ret, 0);
         }
         let mut out = ffi::git_oid::default();
-        // SAFETY: a writable id; a live repository; NULL or a live tree, released once
-        // after; a live array of `raw.len()` updates whose paths outlive the call.
-        let rc = unsafe {
-            let rc = ffi::git_tree_create_updated(&mut out, repo, tree, raw.len(), raw.as_ptr());
-            ffi::git_tree_free(tree);
+        let rc = {
+            // SAFETY: a writable id; a live repository; NULL or a live tree, released once
+            // after; a live array of `raw.len()` updates whose paths outlive the call.
+            let rc = unsafe {
+                ffi::git_tree_create_updated(&raw mut out, repo, tree, raw.len(), raw.as_ptr())
+            };
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(tree) };
             rc
         };
         if rc < 0 {
@@ -3822,6 +4001,10 @@ mod tree_updates {
     }
 
     /// [`Tree::create_updated`] over `base` and `updates`.
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "the closure lets each handle reborrow for its own lifetime, which the method path cannot"
+    )]
     fn rust_step(
         repo: &RepositoryBox,
         base: Option<&Oid>,
@@ -3843,7 +4026,7 @@ mod tree_updates {
             })
             .collect();
         let tree = base.map(|id| Tree::lookup(repo.as_ref(), id.as_ref()).unwrap());
-        let result = Tree::create_updated(repo.as_ref(), tree.as_ref().map(|t| t.as_ref()), &built);
+        let result = Tree::create_updated(repo.as_ref(), tree.as_ref().map(|x| x.as_ref()), &built);
         drop(tree);
         match result {
             Ok(id) => {
@@ -3871,7 +4054,7 @@ mod tree_updates {
         let (c_box, rust_box) = (Sandbox::new("c"), Sandbox::new("rust"));
         let mut c_repo = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_box.c_path().as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut c_repo, c_box.c_path().as_ptr()) };
         assert_eq!(rc, 0);
         let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
         let (mut c_previous, mut rust_previous) = (None, None);
@@ -3914,9 +4097,13 @@ mod tree_updates {
     }
 
     /// The tree a write fails to store, the root or a subtree, fails both sides alike,
-    /// with what the step built released (LSan).
+    /// with what the step built released (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn unwritable_objects_match_c() {
         init();
         let scratch = Sandbox::new("unwritable-scratch");
@@ -3956,7 +4143,7 @@ mod tree_updates {
             assert!(block(&c_box, &blocked) && block(&rust_box, &blocked));
             let mut c_repo = ptr::null_mut();
             // SAFETY: a writable slot and a NUL-terminated path.
-            let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_box.c_path().as_ptr()) };
+            let rc = unsafe { ffi::git_repository_open(&raw mut c_repo, c_box.c_path().as_ptr()) };
             assert_eq!(rc, 0);
             let rust_repo = Repository::open(&rust_box.c_path()).unwrap();
             // The message names the side's own fan-out directory.
@@ -3965,7 +4152,7 @@ mod tree_updates {
                     let message = message.replace(sandbox.0.to_str().unwrap(), "<repo>");
                     Outcome::Failed(rc, class, message)
                 }
-                written => written,
+                written @ Outcome::Written(..) => written,
             };
             let c_seen = anonymous(c_step(c_repo, None, &updates).0, &c_box);
             let rust_seen = anonymous(rust_step(&rust_repo, None, &updates).0, &rust_box);
@@ -3988,7 +4175,7 @@ mod tree_updates {
             "crustify-tree-update-equiv-{}-foreign-base",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&root);
+        drop(std::fs::remove_dir_all(&root));
         let open_empty = |side: &str| {
             let path = CString::new(root.join(side).to_str().unwrap()).unwrap();
             drop(Repository::init(&path, true).unwrap());
@@ -3997,13 +4184,13 @@ mod tree_updates {
         let (c_path, rust_path) = (open_empty("c"), open_empty("rust"));
         let mut c_repo = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_open(&mut c_repo, c_path.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut c_repo, c_path.as_ptr()) };
         assert_eq!(rc, 0);
         let rust_repo = Repository::open(&rust_path).unwrap();
         let mut c_other = ptr::null_mut();
         let other_path = CString::new(TESTREPO).unwrap();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_open(&mut c_other, other_path.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut c_other, other_path.as_ptr()) };
         assert_eq!(rc, 0);
         let rust_other = Repository::open(&other_path).unwrap();
         let base = raw_id(BASE);
@@ -4016,7 +4203,7 @@ mod tree_updates {
         ] {
             let mut c_tree = ptr::null_mut();
             // SAFETY: a writable slot, the live other repository and a live id.
-            let rc = unsafe { ffi::git_tree_lookup(&mut c_tree, c_other, &base) };
+            let rc = unsafe { ffi::git_tree_lookup(&raw mut c_tree, c_other, &raw const base) };
             assert_eq!(rc, 0);
             let paths: Vec<CString> = updates.iter().map(|u| CString::new(u.1).unwrap()).collect();
             let raw: Vec<ffi::git_tree_update> = updates
@@ -4030,19 +4217,27 @@ mod tree_updates {
                 })
                 .collect();
             let mut out = ffi::git_oid::default();
-            // SAFETY: a writable id, the live repository, a live tree of another live
-            // repository, released once after, and a live array whose paths outlive it.
-            let rc = unsafe {
-                let rc =
-                    ffi::git_tree_create_updated(&mut out, c_repo, c_tree, raw.len(), raw.as_ptr());
-                ffi::git_tree_free(c_tree);
+            let rc = {
+                // SAFETY: a writable id, the live repository, a live tree of another live
+                // repository, released once after, and a live array whose paths outlive it.
+                let rc = unsafe {
+                    ffi::git_tree_create_updated(
+                        &raw mut out,
+                        c_repo,
+                        c_tree,
+                        raw.len(),
+                        raw.as_ptr(),
+                    )
+                };
+                // SAFETY: as above.
+                unsafe { ffi::git_tree_free(c_tree) };
                 rc
             };
             let c_seen = if rc < 0 {
                 let (class, message) = last_error();
                 Outcome::Failed(rc, class, message)
             } else {
-                Outcome::Written(hex(&out), Vec::new())
+                Outcome::Written(hex(&raw const out), Vec::new())
             };
             let tree = Tree::lookup(rust_other.as_ref(), rust_base.as_ref()).unwrap();
             let ids: Vec<Oid> = updates
@@ -4072,10 +4267,9 @@ mod tree_updates {
         }
         drop((rust_repo, rust_other));
         // SAFETY: both raw repositories are released once; nothing of them is held.
-        unsafe {
-            ffi::git_repository_free(c_repo);
-            ffi::git_repository_free(c_other);
-        }
-        let _ = std::fs::remove_dir_all(&root);
+        unsafe { ffi::git_repository_free(c_repo) };
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(c_other) };
+        drop(std::fs::remove_dir_all(&root));
     }
 }

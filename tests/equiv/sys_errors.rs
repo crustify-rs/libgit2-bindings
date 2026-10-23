@@ -80,7 +80,9 @@ enum Side {
 
 fn set_errno(value: c_int) {
     // SAFETY: the calling thread's `errno`, valid for writes.
-    unsafe { libc::__errno_location().write(value) }
+    let value2 = unsafe { libc::__errno_location() };
+    // SAFETY: as above.
+    unsafe { value2.write(value) }
 }
 
 fn errno() -> c_int {
@@ -89,11 +91,16 @@ fn errno() -> c_int {
 
 /// `git_error_last()`'s class and message.
 fn last_error() -> (c_int, Vec<u8>) {
-    // SAFETY: `git_error_last` never returns NULL; its message lives until the next
-    // libgit2 call on this thread, and is copied out before one.
-    unsafe {
-        let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_bytes().to_vec())
+    {
+        // SAFETY: `git_error_last` never returns NULL; its message lives until the next
+        // libgit2 call on this thread, and is copied out before one.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { (klass, CStr::from_ptr(message2).to_bytes().to_vec()) }
     }
 }
 
@@ -104,8 +111,8 @@ fn c_string(message: &[u8]) -> CString {
 fn c_step(step: &Step) -> Option<c_int> {
     match step {
         // SAFETY: no arguments.
-        Step::Clear => unsafe { ffi::git_error_clear() },
-        Step::Set(class, message) => {
+        Clear => unsafe { ffi::git_error_clear() },
+        Set(class, message) => {
             let mut format = Vec::new();
             for &b in message {
                 format.extend_from_slice(if b == b'%' {
@@ -119,34 +126,34 @@ fn c_step(step: &Step) -> Option<c_int> {
             unsafe { ffi::git_error_set(class.raw(), format.as_ptr()) }
         }
         // SAFETY: a NULL format reads no argument.
-        Step::Bare(class) => unsafe { ffi::git_error_set(class.raw(), ptr::null()) },
-        Step::Str(class, message) => {
+        Bare(class) => unsafe { ffi::git_error_set(class.raw(), ptr::null()) },
+        Str(class, message) => {
             let message = c_string(message);
             // SAFETY: a NUL-terminated string, copied during the call.
             return Some(unsafe { ffi::git_error_set_str(class.raw(), message.as_ptr()) });
         }
         // SAFETY: no arguments.
-        Step::Oom => unsafe { ffi::git_error_set_oom() },
-        Step::Errno(value) => set_errno(*value),
-        Step::FailNext => refuse_next(),
+        Oom => unsafe { ffi::git_error_set_oom() },
+        Errno(value) => set_errno(*value),
+        FailNext => refuse_next(),
     }
     None
 }
 
 fn rust_step(step: &Step) -> Option<c_int> {
     match step {
-        Step::Clear => errors::clear(),
-        Step::Set(class, message) => errors::set(*class, &c_string(message)),
-        Step::Bare(class) => errors::set_without_message(*class),
-        Step::Str(class, message) => {
+        Clear => errors::clear(),
+        Set(class, message) => errors::set(*class, &c_string(message)),
+        Bare(class) => errors::set_without_message(*class),
+        Str(class, message) => {
             return Some(match errors::set_str(*class, &c_string(message)) {
                 Ok(()) => 0,
                 Err(errors::MessageNotStored) => -1,
             });
         }
-        Step::Oom => errors::set_oom(),
-        Step::Errno(value) => set_errno(*value),
-        Step::FailNext => refuse_next(),
+        Oom => errors::set_oom(),
+        Errno(value) => set_errno(*value),
+        FailNext => refuse_next(),
     }
     None
 }
@@ -170,7 +177,7 @@ fn run(side: Side, steps: &[Step]) -> Vec<Seen> {
                 // Observing allocates the thread's state, and would spend a refusal
                 // meant for the next step.
                 let (class, message) = match step {
-                    Step::Errno(_) | Step::FailNext => (0, Vec::new()),
+                    Errno(_) | FailNext => (0, Vec::new()),
                     _ => last_error(),
                 };
                 Seen {
@@ -203,7 +210,7 @@ fn init() {
 
 fn text(len: usize, seed: u8) -> Vec<u8> {
     (0..len)
-        .map(|i| b'a' + (i as u8).wrapping_mul(7).wrapping_add(seed) % 26)
+        .map(|i| b'a' + i.to_le_bytes()[0].wrapping_mul(7).wrapping_add(seed) % 26)
         .collect()
 }
 
@@ -292,7 +299,7 @@ fn messages_grow_and_shrink() {
         .into_iter()
         .enumerate()
     {
-        let seed = i as u8;
+        let seed = u8::try_from(i).unwrap();
         steps.push(Str(ErrorClass::Index, text(len, seed)));
         steps.push(Set(ErrorClass::Tree, text(len, seed + 1)));
         steps.push(Errno(libc::ENOTDIR));
@@ -308,7 +315,13 @@ fn messages_grow_and_shrink() {
 fn threads_keep_their_own_errors() {
     init();
     let steps: Vec<Step> = (0..64)
-        .flat_map(|i| [Str(ErrorClass::Net, text(i * 5, i as u8)), Oom, Clear])
+        .flat_map(|i| {
+            [
+                Str(ErrorClass::Net, text(i * 5, u8::try_from(i).unwrap())),
+                Oom,
+                Clear,
+            ]
+        })
         .collect();
     let expected = run(Side::C, &steps);
     std::thread::scope(|s| {
@@ -387,7 +400,7 @@ fn allocation_failures() {
         // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
         // nothing is allocated yet, so no storage changes allocator.
         let rc = unsafe {
-            ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+            ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
         };
         assert_eq!(rc, 0);
         init();

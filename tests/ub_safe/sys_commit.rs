@@ -3,7 +3,7 @@
 //!
 //! The callback keeps the last id it handed out, which libgit2 reads through the
 //! returned pointer until the next call: the id read back must be the closure's, whole
-//! (Miri, ASan), and the closure's own state is written between calls (BSan: nothing
+//! (Miri, `ASan`), and the closure's own state is written between calls (`BSan`: nothing
 //! keeps a pointer into it). Ids are built and compared without libgit2 (raw bytes and
 //! type byte), so Miri runs these tests. A panic in the closure resumes from `call`
 //! without crossing the trampoline, and leaves the callback usable. A handed-out id
@@ -31,14 +31,14 @@ fn ids_are_read_back_whole() {
         } else {
             OidType::Sha256
         };
-        let fresh = id(i as u8, kind);
+        let fresh = id(i.to_le_bytes()[0], kind);
         store.push(fresh);
         (i < 6).then_some(fresh)
     };
     let mut callback = ParentCallback::new(&mut next);
     for i in 0..6 {
         let got = callback.call(i).unwrap();
-        assert_eq!(got.id(), [i as u8; 32]);
+        assert_eq!(got.id(), [u8::try_from(i).unwrap(); 32]);
         let kind = if i.is_multiple_of(2) {
             OidType::Sha1
         } else {
@@ -58,9 +58,7 @@ fn panics_resume_and_leave_the_callback_usable() {
     let mut calls = 0;
     let mut next = |i: usize| {
         calls += 1;
-        if i == 1 {
-            panic!("parent {i}");
-        }
+        assert!(i != 1, "parent {i}");
         Some(id(7, OidType::Sha1))
     };
     let mut callback = ParentCallback::new(&mut next);
@@ -82,11 +80,11 @@ fn panics_resume_and_leave_the_callback_usable() {
 }
 
 /// UB tests for `create_from_ids` and `create_from_callback`: the tree and the parents
-/// by id, as heap values freed right after the call (ASan: a read past one; BSan: a
+/// by id, as heap values freed right after the call (`ASan`: a read past one; `BSan`: a
 /// pointer kept), many parents included, and ids of another type than the repository's,
-/// which libgit2 would format out of bounds (ASan), refused before it runs, as is a
-/// signature it cannot write (UBSan). Each thread writes into its own repository at
-/// once, moving no reference (TSan). They call libgit2, so Miri skips them.
+/// which libgit2 would format out of bounds (`ASan`), refused before it runs, as is a
+/// signature it cannot write (`UBSan`). Each thread writes into its own repository at
+/// once, moving no reference (`TSan`). They call libgit2, so Miri skips them.
 mod creating {
     use std::ffi::{CStr, CString};
     use std::thread;
@@ -103,6 +101,10 @@ mod creating {
 
     const EMPTY_TREE: &CStr = c"4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+    #[expect(
+        clippy::unnecessary_box_returns,
+        reason = "the id gets a heap allocation of its own, which ASan bounds exactly"
+    )]
     fn empty_tree() -> Box<Oid> {
         Box::new(Oid::from_string(EMPTY_TREE, OidType::Sha1).unwrap())
     }
@@ -243,7 +245,7 @@ mod creating {
                 s.spawn(move || {
                     let temp = TempRepo::new(&format!("sys-commit-thread-{t}"));
                     let repo = repository(&temp);
-                    let sig = SignatureView::new(c"T", c"t@x", Time::new(t as i64, 0));
+                    let sig = SignatureView::new(c"T", c"t@x", Time::new(i64::from(t), 0));
                     let tree = empty_tree();
                     let mut tip: Option<Oid> = None;
                     for i in 0..4 {

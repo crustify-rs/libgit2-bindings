@@ -21,7 +21,7 @@
 use core::ffi::{CStr, c_char, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull};
 
 use ffibox::define_ctype;
 
@@ -187,27 +187,39 @@ impl AllocatorRef<'_> {
     /// The `malloc` member; `None` only in a value C left unset, never in one built
     /// here.
     ///
-    /// Field: git_allocator.gmalloc
+    /// Field: `git_allocator.gmalloc`
+    #[must_use]
     pub fn malloc(&self) -> Option<MallocFn> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let gmalloc_ptr = unsafe { &raw const (*self.as_ptr()).gmalloc };
         // SAFETY: a read through the shared handle's pointer to a live `git_allocator`;
         // every bit pattern of the member, NULL included, is a valid `Option<fn>`.
-        unsafe { addr_of!((*self.as_ptr()).gmalloc).read() }
+        unsafe { gmalloc_ptr.read() }
     }
 
     /// The `realloc` member; `None` only in a value C left unset.
     ///
-    /// Field: git_allocator.grealloc
+    /// Field: `git_allocator.grealloc`
+    #[must_use]
     pub fn realloc(&self) -> Option<ReallocFn> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let grealloc_ptr = unsafe { &raw const (*self.as_ptr()).grealloc };
         // SAFETY: as in `malloc`.
-        unsafe { addr_of!((*self.as_ptr()).grealloc).read() }
+        unsafe { grealloc_ptr.read() }
     }
 
     /// The `free` member; `None` only in a value C left unset.
     ///
-    /// Field: git_allocator.gfree
+    /// Field: `git_allocator.gfree`
+    #[must_use]
     pub fn free(&self) -> Option<FreeFn> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let gfree_ptr = unsafe { &raw const (*self.as_ptr()).gfree };
         // SAFETY: as in `malloc`.
-        unsafe { addr_of!((*self.as_ptr()).gfree).read() }
+        unsafe { gfree_ptr.read() }
     }
 }
 
@@ -225,27 +237,36 @@ impl fmt::Debug for AllocatorRef<'_> {
 impl AllocatorMut<'_> {
     /// Replaces the `malloc` member.
     ///
-    /// Field: git_allocator.gmalloc
+    /// Field: `git_allocator.gmalloc`
     pub fn set_malloc(&mut self, malloc: MallocFn) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let gmalloc_ptr = unsafe { &raw mut (*self.as_mut_ptr()).gmalloc };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_allocator`; the member is plain data with nothing to release.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).gmalloc).write(Some(malloc)) }
+        unsafe { gmalloc_ptr.write(Some(malloc)) }
     }
 
     /// Replaces the `realloc` member.
     ///
-    /// Field: git_allocator.grealloc
+    /// Field: `git_allocator.grealloc`
     pub fn set_realloc(&mut self, realloc: ReallocFn) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let grealloc_ptr = unsafe { &raw mut (*self.as_mut_ptr()).grealloc };
         // SAFETY: as in `set_malloc`.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).grealloc).write(Some(realloc)) }
+        unsafe { grealloc_ptr.write(Some(realloc)) }
     }
 
     /// Replaces the `free` member.
     ///
-    /// Field: git_allocator.gfree
+    /// Field: `git_allocator.gfree`
     pub fn set_free(&mut self, free: FreeFn) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let gfree_ptr = unsafe { &raw mut (*self.as_mut_ptr()).gfree };
         // SAFETY: as in `set_malloc`.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).gfree).write(Some(free)) }
+        unsafe { gfree_ptr.write(Some(free)) }
     }
 }
 
@@ -393,7 +414,7 @@ mod unit_tests {
     }
 
     fn take_calls() -> Vec<Call> {
-        CALLS.with(|c| c.take())
+        CALLS.with(RefCell::take)
     }
 
     /// The one request size [`Heap`] refuses.
@@ -416,7 +437,7 @@ mod unit_tests {
         fn malloc(len: usize, file: Option<&CStr>, line: i32) -> Option<NonNull<u8>> {
             CALLS.with(|c| {
                 c.borrow_mut()
-                    .push(Call::Malloc(len, file.map(CStr::to_owned), line))
+                    .push(Call::Malloc(len, file.map(CStr::to_owned), line));
             });
             if len == REFUSED {
                 return None;
@@ -437,7 +458,7 @@ mod unit_tests {
         ) -> Option<NonNull<u8>> {
             CALLS.with(|c| {
                 let call = Call::Realloc(ptr.is_some(), len, file.map(CStr::to_owned), line);
-                c.borrow_mut().push(call)
+                c.borrow_mut().push(call);
             });
             let Some(ptr) = ptr else {
                 let block = Self::malloc(len, file, line);
@@ -464,7 +485,9 @@ mod unit_tests {
             // SAFETY: `ptr` is a live block of this allocator, so its header precedes it.
             let base = unsafe { ptr.sub(HEADER) };
             // SAFETY: as above; `base` was allocated with `layout(len)`.
-            unsafe { dealloc(base.as_ptr(), layout(base.cast::<usize>().read())) }
+            let read = unsafe { base.cast::<usize>().read() };
+            // SAFETY: as above.
+            unsafe { dealloc(base.as_ptr(), layout(read)) }
         }
     }
 
@@ -489,6 +512,10 @@ mod unit_tests {
     // that), so every comparison below is against one stored pointer value.
 
     #[test]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn from_fns_sets_every_member() {
         let (m, r, f): (MallocFn, ReallocFn, FreeFn) = (c_malloc, c_realloc, c_free);
         let a = Allocator::from_fns(m, r, f);
@@ -499,6 +526,10 @@ mod unit_tests {
     }
 
     #[test]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn setters_replace_one_member_each() {
         let (m, r, f, other): (MallocFn, ReallocFn, FreeFn, FreeFn) =
             (c_malloc, c_realloc, c_free, other_free);
@@ -541,7 +572,7 @@ mod unit_tests {
         // SAFETY: `p` holds 5 writable bytes.
         unsafe {
             p.cast::<u8>()
-                .copy_from_nonoverlapping(b"hello".as_ptr(), 5)
+                .copy_from_nonoverlapping(b"hello".as_ptr(), 5);
         };
         // SAFETY: `p` is a live block of this family, given up; NULL `file`.
         let q = unsafe { realloc(p, 64, ptr::null(), -1) };
@@ -555,11 +586,11 @@ mod unit_tests {
         let n = unsafe { realloc(ptr::null_mut(), 3, c"x".as_ptr(), 1) };
         assert!(!n.is_null());
         // SAFETY: NULL is a no-op, and `q` and `n` are live blocks given up once.
-        unsafe {
-            free(ptr::null_mut());
-            free(q);
-            free(n);
-        }
+        unsafe { free(ptr::null_mut()) };
+        // SAFETY: as above.
+        unsafe { free(q) };
+        // SAFETY: as above.
+        unsafe { free(n) };
         // SAFETY: as above.
         assert!(unsafe { malloc(REFUSED, ptr::null(), 0) }.is_null());
 
@@ -587,12 +618,9 @@ mod unit_tests {
             (r.malloc().unwrap(), r.realloc().unwrap(), r.free().unwrap());
         take_calls();
         // SAFETY: NULL `file`; both blocks are released below.
-        let (a, b) = unsafe {
-            (
-                malloc(0, ptr::null(), 0),
-                realloc(ptr::null_mut(), 0, ptr::null(), 0),
-            )
-        };
+        let malloc2 = unsafe { malloc(0, ptr::null(), 0) };
+        // SAFETY: as above.
+        let (a, b) = unsafe { (malloc2, realloc(ptr::null_mut(), 0, ptr::null(), 0)) };
         assert!(!a.is_null() && !b.is_null() && a != b);
         // A zero-byte block grows like any other, keeping its (empty) prefix.
         // SAFETY: `a` is a live block of this family, given up on success.
@@ -601,10 +629,9 @@ mod unit_tests {
         // SAFETY: `grown` holds 24 writable bytes.
         unsafe { grown.cast::<u8>().write_bytes(0xAB, 24) };
         // SAFETY: two live blocks of this family, each given up once.
-        unsafe {
-            free(grown);
-            free(b);
-        }
+        unsafe { free(grown) };
+        // SAFETY: as above.
+        unsafe { free(b) };
         assert_eq!(
             take_calls(),
             [
@@ -691,6 +718,10 @@ mod unit_tests {
     }
 
     #[test]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn value_is_copy_send_and_sync() {
         fn shared<T: Copy + Send + Sync>() {}
         fn handle<T: Send + Sync>() {}

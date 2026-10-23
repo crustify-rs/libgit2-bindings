@@ -132,8 +132,9 @@ fn install_tracing_allocator() {
     };
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member set,
     // which it copies; nothing is allocated yet, so no storage changes allocator.
-    let rc =
-        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator) };
+    let rc = unsafe {
+        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
+    };
     assert_eq!(rc, 0);
     // SAFETY: no arguments; refcounted, never released in this process.
     assert!(unsafe { ffi::git_libgit2_init() } > 0);
@@ -175,6 +176,7 @@ impl Recorder {
         n
     }
 
+    #[expect(clippy::match_same_arms, reason = "each arm names its own case")]
     fn step(&mut self, f: impl FnOnce() -> State) {
         TRACE.lock().unwrap().clear();
         TRACING.store(true, Ordering::SeqCst);
@@ -238,7 +240,7 @@ fn c_state(buf: &ffi::git_buf) -> State {
 fn c_get(opt: u32, buf: &mut ffi::git_buf) {
     // SAFETY: the `GET` options take a `git_buf *` that is zeroed, disposed or owns a
     // libgit2 allocation, which they reuse or replace.
-    let rc = unsafe { ffi::git_libgit2_opts(opt as c_int, &raw mut *buf) };
+    let rc = unsafe { ffi::git_libgit2_opts(opt.cast_signed(), &raw mut *buf) };
     assert_eq!(rc, 0);
 }
 
@@ -254,10 +256,11 @@ fn c_from_bytes(bytes: &[u8]) -> ffi::git_buf {
         unsafe { ffi::git_odb_backend_data_alloc(ptr::null_mut(), bytes.len() + 1) }.cast::<u8>();
     assert!(!p.is_null());
     // SAFETY: `p` holds `bytes.len() + 1` writable bytes, distinct from `bytes`.
-    unsafe {
-        p.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
-        p.add(bytes.len()).write(0);
-    }
+    unsafe { p.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
+    // SAFETY: as above.
+    let value = unsafe { p.add(bytes.len()) };
+    // SAFETY: as above.
+    unsafe { value.write(0) };
     ffi::git_buf {
         ptr: p.cast(),
         reserved: bytes.len() + 1,
@@ -270,16 +273,17 @@ fn c_from_bytes(bytes: &[u8]) -> ffi::git_buf {
 fn c_set_in_place(buf: &mut ffi::git_buf, bytes: &[u8]) {
     assert!(bytes.len() < buf.reserved);
     // SAFETY: `buf` owns `reserved` writable bytes, of which `bytes.len() + 1` fit.
-    unsafe {
-        ptr::copy(bytes.as_ptr(), buf.ptr.cast::<u8>(), bytes.len());
-        buf.ptr.add(bytes.len()).write(0);
-    }
+    unsafe { ptr::copy(bytes.as_ptr(), buf.ptr.cast::<u8>(), bytes.len()) };
+    // SAFETY: as above.
+    let value = unsafe { buf.ptr.add(bytes.len()) };
+    // SAFETY: as above.
+    unsafe { value.write(0) };
     buf.size = bytes.len();
 }
 
 fn set_opt(opt: u32, s: *const c_char) {
     // SAFETY: the `SET` options taking a string copy it, or restore the default for NULL.
-    assert_eq!(unsafe { ffi::git_libgit2_opts(opt as c_int, s) }, 0);
+    assert_eq!(unsafe { ffi::git_libgit2_opts(opt.cast_signed(), s) }, 0);
 }
 
 // --- the Rust side ----------------------------------------------------------------
@@ -417,6 +421,14 @@ fn libgit2_results_read_reuse_and_release_alike() {
 /// reused by libgit2, moved out and released.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario, its steps run and compared in order"
+)]
+#[expect(
+    clippy::similar_names,
+    reason = "the names pair each value with its counterpart on the other side"
+)]
 fn rust_built_buffers_match_libgit2_shaped_ones() {
     isolated(
         concat!(
@@ -426,7 +438,7 @@ fn rust_built_buffers_match_libgit2_shaped_ones() {
         || {
             install_tracing_allocator();
             set_opt(ffi::GIT_OPT_SET_USER_AGENT, c"crustify/1.0".as_ptr());
-            let long: Vec<u8> = (0..4096).map(|i| (i * 7 + 1) as u8).collect();
+            let long: Vec<u8> = (0..4096u32).map(|i| (i * 7 + 1).to_le_bytes()[0]).collect();
             let contents: [&[u8]; 5] = [b"a", b"refs/heads/main", b"pa\0ck\0", b"\0", &long];
             for bytes in contents {
                 let (mut c, mut r) = (Recorder::default(), Recorder::default());
@@ -555,6 +567,10 @@ fn rust_built_buffers_match_libgit2_shaped_ones() {
 /// as `git_buf_dispose` would; from the static empty string nothing is taken or freed.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario, its steps run and compared in order"
+)]
 fn contents_taken_from_libgit2_results() {
     isolated(
         concat!(module_path!(), "::contents_taken_from_libgit2_results"),

@@ -2,16 +2,16 @@
 //!
 //! `TraceLevel` is a fieldless enum over C's `git_trace_level_t`. The only safe way in
 //! from a raw value is `from_raw` / `try_from`, which must reject every value without
-//! a variant rather than produce an invalid discriminant (which Miri and UBSan would
+//! a variant rather than produce an invalid discriminant (which Miri and `UBSan` would
 //! flag on the next read); an `as` cast to it does not compile (`compile_fail/`).
 //! None of them calls libgit2, so they also run under Miri.
 //!
 //! Then the callback, `TraceCallback`, over a `Tracer`. Its message is borrowed for
 //! the call, so a tracer that keeps it does not compile (a `compile_fail,E0521`
 //! doctest on `Tracer::trace`, whose wording differs between toolchains), and one
-//! that copies it leaves nothing behind once the caller frees it (ASan). Calls from
+//! that copies it leaves nothing behind once the caller frees it (`ASan`). Calls from
 //! many threads at once, and from libgit2's own threads, reach the tracer with nothing
-//! but Rust's own synchronisation (TSan); a tracer that calls back into the callback
+//! but Rust's own synchronisation (`TSan`); a tracer that calls back into the callback
 //! nests; and a panicking one aborts the process instead of unwinding into C. The
 //! calls that stay in Rust also run under Miri.
 
@@ -23,7 +23,7 @@ use libgit2::ffi;
 use libgit2::libgit2::core::trace::TraceLevel;
 
 /// Every value around the declared ones, then a coarse stride across the whole type;
-/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+/// `BorrowSanitizer` instruments each comparison, so the probe set stays small.
 fn probes() -> impl Iterator<Item = ffi::git_trace_level_t> {
     (0..=64)
         .chain((0..=ffi::git_trace_level_t::MAX).step_by(1 << 26))
@@ -38,10 +38,14 @@ fn from_raw_yields_only_valid_levels() {
         if let Some(level) = TraceLevel::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(level.raw(), raw);
-            assert!(!format!("{level:?}").is_empty());
+            assert_ne!(format!("{level:?}"), "");
             seen.insert(level);
         } else {
-            assert_eq!(TraceLevel::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                TraceLevel::try_from(raw)
+                    .map_err(libgit2::libgit2::core::trace::UnnamedTraceLevel::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 7);

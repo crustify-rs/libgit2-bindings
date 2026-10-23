@@ -7,10 +7,10 @@
 //! [`creating`]; and the creation callback in [`create_callback`].
 //!
 //! Each filled array's buffer is exactly `len` commit pointers long (libgit2 detaches
-//! a `git_vector` sized to them, `set_commits` allocates that many), so ASan flags a
+//! a `git_vector` sized to them, `set_commits` allocates that many), so `ASan` flags a
 //! read past them; every commit reference and buffer must be released exactly once,
-//! whether the array is cleared, emptied by `take`, refilled or dropped (ASan: double
-//! free, use after free; LSan: leak). Only the empty array is built without libgit2,
+//! whether the array is cleared, emptied by `take`, refilled or dropped (`ASan`: double
+//! free, use after free; `LSan`: leak). Only the empty array is built without libgit2,
 //! so little runs under Miri. Illegal uses are compile-fail cases and doctests on the
 //! crate: a commit or an array outliving its repository, a lent commit outliving its
 //! array, a `clone`, sending an array or a commit to another thread.
@@ -25,7 +25,7 @@ use crate::fixture::commit_and_config::{EMPTY, MERGEDREPO, OpenRepo, TESTREPO, c
 use crate::fixture::isolated;
 
 /// The hex id of a commit, through [`CommitRef::id`].
-pub fn commit_id(commit: CommitRef<'_, '_>) -> String {
+pub(crate) fn commit_id(commit: CommitRef<'_, '_>) -> String {
     commit.id().to_hex_string().unwrap()
 }
 
@@ -97,8 +97,8 @@ fn filled_arrays_read_clear_and_release() {
 }
 
 /// Commits lent by an array and copied out of it outlive the array; commits taken out
-/// of one array and moved into another keep their single references (ASan: a double
-/// release; LSan: a leak).
+/// of one array and moved into another keep their single references (`ASan`: a double
+/// release; `LSan`: a leak).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn commits_move_between_arrays_and_outlive_them() {
@@ -157,7 +157,7 @@ fn arrays_go_before_their_repository() {
 
 /// Dropping and clearing empty arrays on one thread while another performs the
 /// process's first libgit2 initialisation races nothing: the empty array never
-/// reaches libgit2's allocator (TSan).
+/// reaches libgit2's allocator (`TSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn empty_drops_do_not_race_the_first_init() {
@@ -185,7 +185,7 @@ fn empty_drops_do_not_race_the_first_init() {
 }
 
 /// Arrays filled from repositories on several threads at once, each array staying on
-/// its own thread, release their commits without racing (TSan).
+/// its own thread, release their commits without racing (`TSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn arrays_on_their_own_threads() {
@@ -211,14 +211,14 @@ fn arrays_on_their_own_threads() {
 /// pointer and rebuild a `&CStr` from it, so these tests exercise every getter and
 /// setter on every holder Rust has for one (a local, a heap slot, an element of a run
 /// that moves when it grows, a copy, a `static`), through reborrows, with strings that
-/// live on the heap and are dropped right after their last read (ASan: a getter
+/// live on the heap and are dropped right after their last read (`ASan`: a getter
 /// reading past the string or after it), and across threads under the `Send` / `Sync`
-/// the crate asserts (TSan). A misaligned projection or a write through the shared
+/// the crate asserts (`TSan`). A misaligned projection or a write through the shared
 /// handle would be flagged by Miri and ASan/UBSan. Headers that outlive their strings,
 /// handles that outlive their header, aliased handles and setters on the shared handle
 /// do not compile (`compile_fail/` and the type's doctests). Nothing here reaches
 /// libgit2, which keeps no pointer to a header past a call, so every test runs under
-/// Miri and there is no foreign write or retained pointer to race (BSan).
+/// Miri and there is no foreign write or retained pointer to race (`BSan`).
 mod header {
     use std::ffi::{CStr, CString};
     use std::sync::Mutex;
@@ -268,7 +268,7 @@ mod header {
     }
 
     /// Strings on the heap, freed right after the header's last use: every read lands
-    /// inside a live allocation (ASan).
+    /// inside a live allocation (`ASan`).
     #[test]
     fn reads_stay_inside_heap_strings() {
         for len in [0, 1, 7, 8, 15, 16, 255] {
@@ -313,7 +313,7 @@ mod header {
 
     /// A run of headers read from several threads at once, each element written by
     /// one thread through its own exclusive handle, and headers moved between threads
-    /// under the asserted `Send` / `Sync` (TSan).
+    /// under the asserted `Send` / `Sync` (`TSan`).
     #[test]
     fn headers_cross_threads() {
         let owned: Vec<CString> = (0..8)
@@ -359,13 +359,13 @@ mod header {
 /// commit to every lookup of one id: every owner gives back its one reference through
 /// `git_commit_free` exactly once, and every clone, `to_commit` and conversion takes or
 /// moves exactly one. A miscount frees a commit the cache or another owner still
-/// reads, which ASan flags, or leaks it, which LSan does. The tests share commits
+/// reads, which `ASan` flags, or leaks it, which `LSan` does. The tests share commits
 /// between lookups, clones, conversions and arrays, drop them in every order, let the
 /// cache evict commits owners still hold (a tiny cache limit) and run with the cache
 /// off (a fresh commit per lookup). Every failing lookup must leave nothing behind, an
 /// object of another type must never pass for a commit, and an id of another type
 /// than the repository's must be refused before it reaches C. libgit2 copies the id it
-/// is given: the tests overwrite and drop each id right after its lookup (BSan).
+/// is given: the tests overwrite and drop each id right after its lookup (`BSan`).
 ///
 /// A commit is neither `Send` nor `Sync`, so there is no thread test (doctests); it,
 /// its handles and its clones cannot outlive the repository, nor a handle its owner,
@@ -594,8 +594,8 @@ mod commit {
     }
 
     /// Parents, first-parent ancestors and trees, each derived from a commit whose owner
-    /// is then dropped, and from those in turn, released in every order (ASan: a read of
-    /// a commit freed under a derived owner; LSan: a reference never given back). The
+    /// is then dropped, and from those in turn, released in every order (`ASan`: a read of
+    /// a commit freed under a derived owner; `LSan`: a reference never given back). The
     /// commits an array lends derive owners that outlive the array.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -629,15 +629,7 @@ mod commit {
             assert!(COMMITS.contains(&hex(commit).as_str()), "{i}");
         }
         for tree in &trees {
-            assert!(
-                !tree
-                    .as_ref()
-                    .as_object()
-                    .id()
-                    .to_hex_string()
-                    .unwrap()
-                    .is_empty()
-            );
+            assert_ne!(tree.as_ref().as_object().id().to_hex_string().unwrap(), "");
         }
         // From the middle out, trees and commits interleaved.
         while !commits.is_empty() || !trees.is_empty() {
@@ -710,7 +702,7 @@ mod commit {
         );
     }
 
-    /// Refused derivations leave nothing behind (LSan) and the commit usable: a parent
+    /// Refused derivations leave nothing behind (`LSan`) and the commit usable: a parent
     /// index past the last, ancestors past a root at every width, and the same through a
     /// commit whose repository has no further objects to give.
     #[test]
@@ -761,14 +753,14 @@ mod commit {
 ///
 /// Every string and id a getter returns lives inside the commit, borrowed for as long
 /// as the handle it came from: the tests read each result after every other owner of
-/// the commit, and every other commit, is gone (ASan: a getter tied to the wrong
+/// the commit, and every other commit, is gone (`ASan`: a getter tied to the wrong
 /// commit, or reading past a string), and, with the cache off, after the earlier
 /// lookup of the same id, a distinct commit, is freed. `summary` writes its result into
 /// the commit on first use, through a shared handle: it is read through other handles
 /// and lent array commits. A header field is a fresh buffer the caller owns, which
-/// outlives the commit and the repository (LSan: leak; ASan: double free). A field
+/// outlives the commit and the repository (`LSan`: leak; `ASan`: double free). A field
 /// holding a newline, which libgit2 would match across line ends and copy with a
-/// negative length (UBSan: pointer overflow; ASan: an allocation of nearly
+/// negative length (`UBSan`: pointer overflow; `ASan`: an allocation of nearly
 /// `usize::MAX` bytes), is refused before C. The repository `owner` hands back is the
 /// one the commit was looked up through, which outlives the commit.
 ///
@@ -859,7 +851,7 @@ mod getters {
         let views: Vec<_> = held.iter().map(view).collect();
         assert_eq!(views[0].id, HEAD);
         assert_eq!(views[1].parents.len(), 2);
-        assert!(views[2].parents.is_empty());
+        assert!(views[2].parents.is_empty(), "{:?}", views[2].parents);
         assert_eq!(views[1].summary, c"Merge branch 'br2'");
         assert!(views.iter().map(touch).sum::<usize>() > 0);
         assert_eq!(views[0].time, (1_312_943_626, -420));
@@ -949,6 +941,10 @@ mod getters {
     /// message at all, leading newlines and whitespace-only lines in the message.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::similar_names,
+        reason = "the names pair each value with its counterpart on the other side"
+    )]
     fn crafted_commits_read_in_bounds() {
         let tmp = TempRepo::new("commit-getters");
         let who = "A U Thor <a@example.com> 1700000000 +0130";
@@ -1009,10 +1005,10 @@ mod getters {
 /// field out of a pointer and rebuild a `&CStr` or a run of headers from it, so these
 /// tests exercise every getter and setter on every holder Rust has for one (a local, a
 /// heap slot, an element of a run that moves when it grows), through reborrows, with
-/// strings and headers on the heap dropped right after their last read (ASan: a getter
+/// strings and headers on the heap dropped right after their last read (`ASan`: a getter
 /// reading past them or after them). libgit2 reads the options for one call and keeps
 /// nothing: one test hands them to `create_ext`, its strings and headers on the heap,
-/// freed right after the call (ASan, BSan: a retained pointer). Options that
+/// freed right after the call (`ASan`, `BSan`: a retained pointer). Options that
 /// outlive their borrows, aliased handles and a signer that does not outlive the options
 /// do not compile (`compile_fail/` and the type's doctests). The options are neither `Send`
 /// nor `Sync`, so there is no thread test. `CreateExtOptions::new` fills the options
@@ -1068,7 +1064,7 @@ mod create_ext_options {
         for i in 0..strings.len() {
             let (name, encoding) = (
                 Some(strings[i].as_c_str()),
-                strings.get(i + 1).map(|s| s.as_c_str()),
+                strings.get(i + 1).map(CString::as_c_str),
             );
             let hs = &headers[i..];
             write(local.as_mut(), name, encoding, hs);
@@ -1176,18 +1172,18 @@ mod create_ext_options {
 /// getter and setter on every holder Rust has for one (a local, a heap slot, an element
 /// of a run that moves when it grows), through reborrows, with signatures (borrowed views
 /// and owned boxes), strings and headers on the heap dropped right after their last read
-/// (ASan: a getter reading past them or after them). libgit2 reads the options for one
+/// (`ASan`: a getter reading past them or after them). libgit2 reads the options for one
 /// call and keeps nothing: two tests hand them to `create_from_tree` and
 /// `amend_from_tree`, everything they borrow on the heap and freed right after the call
-/// (ASan, BSan: a retained pointer), one with a signer whose closure writes its own state
+/// (`ASan`, `BSan`: a retained pointer), one with a signer whose closure writes its own state
 /// between calls and panics once, which the wrapper resumes. Options that outlive their borrows,
 /// aliased handles and a signer that does not outlive the options do not compile (`compile_fail/`
 /// and the type's doctests). The options are neither `Send` nor `Sync`; each thread builds its own
-/// and hands it to libgit2 in its own repository at once (TSan), on the path writing no reference:
-/// the tests that commit run in a child, on one thread, since glibc's `tzset` (the reflog's
-/// time) is reported by TSan against any concurrent caller. `CreateOptions::new` fills the options
-/// through libgit2, so Miri skips every test here; the module's `unit_tests` run the same
-/// projections under Miri over options built in Rust.
+/// and hands it to libgit2 in its own repository at once (`TSan`), on the path writing no
+/// reference: the tests that commit run in a child, on one thread, since glibc's `tzset` (the
+/// reflog's time) is reported by `TSan` against any concurrent caller. `CreateOptions::new` fills
+/// the options through libgit2, so Miri skips every test here; the module's `unit_tests` run the
+/// same projections under Miri over options built in Rust.
 mod create_options {
     use std::cell::Cell;
     use std::ffi::{CStr, CString, c_int};
@@ -1261,7 +1257,7 @@ mod create_options {
         Vec<(&'o CStr, &'o CStr)>,
     );
 
-    fn name<'o>(s: Option<SignatureRef<'o>>) -> Option<&'o CStr> {
+    fn name(s: Option<SignatureRef<'_>>) -> Option<&CStr> {
         s.map(|s| s.name().unwrap())
     }
 
@@ -1301,6 +1297,10 @@ mod create_options {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::similar_names,
+        reason = "the names pair each value with its counterpart on the other side"
+    )]
     fn every_field_round_trips_on_every_holder() {
         let strings: Vec<CString> = ["Name", "UTF-16", "x", &"y".repeat(1024)]
             .into_iter()
@@ -1322,7 +1322,7 @@ mod create_options {
             } else {
                 boxes[i].as_ref()
             };
-            let encoding = strings.get(i + 1).map(|s| s.as_c_str());
+            let encoding = strings.get(i + 1).map(CString::as_c_str);
             let hs = &headers[i..];
             write(local.as_mut(), allow, Some(who), encoding, hs);
             write(
@@ -1590,19 +1590,19 @@ mod create_options {
 /// `create_from_tree`, `amend_from_stage` and `amend_from_tree`.
 ///
 /// Every input is on the heap and freed right after the call that read it: the options,
-/// the signatures, encoding and headers they borrow, the message (ASan: a read past or
-/// after them; BSan: a pointer libgit2 kept). Each routine runs on an unborn `HEAD`, on
+/// the signatures, encoding and headers they borrow, the message (`ASan`: a read past or
+/// after them; `BSan`: a pointer libgit2 kept). Each routine runs on an unborn `HEAD`, on
 /// a born one, during a merge, with the repository's index filled through the `stage`
 /// fixture, and through its failures: nothing to commit, a refused or panicking signer
 /// (the panic resumes from the wrapper, after the commit stopped and the options are
 /// still borrowed), a missing identity. libgit2's own parents collection frees commits
 /// the object cache still holds when `MERGE_HEAD` cannot be read through: the creating
 /// routines are run into each such `MERGE_HEAD`, then the cached commits are looked up
-/// and read again and the repository freed (ASan: a use after free). `HEAD` at a tag or a
+/// and read again and the repository freed (`ASan`: a use after free). `HEAD` at a tag or a
 /// tree, a tree of another repository, an `i32::MIN` offset and an unborn `HEAD` are
 /// refused or failed before anything is written. A signer re-entering the routines on
 /// the same repository commits in between; each thread commits in its own repository at
-/// once (TSan). Every test calls libgit2, so Miri skips them all.
+/// once (`TSan`). Every test calls libgit2, so Miri skips them all.
 mod committing_on_head {
     use std::cell::Cell;
     use std::ffi::{CStr, CString};
@@ -1658,6 +1658,10 @@ mod committing_on_head {
         }
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     fn code(e: RepositoryError) -> (i32, Option<ErrorClass>, String) {
         (
             e.raw_code(),
@@ -1682,8 +1686,11 @@ mod committing_on_head {
                 let index = r.index().unwrap();
                 for (round, len) in [1usize, 15, 16, 255].into_iter().enumerate() {
                     let name = CString::new("n".repeat(len)).unwrap().into_boxed_c_str();
-                    let view =
-                        Box::new(SignatureView::new(&name, &name, Time::new(len as i64, 60)));
+                    let view = Box::new(SignatureView::new(
+                        &name,
+                        &name,
+                        Time::new(i64::try_from(len).unwrap(), 60),
+                    ));
                     let committer = owned(&"c".repeat(len));
                     let encoding = CString::new("e".repeat(len)).unwrap().into_boxed_c_str();
                     let value = CString::new(format!("{}\n{}", "v".repeat(len), "w")).unwrap();
@@ -2103,7 +2110,7 @@ mod committing_on_head {
     /// Each thread opens a repository of its own, which the main thread gave a commit
     /// first, and runs every routine through the paths that write no reference (glibc's
     /// `tzset`, which a reference write reaches for the reflog's time, is reported by
-    /// TSan against any concurrent caller): nothing to commit, a refusing signer, a
+    /// `TSan` against any concurrent caller): nothing to commit, a refusing signer, a
     /// refused signature or tree. In a child, since the setup writes references.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2187,13 +2194,13 @@ mod committing_on_head {
 ///
 /// libgit2 reads the contents, signature and field it is given for the call only, and
 /// fills two fresh buffers it owns: every input is an exact-length heap string,
-/// overwritten and freed right after the call (ASan flags a read past one, BSan a
-/// pointer kept), and every buffer is released once (LSan: leak; ASan: double free). The
+/// overwritten and freed right after the call (`ASan` flags a read past one, `BSan` a
+/// pointer kept), and every buffer is released once (`LSan`: leak; `ASan`: double free). The
 /// commits parsed and rejected along the way take libgit2's error paths: contents that
 /// do not parse, a signed one without a blank line, a missing tree, a repository
 /// without paths. An id of another type than the repository's, which libgit2 would
 /// format out of bounds, and an empty field, which it would scan for forever, are
-/// refused before the call. Each thread writes into its own repository at once (TSan).
+/// refused before the call. Each thread writes into its own repository at once (`TSan`).
 mod signatures {
     use std::ffi::{CStr, CString};
     use std::thread;
@@ -2212,9 +2219,10 @@ mod signatures {
 
     /// The contents of a commit of `tree` with `parents`.
     fn content(tree: &Oid, parents: &[&Oid], message: &str) -> String {
+        use std::fmt::Write as _;
         let mut s = format!("tree {}\n", tree.as_ref().to_hex_string().unwrap());
         for p in parents {
-            s += &format!("parent {}\n", p.as_ref().to_hex_string().unwrap());
+            let _ = writeln!(s, "parent {}", p.as_ref().to_hex_string().unwrap());
         }
         s + "author A U Thor <a@example.com> 1700000000 +0000\n\
              committer A U Thor <a@example.com> 1700000000 +0000\n\n"
@@ -2323,7 +2331,7 @@ mod signatures {
         let id = create_with_signature(repo, &exact(&content(&tree, &[], "m\n")), Some(c"s"), None)
             .unwrap();
         let mut wide = Oid::from_raw(&id.as_ref().id(), OidType::Sha256).unwrap();
-        for kind in [OidType::Sha256.raw() as u8, 0, 9, u8::MAX] {
+        for kind in [u8::try_from(OidType::Sha256.raw()).unwrap(), 0, 9, u8::MAX] {
             wide.as_mut().set_raw_kind(kind);
             let e = extract_signature(repo, wide.as_ref(), None).unwrap_err();
             assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
@@ -2360,11 +2368,11 @@ mod signatures {
 ///
 /// libgit2 calls the trampoline once per commit, with a builder lent for the call and
 /// contents it frees when a header is added: the closure reads its copy of the contents
-/// after adding headers (ASan: use after free), and its own state is written between
-/// calls (BSan: nothing keeps a pointer into it). A refusal fails the commit with its
+/// after adding headers (`ASan`: use after free), and its own state is written between
+/// calls (`BSan`: nothing keeps a pointer into it). A refusal fails the commit with its
 /// code, a panic with `GIT_EUSER`, resumed from `create_ext`. The options borrow the
 /// callback for as long as they live (`compile_fail/`), replaced and cleared ones
-/// included, and each thread signs in its own repository at once (TSan).
+/// included, and each thread signs in its own repository at once (`TSan`).
 mod signers {
     use std::cell::{Cell, RefCell};
     use std::ffi::CStr;
@@ -2446,10 +2454,7 @@ mod signers {
             state.rc.set(code);
             let result = create(&repo, &mut options);
             assert_eq!(result.as_ref().err(), (!written).then_some(&code), "{code}");
-            assert_eq!(
-                result.map(|t| t.contains("gpgsig")).unwrap_or(false),
-                written
-            );
+            assert_eq!(result.is_ok_and(|t| t.contains("gpgsig")), written);
         }
         drop(signer);
         assert_eq!(state.calls.get(), 5);
@@ -2560,12 +2565,12 @@ mod signers {
 ///
 /// The signatures and the body are borrowed from the commit: every string is read whole
 /// through every holder of a shared commit (lookups, clones, an object view), and after
-/// the other holders are gone (ASan: use after free). libgit2 computes the body on the
+/// the other holders are gone (`ASan`: use after free). libgit2 computes the body on the
 /// first call and stores it in the commit through the shared handle, as a `Cell` is
 /// written: a body read earlier stays valid while later calls return the same string
-/// (ASan; BSan: the write goes through C's pointer, never through a Rust reference). The
-/// mailmap copies are owned and released once (LSan, ASan). Commits are neither `Send`
-/// nor `Sync`: each thread reads commits of its own repository (TSan). A signature or a
+/// (`ASan`; `BSan`: the write goes through C's pointer, never through a Rust reference). The
+/// mailmap copies are owned and released once (`LSan`, `ASan`). Commits are neither `Send`
+/// nor `Sync`: each thread reads commits of its own repository (`TSan`). A signature or a
 /// body outliving its commit is a doctest. Every test calls libgit2, so Miri skips them.
 mod reading {
     use std::ffi::{CStr, CString};
@@ -2618,7 +2623,11 @@ mod reading {
                 .unwrap()
                 .into_boxed_c_str();
             let email = CString::new(format!("{}@x", "e".repeat(len))).unwrap();
-            let sig = SignatureView::new(&name, &email, Time::new(len as i64, -(len as i32)));
+            let sig = SignatureView::new(
+                &name,
+                &email,
+                Time::new(i64::try_from(len).unwrap(), -i32::try_from(len).unwrap()),
+            );
             let body = "b".repeat(len);
             let message = CString::new(format!("summary\n\n{body}\n")).unwrap();
             let id = create(
@@ -2646,11 +2655,11 @@ mod reading {
             drop(object);
             assert_eq!(everything(clone.as_ref()), expected);
             drop(second);
-            assert_eq!(early.map(|b| b.to_bytes().len()).unwrap_or(0), len);
+            assert_eq!(early.map_or(0, |b| b.to_bytes().len()), len);
             let author = clone.as_ref().author();
             let late = clone.as_ref().body();
             assert_eq!(signature(author).0.len(), len + 1);
-            assert_eq!(late.map(|b| b.to_bytes().len()).unwrap_or(0), len);
+            assert_eq!(late.map_or(0, |b| b.to_bytes().len()), len);
         }
     }
 
@@ -2778,7 +2787,7 @@ mod reading {
                             .as_ref(),
                     )
                     .unwrap();
-                    let sig = SignatureView::new(c"T", c"t@x", Time::new(t as i64, 0));
+                    let sig = SignatureView::new(c"T", c"t@x", Time::new(i64::from(t), 0));
                     for i in 0..4 {
                         let message = CString::new(format!("s\n\nbody {t} {i}\n")).unwrap();
                         let id = create(
@@ -2793,7 +2802,7 @@ mod reading {
                         )
                         .unwrap();
                         let commit = Commit::lookup(repo, id.as_ref()).unwrap();
-                        assert_eq!(commit.as_ref().author().when().seconds(), t as i64);
+                        assert_eq!(commit.as_ref().author().when().seconds(), i64::from(t));
                         let body = format!("body {t} {i}");
                         assert_eq!(commit.as_ref().body().unwrap().to_bytes(), body.as_bytes());
                         assert!(commit.as_ref().author_with_mailmap(None).is_ok());
@@ -2809,15 +2818,15 @@ mod reading {
 ///
 /// libgit2 reads every input for the call only: the message, the encoding and the
 /// reference name are exact-length heap strings, and the signatures are views over
-/// heap strings, all freed right after the call (ASan: a read past one; BSan: a pointer
-/// kept); the parents' pointers are passed as a run of exactly their number (ASan), or
+/// heap strings, all freed right after the call (`ASan`: a read past one; `BSan`: a pointer
+/// kept); the parents' pointers are passed as a run of exactly their number (`ASan`), or
 /// as that many variadic arguments, up to the most `create_from_array` takes. Every
-/// buffer `create_buffer` fills is released once (LSan, ASan). A signature whose offset
-/// is `i32::MIN` minutes is refused before libgit2 would negate it (UBSan: a signed
+/// buffer `create_buffer` fills is released once (`LSan`, `ASan`). A signature whose offset
+/// is `i32::MIN` minutes is refused before libgit2 would negate it (`UBSan`: a signed
 /// overflow), and a tree or parent of another repository before libgit2 would assert or
 /// drop it. Commits are neither `Send` nor `Sync`: each thread writes into its own
-/// repository at once, without moving a reference (TSan; reference writes reach glibc's
-/// timezone state, which TSan cannot see the lock of). Every test calls libgit2, so Miri
+/// repository at once, without moving a reference (`TSan`; reference writes reach glibc's
+/// timezone state, which `TSan` cannot see the lock of). Every test calls libgit2, so Miri
 /// skips them all.
 mod creating {
     use std::ffi::{CStr, CString};
@@ -3011,9 +3020,13 @@ mod creating {
     }
 
     /// Inputs libgit2 cannot take are refused before it runs: an offset it would negate
-    /// out of range (UBSan), a tree or parent of another repository.
+    /// out of range (`UBSan`), a tree or parent of another repository.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn unwritable_inputs_are_refused_before_c() {
         let (a, b) = (
             TempRepo::new("commit-refuse-a"),
@@ -3075,7 +3088,7 @@ mod creating {
                             .as_ref(),
                     )
                     .unwrap();
-                    let sig = SignatureView::new(c"T", c"t@x", Time::new(t as i64, 0));
+                    let sig = SignatureView::new(c"T", c"t@x", Time::new(i64::from(t), 0));
                     let mut tip = None;
                     for i in 0..4 {
                         let message = CString::new(format!("{t} {i}\n")).unwrap();
@@ -3172,8 +3185,8 @@ mod creating {
 /// [`call`](CreateCallback::call), which runs the `extern "C"` trampoline libgit2 calls.
 ///
 /// The trampoline lends the closure handles over what it is given, for the call only:
-/// the closure reads every string and parent whole (ASan), and its own state is written
-/// between calls (BSan: nothing keeps a pointer into it); the strings are heap ones,
+/// the closure reads every string and parent whole (`ASan`), and its own state is written
+/// between calls (`BSan`: nothing keeps a pointer into it); the strings are heap ones,
 /// freed after the call. An id it returns is copied out whole (Miri cannot run it: the
 /// trampoline reads the tree's repository through libgit2). A panic resumes from `call`
 /// without crossing the trampoline, and leaves the callback usable. Handles outliving
@@ -3196,6 +3209,10 @@ mod create_callback {
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "the closure lets each handle reborrow for its own lifetime, which the method path cannot"
+    )]
     fn arguments_are_lent_for_the_call() {
         let temp = TempRepo::new("commit-create-cb");
         let repo = repository(&temp);
@@ -3255,12 +3272,12 @@ mod create_callback {
                 CString::new("N".repeat(n + 1)).unwrap().into_boxed_c_str(),
                 CString::new("e".repeat(n + 1)).unwrap().into_boxed_c_str(),
             );
-            let author = SignatureView::new(&name, &email, Time::new(n as i64, 0));
+            let author = SignatureView::new(&name, &email, Time::new(i64::try_from(n).unwrap(), 0));
             let message = CString::new("m".repeat(n * 100))
                 .unwrap()
                 .into_boxed_c_str();
             let encoding = (n % 2 == 0).then(|| CString::new("E".repeat(n)).unwrap());
-            let parents: Vec<_> = commits[..n].iter().map(|c| c.as_ref()).collect();
+            let parents: Vec<_> = commits[..n].iter().map(|x| x.as_ref()).collect();
             let result = callback.call(
                 author.as_ref(),
                 author.as_ref(),
@@ -3311,9 +3328,7 @@ mod create_callback {
                      _: TreeRef<'_, '_>,
                      _: &[CommitRef<'_, '_>]| {
             calls += 1;
-            if calls == 2 {
-                panic!("callback {calls}");
-            }
+            assert!(calls != 2, "callback {calls}");
             Ok::<_, StreamError>(None)
         };
         let mut callback = CreateCallback::new(&mut f);

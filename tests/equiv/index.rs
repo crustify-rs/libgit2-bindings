@@ -13,7 +13,7 @@ use libgit2::libgit2::index::index::{Index, IndexArc, IndexBox};
 use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};
 
 fn init() {
-    core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
+    let _ = core::mem::ManuallyDrop::new(libgit2::libgit2::core::global::init().unwrap());
 }
 
 fn clear() {
@@ -23,10 +23,15 @@ fn clear() {
 
 /// The thread's last error, as `(class, message)`.
 fn c_last() -> (c_int, CString) {
-    // SAFETY: the runtime is initialised; the error is copied before any other call.
-    unsafe {
-        let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+    {
+        // SAFETY: the runtime is initialised; the error is copied before any other call.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { (klass, CStr::from_ptr(message2).to_owned()) }
     }
 }
 
@@ -41,7 +46,7 @@ impl Scratch {
     fn new(tag: &str) -> Self {
         let dir =
             std::env::temp_dir().join(format!("crustify-index-equiv-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
@@ -53,7 +58,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        drop(std::fs::remove_dir_all(&self.0));
     }
 }
 
@@ -74,19 +79,31 @@ enum Seen {
 
 /// What `index` reports.
 fn state(index: *mut ffi::git_index) -> Seen {
-    // SAFETY: a live index, only read; every string is copied before the next call.
-    unsafe {
-        let path = ffi::git_index_path(index);
-        let entries = (0..ffi::git_index_entrycount(index))
+    {
+        // SAFETY: a live index, only read; every string is copied before the next call.
+        let path = unsafe { ffi::git_index_path(index) };
+        // SAFETY: as above.
+        let count = unsafe { ffi::git_index_entrycount(index) };
+        let entries = (0..count)
             .map(|i| {
-                let e = ffi::git_index_get_byindex(index, i);
-                (CStr::from_ptr((*e).path).to_owned(), (*e).flags)
+                // SAFETY: as above; `i` is below the entry count.
+                let e = unsafe { ffi::git_index_get_byindex(index, i) };
+                // SAFETY: a live entry.
+                let path = unsafe { (*e).path };
+                // SAFETY: as above.
+                let flags = unsafe { (*e).flags };
+                // SAFETY: its path is NUL-terminated; it is copied at once.
+                (unsafe { CStr::from_ptr(path) }.to_owned(), flags)
             })
             .collect();
+        // SAFETY: as above.
+
         Seen::Built {
-            path: (!path.is_null()).then(|| CStr::from_ptr(path).to_owned()),
+            // SAFETY: as above.
+            path: (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) }.to_owned()),
             entries,
-            owned_by_repository: !ffi::git_index_owner(index).is_null(),
+            // SAFETY: as above.
+            owned_by_repository: !unsafe { ffi::git_index_owner(index) }.is_null(),
         }
     }
 }
@@ -108,11 +125,11 @@ fn c_open(path: Option<&CStr>) -> (Seen, Option<CIndex>) {
     clear();
     let mut out = ptr::null_mut();
     // SAFETY: a live slot and NULL or a NUL-terminated path, read for the call.
-    let rc = unsafe {
-        match path {
-            Some(path) => ffi::git_index_open(&mut out, path.as_ptr()),
-            None => ffi::git_index_new(&mut out),
-        }
+    let rc = match path {
+        // SAFETY: as above.
+        Some(path) => unsafe { ffi::git_index_open(&raw mut out, path.as_ptr()) },
+        // SAFETY: as above.
+        None => unsafe { ffi::git_index_new(&raw mut out) },
     };
     if rc < 0 {
         assert_eq!(rc, -1);
@@ -147,14 +164,14 @@ fn rust_open(path: Option<&CStr>) -> (Seen, Option<IndexBox>) {
 /// `git_index_add` of a regular file at `path`, then the status and the index's state.
 fn add(index: *mut ffi::git_index, path: &CStr) -> (c_int, Seen) {
     let mut entry = ffi::git_index_entry {
-        mode: 0o100644,
+        mode: 0o100_644,
         path: path.as_ptr(),
         ..Default::default()
     };
     entry.id.id[0] = 7;
-    entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+    entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
     // SAFETY: a live index; `entry` and its path are read and copied for the call.
-    let rc = unsafe { ffi::git_index_add(index, &entry) };
+    let rc = unsafe { ffi::git_index_add(index, &raw const entry) };
     (rc, state(index))
 }
 
@@ -194,14 +211,14 @@ fn versioned_index_bytes(scratch: &Scratch, version: u32) -> Vec<u8> {
     }
     if version >= 3 {
         let mut entry = ffi::git_index_entry {
-            mode: 0o100644,
+            mode: 0o100_644,
             path: c"d1/new".as_ptr(),
-            flags_extended: ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD as u16,
+            flags_extended: u16::try_from(ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD).unwrap(),
             ..Default::default()
         };
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         // SAFETY: a live index; `entry` and its path are read and copied for the call.
-        assert_eq!(unsafe { ffi::git_index_add(index.0, &entry) }, 0);
+        assert_eq!(unsafe { ffi::git_index_add(index.0, &raw const entry) }, 0);
     }
     // SAFETY: a live index.
     assert_eq!(unsafe { ffi::git_index_set_version(index.0, version) }, 0);
@@ -411,7 +428,7 @@ fn open_matches_on_long_paths() {
     let file = scratch.file("index");
     let c_file = c_path(&file);
     for (version, len, built) in [(2, 0xFFF, true), (2, 4200, true), (4, 4200, false)] {
-        let _ = std::fs::remove_file(&file);
+        drop(std::fs::remove_file(&file));
         let (_, index) = c_open(Some(&c_file));
         let index = index.unwrap();
         let long = CString::new(format!("d/{}", "x".repeat(len - 2))).unwrap();
@@ -448,7 +465,7 @@ fn sweep(scratch: &Scratch, bytes: &[u8]) {
 
 const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
-/// Runs `body` alone in a child process with LeakSanitizer off: libgit2 leaks the path
+/// Runs `body` alone in a child process with `LeakSanitizer` off: libgit2 leaks the path
 /// of a version 4 entry that runs past the end of the file (`read_entry` in
 /// `src/libgit2/index.c`), on either side.
 fn isolated_tolerating_leaks(test: &str, body: fn()) {
@@ -578,7 +595,8 @@ impl Repo {
     fn index(&self) -> *mut ffi::git_index {
         let mut out = ptr::null_mut();
         // SAFETY: a live slot and repository.
-        assert_eq!(unsafe { ffi::git_repository_index(&mut out, self.repo) }, 0);
+        let ret = unsafe { ffi::git_repository_index(&raw mut out, self.repo) };
+        assert_eq!(ret, 0);
         out
     }
 }
@@ -668,11 +686,13 @@ mod oid_types {
         let mut out = ptr::null_mut();
         // SAFETY: a live slot, NULL or a NUL-terminated path, and live options of this
         // version, all read for the call.
-        let rc = unsafe {
-            match path {
-                Some(path) => ffi::git_index_open_ext(&mut out, path.as_ptr(), &opts),
-                None => ffi::git_index_new_ext(&mut out, &opts),
-            }
+        let rc = match path {
+            // SAFETY: as above.
+            Some(path) => unsafe {
+                ffi::git_index_open_ext(&raw mut out, path.as_ptr(), &raw const opts)
+            },
+            // SAFETY: as above.
+            None => unsafe { ffi::git_index_new_ext(&raw mut out, &raw const opts) },
         };
         if rc < 0 {
             assert_eq!(rc, -1);
@@ -708,14 +728,14 @@ mod oid_types {
     /// `git_index_add` of a regular file at `path` whose id is of `oid_type`.
     fn add_typed(index: *mut ffi::git_index, path: &CStr, oid_type: OidType) -> (c_int, Seen) {
         let mut entry = ffi::git_index_entry {
-            mode: 0o100644,
+            mode: 0o100_644,
             path: path.as_ptr(),
             ..Default::default()
         };
         entry.id.id = [0x5A; 32];
-        entry.id.type_ = oid_type.raw() as _;
+        entry.id.type_ = u8::try_from(oid_type.raw()).unwrap();
         // SAFETY: a live index; `entry` and its path are read and copied for the call.
-        let rc = unsafe { ffi::git_index_add(index, &entry) };
+        let rc = unsafe { ffi::git_index_add(index, &raw const entry) };
         (rc, state(index))
     }
 
@@ -831,7 +851,7 @@ mod oid_types {
             assert_eq!(
                 rust,
                 Seen::Failed {
-                    class: ffi::GIT_ERROR_INDEX as c_int,
+                    class: ffi::GIT_ERROR_INDEX.cast_signed(),
                     message: c"failed to open index: the path is empty".to_owned(),
                 }
             );
@@ -900,38 +920,38 @@ fn scalar_capabilities_c_state_sequence() {
     for bits in [0, 7, 1, 2, 3, 4, 5, 6, 0] {
         let setting = CapabilitySetting::from(Capabilities::from_bits(bits).unwrap());
         // SAFETY: two distinct live indexes, exclusively owned for these calls.
+        let index_set_caps = unsafe { ffi::git_index_set_caps(typed.as_c_ptr(), setting.to_raw()) };
+        // SAFETY: as above.
         let (a, b) = unsafe {
             (
-                ffi::git_index_set_caps(typed.as_c_ptr(), setting.to_raw()),
+                index_set_caps,
                 ffi::git_index_set_caps(reference.as_c_ptr(), bits),
             )
         };
         assert_eq!((a, b), (0, 0));
         // SAFETY: both indexes remain live and unaliased; getters copy integers.
-        let (a, b) = unsafe {
-            (
-                ffi::git_index_caps(typed.as_c_ptr()),
-                ffi::git_index_caps(reference.as_c_ptr()),
-            )
-        };
+        let index_caps = unsafe { ffi::git_index_caps(typed.as_c_ptr()) };
+        // SAFETY: as above.
+        let (a, b) = unsafe { (index_caps, ffi::git_index_caps(reference.as_c_ptr())) };
         assert_eq!((a, b), (bits, bits));
         // Neither index has an owner. The command must fail without setting all
         // bits or changing the previous explicit state.
         // SAFETY: the same two live indexes; the sentinel is a valid C command.
+        let index_set_caps = unsafe {
+            ffi::git_index_set_caps(typed.as_c_ptr(), CapabilitySetting::FromOwner.to_raw())
+        };
+        // SAFETY: as above.
         let (a, b) = unsafe {
             (
-                ffi::git_index_set_caps(typed.as_c_ptr(), CapabilitySetting::FromOwner.to_raw()),
+                index_set_caps,
                 ffi::git_index_set_caps(reference.as_c_ptr(), ffi::GIT_INDEX_CAPABILITY_FROM_OWNER),
             )
         };
         assert_eq!((a, b), (-1, -1));
         // SAFETY: both indexes are still live; failed setters do not free them.
-        let (a, b) = unsafe {
-            (
-                ffi::git_index_caps(typed.as_c_ptr()),
-                ffi::git_index_caps(reference.as_c_ptr()),
-            )
-        };
+        let index_caps = unsafe { ffi::git_index_caps(typed.as_c_ptr()) };
+        // SAFETY: as above.
+        let (a, b) = unsafe { (index_caps, ffi::git_index_caps(reference.as_c_ptr())) };
         assert_eq!((a, b), (bits, bits));
     }
 }
@@ -951,21 +971,33 @@ fn scalar_capabilities_from_owner() {
     typed_repo.set_index(typed.as_c_ptr());
     raw_repo.set_index(raw.as_c_ptr());
     for initial in [Capabilities::empty(), Capabilities::all()] {
-        // SAFETY: the live indexes and retaining repositories remain on this
-        // thread, without simultaneous access or borrowed index contents.
-        unsafe {
-            assert_eq!(ffi::git_index_set_caps(typed.as_c_ptr(), initial.bits()), 0);
-            assert_eq!(ffi::git_index_set_caps(raw.as_c_ptr(), initial.bits()), 0);
-            assert_eq!(
-                ffi::git_index_set_caps(typed.as_c_ptr(), CapabilitySetting::FromOwner.to_raw()),
-                0
-            );
-            assert_eq!(
-                ffi::git_index_set_caps(raw.as_c_ptr(), ffi::GIT_INDEX_CAPABILITY_FROM_OWNER),
-                0
-            );
-            let actual = ffi::git_index_caps(typed.as_c_ptr());
-            assert_eq!(actual, ffi::git_index_caps(raw.as_c_ptr()));
+        {
+            // SAFETY: the live indexes and retaining repositories remain on this
+            // thread, without simultaneous access or borrowed index contents.
+            unsafe { assert_eq!(ffi::git_index_set_caps(typed.as_c_ptr(), initial.bits()), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_set_caps(raw.as_c_ptr(), initial.bits()), 0) };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_index_set_caps(
+                        typed.as_c_ptr(),
+                        CapabilitySetting::FromOwner.to_raw()
+                    ),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_index_set_caps(raw.as_c_ptr(), ffi::GIT_INDEX_CAPABILITY_FROM_OWNER),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            let actual = unsafe { ffi::git_index_caps(typed.as_c_ptr()) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(actual, ffi::git_index_caps(raw.as_c_ptr())) };
             assert!(Capabilities::from_bits(actual).is_some());
         }
     }
@@ -1001,12 +1033,14 @@ mod matched_path_callback {
         pattern: *const c_char,
         payload: *mut c_void,
     ) -> c_int {
-        // SAFETY: remove_all supplies immutable live NUL strings (pattern nullable),
-        // and the harness supplies an exclusively borrowed Recorder for the scan.
-        unsafe {
-            let path = CStr::from_ptr(path);
-            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
-            (&mut *payload.cast::<Recorder>()).call(path, pattern)
+        {
+            // SAFETY: remove_all supplies immutable live NUL strings (pattern nullable),
+            // and the harness supplies an exclusively borrowed Recorder for the scan.
+            let path = unsafe { CStr::from_ptr(path) };
+            // SAFETY: as above.
+            let pattern = unsafe { (!pattern.is_null()).then(|| CStr::from_ptr(pattern)) };
+            // SAFETY: as above.
+            unsafe { (&mut *payload.cast::<Recorder>()).call(path, pattern) }
         }
     }
 
@@ -1017,31 +1051,36 @@ mod matched_path_callback {
         pattern: *const c_char,
         payload: *mut c_void,
     ) -> c_int {
-        // SAFETY: same C string contract as reference; the harness instead supplies
-        // a live exclusive MatchedPathCallback, never retained or reentered.
-        unsafe {
-            let path = CStr::from_ptr(path);
-            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
-            (&mut *payload.cast::<MatchedPathCallback<'_>>())
-                .call(path, pattern)
-                .code()
+        {
+            // SAFETY: same C string contract as reference; the harness instead supplies
+            // a live exclusive MatchedPathCallback, never retained or reentered.
+            let path = unsafe { CStr::from_ptr(path) };
+            // SAFETY: as above.
+            let pattern = unsafe { (!pattern.is_null()).then(|| CStr::from_ptr(pattern)) };
+            // SAFETY: as above.
+            unsafe {
+                (&mut *payload.cast::<MatchedPathCallback<'_>>())
+                    .call(path, pattern)
+                    .code()
+            }
         }
     }
 
-    /// Safe construction; raw additions stand in for the not-yet-wrapped index_add.
+    /// Safe construction; raw additions stand in for the not-yet-wrapped `index_add`.
     fn seeded() -> IndexBox {
         let index = Index::new().unwrap();
         for path in [c"a", c"b", c"c", c"dir/non-utf8-\xff"] {
             let mut entry = ffi::git_index_entry {
-                mode: 0o100644,
+                mode: 0o100_644,
                 path: path.as_ptr(),
                 ..Default::default()
             };
-            entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+            entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
             entry.id.id[0] = 1;
             // SAFETY: the fresh index is exclusively held and C copies this entry
             // and its immutable NUL path before returning.
-            assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+            let ret = unsafe { ffi::git_index_add(index.as_c_ptr(), &raw const entry) };
+            assert_eq!(ret, 0);
         }
         index
     }
@@ -1080,7 +1119,7 @@ mod matched_path_callback {
             let c_rc = unsafe {
                 ffi::git_index_remove_all(
                     raw.as_c_ptr(),
-                    &paths,
+                    &raw const paths,
                     Some(reference),
                     ptr::from_mut(&mut expected).cast(),
                 )
@@ -1100,7 +1139,7 @@ mod matched_path_callback {
             let rust_rc = unsafe {
                 ffi::git_index_remove_all(
                     safe.as_c_ptr(),
-                    &paths,
+                    &raw const paths,
                     Some(public_api),
                     ptr::from_mut(&mut callback).cast(),
                 )
@@ -1132,11 +1171,11 @@ fn stage_values_match_c() {
             continue;
         }
         let raw = ffi::git_index_entry {
-            flags: ((stage.raw() as u16) << 12) | 0xCFFF,
+            flags: (u16::try_from(stage.raw()).unwrap() << 12) | 0xCFFF,
             ..Default::default()
         };
         // SAFETY: initialized local entry; entry_stage reads only its flags.
-        let observed = unsafe { ffi::git_index_entry_stage(&raw) };
+        let observed = unsafe { ffi::git_index_entry_stage(&raw const raw) };
         assert_eq!(observed, stage.raw());
     }
 }
@@ -1159,11 +1198,15 @@ fn iterator_snapshot_lifecycle_matches_c() {
         let mut entry = ptr::null();
         // SAFETY: each caller supplies a live, exclusively advanced iterator;
         // its retained index keeps the entry alive until copied below.
-        let rc = unsafe { ffi::git_index_iterator_next(&mut entry, iterator) };
+        let rc = unsafe { ffi::git_index_iterator_next(&raw mut entry, iterator) };
         let value = if rc == 0 {
             // SAFETY: a successful next writes a live entry with a NUL path;
             // neither is mutated or released before this copy.
-            Some(unsafe { (CStr::from_ptr((*entry).path).to_owned(), (*entry).flags) })
+            let path2 = unsafe { (*entry).path };
+            // SAFETY: as above.
+            let cstr = unsafe { CStr::from_ptr(path2) };
+            // SAFETY: as above.
+            Some(unsafe { (cstr.to_owned(), (*entry).flags) })
         } else {
             assert!(entry.is_null());
             None
@@ -1184,7 +1227,7 @@ fn iterator_snapshot_lifecycle_matches_c() {
             let mut raw = ptr::null_mut();
             // SAFETY: writable output slot and live index; C retains a counted
             // reference on success, settled by CIterator below.
-            let rc = unsafe { ffi::git_index_iterator_new(&mut raw, c_index.0) };
+            let rc = unsafe { ffi::git_index_iterator_new(&raw mut raw, c_index.0) };
             assert_eq!(rc, 0);
             let c_iter = CIterator(raw);
             let rust_iter = IndexIterator::new(&rust_index).unwrap();
@@ -1254,18 +1297,18 @@ mod conflict_cursor {
     /// static paths into the safely constructed index during each add call.
     fn populate(index: &mut IndexBox) {
         let mut resolved = ffi::git_index_entry {
-            mode: 0o100644,
+            mode: 0o100_644,
             path: c"aa-resolved".as_ptr(),
             ..Default::default()
         };
-        resolved.id.type_ = ffi::GIT_OID_SHA1 as _;
+        resolved.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         // SAFETY: the sole index is live and C copies this initialized entry and
         // its static NUL-terminated path. Stage zero must be skipped by the cursor.
-        let rc = unsafe { ffi::git_index_add(index.as_c_ptr(), &resolved) };
+        let rc = unsafe { ffi::git_index_add(index.as_c_ptr(), &raw const resolved) };
         assert_eq!(rc, 0);
         for (name, mask) in [(c"a", 7), (c"b", 1), (c"c", 2), (c"d", 4), (c"e", 5)] {
             let entry = ffi::git_index_entry {
-                mode: 0o100644,
+                mode: 0o100_644,
                 path: name.as_ptr(),
                 ..Default::default()
             };
@@ -1297,21 +1340,23 @@ mod conflict_cursor {
         let mut t = ptr::null();
         // SAFETY: caller guarantees cursor and index liveness/exclusivity;
         // independent writable slots receive borrowed optional entry pointers.
-        let rc = unsafe { ffi::git_index_conflict_next(&mut a, &mut o, &mut t, cursor) };
+        let rc =
+            unsafe { ffi::git_index_conflict_next(&raw mut a, &raw mut o, &raw mut t, cursor) };
         let entries = [a, o, t].map(|p| {
             if p.is_null() {
                 None
             } else {
                 // SAFETY: C returned a live entry from the unchanged index; its
                 // NUL path and flags are copied before any mutation or teardown.
-                unsafe {
-                    Some((
-                        CStr::from_ptr(ptr::addr_of!((*p).path).read())
-                            .to_bytes()
-                            .to_vec(),
-                        ptr::addr_of!((*p).flags).read(),
-                    ))
-                }
+                let path_ptr = unsafe { ptr::addr_of!((*p).path) };
+                // SAFETY: as above.
+                let read2 = unsafe { path_ptr.read() };
+                // SAFETY: as above.
+                let cstr = unsafe { CStr::from_ptr(read2) };
+                // SAFETY: as above.
+                let flags_ptr = unsafe { ptr::addr_of!((*p).flags) };
+                // SAFETY: as above.
+                unsafe { Some((cstr.to_bytes().to_vec(), flags_ptr.read())) }
             }
         });
         (rc, entries)
@@ -1333,13 +1378,15 @@ mod conflict_cursor {
                 // SAFETY: writable slot and live, exclusive independently owned
                 // index which remains unchanged until raw cursor destruction.
                 let rc = unsafe {
-                    ffi::git_index_conflict_iterator_new(&mut raw, raw_parent.as_c_ptr())
+                    ffi::git_index_conflict_iterator_new(&raw mut raw, raw_parent.as_c_ptr())
                 };
                 assert_eq!(rc, 0);
                 for step in 0..if populated { 7 } else { 2 } {
                     // SAFETY: both cursors and their independent parents stay live
                     // and untouched; observe only advances each cursor's position.
-                    let (c, r) = unsafe { (observe(raw), observe(safe.as_c_ptr())) };
+                    let observe2 = unsafe { observe(raw) };
+                    // SAFETY: as above.
+                    let (c, r) = unsafe { (observe2, observe(safe.as_c_ptr())) };
                     assert_eq!(c, r);
                     assert_eq!(
                         r.0,
@@ -1355,9 +1402,11 @@ mod conflict_cursor {
                 unsafe { ffi::git_index_conflict_iterator_free(raw) };
                 drop(safe);
                 // SAFETY: owners remain live after the cursor-only destructors.
+                let index_entrycount = unsafe { ffi::git_index_entrycount(raw_parent.as_c_ptr()) };
+                // SAFETY: as above.
                 unsafe {
                     assert_eq!(
-                        ffi::git_index_entrycount(raw_parent.as_c_ptr()),
+                        index_entrycount,
                         ffi::git_index_entrycount(safe_parent.as_c_ptr())
                     );
                 }
@@ -1430,34 +1479,51 @@ fn timestamp_entry_roundtrips() {
         let mut c_entry = ffi::git_index_entry {
             ctime: raw_time,
             mtime: raw_time,
-            mode: 0o100644,
+            mode: 0o100_644,
             path: c"timestamp".as_ptr(),
             ..Default::default()
         };
-        c_entry.id.type_ = ffi::GIT_OID_SHA1 as u8;
+        c_entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         let mut rust_entry = c_entry;
         rust_entry.ctime = raw(copied.as_ref());
         rust_entry.mtime = raw(safe.as_ref());
-        // SAFETY: two live independent indexes; entries and NUL paths are readable
-        // for the calls, which copy them. The entry pointers stay valid until the
-        // next mutation of their index, after the reads below.
-        unsafe {
-            assert_eq!(ffi::git_index_add(left.as_c_ptr(), &c_entry), 0);
-            assert_eq!(ffi::git_index_add(right.as_c_ptr(), &rust_entry), 0);
-            assert_eq!(ffi::git_index_entrycount(left.as_c_ptr()), 1);
-            let a = ffi::git_index_get_byindex(left.as_c_ptr(), 0);
-            let b = ffi::git_index_get_byindex(right.as_c_ptr(), 0);
-            for (x, y) in [((*a).ctime, (*b).ctime), ((*a).mtime, (*b).mtime)] {
+        {
+            // SAFETY: two live independent indexes; entries and NUL paths are readable
+            // for the calls, which copy them. The entry pointers stay valid until the
+            // next mutation of their index, after the reads below.
+            unsafe { assert_eq!(ffi::git_index_add(left.as_c_ptr(), &raw const c_entry), 0) };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_index_add(right.as_c_ptr(), &raw const rust_entry),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_entrycount(left.as_c_ptr()), 1) };
+            // SAFETY: as above.
+            let a = unsafe { ffi::git_index_get_byindex(left.as_c_ptr(), 0) };
+            // SAFETY: as above.
+            let b = unsafe { ffi::git_index_get_byindex(right.as_c_ptr(), 0) };
+            for (x, y) in [
+                // SAFETY: as above.
+                (unsafe { (*a).ctime }, unsafe { (*b).ctime }),
+                // SAFETY: as above.
+                (unsafe { (*a).mtime }, unsafe { (*b).mtime }),
+            ] {
                 assert_eq!(
                     (x.seconds, x.nanoseconds),
                     (y.seconds, y.nanoseconds),
                     "step {step}"
                 );
             }
-            assert_eq!(
-                ((*a).mtime.seconds, (*a).mtime.nanoseconds),
-                (seconds, nanoseconds)
-            );
+
+            // SAFETY: as above.
+            let seconds2 = unsafe { (*a).mtime.seconds };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!((seconds2, (*a).mtime.nanoseconds), (seconds, nanoseconds));
+            };
         }
     }
 }
@@ -1535,7 +1601,7 @@ mod entry_and_options {
             path: spec.path.as_ptr(),
             ..Default::default()
         };
-        e.id.type_ = spec.kind.raw() as u8;
+        e.id.type_ = u8::try_from(spec.kind.raw()).unwrap();
         e.id.id[..spec.kind.size()].fill(spec.byte);
         e
     }
@@ -1571,12 +1637,16 @@ mod entry_and_options {
 
     /// Every entry of `index`, in order.
     fn entries(index: *mut ffi::git_index) -> Vec<Fields> {
-        // SAFETY: a live index, only read; each entry is copied before the next call.
-        unsafe {
-            (0..ffi::git_index_entrycount(index))
-                .map(|i| fields(&*ffi::git_index_get_byindex(index, i)))
-                .collect()
-        }
+        // SAFETY: a live index, only read.
+        let count = unsafe { ffi::git_index_entrycount(index) };
+        (0..count)
+            .map(|i| {
+                // SAFETY: as above; `i` is below the entry count.
+                let e = unsafe { ffi::git_index_get_byindex(index, i) };
+                // SAFETY: a live entry, copied before the next call.
+                fields(unsafe { &*e })
+            })
+            .collect()
     }
 
     /// `git_index_add` of `entry`, then its status, the thread's error and the entries.
@@ -1596,6 +1666,10 @@ mod entry_and_options {
     /// refused modes, SHA-256 ids, every flag bit and extreme stat data.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
     fn entries_built_in_rust_match_c_built_entries() {
         init();
         let base = Spec {
@@ -1663,7 +1737,7 @@ mod entry_and_options {
             // Refused: an unnamed mode, a tree, and a path under `.git`.
             Spec {
                 path: c"group-writable",
-                mode: 0o100664,
+                mode: 0o100_664,
                 ..base
             },
             Spec {
@@ -1689,9 +1763,11 @@ mod entry_and_options {
                 "step {step}: path is borrowed"
             );
             // SAFETY: both entries are live and only read.
+            let index_entry_stage = unsafe { ffi::git_index_entry_stage(&raw const c) };
+            // SAFETY: as above.
             let stages = unsafe {
                 (
-                    ffi::git_index_entry_stage(&c),
+                    index_entry_stage,
                     ffi::git_index_entry_stage(rust.as_ref_raw()),
                 )
             };
@@ -1737,7 +1813,7 @@ mod entry_and_options {
             oid_type: 99,
         };
         // SAFETY: `c` is writable storage for the options, overwritten for the call.
-        let rc = unsafe { ffi::git_index_options_init(&mut c, ffi::GIT_INDEX_OPTIONS_VERSION) };
+        let rc = unsafe { ffi::git_index_options_init(&raw mut c, ffi::GIT_INDEX_OPTIONS_VERSION) };
         assert_eq!(rc, 0);
         let mut rust = IndexOptions::new();
         let raw = rust.into_raw();
@@ -1770,7 +1846,9 @@ mod entry_and_options {
                 let file = c_path(&scratch.file(&format!("{side}-{step}")));
                 let mut out = ptr::null_mut();
                 // SAFETY: a live slot, a NUL-terminated path and options read for the call.
-                let rc = unsafe { ffi::git_index_open_ext(&mut out, file.as_ptr(), &opts) };
+                let rc = unsafe {
+                    ffi::git_index_open_ext(&raw mut out, file.as_ptr(), &raw const opts)
+                };
                 assert_eq!(rc, 0, "step {step} {side}");
                 let index = CIndex(out);
                 let kind = kind.unwrap_or_default();
@@ -1812,9 +1890,11 @@ mod entry_stage {
     /// The stage C reads from `e`: through the macro, and through libgit2's function.
     fn c_stages(e: &ffi::git_index_entry) -> (c_int, c_int) {
         // SAFETY: `e` is a live entry; both only read its flags.
+        let crustify_git_index_entry_stage = unsafe { ffi::crustify_GIT_INDEX_ENTRY_STAGE(e) };
+        // SAFETY: as above.
         unsafe {
             (
-                ffi::crustify_GIT_INDEX_ENTRY_STAGE(e),
+                crustify_git_index_entry_stage,
                 ffi::git_index_entry_stage(e),
             )
         }
@@ -1891,19 +1971,25 @@ mod entry_stage {
 
     /// Every entry of `index`, as (path, stage, first id byte), and its conflict verdict.
     fn view(index: *mut ffi::git_index) -> (Vec<(CString, c_int, u8)>, c_int) {
-        // SAFETY: a live index, only read; each entry is copied before the next call.
-        unsafe {
-            let entries = (0..ffi::git_index_entrycount(index))
+        {
+            // SAFETY: a live index, only read.
+            let count = unsafe { ffi::git_index_entrycount(index) };
+            let entries = (0..count)
                 .map(|i| {
-                    let e = ffi::git_index_get_byindex(index, i);
-                    (
-                        CStr::from_ptr((*e).path).to_owned(),
-                        ffi::git_index_entry_stage(e),
-                        (*e).id.id[0],
-                    )
+                    // SAFETY: as above; `i` is below the entry count.
+                    let e = unsafe { ffi::git_index_get_byindex(index, i) };
+                    // SAFETY: a live entry.
+                    let path = unsafe { (*e).path };
+                    // SAFETY: as above.
+                    let first = unsafe { (*e).id.id[0] };
+                    // SAFETY: its path is NUL-terminated; it is copied before the next call.
+                    let path = unsafe { CStr::from_ptr(path) }.to_owned();
+                    // SAFETY: as above.
+                    (path, unsafe { ffi::git_index_entry_stage(e) }, first)
                 })
                 .collect();
-            (entries, ffi::git_index_has_conflicts(index))
+            // SAFETY: as above.
+            unsafe { (entries, ffi::git_index_has_conflicts(index)) }
         }
     }
 
@@ -1912,11 +1998,12 @@ mod entry_stage {
         let mut found = Vec::new();
         for path in paths {
             for stage in STAGES {
-                // SAFETY: a live index and a NUL-terminated path; the entry is read before
-                // the next call.
-                found.push(unsafe {
-                    let e = ffi::git_index_get_bypath(index, path.as_ptr(), stage.raw());
-                    (!e.is_null()).then(|| (*e).id.id[0])
+                found.push({
+                    // SAFETY: a live index and a NUL-terminated path; the entry is read before
+                    // the next call.
+                    let e = unsafe { ffi::git_index_get_bypath(index, path.as_ptr(), stage.raw()) };
+                    // SAFETY: as above.
+                    (!e.is_null()).then(|| unsafe { (*e).id.id }[0])
                 });
             }
         }
@@ -1953,7 +2040,7 @@ mod entry_stage {
                 path: path.as_ptr(),
                 ..Default::default()
             };
-            c.id.type_ = OidType::Sha1.raw() as u8;
+            c.id.type_ = u8::try_from(OidType::Sha1.raw()).unwrap();
             c.id.id[..20].fill(byte);
             c_set_stage(&mut c, stage.raw());
             let id = Oid::from_raw(&[byte; 20], OidType::Sha1).unwrap();
@@ -1969,7 +2056,7 @@ mod entry_stage {
             for (index, entry) in [(left.as_c_ptr(), c), (right.as_c_ptr(), rust.into_raw())] {
                 clear();
                 // SAFETY: a live index; the entry and its path are read and copied.
-                let rc = unsafe { ffi::git_index_add(index, &entry) };
+                let rc = unsafe { ffi::git_index_add(index, &raw const entry) };
                 results.push((
                     rc,
                     (rc < 0).then(c_last),
@@ -2031,22 +2118,33 @@ mod routines {
     }
 
     fn view(index: *mut ffi::git_index) -> View {
-        // SAFETY: a live index, only read; every path is copied before the next call.
-        unsafe {
-            let entries = (0..ffi::git_index_entrycount(index))
+        {
+            // SAFETY: a live index, only read.
+            let count = unsafe { ffi::git_index_entrycount(index) };
+            let entries = (0..count)
                 .map(|i| {
-                    let e = ffi::git_index_get_byindex(index, i);
-                    (
-                        CStr::from_ptr((*e).path).to_owned(),
-                        ffi::git_index_entry_stage(e),
-                    )
+                    // SAFETY: as above; `i` is below the entry count.
+                    let e = unsafe { ffi::git_index_get_byindex(index, i) };
+                    // SAFETY: a live entry.
+                    let path = unsafe { (*e).path };
+                    // SAFETY: its path is NUL-terminated; it is copied before the next call.
+                    let path = unsafe { CStr::from_ptr(path) }.to_owned();
+                    // SAFETY: as above.
+                    (path, unsafe { ffi::git_index_entry_stage(e) })
                 })
                 .collect();
-            View {
-                entries,
-                conflicts: ffi::git_index_has_conflicts(index),
-                caps: ffi::git_index_caps(index),
-                owned: !ffi::git_index_owner(index).is_null(),
+            // SAFETY: as above.
+            let index_has_conflicts = unsafe { ffi::git_index_has_conflicts(index) };
+            // SAFETY: as above.
+            let index_caps = unsafe { ffi::git_index_caps(index) };
+            // SAFETY: as above.
+            unsafe {
+                View {
+                    entries,
+                    conflicts: index_has_conflicts,
+                    caps: index_caps,
+                    owned: !ffi::git_index_owner(index).is_null(),
+                }
             }
         }
     }
@@ -2090,29 +2188,29 @@ mod routines {
     /// `git_index_add` of a regular file at `path` in `stage`, on a raw index.
     fn add_staged(index: *mut ffi::git_index, path: &CStr, stage: u16, id: &[u8]) {
         let mut entry = ffi::git_index_entry {
-            mode: 0o100644,
+            mode: 0o100_644,
             path: path.as_ptr(),
             // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
             flags: stage << 12,
             ..Default::default()
         };
         entry.id.id[..id.len()].copy_from_slice(id);
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         // SAFETY: a live index; `entry` and its path are read and copied for the call.
-        assert_eq!(unsafe { ffi::git_index_add(index, &entry) }, 0);
+        assert_eq!(unsafe { ffi::git_index_add(index, &raw const entry) }, 0);
     }
 
     fn c_find(index: *mut ffi::git_index, path: &CStr) -> Option<usize> {
         let mut position = usize::MAX;
         // SAFETY: a writable slot, a live index and a NUL-terminated path.
-        let rc = unsafe { ffi::git_index_find(&mut position, index, path.as_ptr()) };
+        let rc = unsafe { ffi::git_index_find(&raw mut position, index, path.as_ptr()) };
         (rc >= 0).then_some(position)
     }
 
     fn c_find_prefix(index: *mut ffi::git_index, prefix: &CStr) -> Option<usize> {
         let mut position = usize::MAX;
         // SAFETY: as in `c_find`.
-        let rc = unsafe { ffi::git_index_find_prefix(&mut position, index, prefix.as_ptr()) };
+        let rc = unsafe { ffi::git_index_find_prefix(&raw mut position, index, prefix.as_ptr()) };
         assert!(rc == 0 || rc == ErrorCode::NotFound.raw());
         (rc >= 0).then_some(position)
     }
@@ -2221,10 +2319,9 @@ mod routines {
         // Case-insensitive lookups, then back.
         for caps in [ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE, 0] {
             // SAFETY: two live indexes; the capability bits are copied.
-            unsafe {
-                assert_eq!(ffi::git_index_set_caps(c.0, caps), 0);
-                assert_eq!(ffi::git_index_set_caps(rust.as_c_ptr(), caps), 0);
-            }
+            unsafe { assert_eq!(ffi::git_index_set_caps(c.0, caps), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_set_caps(rust.as_c_ptr(), caps), 0) };
             compare(&mut rust, &format!("caps {caps}"));
         }
 
@@ -2259,17 +2356,20 @@ mod routines {
                 // SAFETY: a writable buffer owning nothing, a live index and a
                 // NUL-terminated key.
                 let rc = unsafe {
-                    ffi::git_index_extension_lookup(&mut out, index, key.as_ptr().cast())
+                    ffi::git_index_extension_lookup(&raw mut out, index, key.as_ptr().cast())
                 };
                 if rc == ErrorCode::NotFound.raw() {
                     return None;
                 }
                 assert_eq!(rc, 0);
-                // SAFETY: `out` holds `size` bytes of a fresh allocation, copied, then
-                // released with `git_buf_dispose`, which frees `ptr`.
-                unsafe {
-                    let data = std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size).to_vec();
-                    ffi::git_buf_dispose(&mut out);
+                {
+                    // SAFETY: `out` holds `size` bytes of a fresh allocation, copied, then
+                    // released with `git_buf_dispose`, which frees `ptr`.
+                    let data = unsafe {
+                        std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size).to_vec()
+                    };
+                    // SAFETY: as above.
+                    unsafe { ffi::git_buf_dispose(&raw mut out) };
                     Some(data)
                 }
             })
@@ -2293,6 +2393,18 @@ mod routines {
     /// read back; compared after each step.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario, its steps run and compared in order"
+    )]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "the closure lets each handle reborrow for its own lifetime, which the method path cannot"
+    )]
     fn extension_sequence_matches() {
         init();
         let scratch = Scratch::new("routines-extensions");
@@ -2329,12 +2441,12 @@ mod routines {
             Op::Set(4, b"not the tree cache".to_vec()),
             Op::Set(5, vec![0xFF; 3000]),
         ];
-        ops.extend((6..signatures.len()).map(|i| Op::Set(i, vec![i as u8; i])));
+        ops.extend((6..signatures.len()).map(|i| Op::Set(i, vec![u8::try_from(i).unwrap(); i])));
         ops.extend([Op::Remove(4), Op::Remove(9), Op::Set(9, b"back".to_vec())]);
         for (step, op) in ops.into_iter().enumerate() {
             match op {
                 Op::Set(i, data) => {
-                    let key = signatures[i].map(|b| b as c_char);
+                    let key = signatures[i].map(|b| b.cast_signed());
                     let key = [key[0], key[1], key[2], key[3], 0];
                     clear();
                     // SAFETY: a live index, a NUL-terminated four-byte key and `data`.
@@ -2458,7 +2570,7 @@ mod routines {
         fn index(&self) -> *mut ffi::git_index {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot and a live repository.
-            let rc = unsafe { ffi::git_repository_index(&mut out, self.repo()) };
+            let rc = unsafe { ffi::git_repository_index(&raw mut out, self.repo()) };
             assert_eq!(rc, 0);
             out
         }
@@ -2551,12 +2663,14 @@ mod routines {
         pattern: *const c_char,
         payload: *mut c_void,
     ) -> c_int {
-        // SAFETY: `git_index_add_all` lends live NUL-terminated strings (the pattern
-        // nullable) for the call, and the test an exclusively borrowed `Log`.
-        unsafe {
-            let path = CStr::from_ptr(path);
-            let pattern = (!pattern.is_null()).then(|| CStr::from_ptr(pattern));
-            (&mut *payload.cast::<Log>()).answer(path, pattern)
+        {
+            // SAFETY: `git_index_add_all` lends live NUL-terminated strings (the pattern
+            // nullable) for the call, and the test an exclusively borrowed `Log`.
+            let path = unsafe { CStr::from_ptr(path) };
+            // SAFETY: as above.
+            let pattern = unsafe { (!pattern.is_null()).then(|| CStr::from_ptr(pattern)) };
+            // SAFETY: as above.
+            unsafe { (&mut *payload.cast::<Log>()).answer(path, pattern) }
         }
     }
 
@@ -2567,6 +2681,10 @@ mod routines {
     /// whose first loads race in libgit2.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::similar_names,
+        reason = "the names pair each value with its counterpart on the other side"
+    )]
     fn repository_additions_match() {
         isolated(
             concat!(module_path!(), "::repository_additions_match"),
@@ -2620,8 +2738,10 @@ mod routines {
                 // A conflict at `a`, resolved by adding it again.
                 let blob = view(c.0).entries.len();
                 assert!(blob > 0);
-                // SAFETY: a live index; entry 0 is `a`'s, whose id is copied.
-                let id = unsafe { (*ffi::git_index_get_byindex(c.0, 0)).id.id };
+                // SAFETY: a live index; entry 0 is `a`'s.
+                let entry = unsafe { ffi::git_index_get_byindex(c.0, 0) };
+                // SAFETY: as above; its id is copied.
+                let id = unsafe { (*entry).id.id };
                 for stage in [1, 3] {
                     add_staged(c.0, c"a", stage, &id);
                     add_staged(rust.as_c_ptr(), c"a", stage, &id);
@@ -2669,7 +2789,13 @@ mod routines {
                         // SAFETY: a live index, a live pathspec array and a callback pair
                         // over an exclusively borrowed log, used synchronously.
                         let expected = c_status(unsafe {
-                            ffi::git_index_add_all(c.0, &c_array, flags.bits(), callback, payload)
+                            ffi::git_index_add_all(
+                                c.0,
+                                &raw const c_array,
+                                flags.bits(),
+                                callback,
+                                payload,
+                            )
                         })
                         .map_err(|f| c_repo.relative(f));
 
@@ -2716,7 +2842,7 @@ mod routines {
                 clear();
                 // SAFETY: a live index and an empty pathspec, without a callback.
                 let expected = c_status(unsafe {
-                    ffi::git_index_add_all(c.0, &empty, 0, None, ptr::null_mut())
+                    ffi::git_index_add_all(c.0, &raw const empty, 0, None, ptr::null_mut())
                 });
                 assert_eq!(
                     expected,
@@ -2734,7 +2860,7 @@ mod routines {
     /// A directory holding a repository with no commit, which is no submodule: both
     /// sides fail alike, and libgit2 leaks what it built for the entry and the nested
     /// repository it opened (`add_repo_as_submodule`, `src/libgit2/index.c`), so
-    /// LeakSanitizer is off in the child.
+    /// `LeakSanitizer` is off in the child.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn unborn_nested_repository_matches() {

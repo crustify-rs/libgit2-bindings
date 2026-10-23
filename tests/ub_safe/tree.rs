@@ -2,10 +2,10 @@
 //!
 //! `WalkMode` is a fieldless enum over C's `git_treewalk_mode`. The only safe way in
 //! from a raw value is `from_raw` / `try_from`, which must reject every value without
-//! a variant rather than produce an invalid discriminant (which Miri and UBSan would
+//! a variant rather than produce an invalid discriminant (which Miri and `UBSan` would
 //! flag on the next read); an `as` cast to it does not compile (`compile_fail/`). It
 //! owns and points at nothing and none of these tests calls libgit2, so they also run
-//! under Miri; the sweep strides under BSan and Miri.
+//! under Miri; the sweep strides under `BSan` and Miri.
 //!
 //! The tree object's tests are in [`tree_object`], the tree builder's in [`builder`], its
 //! routines' and the walk callback's in [`routines`], the tree entry's in [`tree_entry`],
@@ -33,24 +33,21 @@ fn probes() -> impl Iterator<Item = ffi::git_treewalk_mode> {
 fn from_raw_yields_only_valid_modes() {
     let mut seen = HashSet::new();
     for raw in probes() {
-        match WalkMode::from_raw(black_box(raw)) {
-            Some(mode) => {
-                // Matching on the value reads its discriminant.
-                let back = match black_box(mode) {
-                    WalkMode::PreOrder => ffi::GIT_TREEWALK_PRE,
-                    WalkMode::PostOrder => ffi::GIT_TREEWALK_POST,
-                    _ => unreachable!(),
-                };
-                assert_eq!(back, raw);
-                assert_eq!(WalkMode::try_from(raw), Ok(mode));
-                assert!(!format!("{mode:?}").is_empty());
-                seen.insert(mode);
-            }
-            None => {
-                let err = WalkMode::try_from(raw).unwrap_err();
-                assert_eq!(err.raw(), raw);
-                assert!(!err.to_string().is_empty());
-            }
+        if let Some(mode) = WalkMode::from_raw(black_box(raw)) {
+            // Matching on the value reads its discriminant.
+            let back = match black_box(mode) {
+                WalkMode::PreOrder => ffi::GIT_TREEWALK_PRE,
+                WalkMode::PostOrder => ffi::GIT_TREEWALK_POST,
+                _ => unreachable!(),
+            };
+            assert_eq!(back, raw);
+            assert_eq!(WalkMode::try_from(raw), Ok(mode));
+            assert_ne!(format!("{mode:?}"), "");
+            seen.insert(mode);
+        } else {
+            let err = WalkMode::try_from(raw).unwrap_err();
+            assert_eq!(err.raw(), raw);
+            assert_ne!(err.to_string(), "");
         }
     }
     assert_eq!(seen.len(), 2);
@@ -60,14 +57,9 @@ fn from_raw_yields_only_valid_modes() {
 fn option_niche_holds() {
     for raw in probes() {
         let mode = black_box(WalkMode::from_raw(raw));
-        assert_eq!(mode.map(WalkMode::raw).unwrap_or(raw), raw);
+        assert_eq!(mode.map_or(raw, WalkMode::raw), raw);
         let result = black_box(WalkMode::try_from(raw));
-        assert_eq!(
-            result
-                .map(WalkMode::raw)
-                .unwrap_or_else(UnnamedWalkMode::raw),
-            raw
-        );
+        assert_eq!(result.map_or_else(UnnamedWalkMode::raw, WalkMode::raw), raw);
     }
 }
 
@@ -95,14 +87,14 @@ mod builder {
     //! subtree, a tree of the builder's own repository or of another, and a SHA256
     //! repository's tree seeding a SHA1 repository's builder; an object that is not a
     //! tree has no tree handle to seed one with. The builder keeps nothing of the tree, so
-    //! dropping the tree right after the call is fine (ASan).
+    //! dropping the tree right after the call is fine (`ASan`).
     //!
     //! Every entry a builder holds is its own allocation, which `clear` and the drop must
-    //! each free exactly once, however the builder was filled (ASan: double free, use
-    //! after free; LSan: leak). A builder keeps a bare pointer to its repository, which
+    //! each free exactly once, however the builder was filled (`ASan`: double free, use
+    //! after free; `LSan`: leak). A builder keeps a bare pointer to its repository, which
     //! libgit2 follows while inserting and writing, across the Rust reborrows of that
-    //! repository made in between (BSan: a retained foreign pointer). Builders are not
-    //! `Send`, so the threaded test gives each thread its own repository (TSan: the
+    //! repository made in between (`BSan`: a retained foreign pointer). Builders are not
+    //! `Send`, so the threaded test gives each thread its own repository (`TSan`: the
     //! runtime pin and allocator under concurrent constructors). Nothing here runs under
     //! Miri, which cannot call libgit2. Illegal uses are compile-fail doctests on the crate
     //! (sending or sharing a builder, among others) and files under `compile_fail/`: a
@@ -141,7 +133,7 @@ mod builder {
             init();
             let path =
                 std::env::temp_dir().join(format!("crustify-tree-ub-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let repo = Repository::init(&Self::c_path(&path), true).unwrap();
             Self {
                 path,
@@ -161,7 +153,7 @@ mod builder {
     impl Drop for TempRepo {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -396,8 +388,8 @@ mod builder {
     const FLAT_256: &str = "f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736";
 
     /// Flat and nested trees, seeding a builder of another repository, are copied whole:
-    /// the builder writes the very tree back, after its source is gone (ASan: use after
-    /// free of the tree; LSan: a leaked copy).
+    /// the builder writes the very tree back, after its source is gone (`ASan`: use after
+    /// free of the tree; `LSan`: a leaked copy).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn trees_seed_builders_of_another_repository() {
@@ -464,7 +456,7 @@ mod builder {
     }
 
     /// An object that is not a tree has no tree handle, so libgit2 never reads one as a
-    /// tree (ASan would flag the read of a smaller object): the commit of `NESTED`, a blob
+    /// tree (`ASan` would flag the read of a smaller object): the commit of `NESTED`, a blob
     /// and a tag stay objects, usable. The tree object itself seeds a builder through
     /// either view of it.
     #[test]
@@ -484,7 +476,7 @@ mod builder {
             let object = object(hex);
             assert!(TreeRef::from_object(object.as_ref()).is_none(), "{hex}");
             let object = Tree::from_object(object).unwrap_err();
-            let _ = object.as_ref().to_object();
+            drop(object.as_ref().to_object());
         }
         let tree = object(NESTED);
         let viewed = TreeRef::from_object(tree.as_ref()).unwrap();
@@ -503,13 +495,13 @@ mod routines {
     //! Each entry is the builder's own allocation, its name inline past the struct: an
     //! entry replaced in place, removed, cleared or dropped with the builder must be freed
     //! exactly once, and an entry lent by `get` or `insert_entry` must be the live one
-    //! (ASan: use after free, double free, a name read out of bounds; LSan: a leak). The
+    //! (`ASan`: use after free, double free, a name read out of bounds; `LSan`: a leak). The
     //! tests insert names of every length up to the longest a tree stores, and refused
     //! inserts of every kind, which must leave the builder as it was. Inserting looks the
     //! object up through the repository pointer the builder kept, across Rust reborrows of
-    //! that repository (BSan: a retained foreign pointer). An entry is `Sync`: an entry the
+    //! that repository (`BSan`: a retained foreign pointer). An entry is `Sync`: an entry the
     //! builder lends is copied from several threads at once while the builder stays
-    //! shared (TSan). The walk callback lends each entry and root for its call only, and
+    //! shared (`TSan`). The walk callback lends each entry and root for its call only, and
     //! catches a panic of its closure; one closure may run a callback of its own (a
     //! re-entered callback). Lent entries outliving their borrow, or held across a change
     //! of the builder, do not compile (`compile_fail/` and doctests). Every test calls
@@ -547,7 +539,7 @@ mod routines {
             init();
             let path =
                 std::env::temp_dir().join(format!("crustify-tree-ub-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let repo = Repository::init(&Self::c_path_of(&path), true).unwrap();
             Self {
                 path,
@@ -571,7 +563,7 @@ mod routines {
     impl Drop for TempRepo {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -734,7 +726,7 @@ mod routines {
 
     /// An id of another type than the repository's never reaches libgit2's object lookup,
     /// whose loose backend formats it into a path sized for the repository's type: a
-    /// SHA-256 id in a SHA-1 repository wrote 24 bytes past that path's buffer (ASan: a
+    /// SHA-256 id in a SHA-1 repository wrote 24 bytes past that path's buffer (`ASan`: a
     /// heap buffer overflow, with the short objects path of a temporary directory), and
     /// a SHA-1 id in a SHA-256 repository left part of it unwritten. Both insert forms
     /// refuse it for every mode libgit2 looks up, leaving the builder as it was; a
@@ -1013,9 +1005,7 @@ mod routines {
         let mut calls = 0;
         let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
             calls += 1;
-            if calls == 1 {
-                panic!("first call panics");
-            }
+            assert!(calls != 1, "first call panics");
             WalkAction::Skip
         };
         let mut callback = WalkCallback::new(&mut f);
@@ -1090,20 +1080,20 @@ mod tree_entry {
     //! An owned entry is one block of libgit2's allocator, its name inline right past the
     //! struct: `git_tree_entry_free` releases it once and `git_tree_entry_dup` copies it
     //! whole into a new one. A double free, a leaked copy, or a copy that reads or writes
-    //! past the name (an off-by-one in the inline name) is flagged by ASan (LSan included):
+    //! past the name (an off-by-one in the inline name) is flagged by `ASan` (`LSan` included):
     //! the tests copy entries from the box and from its shared handle, drop chains of
     //! copies in every order, copy names of every length a tree allows (1 to 65535 bytes),
     //! and let copies outlive the tree and the repository they came from, which an owned
     //! entry does not reach.
     //!
     //! An entry is `Send` and `Sync`: these tests copy one entry from many threads at once
-    //! and move copies to other threads to drop them (TSan). A handle outliving its owner
+    //! and move copies to other threads to drop them (`TSan`). A handle outliving its owner
     //! and aliased exclusive handles do not compile (`compile_fail/` and doctests).
     //!
     //! The getters lend the entry's name and id, which live inside its block: they are
-    //! read in full for names of every length (ASan: a read past the block), outlive the
+    //! read in full for names of every length (`ASan`: a read past the block), outlive the
     //! tree and repository the entry came from, and are read from many threads at once
-    //! with the ordering between entries (TSan). An entry's object outlives the entry,
+    //! with the ordering between entries (`TSan`). An entry's object outlives the entry,
     //! and a name or object outliving what keeps it alive does not compile
     //! (`compile_fail/`). A `TreeBuilderFilter` lends each entry for its call only
     //! (doctests), and a panicking closure resumes after the call.
@@ -1142,7 +1132,7 @@ mod tree_entry {
         c"ab/de/fgh/1.txt",
     ];
 
-    fn tree<'r>(repo: RepositoryRef<'r>) -> TreeArc<'r> {
+    fn tree(repo: RepositoryRef<'_>) -> TreeArc<'_> {
         let id = Oid::from_string(TREE, OidType::Sha1).unwrap();
         Tree::lookup(repo, id.as_ref()).unwrap()
     }
@@ -1206,7 +1196,7 @@ mod tree_entry {
 
     /// Names of 1 to 65535 bytes, the most a tree entry's 16-bit length holds, and of
     /// every byte a name may hold, copied whole: an off-by-one in the inline name leaves
-    /// the block (ASan).
+    /// the block (`ASan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn names_of_every_length_copy_whole() {
@@ -1232,9 +1222,13 @@ mod tree_entry {
     }
 
     /// Many threads copy one shared entry at once, through the owner and its shared
-    /// handle, and move their copies to other threads that read and drop them (TSan).
+    /// handle, and move their copies to other threads that read and drop them (`TSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn entries_cross_threads() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
@@ -1290,6 +1284,10 @@ mod tree_entry {
     /// The shared handle is `Copy` and outlives no owner; several may coexist.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn shared_handles_coexist() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
@@ -1304,7 +1302,7 @@ mod tree_entry {
     }
 
     /// Lookups by path own their entry alone: every failure, at any depth, leaves
-    /// nothing behind (LSan), every success is released once (ASan), and an entry
+    /// nothing behind (`LSan`), every success is released once (`ASan`), and an entry
     /// found through a subtree outlives the tree, the repository and the subtrees
     /// libgit2 read on the way.
     #[test]
@@ -1346,7 +1344,7 @@ mod tree_entry {
     /// A tree whose subtree entry names an object the database lacks: the lookups
     /// through it fail with libgit2's "object not found" error (code `-1` from
     /// `git_tree_entry_bypath`, `GIT_ENOTFOUND` from the odb through
-    /// `ObjectRef::lookup_bypath`'s peel), leaving nothing behind (LSan); the entry
+    /// `ObjectRef::lookup_bypath`'s peel), leaving nothing behind (`LSan`); the entry
     /// itself is still found, and a blob entry beside it looked up.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1398,7 +1396,7 @@ mod tree_entry {
     }
 
     /// An object that is not a tree has no tree handle, so libgit2 never reads one as a
-    /// tree: a commit, a blob and a tag (ASan would flag the read of a smaller object).
+    /// tree: a commit, a blob and a tag (`ASan` would flag the read of a smaller object).
     /// The tree itself is one, and the same lookup through the peeled commit agrees.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1464,9 +1462,13 @@ mod tree_entry {
         }
     }
 
-    /// Many threads read every getter of shared entries at once, and order them (TSan).
+    /// Many threads read every getter of shared entries at once, and order them (`TSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn getters_cross_threads() {
         let repo = open_testrepo();
         let root = tree(repo.as_ref());
@@ -1540,9 +1542,7 @@ mod tree_entry {
         let mut calls = 0;
         let mut pick = |entry: TreeEntryRef<'_>| {
             calls += 1;
-            if calls == 3 {
-                panic!("third call");
-            }
+            assert!(calls != 3, "third call");
             seen.push(entry.name().to_owned());
             entry.kind() == ObjectType::Tree
         };
@@ -1582,19 +1582,19 @@ mod tree_update {
     //! handles and accessors. An update is plain Rust-owned storage with a borrowed path,
     //! so the dangers are a path read after its string is gone or past its end, an id
     //! handle that outlives or aliases the update, and races on shared updates; none of
-    //! these tests calls libgit2, so they run under Miri as well as ASan, UBSan, TSan and
-    //! BSan.
+    //! these tests calls libgit2, so they run under Miri as well as `ASan`, `UBSan`, `TSan` and
+    //! `BSan`.
     //!
     //! Paths of every length up to a few hundred bytes are heap strings, stored and read
-    //! back whole through every write path (ASan: bounds; Miri: provenance of the stored
+    //! back whole through every write path (`ASan`: bounds; Miri: provenance of the stored
     //! pointer). The exclusive id handle writes the struct in place while the update is
-    //! reborrowed around it (Miri, BSan: reborrows). Updates are shared across threads,
-    //! read concurrently and copied out to threads that keep their copies (TSan).
+    //! reborrowed around it (Miri, `BSan`: reborrows). Updates are shared across threads,
+    //! read concurrently and copied out to threads that keep their copies (`TSan`).
     //! Illegal uses are compile-fail doctests on the crate and files under
     //! `compile_fail/`: an update outliving its path, a stored path outliving the update's
     //! use, aliased handles, a handle or id handle outliving its update.
 
-    use std::ffi::{CStr, CString};
+    use std::ffi::CString;
     use std::hint::black_box;
     use std::sync::Barrier;
     use std::thread;
@@ -1620,7 +1620,7 @@ mod tree_update {
                 if i % 7 == 6 {
                     b'/'
                 } else {
-                    b'a' + (i % 26) as u8
+                    b'a' + u8::try_from(i % 26).unwrap()
                 }
             })
             .collect::<Vec<_>>();
@@ -1630,8 +1630,9 @@ mod tree_update {
     /// An id of type `kind` whose bytes count up from `seed`.
     fn id(kind: OidType, seed: u8) -> Oid {
         let mut id = Oid::zero(kind);
-        id.as_mut()
-            .set_id(core::array::from_fn(|i| seed.wrapping_add(i as u8)));
+        id.as_mut().set_id(core::array::from_fn(|i| {
+            seed.wrapping_add(u8::try_from(i).unwrap())
+        }));
         id
     }
 
@@ -1645,7 +1646,8 @@ mod tree_update {
         let short = CString::new("x").unwrap();
         for (i, p) in paths.iter().enumerate() {
             let mode = MODES[i % MODES.len()];
-            let mut up = TreeUpdate::upsert(p, id(OidType::Sha1, i as u8).as_ref(), mode);
+            let mut up =
+                TreeUpdate::upsert(p, id(OidType::Sha1, i.to_le_bytes()[0]).as_ref(), mode);
             assert_eq!(black_box(up.as_ref().path()), p.as_c_str());
             assert_eq!(up.as_ref().filemode(), mode);
             let mut gone = TreeUpdate::remove(p);
@@ -1653,7 +1655,7 @@ mod tree_update {
                 black_box(gone.as_ref().path()).to_bytes().len(),
                 p.as_bytes().len()
             );
-            assert!(!format!("{gone:?}").is_empty());
+            assert_ne!(format!("{gone:?}"), "");
 
             let other = &paths[paths.len() - 1 - i];
             up.as_mut().set_path(other);
@@ -1743,17 +1745,17 @@ mod tree_update {
             let mut m = update.as_mut();
             m.set_action(UpdateAction::Upsert);
             m.set_filemode(MODES[i % MODES.len()]);
-            m.set_id(id(OidType::Sha1, i as u8).as_ref());
+            m.set_id(id(OidType::Sha1, i.to_le_bytes()[0]).as_ref());
         }
         for (i, update) in updates.iter().enumerate() {
             assert_eq!(update.as_ref().filemode(), MODES[i % MODES.len()]);
-            assert_eq!(update.as_ref().id().id()[0], i as u8);
+            assert_eq!(update.as_ref().id().id()[0], u8::try_from(i).unwrap());
         }
     }
 
     /// Updates are shared by many threads that read them at once and copy them out to
     /// threads of their own, which read and change their copies; the originals stay as
-    /// they were (TSan).
+    /// they were (`TSan`).
     #[test]
     fn updates_cross_threads() {
         const THREADS: usize = 8;
@@ -1762,7 +1764,11 @@ mod tree_update {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                TreeUpdate::upsert(p, id(OidType::Sha1, i as u8).as_ref(), FileMode::Blob)
+                TreeUpdate::upsert(
+                    p,
+                    id(OidType::Sha1, i.to_le_bytes()[0]).as_ref(),
+                    FileMode::Blob,
+                )
             })
             .collect();
         let barrier = Barrier::new(THREADS);
@@ -1778,7 +1784,7 @@ mod tree_update {
                             let i = (t + r) % THREADS;
                             let handle = updates[i].as_ref();
                             assert_eq!(handle.path(), paths[i].as_c_str());
-                            assert_eq!(handle.id().id()[0], i as u8);
+                            assert_eq!(handle.id().id()[0], u8::try_from(i).unwrap());
                             mine.push(handle.to_tree_update());
                         }
                         mine
@@ -1796,8 +1802,7 @@ mod tree_update {
                             m.set_action(UpdateAction::Remove);
                             m.set_path(c"elsewhere");
                         }
-                        mine.iter()
-                            .all(|c| c.as_ref().path() == c"elsewhere" as &CStr)
+                        mine.iter().all(|c| c.as_ref().path() == c"elsewhere")
                     })
                 })
                 .collect();
@@ -1823,17 +1828,17 @@ mod tree_object {
     //! object to every lookup of its id, as a tree or as an object: every owner gives back
     //! its one reference through `git_tree_free` (or `git_object_free`, once handed over
     //! as an object) exactly once, and every clone takes one through `git_tree_dup`. A
-    //! miscount frees a tree the cache or another owner still reads (ASan), or leaks it
-    //! with its entries and raw data (LSan). The tests share trees between lookups,
+    //! miscount frees a tree the cache or another owner still reads (`ASan`), or leaks it
+    //! with its entries and raw data (`LSan`). The tests share trees between lookups,
     //! clones and conversions, drop them in every order, let the cache evict trees owners
     //! still hold and run without a cache, and read entries borrowed from each survivor.
     //! Every failing lookup must leave nothing behind, a half-parsed tree's entries
     //! included, and an id of another type than the repository's must be refused before
-    //! it reaches C. libgit2 copies the id it is given (BSan: the tests overwrite and free
+    //! it reaches C. libgit2 copies the id it is given (`BSan`: the tests overwrite and free
     //! it right after), and a tree keeps a bare pointer to its repository, which looking
     //! up a path through its subtrees follows across Rust reborrows of that repository
-    //! (BSan). Trees are not `Send`, so the threaded test gives each thread its own
-    //! repository (TSan).
+    //! (`BSan`). Trees are not `Send`, so the threaded test gives each thread its own
+    //! repository (`TSan`).
     //!
     //! A tree cannot outlive its repository, nor a handle (or a tree viewed from an
     //! object) its owner, and no owner lends an exclusive handle (`compile_fail/` and
@@ -1951,7 +1956,7 @@ mod tree_object {
         }
     }
 
-    /// Every failure leaves no object behind (LSan), with its code and class; objects of
+    /// Every failure leaves no object behind (`LSan`), with its code and class; objects of
     /// other types are looked up, and released, by libgit2 before it refuses them.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2025,8 +2030,8 @@ mod tree_object {
     }
 
     /// Trees the database holds but libgit2 cannot parse fail their lookup, through both
-    /// constructors, and the half-parsed tree is freed with the entries it had (ASan: bad
-    /// free; LSan: leak). The empty tree and a one-entry tree beside them are found, and
+    /// constructors, and the half-parsed tree is freed with the entries it had (`ASan`: bad
+    /// free; `LSan`: leak). The empty tree and a one-entry tree beside them are found, and
     /// their entries read.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2063,7 +2068,10 @@ mod tree_object {
             }
         }
         let empty = write_raw(&repo, b"", ffi::GIT_OBJECT_TREE);
-        assert!(entries(&Tree::lookup(r, empty.as_ref()).unwrap()).is_empty());
+        assert_eq!(
+            entries(&Tree::lookup(r, empty.as_ref()).unwrap()),
+            Vec::<(CString, u32)>::new()
+        );
         let one = write_raw(&repo, &entry, ffi::GIT_OBJECT_TREE);
         let tree = Tree::lookup_prefix(r, one.as_ref(), 40).unwrap();
         assert_eq!(
@@ -2223,22 +2231,22 @@ mod tree_reads {
     //!
     //! A tree's entries are an array the tree owns, their names pointing into the raw
     //! object data it keeps: every lent entry, name and id is read in full while only one
-    //! owner keeps the tree, and copied out to outlive it and its repository (ASan: a
+    //! owner keeps the tree, and copied out to outlive it and its repository (`ASan`: a
     //! read past or after the tree's storage). Lookups by name probe names of every
     //! length around the 16 bits a tree stores one in, past it included, and lookups by
-    //! id probe ids of every type byte and tail (ASan: a read past the name or the id).
+    //! id probe ids of every type byte and tail (`ASan`: a read past the name or the id).
     //! The getters returning nothing on a miss are checked at both ends of the index
     //! range.
     //!
     //! A walk looks each subtree up in the repository and frees it once walked: the
     //! closure copies what it keeps, walks the same tree again from inside, looks other
     //! trees up and drops clones of the walked tree meanwhile, under a cache that evicts
-    //! as fast as trees come (ASan: an entry or root used after its subtree is freed). A
+    //! as fast as trees come (`ASan`: an entry or root used after its subtree is freed). A
     //! panic resumes after the walk, which leaves the tree usable, and a walk failing on
-    //! a missing or mistyped subtree leaves nothing behind (LSan). A filter frees each
+    //! a missing or mistyped subtree leaves nothing behind (`LSan`). A filter frees each
     //! entry it removes right after its call: the closure copies entries out, panics,
-    //! and drives another builder meanwhile (ASan, LSan). Walks and filters run on
-    //! threads, each over its own repository (TSan).
+    //! and drives another builder meanwhile (`ASan`, `LSan`). Walks and filters run on
+    //! threads, each over its own repository (`TSan`).
     //!
     //! An entry, id or repository outliving what keeps it alive, a closure reaching the
     //! builder it filters, or the repository's exclusive handle from a walk do not
@@ -2354,7 +2362,7 @@ mod tree_reads {
         };
         let mut builder = TreeBuilder::new(repository(&temp)).unwrap();
         for (i, &len) in lengths.iter().enumerate() {
-            let entry_id = id(i as u8 + 1);
+            let entry_id = id(u8::try_from(i).unwrap() + 1);
             builder
                 .as_mut()
                 .insert(&name(len, b'x'), entry_id.as_ref(), FileMode::Commit)
@@ -2379,7 +2387,7 @@ mod tree_reads {
         }
         assert!(t.get_by_name(c"").is_none());
         // 65536 bytes search with a 16-bit length of 0, and the others wrap likewise.
-        for len in [65536, 65537, 65536 + 255, 131071, 131072, 200_000] {
+        for len in [65536, 65537, 65536 + 255, 131_071, 131_072, 200_000] {
             assert!(t.get_by_name(&name(len, b'x')).is_none(), "{len}");
             let e = last();
             assert_eq!(e.class(), Some(ErrorClass::Invalid));
@@ -2491,7 +2499,7 @@ mod tree_reads {
                     let clone = tree.clone();
                     let mut inner = |r: &CStr, e: TreeEntryRef<'_>| {
                         inner_visits += 1;
-                        let _ = path_of(r, e);
+                        drop(path_of(r, e));
                         WalkAction::Skip
                     };
                     let mut nested = WalkCallback::new(&mut inner);
@@ -2503,7 +2511,7 @@ mod tree_reads {
                         assert_eq!(sub.as_ref().id().id(), entry.id().id());
                         assert!(!sub.as_ref().is_empty());
                     }
-                    let _ = path_of(root, entry);
+                    drop(path_of(root, entry));
                     WalkAction::Continue
                 };
                 let mut callback = WalkCallback::new(&mut outer);
@@ -2532,9 +2540,7 @@ mod tree_reads {
             let mut calls = 0;
             let mut f = |_: &CStr, entry: TreeEntryRef<'_>| {
                 calls += 1;
-                if calls == 3 {
-                    panic!("walk panicked at {:?}", entry.name());
-                }
+                assert!(calls != 3, "walk panicked at {:?}", entry.name());
                 WalkAction::Continue
             };
             let mut callback = WalkCallback::new(&mut f);
@@ -2562,7 +2568,7 @@ mod tree_reads {
 
     /// Walks reaching a subtree the object database lacks, or whose object is a blob,
     /// fail with the lookup's error after the visits before it, leaving nothing behind
-    /// (LSan).
+    /// (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn walks_into_missing_or_mistyped_subtrees_fail_cleanly() {
@@ -2641,9 +2647,7 @@ mod tree_reads {
         let mut boom = |_: TreeEntryRef<'_>| {
             calls += 1;
             assert!(calls <= 2, "called after the panic");
-            if calls == 2 {
-                panic!("filter panicked");
-            }
+            assert!(calls != 2, "filter panicked");
             true
         };
         let mut filter = TreeBuilderFilter::new(&mut boom);
@@ -2727,17 +2731,17 @@ mod updates {
     //!
     //! libgit2 reads the caller's array of updates in place, sorting pointers to its
     //! elements, and each update's path through a bare pointer, for the call only: the
-    //! paths sit in exact-length heap buffers (ASan: a read past their NUL) that the
-    //! tests rewrite and free right after the call (BSan: a retained foreign pointer),
+    //! paths sit in exact-length heap buffers (`ASan`: a read past their NUL) that the
+    //! tests rewrite and free right after the call (`BSan`: a retained foreign pointer),
     //! and the arrays range from empty to thousands of updates. It counts a reference
     //! on the baseline tree and builds a builder and a subtree reference per level of
-    //! each path, all released whatever the outcome (ASan, LSan): every refusal it
+    //! each path, all released whatever the outcome (`ASan`, LSan): every refusal it
     //! makes (duplicates, D/F conflicts, missing removals, invalid names, missing
     //! objects) runs, beside the inputs the wrapper refuses before C (an id or a
     //! baseline of another object id type, which C formats out of bounds, and an
     //! over-long path component). The baseline is dropped before the result is used.
     //! Each thread updates trees of a repository of its own, as a repository is not
-    //! `Sync` (TSan). Every test calls libgit2, so Miri skips them all.
+    //! `Sync` (`TSan`). Every test calls libgit2, so Miri skips them all.
 
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -2785,7 +2789,7 @@ mod updates {
                 "crustify-tree-update-ub-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let source = concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/c/tests/resources/testrepo.git"
@@ -2806,7 +2810,7 @@ mod updates {
     impl Drop for Sandbox {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -2927,7 +2931,7 @@ mod updates {
         let sandbox = Sandbox::new("foreign-base");
         let repo = sandbox.repo();
         let path = sandbox.path.with_extension("sha256");
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let mut opts = InitOptions::new();
         opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
         opts.as_mut().set_oid_type(Some(OidType::Sha256));
@@ -2957,7 +2961,7 @@ mod updates {
         assert!(Tree::lookup(repo.as_ref(), written.as_ref()).is_ok());
         drop(wide_tree);
         drop(wide);
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
     }
 
     /// Threads update trees at once, each in a repository of its own.

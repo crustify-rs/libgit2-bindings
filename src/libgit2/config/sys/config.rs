@@ -22,7 +22,7 @@ use core::ffi::{CStr, c_char, c_int};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::rc::Rc;
@@ -92,7 +92,7 @@ use crate::libgit2::util::sys::errors::set;
 /// std::thread::spawn(move || drop(options));
 /// ```
 ///
-/// Wraps: git_config_backend_memory_options
+/// Wraps: `git_config_backend_memory_options`
 /// Handwritten
 #[repr(transparent)]
 pub struct BackendMemoryOptions<'o>(
@@ -153,7 +153,13 @@ impl<'o> BackendMemoryOptions<'o> {
     /// C's defaults: current version and both strings unset. No library
     /// initialization is needed: this version's init only copies a template.
     ///
-    /// Wraps: git_config_backend_memory_options_init
+    /// Wraps: `git_config_backend_memory_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::uninit();
         // SAFETY: raw provides exclusive writable storage; init fills the entire
@@ -169,11 +175,14 @@ impl<'o> BackendMemoryOptions<'o> {
         Self(unsafe { raw.assume_init() }, PhantomData)
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> BackendMemoryOptionsRef<'_, 'o> {
         // SAFETY: initialized Rust-owned storage, shared for the handle's lifetime.
         BackendMemoryOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> BackendMemoryOptionsMut<'_, 'o> {
         // SAFETY: exclusive borrow of initialized storage supplies write provenance;
         // no other handle can be used while this result lives.
@@ -199,7 +208,13 @@ impl<'a, 'o> BackendMemoryOptionsRef<'a, 'o> {
     /// # Safety
     /// `ptr` is NULL or aligned initialized options, readable and unchanged for
     /// `'a`; both strings are NULL or NUL-terminated immutable borrows for `'o`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(
         ptr: *const ffi::git_config_backend_memory_options,
     ) -> Option<Self> {
@@ -215,18 +230,26 @@ impl<'a, 'o> BackendMemoryOptionsRef<'a, 'o> {
 
     /// Structure version; constructors use the current supported version.
     ///
-    /// Field: git_config_backend_memory_options.version
+    /// Field: `git_config_backend_memory_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw const (*self.as_ptr()).version };
         // SAFETY: reads the initialized scalar through the live shared handle.
-        unsafe { addr_of!((*self.as_ptr()).version).read() }
+        unsafe { version_ptr.read() }
     }
 
     /// Unset means C will use "in-memory"; an empty string is distinct from unset.
     ///
-    /// Field: git_config_backend_memory_options.backend_type
+    /// Field: `git_config_backend_memory_options.backend_type`
+    #[must_use]
     pub fn backend_type(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let backend_type_ptr = unsafe { &raw const (*self.as_ptr()).backend_type };
         // SAFETY: reads the initialized pointer through the live shared handle.
-        let value = unsafe { addr_of!((*self.as_ptr()).backend_type).read() };
+        let value = unsafe { backend_type_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -238,10 +261,14 @@ impl<'a, 'o> BackendMemoryOptionsRef<'a, 'o> {
 
     /// Unset means entries have no origin; empty and non-UTF-8 strings are valid.
     ///
-    /// Field: git_config_backend_memory_options.origin_path
+    /// Field: `git_config_backend_memory_options.origin_path`
+    #[must_use]
     pub fn origin_path(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let origin_path_ptr = unsafe { &raw const (*self.as_ptr()).origin_path };
         // SAFETY: reads the initialized pointer through the live shared handle.
-        let value = unsafe { addr_of!((*self.as_ptr()).origin_path).read() };
+        let value = unsafe { origin_path_ptr.read() };
         if value.is_null() {
             None
         } else {
@@ -273,15 +300,18 @@ impl fmt::Debug for BackendMemoryOptionsMut<'_, '_> {
     }
 }
 
-impl<'a, 'o> BackendMemoryOptionsMut<'a, 'o> {
+impl<'o> BackendMemoryOptionsMut<'_, 'o> {
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_backend_memory_options {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> BackendMemoryOptionsRef<'_, 'o> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> BackendMemoryOptionsMut<'_, 'o> {
         BackendMemoryOptionsMut(self.0, PhantomData)
     }
@@ -289,23 +319,32 @@ impl<'a, 'o> BackendMemoryOptionsMut<'a, 'o> {
     /// Sets the scalar version. C's memory backend constructors currently ignore
     /// it; normally leave this at the constructor's supported version.
     pub fn set_version(&mut self, version: u32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw mut (*self.as_mut_ptr()).version };
         // SAFETY: exclusive live handle permits writing this initialized scalar.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).version).write(version) };
+        unsafe { version_ptr.write(version) };
     }
 
     /// Replaces the stored immutable borrow; never frees either string.
     pub fn set_backend_type(&mut self, value: Option<&'o CStr>) {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let backend_type_ptr = unsafe { &raw mut (*self.as_mut_ptr()).backend_type };
         // SAFETY: exclusive live handle permits replacing the pointer; the new
         // referent is NUL-terminated and borrowed for the options' 'o.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).backend_type).write(value) };
+        unsafe { backend_type_ptr.write(value) };
     }
 
     /// Replaces the stored immutable borrow; never frees either string.
     pub fn set_origin_path(&mut self, value: Option<&'o CStr>) {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let origin_path_ptr = unsafe { &raw mut (*self.as_mut_ptr()).origin_path };
         // SAFETY: as set_backend_type, exclusive field access and borrow for 'o.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).origin_path).write(value) };
+        unsafe { origin_path_ptr.write(value) };
     }
 }
 
@@ -366,7 +405,7 @@ define_ctype!(
 /// The same C routine as [`EntryFree`](crate::libgit2::config::config::EntryFree),
 /// given the enclosing layout.
 ///
-/// Wraps: git_config_entry_free
+/// Wraps: `git_config_entry_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BackendEntryFree;
@@ -378,10 +417,12 @@ pub struct BackendEntryFree;
 unsafe impl CDrop<BackendEntry> for BackendEntryFree {
     unsafe fn c_drop(&self, ptr: NonNull<BackendEntry>) {
         let entry = ptr.as_ptr().cast::<ffi::git_config_backend_entry>();
-        // SAFETY: per `c_drop`'s contract, the caller gives up a live backend entry's
-        // reference; its public entry is the offset-zero inline field, so C's cast
-        // recovers this allocation.
-        unsafe { ffi::git_config_entry_free(addr_of_mut!((*entry).entry)) }
+        // SAFETY: per `c_drop`'s contract, `entry` addresses a live backend entry; the projection
+        // forms no reference to it.
+        let public = unsafe { &raw mut (*entry).entry };
+        // SAFETY: the caller gives up the entry's reference; its public entry is the offset-zero
+        // inline field, so C's cast recovers this allocation.
+        unsafe { ffi::git_config_entry_free(public) }
     }
 }
 
@@ -392,8 +433,11 @@ pub type BackendEntryArc = CArc<BackendEntry, BackendEntryFree>;
 /// `origin_path` and `include_depth`. libgit2 only hands them on to readers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EntryOrigin<'s> {
+    /// The kind of backend the entry came from: `"file"`, say.
     pub backend_type: Option<&'s CStr>,
+    /// The path of the file the entry came from.
     pub origin_path: Option<&'s CStr>,
+    /// How many includes deep the entry was read.
     pub include_depth: u32,
 }
 
@@ -425,6 +469,10 @@ impl BackendEntry {
     ///
     /// libgit2 compares names as given, so pass them normalized, as git stores them:
     /// section and key lowercased (`core.filemode`), the subsection as written.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a box is never NULL"
+    )]
     pub fn new(
         name: &CStr,
         value: Option<&CStr>,
@@ -465,6 +513,10 @@ impl BackendEntry {
     /// Promotes an acquired public entry to its full backend layout, without
     /// copying or acquiring another reference. `EntryArc`'s release contract
     /// already requires this larger allocation, unlike an arbitrary `EntryRef`.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: entry owner is non-null"
+    )]
     pub fn from_entry(entry: EntryArc) -> BackendEntryArc {
         let ptr = entry.into_c();
         // SAFETY: EntryArc owns an acquired backend entry reference (C's release
@@ -474,6 +526,10 @@ impl BackendEntry {
     }
 
     /// Returns the public-entry owner, transferring the same single reference.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: backend entry owner is non-null"
+    )]
     pub fn into_entry(entry: BackendEntryArc) -> EntryArc {
         let ptr = entry.into_c();
         // SAFETY: BackendEntryArc owns an acquired reference, and its first field
@@ -485,12 +541,19 @@ impl BackendEntry {
 impl<'a> BackendEntryRef<'a> {
     /// Shared view of the inline entry, kept alive by this backend-entry borrow.
     ///
-    /// Field: git_config_backend_entry.entry
+    /// Field: `git_config_backend_entry.entry`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: inline entry is non-null"
+    )]
     pub fn entry(&self) -> EntryRef<'a> {
-        // SAFETY: projects the initialized inline field, without forming a Rust
-        // reference to foreign storage. Its immutable strings live for 'a.
-        unsafe { EntryRef::from_ptr(addr_of!((*self.as_ptr()).entry).cast_mut()) }
-            .expect("inline entry is non-null")
+        // SAFETY: the shared handle's pointer addresses a live backend entry; the projection forms
+        // no reference to it.
+        let entry = unsafe { &raw const (*self.as_ptr()).entry };
+        // SAFETY: `entry` addresses the initialised inline field, whose immutable strings live for
+        // 'a.
+        unsafe { EntryRef::from_ptr(entry.cast_mut()) }.expect("inline entry is non-null")
     }
 
     /// The allocation-matched release strategy, not an unbound function pointer.
@@ -498,10 +561,19 @@ impl<'a> BackendEntryRef<'a> {
     /// cannot be freed. The strategy recovers the callback from the owner it is
     /// given, never from a different entry that supplied this token.
     ///
-    /// Field: git_config_backend_entry.free
+    /// Field: `git_config_backend_entry.free`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `backend entry lacks its release callback`, only if libgit2 breaks its
+    /// contract.
+    #[must_use]
     pub fn release_policy(&self) -> BackendEntryFree {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let free_ptr = unsafe { &raw const (*self.as_ptr()).free };
         // SAFETY: reads the initialized callback through the live shared handle.
-        let callback = unsafe { addr_of!((*self.as_ptr()).free).read() };
+        let callback = unsafe { free_ptr.read() };
         assert!(
             callback.is_some(),
             "backend entry lacks its release callback"
@@ -523,11 +595,17 @@ impl BackendEntryMut<'_> {
     ///     drop(other);
     /// }
     /// ```
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: inline entry is non-null"
+    )]
     pub fn entry_mut(&mut self) -> EntryMut<'_> {
-        // SAFETY: the exclusive parent borrow includes its inline field; the
-        // child cannot outlive this reborrow or alias another parent handle.
-        unsafe { EntryMut::from_ptr(addr_of_mut!((*self.as_mut_ptr()).entry)) }
-            .expect("inline entry is non-null")
+        // SAFETY: the exclusive handle's pointer addresses a live backend entry; the projection
+        // forms no reference to it.
+        let entry = unsafe { &raw mut (*self.as_mut_ptr()).entry };
+        // SAFETY: the exclusive parent borrow includes its inline field; the child cannot outlive
+        // this reborrow or alias another parent handle.
+        unsafe { EntryMut::from_ptr(entry) }.expect("inline entry is non-null")
     }
 }
 
@@ -632,7 +710,7 @@ impl fmt::Debug for BackendEntryMut<'_> {
 /// fn copy(iter: IteratorBox<'_>) { let _ = iter.clone(); }
 /// ```
 ///
-/// Wraps: git_config_iterator
+/// Wraps: `git_config_iterator`
 /// Handwritten
 #[repr(transparent)]
 pub struct Iterator<'c>(ffi::git_config_iterator, PhantomData<(*const (), &'c ())>);
@@ -667,7 +745,7 @@ unsafe impl<'c> CCell for Iterator<'c> {
 
 /// Stateless release dispatch, recovered from the allocation being released.
 ///
-/// Wraps: git_config_iterator_free
+/// Wraps: `git_config_iterator_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IteratorFree;
@@ -687,12 +765,19 @@ unsafe impl<'c> CDrop<Iterator<'c>> for IteratorFree {
 pub type IteratorBox<'c> = ffibox::CBox<Iterator<'c>, IteratorFree>;
 
 impl<'c> Iterator<'c> {
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field's address is not NULL"
+    )]
     pub fn as_ref(&self) -> IteratorRef<'_, 'c> {
         // SAFETY: initialized inline Rust-owned layout, borrowed for this call;
         // raw projection avoids forming a reference to any C-owned pointee.
-        unsafe { IteratorRef::from_ptr(addr_of!(self.0).cast_mut()) }.unwrap()
+        unsafe { IteratorRef::from_ptr((&raw const self.0).cast_mut()) }.unwrap()
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> IteratorMut<'_, 'c> {
         let p = NonNull::from(self);
         // SAFETY: exclusively borrowed initialized inline Rust-owned layout.
@@ -713,7 +798,7 @@ impl IteratorFree {
     }
 }
 
-impl<'a, 'c> IteratorRef<'a, 'c> {
+impl<'a> IteratorRef<'a, '_> {
     pub(crate) fn as_ptr(&self) -> *mut ffi::git_config_iterator {
         self.0.as_non_null().as_ptr().cast()
     }
@@ -721,7 +806,6 @@ impl<'a, 'c> IteratorRef<'a, 'c> {
     /// # Safety
     /// `p` is NULL or a complete initialized iterator with matching callbacks,
     /// live and unmodified for `'a`; its config/backend dependencies outlive `'c`.
-    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(p: *mut ffi::git_config_iterator) -> Option<Self> {
         // SAFETY: the contract supplies initialized live storage for 'a.
         NonNull::new(p.cast()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
@@ -729,54 +813,73 @@ impl<'a, 'c> IteratorRef<'a, 'c> {
 
     /// User/backend flags; libgit2's built-in iterators leave these zero.
     ///
-    /// Field: git_config_iterator.flags
+    /// Field: `git_config_iterator.flags`
+    #[must_use]
     pub fn flags(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw const (*self.as_ptr()).flags };
         // SAFETY: initialized scalar projected through a live shared handle.
-        unsafe { addr_of!((*self.as_ptr()).flags).read() }
+        unsafe { flags_ptr.read() }
     }
 
     /// Nullable borrowed backend, never an owner. Built-in iterators leave it
     /// NULL. The handle is tied to the iterator borrow and never owns the backend.
     ///
-    /// Field: git_config_iterator.backend
+    /// Field: `git_config_iterator.backend`
+    #[must_use]
     pub fn backend(&self) -> Option<BackendRef<'a>> {
-        // SAFETY: the iterator contract keeps its stored backend alive and unchanged
-        // for its dependency lifetime, which outlives this shared handle.
-        unsafe { BackendRef::from_ptr(addr_of!((*self.as_ptr()).backend).read()) }
+        // SAFETY: the shared handle's pointer addresses a live iterator; the projection forms no
+        // reference to it.
+        let backend_ptr = unsafe { &raw const (*self.as_ptr()).backend };
+        // SAFETY: reads the initialised field.
+        let backend = unsafe { backend_ptr.read() };
+        // SAFETY: the iterator contract keeps its stored backend alive and unchanged for its
+        // dependency lifetime, which outlives this shared handle.
+        unsafe { BackendRef::from_ptr(backend) }
     }
 
     /// Allocation-matched dispatch, not a detachable C function pointer. The
     /// callable always reads the callback of the mutable iterator it receives.
     ///
-    /// Field: git_config_iterator.next
+    /// Field: `git_config_iterator.next`
+    #[must_use]
     pub fn next_callback(&self) -> IteratorNext {
         IteratorNext
     }
 
     /// Stateless policy that recovers an owned iterator's own free callback.
     ///
-    /// Field: git_config_iterator.free
+    /// Field: `git_config_iterator.free`
+    #[must_use]
     pub fn release_policy(&self) -> IteratorFree {
         IteratorFree
     }
 }
 
-impl<'a, 'c> IteratorMut<'a, 'c> {
+impl<'c> IteratorMut<'_, 'c> {
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_iterator {
         self.0.as_ptr()
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> IteratorRef<'_, 'c> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> IteratorMut<'_, 'c> {
         IteratorMut(self.0, PhantomData)
     }
 
+    /// Sets the iterator's flags.
     pub fn set_flags(&mut self, flags: u32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw mut (*self.as_mut_ptr()).flags };
         // SAFETY: the exclusive handle grants writing this independent scalar.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(flags) }
+        unsafe { flags_ptr.write(flags) }
     }
 
     /// Replaces a stored backend borrow without freeing the old one. The lifetime
@@ -803,11 +906,16 @@ impl<'a, 'c> IteratorMut<'a, 'c> {
     /// ```
     pub unsafe fn set_backend(&mut self, backend: Option<BackendRef<'c>>) {
         let backend = backend.map_or(ptr::null_mut(), |b| b.as_ptr().cast_mut());
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let backend_ptr = unsafe { &raw mut (*self.as_mut_ptr()).backend };
         // SAFETY: exclusive access to the slot; the caller guarantees keepalive
         // and compatibility with the enclosing allocation's callbacks.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).backend).write(backend) }
+        unsafe { backend_ptr.write(backend) }
     }
 
+    /// # Errors
+    ///
     /// Advances the allocation's inline callback. `None` is C's ITEROVER; other
     /// errors preserve the code and copied thread-local error. A subsequent call
     /// after an error is allowed (C can proceed to a different backend).
@@ -823,17 +931,29 @@ pub struct IteratorNext;
 impl IteratorNext {
     /// The result is borrowed until this mutable reborrow ends: it cannot be
     /// kept across another call, released, or promoted to an acquired owner.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the code and copied error of the iterator's `next` callback, other than
+    /// `GIT_ITEROVER`, which is `Ok(None)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `iterator lacks next callback`, only if libgit2 breaks its contract.
     pub fn call<'a>(
         &self,
         iterator: &'a mut IteratorMut<'_, '_>,
     ) -> Result<Option<BackendEntryRef<'a>>, ConfigError> {
         let p = iterator.as_mut_ptr();
-        // SAFETY: reads the initialized callback from the complete live iterator.
-        let next = unsafe { addr_of!((*p).next).read() }.expect("iterator lacks next callback");
+        // SAFETY: `p` addresses the complete live iterator; the projection forms no reference to
+        // it.
+        let next_ptr = unsafe { &raw const (*p).next };
+        // SAFETY: reads the initialised callback.
+        let next = unsafe { next_ptr.read() }.expect("iterator lacks next callback");
         let mut entry = ptr::null_mut();
         // SAFETY: exclusive live iterator with its allocation-matched callback;
         // writable output slot, and no previously lent entry is still borrowed.
-        let rc = unsafe { next(&mut entry, p) };
+        let rc = unsafe { next(&raw mut entry, p) };
         if rc == ffi::GIT_ITEROVER {
             return Ok(None);
         }
@@ -856,15 +976,18 @@ pub(crate) mod value_filter {
     use ffibox::{CBox, impl_cdrop};
     use pcre2_sys as pcre;
 
-    use super::*;
+    use super::{
+        CStr, ConfigError, ErrorClass, Iterator, IteratorBox, PhantomData, define_ctype, ffi, ptr,
+        set,
+    };
     use crate::libgit2::util::sys::errors::set_oom;
 
     define_ctype!(Regex, RegexRef, RegexMut, pcre::pcre2_code_8);
     /// PCRE2's compiled-pattern releaser, recovered through ffibox.
     ///
-    /// Wraps: pcre2_code_free_8
+    /// Wraps: `pcre2_code_free_8`
     #[derive(Clone, Copy, Debug, Default)]
-    pub struct RegexFree;
+    pub(crate) struct RegexFree;
     impl_cdrop!(RegexFree, Regex, pcre::pcre2_code_free_8);
     type RegexBox = CBox<Regex, RegexFree>;
 
@@ -876,9 +999,9 @@ pub(crate) mod value_filter {
     );
     /// PCRE2's transient match-data releaser.
     ///
-    /// Wraps: pcre2_match_data_free_8
+    /// Wraps: `pcre2_match_data_free_8`
     #[derive(Clone, Copy, Debug, Default)]
-    pub struct MatchDataFree;
+    pub(crate) struct MatchDataFree;
     impl_cdrop!(MatchDataFree, MatchData, pcre::pcre2_match_data_free_8);
     type MatchDataBox = CBox<MatchData, MatchDataFree>;
 
@@ -893,8 +1016,8 @@ pub(crate) mod value_filter {
                 pattern.as_ptr().cast(),
                 pattern.to_bytes().len(),
                 0,
-                &mut error,
-                &mut offset,
+                &raw mut error,
+                &raw mut offset,
                 ptr::null_mut(),
             )
         };
@@ -954,10 +1077,10 @@ pub(crate) mod value_filter {
             out: *mut *mut ffi::git_config_backend_entry,
             iterator: *mut ffi::git_config_iterator,
         ) -> i32 {
-            // SAFETY: this callback belongs only to Filtered allocations; the caller
-            // gives exclusive access and C never retains a pointer to Rust's state.
-            // The reference covers Rust-owned state, not the C base or its pointees.
-            let state = unsafe { &mut *addr_of_mut!((*iterator.cast::<Self>()).state) };
+            // SAFETY: this callback belongs only to Filtered allocations; the caller gives
+            // exclusive access and C never retains a pointer to Rust's state. The reference covers
+            // Rust-owned state, not the C base or its pointees.
+            let state = unsafe { &mut (*iterator.cast::<Self>()).state };
             loop {
                 let mut m = state.inner.as_mut();
                 let entry = match m.advance() {
@@ -1037,7 +1160,7 @@ define_ctype!(
 
 /// Release dispatch selected by the allocation, not by another backend's vtable.
 ///
-/// Wraps: git_config_backend_free
+/// Wraps: `git_config_backend_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BackendFree;
@@ -1047,8 +1170,11 @@ pub struct BackendFree;
 unsafe impl CDrop<Backend> for BackendFree {
     unsafe fn c_drop(&self, p: NonNull<Backend>) {
         let p = p.as_ptr().cast::<ffi::git_config_backend>();
-        // SAFETY: the owned complete allocation has an initialized matching callback.
-        let free = unsafe { addr_of!((*p).free).read() }.expect("backend lacks free callback");
+        // SAFETY: `p` addresses the owned complete allocation; the projection forms no reference to
+        // it.
+        let free_ptr = unsafe { &raw const (*p).free };
+        // SAFETY: reads its initialised, matching callback.
+        let free = unsafe { free_ptr.read() }.expect("backend lacks free callback");
         // SAFETY: caller surrenders the sole owner and all borrowed dependencies live.
         unsafe { free(p) };
     }
@@ -1085,17 +1211,23 @@ pub type BackendBox = ffibox::CBox<Backend, BackendFree>;
 pub struct UnopenedBackend(BackendBox);
 
 /// Non-dereferenceable identity of C's registration back-pointer. It may be stale:
-/// open_level shares a backend and does not keep the original registering config
-/// alive. No C consumer reads this field. It is not an owned or live ConfigRef.
+/// `open_level` shares a backend and does not keep the original registering config
+/// alive. No C consumer reads this field. It is not an owned or live `ConfigRef`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackendConfigIdentity(NonNull<ffi::git_config>);
 
 impl Backend {
     /// Inert implementation template, not an opened enclosing backend allocation.
     /// Missing callbacks produce errors, never calls through NULL. No resource is
-    /// owned by this inline value and it must not be adopted as a BackendBox.
+    /// owned by this inline value and it must not be adopted as a `BackendBox`.
     ///
-    /// Wraps: git_config_init_backend
+    /// Wraps: `git_config_init_backend`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::uninit();
         // SAFETY: supported version initializes the entire exclusive output slot;
@@ -1178,7 +1310,7 @@ impl UnopenedBackend {
     /// fn send(backend: UnopenedBackend) { std::thread::spawn(move || drop(backend)); }
     /// ```
     ///
-    /// Wraps: git_config_init_backend
+    /// Wraps: `git_config_init_backend`
     pub fn new<B: CustomBackend>(backend: B) -> Self {
         Self(Custom::boxed(backend, false))
     }
@@ -1189,6 +1321,8 @@ impl UnopenedBackend {
         Self(Custom::boxed(backend, true))
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> BackendRef<'_> {
         self.0.as_ref()
     }
@@ -1197,26 +1331,37 @@ impl UnopenedBackend {
     /// ([`ConfigMut::add_backend`] lends one). Repository-retaining file constructors
     /// are not exposed by this phase type and require a lifetime-carrying owner when
     /// scheduled.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the code and copied error of the backend's `open` callback, or when the backend
+    /// has none.
     pub fn open(self, level: ConfigLevel) -> Result<BackendBox, ConfigError> {
         BackendOpen.call(self, level)
     }
 }
 
-impl<'a, 'r> ConfigMut<'a, 'r> {
+impl<'r> ConfigMut<'_, 'r> {
     /// Opens and transfers a backend into this configuration, optionally replacing
     /// the existing priority. The backend is consumed on failure too: C may already
     /// have opened it, so it cannot safely be returned to the construction phase.
     /// Successful registration is released by the config (or its last level view).
     ///
+    /// Wraps: `git_config_add_backend`
+    ///
+    /// # Errors
+    ///
     /// Priorities must be in `0..i32::MAX`, as with `add_file`. A repository, when
     /// supplied, stays borrowed for the configuration's `'r`.
     ///
-    /// Wraps: git_config_add_backend
+    /// Fails with [`ErrorCode::Invalid`] for a level outside `0..i32::MAX`, before calling C; with
+    /// [`ErrorCode::Exists`] when a backend already has that priority and `force` is false; and
+    /// with libgit2's code and error when the backend cannot be opened or registered.
     pub fn add_backend(
         &mut self,
         mut backend: UnopenedBackend,
         level: ConfigLevel,
-        repository: Option<crate::libgit2::repository::repository::RepositoryRef<'r>>,
+        repository: Option<RepositoryRef<'r>>,
         force: bool,
     ) -> Result<(), ConfigError> {
         if !(0..i32::MAX).contains(&level.raw()) {
@@ -1227,9 +1372,12 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
             return Err(ConfigError::from_libgit2(ffi::GIT_EINVALID));
         }
         let p = backend.0.as_mut().as_mut_ptr();
-        // SAFETY: the construction-phase owner has an initialized vtable. C calls
-        // open unconditionally, so reject a missing slot before entering it.
-        if unsafe { addr_of!((*p).open).read() }.is_none() {
+        // SAFETY: `p` addresses the construction-phase owner's allocation; the projection forms no
+        // reference to it.
+        let open_ptr = unsafe { &raw const (*p).open };
+        // SAFETY: reads its initialised vtable slot. C calls open unconditionally, so a missing
+        // slot is rejected before entering it.
+        if unsafe { open_ptr.read() }.is_none() {
             return Err(missing_slot("open"));
         }
         // SAFETY: config and backend are exclusive live allocations; the bounded
@@ -1259,14 +1407,23 @@ impl<'a, 'r> ConfigMut<'a, 'r> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BackendOpen;
 impl BackendOpen {
+    /// Calls the backend's `open` callback at `level`, without a repository.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the code and copied error of the backend's `open` callback, or when the backend
+    /// has none.
     pub fn call(
         &self,
         mut backend: UnopenedBackend,
         level: ConfigLevel,
     ) -> Result<BackendBox, ConfigError> {
         let p = backend.0.as_mut().as_mut_ptr();
-        // SAFETY: initialized allocation-specific vtable; missing slot is checked.
-        let open = unsafe { addr_of!((*p).open).read() }.ok_or_else(|| missing_slot("open"))?;
+        // SAFETY: `p` addresses the construction-phase owner's allocation; the projection forms no
+        // reference to it.
+        let open_ptr = unsafe { &raw const (*p).open };
+        // SAFETY: reads its initialised, allocation-specific vtable slot; a missing one is checked.
+        let open = unsafe { open_ptr.read() }.ok_or_else(|| missing_slot("open"))?;
         // SAFETY: construction phase owns the entire allocation exclusively; NULL
         // repo is supported, and only this consuming call can initialize it.
         backend_status(unsafe { open(p, level.raw(), ptr::null()) })?;
@@ -1275,49 +1432,66 @@ impl BackendOpen {
 }
 
 impl BackendFree {
+    /// Releases `backend` through its own `free` member.
     pub fn release(self, backend: BackendBox) {
         drop(backend);
     }
 }
 
 impl BackendRef<'_> {
-    /// Field: git_config_backend.version
+    /// Field: `git_config_backend.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw const (*self.as_ptr()).version };
         // SAFETY: initialized scalar under the shared handle.
-        unsafe { addr_of!((*self.as_ptr()).version).read() }
+        unsafe { version_ptr.read() }
     }
 
     /// C's integer flag, preserving noncanonical true values.
-    /// Field: git_config_backend.readonly
+    /// Field: `git_config_backend.readonly`
+    #[must_use]
     pub fn readonly_raw(&self) -> i32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let readonly_ptr = unsafe { &raw const (*self.as_ptr()).readonly };
         // SAFETY: initialized scalar under the shared handle.
-        unsafe { addr_of!((*self.as_ptr()).readonly).read() }
+        unsafe { readonly_ptr.read() }
     }
 
+    /// Whether the backend refuses writes.
+    #[must_use]
     pub fn is_readonly(&self) -> bool {
         self.readonly_raw() != 0
     }
 
     /// Identity only: registering configurations can die before shared backends.
-    /// Field: git_config_backend.cfg
+    /// Field: `git_config_backend.cfg`
     pub fn config_identity(&self) -> Option<BackendConfigIdentity> {
+        // SAFETY: the shared handle's pointer addresses a live backend; the projection forms no
+        // reference to it.
+        let cfg_ptr = unsafe { &raw const (*self.as_ptr()).cfg };
         // SAFETY: reads the pointer slot only, never its possibly stale referent.
-        NonNull::new(unsafe { addr_of!((*self.as_ptr()).cfg).read() }).map(BackendConfigIdentity)
+        NonNull::new(unsafe { cfg_ptr.read() }).map(BackendConfigIdentity)
     }
 
-    /// Field: git_config_backend.open
+    /// Field: `git_config_backend.open`
+    #[must_use]
     pub fn open_callback(&self) -> BackendOpen {
         BackendOpen
     }
 
-    /// Field: git_config_backend.free
+    /// Field: `git_config_backend.free`
+    #[must_use]
     pub fn release_policy(&self) -> BackendFree {
         BackendFree
     }
 
     /// A callable which can only consume a transaction, not unlock an unrelated
     /// backend or a borrowed allocation that has not been locked.
-    /// Field: git_config_backend.unlock
+    /// Field: `git_config_backend.unlock`
+    #[must_use]
     pub fn unlock_callback(&self) -> BackendUnlock {
         BackendUnlock
     }
@@ -1329,15 +1503,28 @@ impl BackendMut<'_> {
     /// file backend rereads a changed file first and reports a failed reread
     /// without writing an entry. Backends report a missing key as `GIT_ENOTFOUND`
     /// without an error, so the miss is described as `get_entry` describes it.
-    /// Field: git_config_backend.get
+    /// Field: `git_config_backend.get`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when the backend has no `key`, and with the backend's
+    /// code and copied error when it has no `get` callback, cannot reread its changed file, or
+    /// fails otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `backend get returned NULL`, only if libgit2 breaks its contract.
     pub fn get(&mut self, key: &CStr) -> Result<BackendEntryArc, ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let get_ptr = unsafe { &raw const (*p).get };
         // SAFETY: live initialized vtable; missing callback is checked.
-        let get = unsafe { addr_of!((*p).get).read() }.ok_or_else(|| missing_slot("get"))?;
+        let get = unsafe { get_ptr.read() }.ok_or_else(|| missing_slot("get"))?;
         let mut out = ptr::null_mut();
         // SAFETY: exclusive opened backend, readable key for this call, writable
         // out, which is read below only after the callback reports success.
-        let rc = unsafe { get(p, key.as_ptr(), &mut out) };
+        let rc = unsafe { get(p, key.as_ptr(), &raw mut out) };
         if rc == ffi::GIT_ENOTFOUND {
             return Err(not_found(key));
         }
@@ -1358,16 +1545,28 @@ impl BackendMut<'_> {
     /// }
     /// ```
     ///
-    /// Field: git_config_backend.iterator
+    /// Field: `git_config_backend.iterator`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `iterator` callback or cannot
+    /// build the iterator.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `backend iterator returned NULL`, only if libgit2 breaks its contract.
     pub fn iterator(&mut self) -> Result<IteratorBox<'_>, ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let iterator_ptr = unsafe { &raw const (*p).iterator };
         // SAFETY: initialized live vtable, with NULL checked.
-        let iterator = unsafe { addr_of!((*p).iterator).read() };
+        let iterator = unsafe { iterator_ptr.read() };
         let iterator = iterator.ok_or_else(|| missing_slot("iterator"))?;
         let mut out = ptr::null_mut();
         // SAFETY: exclusive opened backend, writable output; result retains its
         // own entries and any borrowed backend remains frozen for this reborrow.
-        backend_status(unsafe { iterator(&mut out, p) })?;
+        backend_status(unsafe { iterator(&raw mut out, p) })?;
         // SAFETY: fresh complete iterator with its own matched free callback;
         // backend dependencies cannot die or be mutated until this owner dies.
         Ok(unsafe { IteratorBox::from_c(out) }.expect("backend iterator returned NULL"))
@@ -1376,32 +1575,57 @@ impl BackendMut<'_> {
     /// Immediately opens the new snapshot while its source is still borrowed.
     /// The snapshot stores a source pointer used only during that one-time open;
     /// subsequent get/iterator/free operations never dereference it.
-    /// Field: git_config_backend.snapshot
+    /// Field: `git_config_backend.snapshot`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `snapshot` callback, or when
+    /// the snapshot cannot be made or opened.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `snapshot returned NULL`, only if libgit2 breaks its contract.
     pub fn snapshot(&mut self) -> Result<BackendBox, ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let snapshot_ptr = unsafe { &raw const (*p).snapshot };
         // SAFETY: initialized live allocation-specific callback.
-        let snapshot = unsafe { addr_of!((*p).snapshot).read() };
+        let snapshot = unsafe { snapshot_ptr.read() };
         let snapshot = snapshot.ok_or_else(|| missing_slot("snapshot"))?;
         let mut out = ptr::null_mut();
         // SAFETY: exclusive live source and writable output. C constructs a fresh
         // snapshot borrowing source only until its one-time open below completes.
-        backend_status(unsafe { snapshot(&mut out, p) })?;
+        backend_status(unsafe { snapshot(&raw mut out, p) })?;
         // SAFETY: success transfers a complete snapshot allocation and matching
         // free callback; self remains live through its synchronous initialization.
         let snapshot = unsafe { BackendBox::from_c(out) };
         UnopenedBackend(snapshot.expect("snapshot returned NULL")).open(ConfigLevel::LOCAL)
     }
 
-    /// Field: git_config_backend.set
+    /// Field: `git_config_backend.set`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `set` callback or refuses the
+    /// write: an invalid or read-only key, a locked file.
     pub fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let set_ptr = unsafe { &raw const (*p).set };
         // SAFETY: initialized matching vtable; absent callback is rejected.
-        let set = unsafe { addr_of!((*p).set).read() }.ok_or_else(|| missing_slot("set"))?;
+        let set = unsafe { set_ptr.read() }.ok_or_else(|| missing_slot("set"))?;
         // SAFETY: exclusive opened backend, C reads/copies strings within the call.
         backend_status(unsafe { set(p, key.as_ptr(), value.as_ptr()) })
     }
 
-    /// Field: git_config_backend.set_multivar
+    /// Field: `git_config_backend.set_multivar`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `set_multivar` callback or
+    /// refuses the write: an invalid key or pattern, a locked file.
     pub fn set_multivar(
         &mut self,
         key: &CStr,
@@ -1409,41 +1633,70 @@ impl BackendMut<'_> {
         value: &CStr,
     ) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let set_multivar_ptr = unsafe { &raw const (*p).set_multivar };
         // SAFETY: initialized matching vtable; absent callback is rejected.
-        let set = unsafe { addr_of!((*p).set_multivar).read() }
-            .ok_or_else(|| missing_slot("set_multivar"))?;
+        let set = unsafe { set_multivar_ptr.read() }.ok_or_else(|| missing_slot("set_multivar"))?;
         // SAFETY: exclusive opened backend; strings are readable for this call only.
         backend_status(unsafe { set(p, key.as_ptr(), regexp.as_ptr(), value.as_ptr()) })
     }
 
-    /// Field: git_config_backend.del
+    /// Field: `git_config_backend.del`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `del` callback, holds no such
+    /// key, or refuses the deletion.
     pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let del_ptr = unsafe { &raw const (*p).del };
         // SAFETY: initialized matching vtable; absent callback is rejected.
-        let delete = unsafe { addr_of!((*p).del).read() }.ok_or_else(|| missing_slot("del"))?;
+        let delete = unsafe { del_ptr.read() }.ok_or_else(|| missing_slot("del"))?;
         // SAFETY: exclusive opened backend; key is read only during this call.
         backend_status(unsafe { delete(p, key.as_ptr()) })
     }
 
-    /// Field: git_config_backend.del_multivar
+    /// Field: `git_config_backend.del_multivar`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `del_multivar` callback, holds
+    /// no matching value, or refuses the deletion.
     pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let del_multivar_ptr = unsafe { &raw const (*p).del_multivar };
         // SAFETY: initialized matching vtable; absent callback is rejected.
-        let delete = unsafe { addr_of!((*p).del_multivar).read() }
-            .ok_or_else(|| missing_slot("del_multivar"))?;
+        let delete =
+            unsafe { del_multivar_ptr.read() }.ok_or_else(|| missing_slot("del_multivar"))?;
         // SAFETY: exclusive opened backend; strings readable only for this call.
         backend_status(unsafe { delete(p, key.as_ptr(), regexp.as_ptr()) })
     }
 
     /// An exclusive transaction, not a mutex: file locks permit updates through
     /// the transaction and commit/rollback on finish. No Send/Sync is asserted.
-    /// Field: git_config_backend.lock
+    /// Field: `git_config_backend.lock`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when it has no `lock` or `unlock` callback,
+    /// or cannot take the lock.
     pub fn lock(&mut self) -> Result<BackendTransaction<'_>, ConfigError> {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let lock_ptr = unsafe { &raw const (*p).lock };
         // SAFETY: initialized matching callbacks; check unlock before acquiring.
-        let lock = unsafe { addr_of!((*p).lock).read() }.ok_or_else(|| missing_slot("lock"))?;
+        let lock = unsafe { lock_ptr.read() }.ok_or_else(|| missing_slot("lock"))?;
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let unlock_ptr = unsafe { &raw const (*p).unlock };
         // SAFETY: initialized matching callback under exclusive access.
-        let unlock = unsafe { addr_of!((*p).unlock).read() };
+        let unlock = unsafe { unlock_ptr.read() };
         let unlock = unlock.ok_or_else(|| missing_slot("unlock"))?;
         // SAFETY: exclusive backend, no nested transaction can survive this borrow.
         backend_status(unsafe { lock(p) })?;
@@ -1472,10 +1725,20 @@ pub struct BackendTransaction<'a> {
     unlock: Option<unsafe extern "C" fn(*mut ffi::git_config_backend, i32) -> i32>,
 }
 impl BackendTransaction<'_> {
+    /// Sets `key` to `value` within the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`BackendMut::set`] does.
     pub fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
         self.backend.set(key, value)
     }
 
+    /// Sets the values of the multivar `key` that match `regexp` within the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`BackendMut::set_multivar`] does.
     pub fn set_multivar(
         &mut self,
         key: &CStr,
@@ -1485,22 +1748,49 @@ impl BackendTransaction<'_> {
         self.backend.set_multivar(key, regexp, value)
     }
 
+    /// Deletes `key` within the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`BackendMut::delete`] does.
     pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
         self.backend.delete(key)
     }
 
+    /// Deletes the values of the multivar `key` that match `regexp` within the transaction.
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`BackendMut::delete_multivar`] does.
     pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         self.backend.delete_multivar(key, regexp)
     }
 
+    /// Ends the transaction, committing its writes when `commit` is true and rolling them back
+    /// otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when its `unlock` callback fails; the lock is
+    /// released either way.
     pub fn finish(self, commit: bool) -> Result<(), ConfigError> {
         BackendUnlock.call(self, commit)
     }
 }
 
+/// Ends a backend's transaction through its `unlock` member.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BackendUnlock;
 impl BackendUnlock {
+    /// Calls the transaction's `unlock` callback once, committing when `commit` is true.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and copied error when its `unlock` callback fails.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: transaction already finished"
+    )]
     pub fn call(
         &self,
         mut transaction: BackendTransaction<'_>,
@@ -1607,6 +1897,11 @@ pub trait CustomBackend: 'static {
 
     /// Prepares the store once, before any other call, for `level`. A repository is
     /// lent for the call when the registering caller supplied one.
+    ///
+    /// # Errors
+    ///
+    /// An error refuses the registration: [`ConfigMut::add_backend`] fails with it, and the store
+    /// is released.
     fn open(
         &mut self,
         level: ConfigLevel,
@@ -1646,31 +1941,59 @@ pub trait CustomBackend: 'static {
 
     /// The entries, for one walk. They must not borrow the store: the walk may outlive
     /// the call, while the store answers others.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the walk that asked for the entries.
     fn iterator(&mut self) -> Result<Self::Entries, ConfigError>;
 
     /// A read-only copy of the store, which libgit2 opens and reads independently. The
     /// result is marked read-only whichever constructor built it.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the snapshot that asked for the copy.
     fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError>;
 
     /// Sets `key` to `value`, replacing a single existing value.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the write; the default refuses every write, as
+    /// unimplemented.
     fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
         let _ = (key, value);
         Err(unimplemented_slot("set"))
     }
 
     /// Sets the values of the multivar `key` that match `regexp` to `value`.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the write; the default refuses every write, as
+    /// unimplemented.
     fn set_multivar(&mut self, key: &CStr, regexp: &CStr, value: &CStr) -> Result<(), ConfigError> {
         let _ = (key, regexp, value);
         Err(unimplemented_slot("set_multivar"))
     }
 
     /// Deletes the single value of `key`.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the deletion; the default refuses every deletion, as
+    /// unimplemented.
     fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
         let _ = key;
         Err(unimplemented_slot("del"))
     }
 
     /// Deletes the values of the multivar `key` that match `regexp`.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the deletion; the default refuses every deletion, as
+    /// unimplemented.
     fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         let _ = (key, regexp);
         Err(unimplemented_slot("del_multivar"))
@@ -1679,12 +2002,21 @@ pub trait CustomBackend: 'static {
     /// Begins a transaction: writes stay invisible to other readers until
     /// [`unlock`](Self::unlock) commits them. libgit2 unlocks only after a successful
     /// lock, so implement both or neither.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the lock; the default refuses it, as unimplemented.
     fn lock(&mut self) -> Result<(), ConfigError> {
         Err(unimplemented_slot("lock"))
     }
 
     /// Ends the transaction, committing its writes when `commit` is true and rolling
     /// them back otherwise.
+    ///
+    /// # Errors
+    ///
+    /// An error is reported as the failure of the transaction's end; the default refuses it, as
+    /// unimplemented.
     fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
         let _ = commit;
         Err(unimplemented_slot("unlock"))
@@ -1761,9 +2093,9 @@ impl<B> Entered<'_, B> {
     /// lives: only its `free` callback releases it, and that defers to the result.
     unsafe fn from_ptr(p: *mut ffi::git_config_backend) -> Option<Self> {
         let custom = NonNull::new(p.cast::<Custom<B>>())?;
-        // SAFETY: per this function's contract; the cell is Rust-owned and only ever
-        // reached through shared references.
-        let state = unsafe { &*addr_of!((*custom.as_ptr()).state) };
+        // SAFETY: per this function's contract `custom` addresses a live box; the cell is
+        // Rust-owned and only ever reached through shared references.
+        let state = unsafe { &(*custom.as_ptr()).state };
         if state.get() != Dispatch::Idle {
             return None;
         }
@@ -1775,9 +2107,9 @@ impl<B> Entered<'_, B> {
     }
 
     fn backend(&mut self) -> &mut B {
-        // SAFETY: the box is live (per `from_ptr`), and the `Running` state keeps every
-        // other callback away from the store until this value drops.
-        unsafe { &mut *addr_of_mut!((*self.custom.as_ptr()).backend) }
+        // SAFETY: the box is live (per `from_ptr`), and the `Running` state keeps every other
+        // callback away from the store until this value drops.
+        unsafe { &mut (*self.custom.as_ptr()).backend }
     }
 
     /// A lookup's answer, as handed to C. A read-only backend keeps the answer until
@@ -1787,22 +2119,23 @@ impl<B> Entered<'_, B> {
     /// such values (`git_signature_default`). Equal answers to a key share one entry.
     fn answer(&mut self, key: &CStr, entry: BackendEntryArc) -> BackendEntryArc {
         let custom = self.custom.as_ptr();
-        // SAFETY: the box is live; the flag is a scalar set before the backend opened.
-        if unsafe { addr_of!((*custom).base.readonly).read() } == 0 {
+        // SAFETY: the box is live; the projection forms no reference to it.
+        let readonly_ptr = unsafe { &raw const (*custom).base.readonly };
+        // SAFETY: the flag is a scalar set before the backend opened.
+        if unsafe { readonly_ptr.read() } == 0 {
             return entry;
         }
         // SAFETY: as in `backend`; the map is Rust-owned, apart from the store.
-        let kept = unsafe { &mut *addr_of_mut!((*custom).kept) };
+        let kept = unsafe { &mut (*custom).kept };
         let answers = kept.entry(key.to_owned()).or_default();
         let same =
             |k: &&Rc<BackendEntryArc>| same_entry(BackendEntryArc::as_ref(k), entry.as_ref());
-        let shared = match answers.iter().find(same) {
-            Some(kept) => kept.clone(),
-            None => {
-                let kept = Rc::new(entry);
-                answers.push(kept.clone());
-                kept
-            }
+        let shared = if let Some(kept) = answers.iter().find(same) {
+            kept.clone()
+        } else {
+            let kept = Rc::new(entry);
+            answers.push(kept.clone());
+            kept
         };
         SharedEntry::boxed(shared)
     }
@@ -1831,9 +2164,12 @@ struct SharedEntry {
 
 impl SharedEntry {
     fn boxed(entry: Rc<BackendEntryArc>) -> BackendEntryArc {
-        // SAFETY: a live entry, read through its shared handle; the copy's strings
-        // are the entry's, which the box keeps live through its `Rc`.
-        let public = unsafe { addr_of!((*entry.as_c_ptr()).entry).read() };
+        // SAFETY: a live entry, reached through its shared owner; the projection forms no reference
+        // to it.
+        let public_ptr = unsafe { &raw const (*entry.as_c_ptr()).entry };
+        // SAFETY: reads the initialised inline entry; the copy's strings are the entry's, which the
+        // box keeps live through its `Rc`.
+        let public = unsafe { public_ptr.read() };
         let shared = Box::new(Self {
             base: ffi::git_config_backend_entry {
                 entry: public,
@@ -1859,7 +2195,7 @@ impl<B> Drop for Entered<'_, B> {
     fn drop(&mut self) {
         let custom = self.custom.as_ptr();
         // SAFETY: the box is live while this value lives, per `from_ptr`.
-        let state = unsafe { &*addr_of!((*custom).state) };
+        let state = unsafe { &(*custom).state };
         if state.replace(Dispatch::Idle) == Dispatch::Released {
             // SAFETY: `free` ran during the callback and left this box, which nothing
             // refers to any more, to this value; the store borrow has ended.
@@ -1963,7 +2299,9 @@ impl<B: CustomBackend> Custom<B> {
             return null_argument().raise();
         }
         // SAFETY: non-NULL strings are NUL-terminated and live for the call.
-        let (key, value) = unsafe { (CStr::from_ptr(key), CStr::from_ptr(value)) };
+        let key = unsafe { CStr::from_ptr(key) };
+        // SAFETY: as above.
+        let value = unsafe { CStr::from_ptr(value) };
         // SAFETY: C calls this slot with the live backend it was installed on.
         let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
             return reentered().raise();
@@ -2014,7 +2352,9 @@ impl<B: CustomBackend> Custom<B> {
             return null_argument().raise();
         }
         // SAFETY: non-NULL strings are NUL-terminated and live for the call.
-        let (key, regexp) = unsafe { (CStr::from_ptr(key), CStr::from_ptr(regexp)) };
+        let key = unsafe { CStr::from_ptr(key) };
+        // SAFETY: as above.
+        let regexp = unsafe { CStr::from_ptr(regexp) };
         // SAFETY: C calls this slot with the live backend it was installed on.
         let Some(mut entered) = (unsafe { Entered::<B>::from_ptr(p) }) else {
             return reentered().raise();
@@ -2059,9 +2399,11 @@ impl<B: CustomBackend> Custom<B> {
         match entered.backend().snapshot() {
             Ok(UnopenedBackend(mut snapshot)) => {
                 let base = snapshot.as_mut().as_mut_ptr();
-                // SAFETY: the unopened snapshot is exclusively owned here, and its
-                // read-only flag is a plain scalar no callback has read yet.
-                unsafe { addr_of_mut!((*base).readonly).write(1) };
+                // SAFETY: the unopened snapshot is exclusively owned here; the projection forms no
+                // reference to it.
+                let readonly = unsafe { &raw mut (*base).readonly };
+                // SAFETY: its read-only flag is a plain scalar no callback has read yet.
+                unsafe { readonly.write(1) };
                 // SAFETY: as above; the caller takes the unopened allocation, opens
                 // it once and frees it through its own callback.
                 unsafe { out.write(snapshot.into_c()) };
@@ -2094,7 +2436,7 @@ impl<B: CustomBackend> Custom<B> {
     unsafe extern "C" fn free(p: *mut ffi::git_config_backend) {
         let custom = p.cast::<Self>();
         // SAFETY: C releases the live backend this slot was installed on, once.
-        let state = unsafe { &*addr_of!((*custom).state) };
+        let state = unsafe { &(*custom).state };
         if state.replace(Dispatch::Released) == Dispatch::Idle {
             // SAFETY: no callback runs on the box from `Custom::boxed`, whose owner gives
             // it up here; `Released` refuses any callback the store's drop reaches.
@@ -2109,6 +2451,10 @@ impl<B: CustomBackend> Custom<B> {
 ///
 /// Handwritten
 #[repr(C)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "the fields mirror the names of what they hold"
+)]
 struct Entries<I> {
     base: ffi::git_config_iterator,
     entries: Option<I>,
@@ -2142,11 +2488,11 @@ where
         iterator: *mut ffi::git_config_iterator,
     ) -> c_int {
         let this = iterator.cast::<Self>();
-        // SAFETY: C advances the live box this slot was installed on, one call at a
-        // time; its Rust-owned fields are reached only here and by `free`.
-        let entries = unsafe { &mut *addr_of_mut!((*this).entries) };
+        // SAFETY: C advances the live box this slot was installed on, one call at a time; its
+        // Rust-owned fields are reached only here and by `free`.
+        let entries = unsafe { &mut (*this).entries };
         // SAFETY: as above, for the field apart from `entries`.
-        let current = unsafe { &mut *addr_of_mut!((*this).current) };
+        let current = unsafe { &mut (*this).current };
         *current = None;
         match entries.as_mut().and_then(core::iter::Iterator::next) {
             Some(Ok(entry)) => {
@@ -2227,15 +2573,21 @@ mod unit_tests {
     #[test]
     fn layout_and_pointer_seams() {
         assert_eq!(
-            size_of::<BackendMemoryOptions>(),
+            size_of::<BackendMemoryOptions<'_>>(),
             size_of::<ffi::git_config_backend_memory_options>()
         );
         assert_eq!(
-            align_of::<BackendMemoryOptions>(),
+            align_of::<BackendMemoryOptions<'_>>(),
             align_of::<ffi::git_config_backend_memory_options>()
         );
-        assert_eq!(size_of::<BackendMemoryOptionsRef>(), size_of::<*const ()>());
-        assert_eq!(size_of::<BackendMemoryOptionsMut>(), size_of::<*mut ()>());
+        assert_eq!(
+            size_of::<BackendMemoryOptionsRef<'_, '_>>(),
+            size_of::<*const ()>()
+        );
+        assert_eq!(
+            size_of::<BackendMemoryOptionsMut<'_, '_>>(),
+            size_of::<*mut ()>()
+        );
         let options = fixture();
         let ptr = options.as_ref().as_ptr();
         // SAFETY: shared initialized fixture, both strings NULL, unchanged here.
@@ -2348,8 +2700,8 @@ mod unit_tests {
                 align_of::<BackendEntry>(),
                 align_of::<ffi::git_config_backend_entry>()
             );
-            assert_eq!(size_of::<BackendEntryRef>(), size_of::<*const ()>());
-            assert_eq!(size_of::<BackendEntryMut>(), size_of::<*mut ()>());
+            assert_eq!(size_of::<BackendEntryRef<'_>>(), size_of::<*const ()>());
+            assert_eq!(size_of::<BackendEntryMut<'_>>(), size_of::<*mut ()>());
             assert_eq!(
                 core::mem::offset_of!(ffi::git_config_backend_entry, entry),
                 0
@@ -2477,16 +2829,21 @@ mod unit_tests {
             p: *mut ffi::git_config_iterator,
         ) -> i32 {
             let p = p.cast::<Fixture>();
-            // SAFETY: our fixture always has its initialized base at offset zero;
-            // callback receives exclusive access, and out is a writable output slot.
-            unsafe {
-                let calls = addr_of_mut!((*p).calls);
-                let n = calls.read();
-                calls.write(n + 1);
+            {
+                // SAFETY: our fixture always has its initialized base at offset zero;
+                // callback receives exclusive access, and out is a writable output slot.
+                let calls = unsafe { &raw mut (*p).calls };
+                // SAFETY: as above.
+                let n = unsafe { calls.read() };
+                // SAFETY: as above.
+                unsafe { calls.write(n + 1) };
                 if n > 0 {
                     return ffi::GIT_ITEROVER;
                 }
-                out.write(addr_of_mut!((*p).entry));
+                // SAFETY: as above.
+                let entry_ptr = unsafe { &raw mut (*p).entry };
+                // SAFETY: as above.
+                unsafe { out.write(entry_ptr) };
             }
             0
         }
@@ -2512,13 +2869,16 @@ mod unit_tests {
 
         #[test]
         fn iterator_layout_and_borrowed_rust_callback() {
-            assert_eq!(size_of::<Iterator>(), size_of::<ffi::git_config_iterator>());
             assert_eq!(
-                align_of::<Iterator>(),
+                size_of::<Iterator<'_>>(),
+                size_of::<ffi::git_config_iterator>()
+            );
+            assert_eq!(
+                align_of::<Iterator<'_>>(),
                 align_of::<ffi::git_config_iterator>()
             );
-            assert_eq!(size_of::<IteratorRef>(), size_of::<*const ()>());
-            assert_eq!(size_of::<IteratorMut>(), size_of::<*mut ()>());
+            assert_eq!(size_of::<IteratorRef<'_, '_>>(), size_of::<*const ()>());
+            assert_eq!(size_of::<IteratorMut<'_, '_>>(), size_of::<*mut ()>());
             assert_eq!(core::mem::offset_of!(Fixture, base), 0);
             let mut value = fixture(Rc::new(Cell::new(0)));
             let p = NonNull::from(&mut value).cast::<Iterator<'static>>();
@@ -2633,8 +2993,8 @@ mod unit_tests {
         }
         unsafe fn state<'a>(p: *mut ffi::git_config_backend) -> &'a State {
             // SAFETY: mock callbacks are installed only on complete Mock Boxes. The
-            // reference covers the Rust-owned payload, not the projected C base.
-            unsafe { &*addr_of!((*p.cast::<Mock>()).state) }
+            // reference covers the Rust-owned payload, not the C base.
+            unsafe { &(*p.cast::<Mock>()).state }
         }
         unsafe extern "C" fn lock(p: *mut ffi::git_config_backend) -> i32 {
             // SAFETY: matched Mock callback, allocation live for this call.
@@ -2660,8 +3020,8 @@ mod unit_tests {
         }
         unsafe extern "C" fn set(
             p: *mut ffi::git_config_backend,
-            _key: *const core::ffi::c_char,
-            _value: *const core::ffi::c_char,
+            _key: *const c_char,
+            _value: *const c_char,
         ) -> i32 {
             // SAFETY: matched Mock callback, allocation live for this call.
             let s = unsafe { state(p) };
@@ -2670,24 +3030,21 @@ mod unit_tests {
         }
         unsafe extern "C" fn set_multivar(
             p: *mut ffi::git_config_backend,
-            key: *const core::ffi::c_char,
-            _regexp: *const core::ffi::c_char,
-            value: *const core::ffi::c_char,
+            key: *const c_char,
+            _regexp: *const c_char,
+            value: *const c_char,
         ) -> i32 {
             // SAFETY: forwards the same matched allocation and unused string inputs.
             unsafe { set(p, key, value) }
         }
-        unsafe extern "C" fn delete(
-            p: *mut ffi::git_config_backend,
-            key: *const core::ffi::c_char,
-        ) -> i32 {
+        unsafe extern "C" fn delete(p: *mut ffi::git_config_backend, key: *const c_char) -> i32 {
             // SAFETY: forwards the same matched allocation and unused key input.
             unsafe { set(p, key, ptr::null()) }
         }
         unsafe extern "C" fn delete_multivar(
             p: *mut ffi::git_config_backend,
-            key: *const core::ffi::c_char,
-            _regexp: *const core::ffi::c_char,
+            key: *const c_char,
+            _regexp: *const c_char,
         ) -> i32 {
             // SAFETY: forwards the same matched allocation and unused key input.
             unsafe { delete(p, key) }
@@ -2739,8 +3096,10 @@ mod unit_tests {
             let (mut owner, state) = fixture();
             // SAFETY: exclusive complete Mock fixture, its compatible construction
             // callback is installed before any open or registration is possible.
+            let as_mut_ptr_ptr = unsafe { &raw mut (*owner.as_mut().as_mut_ptr()).open };
+            // SAFETY: as above.
             unsafe {
-                addr_of_mut!((*owner.as_mut().as_mut_ptr()).open).write(Some(registration_open))
+                as_mut_ptr_ptr.write(Some(registration_open));
             };
             (UnopenedBackend(owner), state)
         }
@@ -2790,7 +3149,9 @@ mod unit_tests {
             assert_eq!(missing.frees.get(), 1);
             let (mut backend, bad_version) = pending();
             // SAFETY: fixture is uniquely owned; version refusal precedes dispatch.
-            unsafe { addr_of_mut!((*backend.0.as_mut().as_mut_ptr()).version).write(2) };
+            let as_mut_ptr_ptr = unsafe { &raw mut (*backend.0.as_mut().as_mut_ptr()).version };
+            // SAFETY: as above.
+            unsafe { as_mut_ptr_ptr.write(2) };
             assert!(
                 config
                     .as_mut()
@@ -2908,14 +3269,8 @@ mod unit_tests {
         }
         #[test]
         fn backend_rust_layout_and_stale_identity_are_not_dereferenced() {
-            assert_eq!(
-                core::mem::size_of::<Backend>(),
-                core::mem::size_of::<ffi::git_config_backend>()
-            );
-            assert_eq!(
-                core::mem::align_of::<Backend>(),
-                core::mem::align_of::<ffi::git_config_backend>()
-            );
+            assert_eq!(size_of::<Backend>(), size_of::<ffi::git_config_backend>());
+            assert_eq!(align_of::<Backend>(), align_of::<ffi::git_config_backend>());
             let config = NonNull::<ffi::git_config>::dangling().as_ptr();
             let mut backend = Backend(
                 ffi::git_config_backend {
@@ -2938,6 +3293,10 @@ mod unit_tests {
         }
         #[test]
         #[cfg_attr(miri, ignore = "error construction calls C")]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn backend_missing_slots_reject_before_ffi_dispatch() {
             let mut backend = Backend::default();
             assert_eq!(backend.as_ref().version(), ffi::GIT_CONFIG_BACKEND_VERSION);
@@ -2972,13 +3331,17 @@ mod unit_tests {
             let p = b.as_mut_ptr();
             // SAFETY: exclusive inert template; changing its scalar leaves every
             // field initialized and permits testing the absent read-only get slot.
-            unsafe { addr_of_mut!((*p).readonly).write(1) };
+            let readonly_ptr = unsafe { &raw mut (*p).readonly };
+            // SAFETY: as above.
+            unsafe { readonly_ptr.write(1) };
             assert!(b.get(c"a.b").is_err());
             let (mut backend, state) = fixture();
             let p = backend.as_mut().as_mut_ptr();
             // SAFETY: exclusive mock fixture, no lock held; remove unlock to check
             // rejection before the otherwise valid lock callback can mutate state.
-            unsafe { addr_of_mut!((*p).unlock).write(None) };
+            let unlock_ptr = unsafe { &raw mut (*p).unlock };
+            // SAFETY: as above.
+            unsafe { unlock_ptr.write(None) };
             let error = backend.as_mut().lock().unwrap_err();
             assert_eq!(
                 error.message(),
@@ -3054,22 +3417,38 @@ mod unit_tests {
                 let mut snapshot = ptr::null_mut();
                 // SAFETY: `p` is this store's own live backend, its slots the
                 // trampolines, called with valid strings and writable slots.
+                let value2 = unsafe { Custom::<Self>::open(p, 1, ptr::null()) };
+                // SAFETY: as above.
+                let value3 = unsafe { Custom::<Self>::get(p, c"a.b".as_ptr(), &raw mut entry) };
+                // SAFETY: as above.
+                let value4 = unsafe { Custom::<Self>::set(p, c"a.b".as_ptr(), c"v".as_ptr()) };
+                // SAFETY: as above.
+                let value5 = unsafe {
+                    Custom::<Self>::set_multivar(p, c"a.b".as_ptr(), c".".as_ptr(), c"v".as_ptr())
+                };
+                // SAFETY: as above.
+                let value6 = unsafe { Custom::<Self>::delete(p, c"a.b".as_ptr()) };
+                // SAFETY: as above.
+                let value7 =
+                    unsafe { Custom::<Self>::delete_multivar(p, c"a.b".as_ptr(), c".".as_ptr()) };
+                // SAFETY: as above.
+                let value8 = unsafe { Custom::<Self>::iterator(&raw mut iter, p) };
+                // SAFETY: as above.
+                let value9 = unsafe { Custom::<Self>::snapshot(&raw mut snapshot, p) };
+                // SAFETY: as above.
+                let value10 = unsafe { Custom::<Self>::lock(p) };
+                // SAFETY: as above.
                 let codes = unsafe {
                     [
-                        Custom::<Self>::open(p, 1, ptr::null()),
-                        Custom::<Self>::get(p, c"a.b".as_ptr(), &mut entry),
-                        Custom::<Self>::set(p, c"a.b".as_ptr(), c"v".as_ptr()),
-                        Custom::<Self>::set_multivar(
-                            p,
-                            c"a.b".as_ptr(),
-                            c".".as_ptr(),
-                            c"v".as_ptr(),
-                        ),
-                        Custom::<Self>::delete(p, c"a.b".as_ptr()),
-                        Custom::<Self>::delete_multivar(p, c"a.b".as_ptr(), c".".as_ptr()),
-                        Custom::<Self>::iterator(&mut iter, p),
-                        Custom::<Self>::snapshot(&mut snapshot, p),
-                        Custom::<Self>::lock(p),
+                        value2,
+                        value3,
+                        value4,
+                        value5,
+                        value6,
+                        value7,
+                        value8,
+                        value9,
+                        value10,
                         Custom::<Self>::unlock(p, 1),
                     ]
                 };
@@ -3273,13 +3652,24 @@ mod unit_tests {
             let mut entry = ptr::without_provenance_mut(1);
             // SAFETY: the live probe backend, called as C never does: with NULL
             // strings; the out slot is writable.
+            let value = unsafe { Custom::<Probe>::get(p, null, &raw mut entry) };
+            // SAFETY: as above.
+            let value2 = unsafe { Custom::<Probe>::set(p, null, c"v".as_ptr()) };
+            // SAFETY: as above.
+            let value3 = unsafe { Custom::<Probe>::set(p, c"a.b".as_ptr(), null) };
+            // SAFETY: as above.
+            let value4 =
+                unsafe { Custom::<Probe>::set_multivar(p, c"a.b".as_ptr(), null, c"v".as_ptr()) };
+            // SAFETY: as above.
+            let value5 = unsafe { Custom::<Probe>::delete(p, null) };
+            // SAFETY: as above.
             let codes = unsafe {
                 [
-                    Custom::<Probe>::get(p, null, &mut entry),
-                    Custom::<Probe>::set(p, null, c"v".as_ptr()),
-                    Custom::<Probe>::set(p, c"a.b".as_ptr(), null),
-                    Custom::<Probe>::set_multivar(p, c"a.b".as_ptr(), null, c"v".as_ptr()),
-                    Custom::<Probe>::delete(p, null),
+                    value,
+                    value2,
+                    value3,
+                    value4,
+                    value5,
                     Custom::<Probe>::delete_multivar(p, c"a.b".as_ptr(), null),
                 ]
             };
@@ -3339,7 +3729,7 @@ mod unit_tests {
             assert_eq!(slot(b.snapshot().map(drop)), "no snapshot");
             // The store's miss sets no error; `get` describes it as `get_entry` does,
             // with the key's bytes as given.
-            crate::libgit2::util::sys::errors::set(ErrorClass::Odb, c"earlier");
+            set(ErrorClass::Odb, c"earlier");
             let missing = b.get(c"a.b").unwrap_err();
             assert_eq!(missing.code(), Some(ErrorCode::NotFound));
             assert_eq!(missing.message(), c"config value 'a.b' was not found");

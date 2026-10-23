@@ -7,7 +7,7 @@
 //! Retaining a generated patch must borrow the diff exclusively for the patch's
 //! lifetime, or consume the box into a shared owner: C patches can update deltas.
 //! The retained parse context still contains input cursors, but no public operation
-//! or destructor dereferences them after parsing (patch_parse.c).
+//! or destructor dereferences them after parsing (`patch_parse.c`).
 //! No wrapper here is `Send` or `Sync`; the atomic refcount does not protect deltas.
 //!
 //! Deltas are read-only output records, allocated/freed by their diff or patch;
@@ -47,26 +47,38 @@ impl DiffError {
         }
     }
 
+    /// libgit2's raw return code.
+    #[must_use]
     pub fn raw_code(&self) -> i32 {
         self.code
     }
 
+    /// The return code, as a named [`ErrorCode`] when libgit2 names it.
+    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
 
+    /// The thread's libgit2 error, copied when the call failed.
+    #[must_use]
     pub fn error(&self) -> &ErrorBuf {
         &self.error
     }
 
+    /// The error's class, when libgit2 names it.
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         self.error.class()
     }
 
+    /// The error's raw class.
+    #[must_use]
     pub fn raw_class(&self) -> i32 {
         self.error.raw_class()
     }
 
+    /// The error's message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         self.error.message()
     }
@@ -94,7 +106,7 @@ impl std::error::Error for DiffError {}
 /// sync::<DiffRef<'static, 'static>>();
 /// ```
 ///
-/// Wraps: git_diff
+/// Wraps: `git_diff`
 /// Handwritten
 #[repr(transparent)]
 pub struct Diff<'r>(ffi::git_diff, PhantomData<(*const (), &'r ())>);
@@ -124,12 +136,18 @@ unsafe impl<'r> CCell for Diff<'r> {
         Self: 'a;
 }
 
-impl<'a, 'r> DiffRef<'a, 'r> {
+impl<'a> DiffRef<'a, '_> {
     /// # Safety
     /// A non-null pointer must be a live, initialized diff for `'a`, with its
     /// repository and retained option referents live for `'r`. Nothing may mutate
     /// or release the diff or its deltas during `'a`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(p: *const ffi::git_diff) -> Option<Self> {
         NonNull::new(p.cast_mut()).map(|p| {
             // SAFETY: caller establishes the lifetime and shared access contract.
@@ -142,44 +160,65 @@ impl<'a, 'r> DiffRef<'a, 'r> {
     }
 
     /// Number of deltas (including unmodified entries if requested).
-    /// Wraps: git_diff_num_deltas
+    /// Wraps: `git_diff_num_deltas`
+    #[must_use]
     pub fn len(&self) -> usize {
         // SAFETY: the handle keeps an initialized, unmodified diff alive.
         unsafe { ffi::git_diff_num_deltas(self.as_ptr()) }
     }
 
+    /// Whether the diff holds no delta.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// A delta borrowed from this diff, or None when the index is out of bounds.
-    /// Wraps: git_diff_get_delta
+    /// Wraps: `git_diff_get_delta`
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<DiffDeltaRef<'a>> {
         // SAFETY: C bounds-checks index; a returned delta and its paths are kept
         // alive and unmodified by the diff borrow for 'a.
-        unsafe { DiffDeltaRef::from_ptr(ffi::git_diff_get_delta(self.as_ptr(), index).cast_mut()) }
+        let diff_get_delta = unsafe { ffi::git_diff_get_delta(self.as_ptr(), index) };
+        // SAFETY: as above.
+        unsafe { DiffDeltaRef::from_ptr(diff_get_delta.cast_mut()) }
     }
 }
 
-impl<'a, 'r> DiffMut<'a, 'r> {
+impl<'r> DiffMut<'_, 'r> {
     /// # Safety
-    /// Same validity/keepalive as DiffRef::from_ptr; additionally access must be
+    /// Same validity/keepalive as `DiffRef::from_ptr`; additionally access must be
     /// exclusive for 'a, including every C-held reference and generated patch.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(p: *mut ffi::git_diff) -> Option<Self> {
         // SAFETY: the caller promises validity and exclusivity.
         unsafe { DiffRef::from_ptr(p) }.map(|p| Self(p, PhantomData))
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_diff {
         self.0.as_ptr().cast_mut()
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> DiffRef<'_, 'r> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> DiffMut<'_, 'r> {
         DiffMut(self.0, PhantomData)
     }
@@ -187,7 +226,7 @@ impl<'a, 'r> DiffMut<'a, 'r> {
 
 /// Releases a counted reference, dispatching to C's generated/parsed destructor.
 /// No public routine can clone or retain a diff independently.
-/// Wraps: git_diff_free
+/// Wraps: `git_diff_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DiffFree;
@@ -227,9 +266,14 @@ pub type DiffBox<'r> = CBox<Diff<'r>, DiffFree>;
 pub type DiffArc<'r> = CArc<Diff<'r>, DiffFree>;
 
 impl Diff<'static> {
-    /// Parse Git patch bytes; paths, hunk lines and binary data are copied by C.
-    /// Empty input is an empty diff. Non-Git unified diffs are rejected by C.
-    /// Wraps: git_diff_from_buffer
+    /// Parse Git patch bytes; paths, hunk lines and binary data are copied by C. Empty input is an
+    /// empty diff.
+    ///
+    /// # Errors
+    ///
+    /// Non-Git unified diffs are rejected by C. Wraps: `git_diff_from_buffer`
+    ///
+    /// Fails, as well, with libgit2's error when it cannot be initialised.
     pub fn from_buffer(content: &[u8]) -> Result<DiffBox<'static>, DiffError> {
         if !runtime_pinned() {
             return Err(DiffError::from_libgit2(-1));
@@ -238,14 +282,18 @@ impl Diff<'static> {
         // SAFETY: content is readable for its length, including the non-null empty
         // slice; out is writable. C copies the data used after parsing; retained
         // input cursors are never dereferenced again (see the module docs).
-        let rc = unsafe { ffi::git_diff_from_buffer(&mut out, data, content.len()) };
+        let rc = unsafe { ffi::git_diff_from_buffer(&raw mut out, data, content.len()) };
         // SAFETY: successful parsing hands out a fresh sole reference with no repository,
         // released by DiffFree; every failure leaves `out` NULL (adopted as None).
         constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
     /// Parse with an explicit object-id type (the entire parse-options surface).
-    /// Wraps: git_diff_from_buffer_ext
+    /// Wraps: `git_diff_from_buffer_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`from_buffer`](Self::from_buffer) does.
     pub fn from_buffer_with_oid_type(
         content: &[u8],
         kind: OidType,
@@ -262,10 +310,10 @@ impl Diff<'static> {
         // the retained parse cursor is never dereferenced after parsing finishes.
         let rc = unsafe {
             ffi::git_diff_from_buffer_ext(
-                &mut out,
+                &raw mut out,
                 content.as_ptr().cast(),
                 content.len(),
-                &mut opts,
+                &raw mut opts,
             )
         };
         // SAFETY: successful parsing hands out a fresh sole reference with no repository,
@@ -277,7 +325,7 @@ impl Diff<'static> {
 /// The diff a constructor returning `rc` handed out, or its error with the exact code.
 /// Every constructor leaves its output NULL whenever it returns nonzero, including a
 /// progress callback's positive code, so a failure adopts nothing.
-fn constructed<'r>(rc: i32, diff: Option<DiffBox<'r>>) -> Result<DiffBox<'r>, DiffError> {
+fn constructed(rc: i32, diff: Option<DiffBox<'_>>) -> Result<DiffBox<'_>, DiffError> {
     if rc != 0 {
         return Err(DiffError::from_libgit2(rc));
     }
@@ -287,7 +335,12 @@ fn constructed<'r>(rc: i32, diff: Option<DiffBox<'r>>) -> Result<DiffBox<'r>, Di
 impl<'r> Diff<'r> {
     /// Compare two trees; None denotes the empty tree on either side.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_tree_to_tree
+    /// Wraps: `git_diff_tree_to_tree`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when an object cannot be read from the object database,
+    /// or when it runs out of memory.
     pub fn tree_to_tree(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -299,7 +352,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_tree_to_tree(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
                 new.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
@@ -313,7 +366,12 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree (None is empty) to an index (None loads the repository index).
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_tree_to_index
+    /// Wraps: `git_diff_tree_to_index`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when the repository's index cannot be loaded, an object
+    /// cannot be read, or it runs out of memory.
     pub fn tree_to_index(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -325,7 +383,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_tree_to_index(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
                 index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut()),
@@ -339,7 +397,12 @@ impl<'r> Diff<'r> {
 
     /// Compare an index (None loads the repository index) to the working directory.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_index_to_workdir
+    /// Wraps: `git_diff_index_to_workdir`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for a bare repository, when the repository's index
+    /// cannot be loaded, a file cannot be read or filtered, or it runs out of memory.
     pub fn index_to_workdir(
         repo: RepositoryRef<'r>,
         index: Option<IndexRef<'_>>,
@@ -350,7 +413,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_index_to_workdir(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut()),
                 ptr::null(),
@@ -363,7 +426,12 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree (None is empty) directly to the working directory.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_tree_to_workdir
+    /// Wraps: `git_diff_tree_to_workdir`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for a bare repository, when an object or a file cannot
+    /// be read, or when it runs out of memory.
     pub fn tree_to_workdir(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -374,7 +442,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_tree_to_workdir(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
                 ptr::null(),
@@ -387,7 +455,12 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree to the working directory, accounting for staged changes.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_tree_to_workdir_with_index
+    /// Wraps: `git_diff_tree_to_workdir_with_index`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error for a bare repository, when the repository's index
+    /// cannot be loaded, an object or a file cannot be read, or it runs out of memory.
     pub fn tree_to_workdir_with_index(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -398,7 +471,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_tree_to_workdir_with_index(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
                 ptr::null(),
@@ -411,7 +484,12 @@ impl<'r> Diff<'r> {
 
     /// Compare two indices. A repository is required by this C revision.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: git_diff_index_to_index
+    /// Wraps: `git_diff_index_to_index`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's code and error when an object cannot be read, or when it runs out of
+    /// memory.
     pub fn index_to_index(
         repo: RepositoryRef<'r>,
         old: IndexRef<'_>,
@@ -423,7 +501,7 @@ impl<'r> Diff<'r> {
         // and retains no input handle. NULL options selects callback-free defaults.
         let rc = unsafe {
             ffi::git_diff_index_to_index(
-                &mut out,
+                &raw mut out,
                 repo.as_ptr().cast_mut(),
                 old.as_ptr().cast_mut(),
                 new.as_ptr().cast_mut(),
@@ -447,46 +525,74 @@ define_ctype!(
 );
 
 impl<'a> DiffDeltaRef<'a> {
-    /// Field: git_diff_delta.status
+    /// Field: `git_diff_delta.status`
+    #[must_use]
     pub fn status(&self) -> ffi::git_delta_t {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let status_ptr = unsafe { &raw const (*self.as_ptr()).status };
         // SAFETY: initialized scalar projected from a live, unmodified delta.
-        unsafe { addr_of!((*self.as_ptr()).status).read() }
+        unsafe { status_ptr.read() }
     }
 
-    /// Field: git_diff_delta.flags
+    /// Field: `git_diff_delta.flags`
+    #[must_use]
     pub fn flags(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw const (*self.as_ptr()).flags };
         // SAFETY: initialized scalar projected from a live, unmodified delta.
-        unsafe { addr_of!((*self.as_ptr()).flags).read() }
+        unsafe { flags_ptr.read() }
     }
 
-    /// Field: git_diff_delta.similarity
+    /// Field: `git_diff_delta.similarity`
+    #[must_use]
     pub fn similarity(&self) -> u16 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let similarity_ptr = unsafe { &raw const (*self.as_ptr()).similarity };
         // SAFETY: initialized scalar projected from a live, unmodified delta.
-        unsafe { addr_of!((*self.as_ptr()).similarity).read() }
+        unsafe { similarity_ptr.read() }
     }
 
-    /// Field: git_diff_delta.nfiles
+    /// Field: `git_diff_delta.nfiles`
+    #[must_use]
     pub fn nfiles(&self) -> u16 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let nfiles_ptr = unsafe { &raw const (*self.as_ptr()).nfiles };
         // SAFETY: initialized scalar projected from a live, unmodified delta.
-        unsafe { addr_of!((*self.as_ptr()).nfiles).read() }
+        unsafe { nfiles_ptr.read() }
     }
 
     /// Shared projection of the embedded file, kept alive by the delta borrow.
-    /// Field: git_diff_delta.old_file
+    /// Field: `git_diff_delta.old_file`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an embedded field is non-null"
+    )]
     pub fn old_file(&self) -> DiffFileRef<'a> {
         // SAFETY: the embedded initialized file and its path are live and
         // unmodified for the parent delta borrow; no reference covers C storage.
-        unsafe { DiffFileRef::from_ptr(addr_of!((*self.as_ptr()).old_file).cast_mut()) }
-            .expect("an embedded field is non-null")
+        let value = unsafe { addr_of!((*self.as_ptr()).old_file) };
+        // SAFETY: as above.
+        unsafe { DiffFileRef::from_ptr(value.cast_mut()) }.expect("an embedded field is non-null")
     }
 
     /// Shared projection of the embedded file, kept alive by the delta borrow.
-    /// Field: git_diff_delta.new_file
+    /// Field: `git_diff_delta.new_file`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an embedded field is non-null"
+    )]
     pub fn new_file(&self) -> DiffFileRef<'a> {
         // SAFETY: the embedded initialized file and its path are live and
         // unmodified for the parent delta borrow; no reference covers C storage.
-        unsafe { DiffFileRef::from_ptr(addr_of!((*self.as_ptr()).new_file).cast_mut()) }
-            .expect("an embedded field is non-null")
+        let value = unsafe { addr_of!((*self.as_ptr()).new_file) };
+        // SAFETY: as above.
+        unsafe { DiffFileRef::from_ptr(value.cast_mut()) }.expect("an embedded field is non-null")
     }
 }
 
@@ -502,74 +608,118 @@ define_ctype!(
 );
 impl<'a> DiffFileRef<'a> {
     /// The path, if present. It belongs to the parent's pool/patch, not this field.
-    /// Field: git_diff_file.path
+    /// Field: `git_diff_file.path`
+    #[must_use]
     pub fn path(&self) -> Option<&'a CStr> {
-        // SAFETY: a live initialized file; the path is null or a NUL-terminated
-        // immutable string kept alive by the parent for 'a.
-        unsafe {
-            let path = addr_of!((*self.as_ptr()).path).read();
-            if path.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(path))
+        {
+            // SAFETY: a live initialized file; the path is null or a NUL-terminated
+            // immutable string kept alive by the parent for 'a.
+            let value = unsafe { addr_of!((*self.as_ptr()).path) };
+            // SAFETY: as above.
+            let path = unsafe { value.read() };
+            // SAFETY: as above.
+            unsafe {
+                if path.is_null() {
+                    None
+                } else {
+                    Some(CStr::from_ptr(path))
+                }
             }
         }
     }
 
-    /// Field: git_diff_file.id
+    /// Field: `git_diff_file.id`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an embedded field is non-null"
+    )]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: initialized inline oid, live and unwritten for the parent's borrow.
-        unsafe { OidRef::from_ptr(addr_of!((*self.as_ptr()).id).cast_mut()) }
-            .expect("an embedded field is non-null")
+        let value = unsafe { addr_of!((*self.as_ptr()).id) };
+        // SAFETY: as above.
+        unsafe { OidRef::from_ptr(value.cast_mut()) }.expect("an embedded field is non-null")
     }
 
-    /// Field: git_diff_file.size
+    /// Field: `git_diff_file.size`
+    #[must_use]
     pub fn size(&self) -> u64 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let size_ptr = unsafe { &raw const (*self.as_ptr()).size };
         // SAFETY: initialized scalar projected from a live, unmodified file.
-        unsafe { addr_of!((*self.as_ptr()).size).read() }
+        unsafe { size_ptr.read() }
     }
 
-    /// Field: git_diff_file.flags
+    /// Field: `git_diff_file.flags`
+    #[must_use]
     pub fn flags(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw const (*self.as_ptr()).flags };
         // SAFETY: initialized scalar projected from a live, unmodified file.
-        unsafe { addr_of!((*self.as_ptr()).flags).read() }
+        unsafe { flags_ptr.read() }
     }
 
-    /// Field: git_diff_file.mode
+    /// Field: `git_diff_file.mode`
+    #[must_use]
     pub fn mode(&self) -> u16 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let mode_ptr = unsafe { &raw const (*self.as_ptr()).mode };
         // SAFETY: initialized scalar projected from a live, unmodified file.
-        unsafe { addr_of!((*self.as_ptr()).mode).read() }
+        unsafe { mode_ptr.read() }
     }
 
-    /// Field: git_diff_file.id_abbrev
+    /// Field: `git_diff_file.id_abbrev`
+    #[must_use]
     pub fn id_abbrev(&self) -> u16 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let id_abbrev_ptr = unsafe { &raw const (*self.as_ptr()).id_abbrev };
         // SAFETY: initialized scalar projected from a live, unmodified file.
-        unsafe { addr_of!((*self.as_ptr()).id_abbrev).read() }
+        unsafe { id_abbrev_ptr.read() }
     }
 }
 
 /// Inputs to the six C diff generators. These handles are borrowed only for the
 /// construction call, even when raw options are used.
 pub enum DiffInputs<'a, 't> {
+    /// Two trees, as [`Diff::tree_to_tree`] compares them.
     Trees {
+        /// The old tree; `None` is the empty tree.
         old: Option<TreeRef<'a, 't>>,
+        /// The new tree; `None` is the empty tree.
         new: Option<TreeRef<'a, 't>>,
     },
+    /// A tree and an index, as [`Diff::tree_to_index`] compares them.
     TreeToIndex {
+        /// The old tree; `None` is the empty tree.
         old: Option<TreeRef<'a, 't>>,
+        /// The index; `None` loads the repository's.
         index: Option<IndexRef<'a>>,
     },
+    /// An index and the working directory, as [`Diff::index_to_workdir`] compares them.
     IndexToWorkdir {
+        /// The index; `None` loads the repository's.
         index: Option<IndexRef<'a>>,
     },
+    /// A tree and the working directory, as [`Diff::tree_to_workdir`] compares them.
     TreeToWorkdir {
+        /// The old tree; `None` is the empty tree.
         old: Option<TreeRef<'a, 't>>,
     },
+    /// A tree and the working directory with its staged changes, as
+    /// [`Diff::tree_to_workdir_with_index`] compares them.
     TreeToWorkdirWithIndex {
+        /// The old tree; `None` is the empty tree.
         old: Option<TreeRef<'a, 't>>,
     },
+    /// Two indices, as [`Diff::index_to_index`] compares them.
     Indices {
+        /// The old index.
         old: IndexRef<'a>,
+        /// The new index.
         new: IndexRef<'a>,
     },
 }
@@ -578,8 +728,14 @@ impl<'r> Diff<'r> {
     /// Generate with nondefault options, pending the higher-layer options/callback
     /// wrappers. Prefer the six safe default constructors when possible.
     ///
+    /// # Errors
+    ///
+    /// Fails with code `-1` and a `GIT_ERROR_INVALID` error for the checked inputs the Safety
+    /// section names, and otherwise as the safe constructors fail, with a callback's own code when
+    /// a callback stops the diff.
+    ///
     /// # Safety
-    /// All nested pointers must satisfy git_diff_options: pathspec is a readable
+    /// All nested pointers must satisfy `git_diff_options`: pathspec is a readable
     /// array of its stated count, every string is NUL-terminated, callbacks and
     /// payload match each other. Their referents must remain valid for `'r` (C copies
     /// the options into the diff). Callbacks must not unwind, mutate/free input
@@ -598,7 +754,15 @@ impl<'r> Diff<'r> {
     /// progress callback could also have returned (`(error = f(...) < 0)` in
     /// `diff_generate.c`).
     ///
-    /// This is a temporary raw seam for the unavailable git_diff_options wrapper.
+    /// This is a temporary raw seam for the unavailable `git_diff_options` wrapper.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a formatted number has no NUL"
+    )]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the helper consumes what it reports, as its callers hand it over"
+    )]
     pub unsafe fn generate_with_options(
         repo: RepositoryRef<'r>,
         inputs: DiffInputs<'_, '_>,
@@ -606,7 +770,7 @@ impl<'r> Diff<'r> {
     ) -> Result<DiffBox<'r>, DiffError> {
         if !(1..=ffi::GIT_DIFF_OPTIONS_VERSION).contains(&options.version) {
             // libgit2 formats the unsigned version with `%d`.
-            let version = options.version as i32;
+            let version = options.version.cast_signed();
             let message = format!("invalid version {version} on git_diff_options");
             set(
                 ErrorClass::Invalid,
@@ -621,52 +785,44 @@ impl<'r> Diff<'r> {
             return Err(DiffError::from_libgit2(-1));
         }
         let mut out = ptr::null_mut();
-        // SAFETY: handles keep all input objects alive for the call and repo for
-        // 'r. The caller guarantees nested option validity and callback discipline.
-        // Each generator copies entries/paths and returns a sole owned reference.
-        let rc = unsafe {
-            match inputs {
-                DiffInputs::Trees { old, new } => ffi::git_diff_tree_to_tree(
-                    &mut out,
-                    repo.as_ptr().cast_mut(),
-                    old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
-                    new.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
-                    options,
-                ),
-                DiffInputs::TreeToIndex { old, index } => ffi::git_diff_tree_to_index(
-                    &mut out,
-                    repo.as_ptr().cast_mut(),
-                    old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
-                    index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut()),
-                    options,
-                ),
-                DiffInputs::IndexToWorkdir { index } => ffi::git_diff_index_to_workdir(
-                    &mut out,
-                    repo.as_ptr().cast_mut(),
-                    index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut()),
-                    options,
-                ),
-                DiffInputs::TreeToWorkdir { old } => ffi::git_diff_tree_to_workdir(
-                    &mut out,
-                    repo.as_ptr().cast_mut(),
-                    old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
-                    options,
-                ),
-                DiffInputs::TreeToWorkdirWithIndex { old } => {
-                    ffi::git_diff_tree_to_workdir_with_index(
-                        &mut out,
-                        repo.as_ptr().cast_mut(),
-                        old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut()),
-                        options,
-                    )
+        // Handles keep all input objects alive for the call and repo for 'r. The caller
+        // guarantees nested option validity and callback discipline. Each generator copies
+        // entries/paths and returns a sole owned reference.
+        let raw_repo = repo.as_ptr().cast_mut();
+        let rc = match inputs {
+            DiffInputs::Trees { old, new } => {
+                let old = old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
+                let new = new.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
+                // SAFETY: as above, for two trees or NULL.
+                unsafe { ffi::git_diff_tree_to_tree(&raw mut out, raw_repo, old, new, options) }
+            }
+            DiffInputs::TreeToIndex { old, index } => {
+                let old = old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
+                let index = index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut());
+                // SAFETY: as above, for a tree or NULL and an index or NULL.
+                unsafe { ffi::git_diff_tree_to_index(&raw mut out, raw_repo, old, index, options) }
+            }
+            DiffInputs::IndexToWorkdir { index } => {
+                let index = index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut());
+                // SAFETY: as above, for an index or NULL.
+                unsafe { ffi::git_diff_index_to_workdir(&raw mut out, raw_repo, index, options) }
+            }
+            DiffInputs::TreeToWorkdir { old } => {
+                let old = old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
+                // SAFETY: as above, for a tree or NULL.
+                unsafe { ffi::git_diff_tree_to_workdir(&raw mut out, raw_repo, old, options) }
+            }
+            DiffInputs::TreeToWorkdirWithIndex { old } => {
+                let old = old.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
+                // SAFETY: as above, for a tree or NULL.
+                unsafe {
+                    ffi::git_diff_tree_to_workdir_with_index(&raw mut out, raw_repo, old, options)
                 }
-                DiffInputs::Indices { old, new } => ffi::git_diff_index_to_index(
-                    &mut out,
-                    repo.as_ptr().cast_mut(),
-                    old.as_ptr().cast_mut(),
-                    new.as_ptr().cast_mut(),
-                    options,
-                ),
+            }
+            DiffInputs::Indices { old, new } => {
+                let (old, new) = (old.as_ptr().cast_mut(), new.as_ptr().cast_mut());
+                // SAFETY: as above, for two indices.
+                unsafe { ffi::git_diff_index_to_index(&raw mut out, raw_repo, old, new, options) }
             }
         };
         // SAFETY: success yields a sole reference with repo and option referents
@@ -711,10 +867,10 @@ mod unit_tests {
         let error = Diff::from_buffer(b"not a patch").err().unwrap();
         let copy = error.clone();
         assert_eq!(copy, error);
-        assert_eq!(error.code().map(|code| code.raw()), Some(error.raw_code()));
+        assert_eq!(error.code().map(ErrorCode::raw), Some(error.raw_code()));
         assert_eq!(error.class(), error.error().class());
         assert!(error.to_string().contains("diff error"));
-        assert!(!format!("{error:?}").is_empty());
+        assert_ne!(format!("{error:?}"), "");
         let boxed: Box<dyn std::error::Error> = Box::new(error);
         assert!(boxed.source().is_none());
     }
@@ -729,7 +885,7 @@ mod unit_tests {
         use crate::libgit2::repository::repository::Repository;
         let dir =
             std::env::temp_dir().join(format!("crustify-diff-version-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let repo = Repository::init(&CString::new(dir.to_str().unwrap()).unwrap(), false).unwrap();
         let index = Index::new().unwrap();
         let mut opts = ffi::git_diff_options::default();
@@ -740,11 +896,11 @@ mod unit_tests {
             // the version before reading any other field of the options.
             let rc = unsafe {
                 ffi::git_diff_tree_to_tree(
-                    &mut out,
+                    &raw mut out,
                     repo.as_ref().as_ptr().cast_mut(),
                     ptr::null_mut(),
                     ptr::null_mut(),
-                    &opts,
+                    &raw const opts,
                 )
             };
             assert_eq!((rc, out), (-1, ptr::null_mut()));
@@ -768,13 +924,17 @@ mod unit_tests {
             }
         }
         drop(repo);
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
     }
 
     /// Without a libgit2 runtime both parsers fail before calling C. The runtime is
     /// made to fail in a fresh process, whose first allocation request is refused.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2 and spawns a child")]
+    #[expect(
+        clippy::items_after_statements,
+        reason = "each helper item sits beside the steps that use it"
+    )]
     fn parsers_refuse_without_a_runtime() {
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
         const CHILD: &str = "CRUSTIFY_DIFF_NO_RUNTIME_CHILD";
@@ -812,7 +972,7 @@ mod unit_tests {
             unsafe fn free(_: NonNull<u8>) {}
         }
         let allocator = Allocator::new::<Refusing>();
-        let option = ffi::GIT_OPT_SET_ALLOCATOR as core::ffi::c_int;
+        let option = ffi::GIT_OPT_SET_ALLOCATOR.cast_signed();
         // SAFETY: this fresh process has never initialised libgit2, and no other
         // thread runs; C copies the valid allocator table.
         let rc = unsafe { ffi::git_libgit2_opts(option, allocator.as_ref().as_ptr()) };
@@ -842,7 +1002,7 @@ mod unit_tests {
         };
         raw.old_file.path = c"old".as_ptr();
         raw.old_file.size = u64::MAX;
-        raw.old_file.mode = 0o100644;
+        raw.old_file.mode = 0o100_644;
         raw.old_file.id_abbrev = 7;
         raw.old_file.flags = 5;
         // SAFETY: initialized stack record, with a static path. The exclusive
@@ -857,7 +1017,7 @@ mod unit_tests {
         let f = d.old_file();
         assert_eq!(f.path(), Some(c"old"));
         assert_eq!(f.size(), u64::MAX);
-        assert_eq!((f.flags(), f.mode(), f.id_abbrev()), (5, 0o100644, 7));
+        assert_eq!((f.flags(), f.mode(), f.id_abbrev()), (5, 0o100_644, 7));
         assert_eq!(f.id().id(), [0; 32]);
         assert!(d.new_file().path().is_none());
         // SAFETY: null is expressly accepted by borrowed-handle construction.

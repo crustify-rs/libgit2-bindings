@@ -31,7 +31,7 @@
 //! A libgit2 defect, on both sides alike: when a filter's `initialize` fails,
 //! `git_filter_list__load` leaves its loop without freeing the attribute values it read
 //! for the filter (`filter.c`, the `break` after `filter_initialize`), so every such load
-//! leaks them; [`failing_initialize`] runs with LeakSanitizer off.
+//! leaks them; [`failing_initialize`] runs with `LeakSanitizer` off.
 //!
 //! Every test runs its loads alone in a child process, so that no other module's raw
 //! first loads race with them (see `filter.rs`'s module docs).
@@ -123,7 +123,12 @@ unsafe extern "C" fn refuse_check(
     _values: *mut *const c_char,
 ) -> c_int {
     // SAFETY: a NUL-terminated message, which libgit2 copies; the runtime is initialised.
-    unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_FILTER as c_int, c"refused by check".as_ptr()) };
+    unsafe {
+        ffi::git_error_set_str(
+            ffi::GIT_ERROR_FILTER.cast_signed(),
+            c"refused by check".as_ptr(),
+        )
+    };
     ffi::GIT_EUSER
 }
 
@@ -133,7 +138,7 @@ unsafe extern "C" fn refuse_initialize(_filter: *mut ffi::git_filter) -> c_int {
     // SAFETY: as in `refuse_check`.
     unsafe {
         ffi::git_error_set_str(
-            ffi::GIT_ERROR_FILTER as c_int,
+            ffi::GIT_ERROR_FILTER.cast_signed(),
             c"cannot initialise".as_ptr(),
         )
     };
@@ -188,7 +193,7 @@ fn setup() {
         assert!(!list.is_null());
         // SAFETY: the fresh list, released once.
         unsafe { ffi::git_filter_list_free(list) };
-        let _ = take_seen();
+        drop(take_seen());
     });
 }
 
@@ -215,7 +220,7 @@ impl Workdir {
             "crustify-filter-equiv-{}-{tag}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
         let repo = Repository::init(&c_path, false).unwrap();
         let raw = repo.as_c_ptr();
@@ -228,52 +233,79 @@ impl Workdir {
             update_ref: c"HEAD".as_ptr(),
             ..Default::default()
         };
-        // The commit's tree is built directly, so the index stays empty and only
-        // `HEAD` (or the commit, by id) has these attributes.
-        // SAFETY: writable slots, the live repository, live buffers and NUL-terminated
-        // strings; every object is freed once.
-        unsafe {
-            let rc = ffi::git_blob_create_from_buffer(
-                &mut blob,
-                raw,
-                attributes.as_ptr().cast(),
-                attributes.len(),
-            );
+        {
+            // The commit's tree is built directly, so the index stays empty and only
+            // `HEAD` (or the commit, by id) has these attributes.
+            // SAFETY: writable slots, the live repository, live buffers and NUL-terminated
+            // strings; every object is freed once.
+            let rc = unsafe {
+                ffi::git_blob_create_from_buffer(
+                    &raw mut blob,
+                    raw,
+                    attributes.as_ptr().cast(),
+                    attributes.len(),
+                )
+            };
             assert_eq!(rc, 0);
-            assert_eq!(ffi::git_treebuilder_new(&mut builder, raw, ptr::null()), 0);
-            let rc = ffi::git_treebuilder_insert(
-                ptr::null_mut(),
-                builder,
-                c".gitattributes".as_ptr(),
-                &blob,
-                ffi::GIT_FILEMODE_BLOB,
-            );
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_treebuilder_new(&raw mut builder, raw, ptr::null()),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            let rc = unsafe {
+                ffi::git_treebuilder_insert(
+                    ptr::null_mut(),
+                    builder,
+                    c".gitattributes".as_ptr(),
+                    &raw const blob,
+                    ffi::GIT_FILEMODE_BLOB,
+                )
+            };
             assert_eq!(rc, 0);
-            assert_eq!(ffi::git_treebuilder_write(&mut tree_id, builder), 0);
-            ffi::git_treebuilder_free(builder);
-            assert_eq!(ffi::git_tree_lookup(&mut tree, raw, &tree_id), 0);
-            let rc = ffi::git_signature_new(
-                &mut who,
-                c"A".as_ptr(),
-                c"a@example.com".as_ptr(),
-                1_700_000_000,
-                0,
-            );
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut tree_id, builder), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_treebuilder_free(builder) };
+            // SAFETY: as above.
+            unsafe {
+                assert_eq!(
+                    ffi::git_tree_lookup(&raw mut tree, raw, &raw const tree_id),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            let rc = unsafe {
+                ffi::git_signature_new(
+                    &raw mut who,
+                    c"A".as_ptr(),
+                    c"a@example.com".as_ptr(),
+                    1_700_000_000,
+                    0,
+                )
+            };
             assert_eq!(rc, 0);
-            let rc = ffi::git_commit_create_ext(
-                &mut head,
-                raw,
-                who,
-                who,
-                c"attributes\n".as_ptr(),
-                tree,
-                0,
-                ptr::null(),
-                &opts,
-            );
+            // SAFETY: as above.
+            let rc = unsafe {
+                ffi::git_commit_create_ext(
+                    &raw mut head,
+                    raw,
+                    who,
+                    who,
+                    c"attributes\n".as_ptr(),
+                    tree,
+                    0,
+                    ptr::null(),
+                    &raw const opts,
+                )
+            };
             assert_eq!(rc, 0);
-            ffi::git_tree_free(tree);
-            ffi::git_signature_free(who);
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(tree) };
+            // SAFETY: as above.
+            unsafe { ffi::git_signature_free(who) };
         }
         std::fs::write(
             path.join(".gitattributes"),
@@ -303,7 +335,7 @@ impl Workdir {
         // SAFETY: a writable id, the live repository and `content`, read for the call.
         let rc = unsafe {
             ffi::git_blob_create_from_buffer(
-                &mut id,
+                &raw mut id,
                 self.raw(),
                 content.as_ptr().cast(),
                 content.len(),
@@ -318,7 +350,7 @@ impl Workdir {
         let id = self.write_blob(content);
         let mut blob = ptr::null_mut();
         // SAFETY: a writable slot, the live repository and a live id of its type.
-        let rc = unsafe { ffi::git_blob_lookup(&mut blob, self.raw(), &id) };
+        let rc = unsafe { ffi::git_blob_lookup(&raw mut blob, self.raw(), &raw const id) };
         assert_eq!(rc, 0);
         NonNull::new(blob).unwrap()
     }
@@ -334,7 +366,7 @@ impl Workdir {
 impl Drop for Workdir {
     fn drop(&mut self) {
         drop(self.repo.take());
-        let _ = std::fs::remove_dir_all(&self.path);
+        drop(std::fs::remove_dir_all(&self.path));
     }
 }
 
@@ -347,13 +379,22 @@ fn free_blob(blob: NonNull<ffi::git_blob>) {
 type Reported = (c_int, CString);
 
 fn c_last() -> Reported {
-    // SAFETY: the runtime is initialised; the error is copied before any other call.
-    unsafe {
-        let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+    {
+        // SAFETY: the runtime is initialised; the error is copied before any other call.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { (klass, CStr::from_ptr(message2).to_owned()) }
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the helper consumes what it reports, as its callers hand it over"
+)]
 fn rust_error(e: ErrorBuf) -> Reported {
     (e.raw_class(), e.message().to_owned())
 }
@@ -369,9 +410,11 @@ enum Built {
 /// The list's shape: its length and whether it holds `crlf`, `ident`, the probe.
 fn shape(list: *mut ffi::git_filter_list) -> Built {
     // SAFETY: a live list, only read; NUL-terminated names.
+    let filter_list_length = unsafe { ffi::git_filter_list_length(list) };
+    // SAFETY: as above.
     unsafe {
         Built::List {
-            len: ffi::git_filter_list_length(list),
+            len: filter_list_length,
             holds: [c"crlf", c"ident", c"crustify-probe"]
                 .map(|name| ffi::git_filter_list_contains(list, name.as_ptr())),
         }
@@ -383,7 +426,7 @@ fn apply(list: *mut ffi::git_filter_list, data: &[u8]) -> Result<Vec<u8>, Report
     let mut out = ffi::git_buf::default();
     // SAFETY: a zeroed buffer, a NULL or live list, used by this call alone, and `data`.
     let rc = unsafe {
-        ffi::git_filter_list_apply_to_buffer(&mut out, list, data.as_ptr().cast(), data.len())
+        ffi::git_filter_list_apply_to_buffer(&raw mut out, list, data.as_ptr().cast(), data.len())
     };
     let result = if rc < 0 {
         Err(c_last())
@@ -392,7 +435,7 @@ fn apply(list: *mut ffi::git_filter_list, data: &[u8]) -> Result<Vec<u8>, Report
         Ok(unsafe { std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size) }.to_vec())
     };
     // SAFETY: the buffer, released once.
-    unsafe { ffi::git_buf_dispose(&mut out) };
+    unsafe { ffi::git_buf_dispose(&raw mut out) };
     result
 }
 
@@ -417,16 +460,19 @@ fn c_load(
 ) -> (*mut ffi::git_filter_list, Built) {
     let mut list = ptr::null_mut();
     let blob = blob.map_or(ptr::null_mut(), NonNull::as_ptr);
-    // SAFETY: a writable slot; the live repository and blob (or NULL); a NUL-terminated
-    // path; NULL or live options, only copied.
-    let rc = unsafe {
-        match opts {
-            Opts::Flags(flags) => {
-                ffi::git_filter_list_load(&mut list, repo, blob, path.as_ptr(), mode, flags)
+    let rc = match opts {
+        Opts::Flags(flags) => {
+            // SAFETY: a writable slot; the live repository and blob (or NULL); a NUL-terminated
+            // path; NULL or live options, only copied.
+            unsafe {
+                ffi::git_filter_list_load(&raw mut list, repo, blob, path.as_ptr(), mode, flags)
             }
-            Opts::Ext(o) => {
-                let o = o.map_or(ptr::null_mut(), |o| ptr::from_ref(o).cast_mut());
-                ffi::git_filter_list_load_ext(&mut list, repo, blob, path.as_ptr(), mode, o)
+        }
+        Opts::Ext(o) => {
+            let o = o.map_or(ptr::null_mut(), |o| ptr::from_ref(o).cast_mut());
+            // SAFETY: as above.
+            unsafe {
+                ffi::git_filter_list_load_ext(&raw mut list, repo, blob, path.as_ptr(), mode, o)
             }
         }
     };
@@ -466,6 +512,10 @@ fn rust_load<'r>(
 }
 
 /// Runs one case on both sides and compares every step.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "the closure lets each handle reborrow for its own lifetime, which the method path cannot"
+)]
 fn compare(
     c: &Workdir,
     r: &Workdir,
@@ -482,7 +532,7 @@ fn compare(
     };
     let (c_list, c_built) = c_load(c.raw(), c_blob, path, mode, opts);
     let c_seen = take_seen();
-    let (mut r_list, r_built) = rust_load(r, r_blob.as_ref().map(|b| b.as_ref()), path, mode, opts);
+    let (mut r_list, r_built) = rust_load(r, r_blob.as_ref().map(|x| x.as_ref()), path, mode, opts);
     let r_seen = take_seen();
     c_blob.into_iter().for_each(free_blob);
     drop(r_blob);
@@ -622,7 +672,7 @@ fn with_blob() {
 /// A filter whose `initialize` fails fails every load that selects it, with its error,
 /// and libgit2 discards the list it had started (`ident` joined it first). libgit2 leaks
 /// the attribute values it read for the filter on each (see the module docs), hence
-/// LeakSanitizer off in the child.
+/// `LeakSanitizer` off in the child.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn failing_initialize() {
@@ -633,7 +683,7 @@ fn failing_initialize() {
         let (list, built) = c_load(c.raw(), None, c"a.uninit", 0, Opts::Flags(0));
         assert!(list.is_null());
         let expect = (
-            ffi::GIT_ERROR_FILTER as c_int,
+            ffi::GIT_ERROR_FILTER.cast_signed(),
             c"cannot initialise".to_owned(),
         );
         assert_eq!(built, Built::Failed(expect));
@@ -676,7 +726,7 @@ fn new() {
             for flags in [0, ffi::GIT_FILTER_ALLOW_UNSAFE, u32::MAX] {
                 let mut c_list = ptr::null_mut();
                 // SAFETY: a writable slot and the live repository.
-                let rc = unsafe { ffi::git_filter_list_new(&mut c_list, c.raw(), mode, flags) };
+                let rc = unsafe { ffi::git_filter_list_new(&raw mut c_list, c.raw(), mode, flags) };
                 assert_eq!(rc, 0);
                 let r_list = FilterList::new(r.box_().as_ref(), mode, flags).unwrap();
                 assert_eq!(shape(c_list), shape(r_list.as_c_ptr()));

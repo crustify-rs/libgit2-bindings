@@ -84,7 +84,7 @@ fn construction_copy_and_release_sequences() {
         let mut raw = ptr::null_mut();
         // SAFETY: initialized runtime; valid input pointers only read during the
         // call, and writable output slot. This result owns a separate C allocation.
-        let rc = unsafe { ffi::git_pathspec_new(&mut raw, &input) };
+        let rc = unsafe { ffi::git_pathspec_new(&raw mut raw, &raw const input) };
         assert_eq!(safe_result.is_ok(), rc == 0);
         let mut safe = safe_result.unwrap();
         drop(view);
@@ -183,7 +183,8 @@ fn slash_only_patterns_compile_to_nothing() {
         };
         // SAFETY: initialized runtime; the input is read during the call only; the
         // output slot is writable and receives an independent pathspec.
-        assert_eq!(unsafe { ffi::git_pathspec_new(&mut raw, &input) }, 0);
+        let ret = unsafe { ffi::git_pathspec_new(&raw mut raw, &raw const input) };
+        assert_eq!(ret, 0);
         for flags in [PathspecFlags::DEFAULT, PathspecFlags::IGNORE_CASE] {
             let safe_result = safe.as_ref().matches_path(flags, path);
             assert_eq!(safe_result, raw_matches(raw, flags, path));
@@ -227,7 +228,8 @@ fn matching_across_retaining_list_sequence() {
     let mut raw = ptr::null_mut();
     // SAFETY: initialized runtime (the safe constructor ran); valid input pointers
     // only read during the call; writable output slot for an independent pathspec.
-    assert_eq!(unsafe { ffi::git_pathspec_new(&mut raw, &input) }, 0);
+    let ret = unsafe { ffi::git_pathspec_new(&raw mut raw, &raw const input) };
+    assert_eq!(ret, 0);
     let compare = |step: &str| {
         for flags in flag_sets {
             for path in paths {
@@ -249,7 +251,7 @@ fn matching_across_retaining_list_sequence() {
     // list takes its own counted reference to `raw`.
     let rc = unsafe {
         ffi::git_pathspec_match_index(
-            &mut raw_list,
+            &raw mut raw_list,
             raw_index.as_c_ptr(),
             PathspecFlags::FIND_FAILURES.bits(),
             raw,

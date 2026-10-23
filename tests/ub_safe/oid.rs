@@ -2,7 +2,7 @@
 //!
 //! `OidType` is a fieldless enum over C's `git_oid_t`. The only safe way in from a
 //! raw value is `from_raw` / `try_from`, which must reject every value without a
-//! variant rather than produce an invalid discriminant (which Miri and UBSan would
+//! variant rather than produce an invalid discriminant (which Miri and `UBSan` would
 //! flag on the next read); an `as` cast to it does not compile (`compile_fail/`). Its
 //! sizes index a `git_oid`'s id, so they must stay within `GIT_OID_MAX_SIZE` and its
 //! hex form. None of them calls libgit2, so they also run under Miri.
@@ -16,7 +16,7 @@
 //! `_tostr_s`) and `OidShortenerMut::add` (`git_oid_shorten_add`), whose shortener keeps
 //! pointers into the ids it is given.
 //!
-//! Inputs and outputs sit in exact-length heap buffers, so ASan flags any access
+//! Inputs and outputs sit in exact-length heap buffers, so `ASan` flags any access
 //! libgit2 makes past them.
 
 use std::cmp::Ordering;
@@ -33,7 +33,7 @@ use libgit2::libgit2::util::errors::ErrorClass;
 use crate::fixture::isolated;
 
 /// Every value around the declared ones and `git_oid.type`'s byte boundary, then a
-/// coarse stride across the whole type; BorrowSanitizer instruments each comparison,
+/// coarse stride across the whole type; `BorrowSanitizer` instruments each comparison,
 /// so the probe set stays small.
 fn probes() -> impl Iterator<Item = ffi::git_oid_t> {
     (0..=300)
@@ -49,10 +49,13 @@ fn from_raw_yields_only_valid_types() {
         if let Some(ty) = OidType::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(ty.raw(), raw);
-            assert!(!format!("{ty:?}").is_empty());
+            assert_ne!(format!("{ty:?}"), "");
             seen.insert(ty);
         } else {
-            assert_eq!(OidType::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                OidType::try_from(raw).map_err(libgit2::libgit2::oid::oid::UnnamedOidType::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 2);
@@ -64,7 +67,7 @@ fn option_niche_holds_for_every_value() {
     // must never alias a variant, nor a variant read as `None`.
     for raw in probes() {
         let ty = black_box(OidType::from_raw(raw));
-        assert_eq!(ty.map(OidType::raw).unwrap_or(raw), raw);
+        assert_eq!(ty.map_or(raw, OidType::raw), raw);
     }
 }
 
@@ -214,8 +217,9 @@ fn copies_of_any_byte_pattern() {
     for kind in [0, 1, 2, 3, u8::MAX] {
         let mut src = Oid::zeroed();
         src.as_mut().set_raw_kind(kind);
-        src.as_mut()
-            .set_id(std::array::from_fn(|i| (i as u8).wrapping_mul(kind)));
+        src.as_mut().set_id(std::array::from_fn(|i| {
+            i.to_le_bytes()[0].wrapping_mul(kind)
+        }));
         let mut dst = Oid::zeroed();
         dst.as_mut().copy_from(src.as_ref());
         assert_eq!(dst.as_ref().raw_kind(), kind);
@@ -235,7 +239,7 @@ fn views_stay_in_bounds() {
         let mut m = oid.as_mut();
         let mut id = m.id_mut();
         for i in 0..id.len() {
-            assert!(id.set_elem(i, i as u8));
+            assert!(id.set_elem(i, u8::try_from(i).unwrap()));
         }
         assert!(!id.set_elem(id.len(), 0));
         let mut sub = id.slice_mut(30..).unwrap();
@@ -272,7 +276,8 @@ fn hashes_read_within_the_oid() {
     for raw in [0, 3, u8::MAX] {
         let mut oid = Oid::zeroed();
         oid.as_mut().set_raw_kind(raw);
-        oid.as_mut().set_id(std::array::from_fn(|i| i as u8 ^ raw));
+        oid.as_mut()
+            .set_id(std::array::from_fn(|i| u8::try_from(i).unwrap() ^ raw));
         oids.push(Box::new(oid));
     }
     let hashes: Vec<u64> = oids.iter().map(|o| state.hash_one(**o)).collect();
@@ -286,7 +291,7 @@ fn hashes_read_within_the_oid() {
 }
 
 /// `Oid` and its handles are `Send` / `Sync`: readers on many threads, a writer on
-/// one at a time (TSan checks the claims, and Miri the Rust-side accesses).
+/// one at a time (`TSan` checks the claims, and Miri the Rust-side accesses).
 #[test]
 fn oids_cross_threads() {
     let mut oid = Oid::zeroed();
@@ -333,8 +338,8 @@ fn oid_copies_cross_threads() {
     });
 }
 
-/// Every shortener is freed once, on whichever thread drops it; LSan (asan variant)
-/// flags a leak, ASan a double free, TSan a race in the `Send` / `Sync` claims.
+/// Every shortener is freed once, on whichever thread drops it; `LSan` (asan variant)
+/// flags a leak, `ASan` a double free, `TSan` a race in the `Send` / `Sync` claims.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn shorteners_are_freed_once_on_any_thread() {
@@ -380,8 +385,10 @@ fn shortener_lifetime_follows_its_strings() {
 /// Oids of every kind a wrapper must accept: both types, their null ids, unknown
 /// type bytes, the typeless zero id, each in a heap allocation of exactly its 33
 /// bytes.
-// Boxed on purpose: ASan then sees each oid's own bounds.
-#[allow(clippy::vec_box)]
+#[expect(
+    clippy::vec_box,
+    reason = "boxed on purpose: ASan then sees each oid's own bounds"
+)]
 fn sample_oids() -> Vec<Box<Oid>> {
     let mut v = Vec::new();
     for (kind, hex) in [(OidType::Sha1, SHA1_HEX), (OidType::Sha256, SHA256_HEX)] {
@@ -460,27 +467,23 @@ fn formatters_write_within_exact_buffers() {
         }
         for n in 0..=70 {
             let mut out = vec![b'#'; n].into_boxed_slice();
-            match r.format_prefix(&mut out) {
-                Ok(hex) => {
-                    let hex_size = hex_size.unwrap();
-                    assert_eq!(hex.len(), n.min(hex_size));
-                    assert!(out[n.min(hex_size)..].iter().all(|&b| b == 0));
-                }
-                Err(_) => {
-                    assert_eq!(hex_size, None);
-                    assert!(out.iter().all(|&b| b == b'#'));
-                }
+            if let Ok(hex) = r.format_prefix(&mut out) {
+                let hex_size = hex_size.unwrap();
+                assert_eq!(hex.len(), n.min(hex_size));
+                assert!(out[n.min(hex_size)..].iter().all(|&b| b == 0));
+            } else {
+                assert_eq!(hex_size, None);
+                assert!(out.iter().all(|&b| b == b'#'));
             }
             let mut out = vec![b'#'; n].into_boxed_slice();
-            match r.format_cstr(&mut out) {
-                Ok(s) => assert_eq!(
+            if let Ok(s) = r.format_cstr(&mut out) {
+                assert_eq!(
                     s.to_bytes().len(),
                     n.saturating_sub(1).min(hex_size.unwrap_or(0))
-                ),
-                Err(_) => {
-                    assert_eq!(hex_size, None);
-                    assert_eq!(out[0], 0);
-                }
+                );
+            } else {
+                assert_eq!(hex_size, None);
+                assert_eq!(out[0], 0);
             }
         }
     }
@@ -515,7 +518,7 @@ fn thread_strings_are_copied_out_on_every_thread() {
                     }
                     // Other libgit2 calls on the thread in between.
                     let mut buf = [0; 64];
-                    let _ = r.format(&mut buf);
+                    drop(r.format(&mut buf));
                 }
             });
         }
@@ -544,6 +547,7 @@ fn formatters_before_init_pin_the_runtime() {
 
 /// Deterministic, distinct-looking 40-digit hex ids.
 fn random_ids(n: usize, mut seed: u64) -> Vec<Box<str>> {
+    use std::fmt::Write as _;
     (0..n)
         .map(|_| {
             let mut id = String::with_capacity(40);
@@ -551,7 +555,7 @@ fn random_ids(n: usize, mut seed: u64) -> Vec<Box<str>> {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
                 seed ^= seed << 17;
-                id.push_str(&format!("{:016x}", seed));
+                let _ = write!(id, "{seed:016x}");
             }
             id.truncate(40);
             id.into_boxed_str()
@@ -560,7 +564,7 @@ fn random_ids(n: usize, mut seed: u64) -> Vec<Box<str>> {
 }
 
 /// Ids in exact 40-byte heap buffers, no NUL after them: libgit2 reads, and keeps
-/// pointers into, no more than that (ASan), and the result never shrinks.
+/// pointers into, no more than that (`ASan`), and the result never shrinks.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn add_reads_forty_digits_of_ids_it_keeps() {
@@ -638,8 +642,8 @@ fn a_full_shortener_keeps_failing_safely() {
 }
 
 /// The shortener only reads the ids it keeps: Rust reads them between additions
-/// (BorrowSanitizer checks the retained pointers against these reborrows), and an
-/// owner moved to another thread keeps adding (TSan checks the `Send` claim).
+/// (`BorrowSanitizer` checks the retained pointers against these reborrows), and an
+/// owner moved to another thread keeps adding (`TSan` checks the `Send` claim).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn kept_ids_are_shared_with_rust_readers() {

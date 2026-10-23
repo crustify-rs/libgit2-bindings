@@ -6,17 +6,17 @@
 /// pointer, so these tests exercise every getter and setter on every holder Rust has
 /// for one (a local, a heap slot, an element of a run that moves when it grows, a
 /// copy), through reborrows, and across threads under the `Send` / `Sync` the crate
-/// asserts (TSan). A misaligned projection or a write through the shared handle would
+/// asserts (`TSan`). A misaligned projection or a write through the shared handle would
 /// be flagged by Miri and ASan/UBSan. The only safe way in from a raw value is
 /// `try_from`, which must refuse an object id type libgit2 does not name (libgit2
 /// asserts on one), and the setter only takes `Option<OidType>`; handles that outlive
 /// their value, aliased handles and setters on the shared handle do not compile
 /// (`compile_fail/`, the type's doctests). `NewOptions::new` calls libgit2
 /// (`git_repository_new_options_init`, which copies a template into the value): it runs
-/// from many threads at once, and before anything initialised libgit2, for ASan and
-/// TSan. libgit2 reads the options in `git_repository_new_ext` (the fixture, and
+/// from many threads at once, and before anything initialised libgit2, for `ASan` and
+/// `TSan`. libgit2 reads the options in `git_repository_new_ext` (the fixture, and
 /// `Repository::with_oid_type`), keeping no pointer to them past the call, so there is
-/// no foreign write or retained pointer to race (BSan). Everything else also runs
+/// no foreign write or retained pointer to race (`BSan`). Everything else also runs
 /// under Miri, from values built by conversion.
 mod new_options {
     use std::collections::hash_map::DefaultHasher;
@@ -120,7 +120,7 @@ mod new_options {
         let shared = m.as_ref();
         let copy = shared;
         assert_eq!(read(copy), (1, Some(OidType::Sha256)));
-        assert!(!format!("{m:?}").is_empty());
+        assert_ne!(format!("{m:?}"), "");
         m.set_version(7);
         assert_eq!(read(opts.as_ref()), (7, Some(OidType::Sha256)));
     }
@@ -216,7 +216,7 @@ mod new_options {
     }
 
     /// `new` copies libgit2's template into a fresh value on each call: concurrent
-    /// calls share nothing for TSan to flag, and each result is the default.
+    /// calls share nothing for `TSan` to flag, and each result is the default.
     fn new_from_many_threads() {
         thread::scope(|s| {
             let handles: Vec<_> = (0..8)
@@ -297,13 +297,13 @@ mod new_options {
 /// `RepositoryMut::clear_submodule_cache`.
 ///
 /// Each cache holds a counted reference to every submodule it loads; a reload must
-/// release the cache it replaces (libgit2 alone leaks it: LSan), a clear must release
-/// it once (ASan: double free), and a submodule looked up through the cache must stay
+/// release the cache it replaces (libgit2 alone leaks it: `LSan`), a clear must release
+/// it once (`ASan`: double free), and a submodule looked up through the cache must stay
 /// readable after a clear and after its repository is freed, through its own reference
-/// (ASan: use after free). Both routines take the exclusive handle, so no shared handle
+/// (`ASan`: use after free). Both routines take the exclusive handle, so no shared handle
 /// can clear a cache a libgit2 routine is reading (the `compile_fail` doctest on
 /// `cache_submodules`). Neither a repository nor its handles cross threads, so there is
-/// nothing for TSan; libgit2 keeps no pointer into Rust storage (BSan). Every test calls
+/// nothing for `TSan`; libgit2 keeps no pointer into Rust storage (`BSan`). Every test calls
 /// libgit2, so none runs under Miri.
 mod submodule_cache {
     use std::ffi::CString;
@@ -378,7 +378,7 @@ mod submodule_cache {
             "crustify-sys-repository-ub-{}-bare",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         let path = CString::new(dir.as_os_str().as_bytes()).unwrap();
         let mut bare = Repository::init(&path, true).unwrap();
         bare.as_mut().cache_submodules().unwrap();

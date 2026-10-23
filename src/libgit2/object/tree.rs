@@ -127,7 +127,7 @@ use core::fmt;
 use core::iter::FusedIterator;
 use core::marker::PhantomData;
 use core::ops::{ControlFlow, Range};
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull};
 use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{
@@ -147,7 +147,7 @@ use crate::libgit2::util::sys::errors::{runtime_pinned, set};
 /// subtrees it loads on the way: either way, once per entry it reaches, each tree's entries in
 /// that tree's order, under the path of the tree that holds them.
 ///
-/// Wraps: git_treewalk_mode
+/// Wraps: `git_treewalk_mode`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -165,6 +165,7 @@ pub enum WalkMode {
 impl WalkMode {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name, which `git_tree_walk` refuses.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_treewalk_mode) -> Option<Self> {
         match raw {
             ffi::GIT_TREEWALK_PRE => Some(Self::PreOrder),
@@ -174,6 +175,7 @@ impl WalkMode {
     }
 
     /// The C value, as `git_tree_walk` takes it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_treewalk_mode {
         self as ffi::git_treewalk_mode
     }
@@ -202,6 +204,7 @@ pub struct UnnamedWalkMode(ffi::git_treewalk_mode);
 
 impl UnnamedWalkMode {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_treewalk_mode {
         self.0
     }
@@ -236,7 +239,7 @@ pub enum WalkAction {
     /// walked the subtree when it calls back, and goes on as for `Continue`.
     Skip,
     /// Stop the walk at once: the walk returns `GIT_EUSER`. libgit2 sets a
-    /// `GIT_ERROR_CALLBACK` error "git_tree_walk callback returned -7" only when the
+    /// `GIT_ERROR_CALLBACK` error "`git_tree_walk` callback returned -7" only when the
     /// thread has no libgit2 error yet: one the closure set, or one an earlier call left,
     /// stays the thread's.
     Stop,
@@ -353,7 +356,7 @@ type WalkFn<'f> = dyn FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f;
 /// send(WalkCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: git_treewalk_cb
+/// Wraps: `git_treewalk_cb`
 /// Handwritten
 pub struct WalkCallback<'f> {
     f: &'f mut WalkFn<'f>,
@@ -379,6 +382,10 @@ impl<'f> WalkCallback<'f> {
     /// Calls the callback with `root` and `entry`, through the trampoline libgit2 calls,
     /// and returns the answer libgit2 would read from it. A panic of the closure resumes
     /// here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is never NULL"
+    )]
     pub fn call(&mut self, root: &CStr, entry: TreeEntryRef<'_>) -> WalkAction {
         let rc = self.walk_with(|callback, payload| {
             let callback = callback.expect("the trampoline is never NULL");
@@ -393,6 +400,7 @@ impl<'f> WalkCallback<'f> {
     /// Whether the last call stopped the walk: the closure answered
     /// [`Stop`](WalkAction::Stop), or panicked. Tells the callback's `GIT_EUSER` from
     /// libgit2's own errors.
+    #[must_use]
     pub fn stopped(&self) -> bool {
         self.stopped
     }
@@ -408,7 +416,7 @@ impl<'f> WalkCallback<'f> {
         self.stopped = false;
         let result = walk(Some(walk_with), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
-            std::panic::resume_unwind(panic);
+            panic::resume_unwind(panic);
         }
         result
     }
@@ -453,7 +461,7 @@ unsafe extern "C" fn walk_with(
     // SAFETY: `root` is non-NULL, so NUL-terminated and live for the call per this
     // function's contract; the closure borrows it for its call only.
     let root = unsafe { CStr::from_ptr(root) };
-    let answer = std::panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(root, entry)));
+    let answer = panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(root, entry)));
     let action = answer.unwrap_or_else(|panic| {
         callback.panic = Some(panic);
         WalkAction::Stop
@@ -469,7 +477,7 @@ unsafe extern "C" fn walk_with(
 /// action for update"), after building the trees above the path.
 /// [`from_raw`](Self::from_raw) gives `None` for a value without a variant.
 ///
-/// Wraps: git_tree_update_t
+/// Wraps: `git_tree_update_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -485,6 +493,7 @@ pub enum UpdateAction {
 impl UpdateAction {
     /// The variant whose C value is `raw`; `None` for any value libgit2's header does not
     /// name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_tree_update_t) -> Option<Self> {
         match raw {
             ffi::GIT_TREE_UPDATE_UPSERT => Some(Self::Upsert),
@@ -494,6 +503,7 @@ impl UpdateAction {
     }
 
     /// The C value, as libgit2's functions take it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_tree_update_t {
         self as ffi::git_tree_update_t
     }
@@ -522,6 +532,7 @@ pub struct UnnamedUpdateAction(ffi::git_tree_update_t);
 
 impl UnnamedUpdateAction {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_tree_update_t {
         self.0
     }
@@ -616,7 +627,7 @@ const _: () = assert!(
 /// plain values are: libgit2 never writes through the path, and only the exclusive
 /// handle writes the fields. Equal when every field is, the path by its contents.
 ///
-/// Wraps: git_tree_update
+/// Wraps: `git_tree_update`
 /// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -687,6 +698,7 @@ impl<'p> TreeUpdate<'p> {
     /// [`Unreadable`](FileMode::Unreadable) mode, an `id` of a blob or tree the
     /// repository lacks, or the replacement of a tree with a blob or of a blob with a
     /// tree.
+    #[must_use]
     pub fn upsert(path: &'p CStr, id: OidRef<'_>, filemode: FileMode) -> Self {
         Self::new(UpdateAction::Upsert, path, copy_id(id), filemode)
     }
@@ -697,6 +709,7 @@ impl<'p> TreeUpdate<'p> {
     /// Only the path is read for a removal: the id is libgit2's typeless, all-zero
     /// `GIT_OID_NONE` and the mode [`Unreadable`](FileMode::Unreadable), until a setter
     /// changes them.
+    #[must_use]
     pub const fn remove(path: &'p CStr) -> Self {
         let none = ffi::git_oid {
             type_: 0,
@@ -723,6 +736,7 @@ impl<'p> TreeUpdate<'p> {
     }
 
     /// Shared handle to the update — the getters.
+    #[must_use]
     pub fn as_ref(&self) -> TreeUpdateRef<'_, 'p> {
         // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
         TreeUpdateRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
@@ -773,12 +787,20 @@ impl<'a, 'p> TreeUpdateRef<'a, 'p> {
 
     /// What the update does at its path.
     ///
-    /// Field: git_tree_update.action
+    /// Field: `git_tree_update.action`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an update holds a named action`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn action(&self) -> UpdateAction {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let action_ptr = unsafe { &raw const (*p).action };
         // SAFETY: a read through the shared handle's pointer to a live update; the field
         // is a plain integer.
-        let raw = unsafe { addr_of!((*p).action).read() };
+        let raw = unsafe { action_ptr.read() };
         // `new` and `set_action` only store a variant's value.
         UpdateAction::from_raw(raw).expect("an update holds a named action")
     }
@@ -786,40 +808,61 @@ impl<'a, 'p> TreeUpdateRef<'a, 'p> {
     /// The id of the object an upsert's entry names, in place, for as long as the
     /// update is borrowed.
     ///
-    /// Field: git_tree_update.id
+    /// Field: `git_tree_update.id`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field is never NULL"
+    )]
     pub fn id(&self) -> OidRef<'a> {
         let p = self.as_ptr();
-        // SAFETY: the field projected from the shared handle's pointer to a live update
-        // is an initialised `git_oid`, which lives for `'a` with the update and which
-        // nothing writes meanwhile (every write needs the exclusive handle); `OidRef`
-        // only reads it.
-        unsafe { OidRef::from_ptr(addr_of!((*p).id).cast_mut()) }.expect("a field is never NULL")
+        // SAFETY: the shared handle's pointer addresses a live update; the projection forms no
+        // reference to it.
+        let id = unsafe { &raw const (*p).id };
+        // SAFETY: `id` addresses an initialised `git_oid`, which lives for `'a` with the update and
+        // which nothing writes meanwhile (every write needs the exclusive handle); `OidRef` only
+        // reads it.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a field is never NULL")
     }
 
     /// The mode of an upsert's entry.
     ///
-    /// Field: git_tree_update.filemode
+    /// Field: `git_tree_update.filemode`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an update holds a named file mode`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn filemode(&self) -> FileMode {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let filemode_ptr = unsafe { &raw const (*p).filemode };
         // SAFETY: a read through the shared handle's pointer to a live update; the field
         // is a plain integer.
-        let raw = unsafe { addr_of!((*p).filemode).read() };
+        let raw = unsafe { filemode_ptr.read() };
         // `new` and `set_filemode` only store a variant's value.
         FileMode::from_raw(raw).expect("an update holds a named file mode")
     }
 
     /// The entry's full path from the root tree, borrowed for `'p`, as it was set.
     ///
-    /// Field: git_tree_update.path
+    /// Field: `git_tree_update.path`
+    #[must_use]
     pub fn path(&self) -> &'p CStr {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to a live update. `new` and
-        // `set_path` store a `&'p CStr`'s pointer, a NUL-terminated string that outlives
-        // `'p` and that nothing writes, being shared-borrowed.
-        unsafe { CStr::from_ptr(addr_of!((*p).path).read()) }
+        // SAFETY: the shared handle's pointer addresses a live update; the projection forms no
+        // reference to it.
+        let path_ptr = unsafe { &raw const (*p).path };
+        // SAFETY: reads the initialised field.
+        let path = unsafe { path_ptr.read() };
+        // SAFETY: `new` and `set_path` store a `&'p CStr`'s pointer, a NUL-terminated string that
+        // outlives `'p` and that nothing writes, being shared-borrowed.
+        unsafe { CStr::from_ptr(path) }
     }
 
     /// A copy of the update, as a value of its own, borrowing the same path.
+    #[must_use]
     pub fn to_tree_update(&self) -> TreeUpdate<'p> {
         TreeUpdate::new(
             self.action(),
@@ -848,6 +891,7 @@ impl<'p> TreeUpdateMut<'_, 'p> {
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> TreeUpdateRef<'_, 'p> {
         self.0
     }
@@ -860,55 +904,73 @@ impl<'p> TreeUpdateMut<'_, 'p> {
     /// Replaces what the update does; the id and file mode stay, and are read again
     /// when it becomes an upsert.
     ///
-    /// Field: git_tree_update.action
+    /// Field: `git_tree_update.action`
     pub fn set_action(&mut self, action: UpdateAction) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let action_ptr = unsafe { &raw mut (*p).action };
         // SAFETY: a write through the exclusive handle's pointer to a live update of a
         // variant's value, which keeps `action`'s guarantee.
-        unsafe { addr_of_mut!((*p).action).write(action.raw()) }
+        unsafe { action_ptr.write(action.raw()) }
     }
 
     /// The id of the object an upsert's entry names, in place, borrowed exclusively to
     /// change it.
     ///
-    /// Field: git_tree_update.id
+    /// Field: `git_tree_update.id`
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field is never NULL"
+    )]
     pub fn id_mut(&mut self) -> OidMut<'_> {
         let p = self.as_mut_ptr();
-        // SAFETY: the field projected from the exclusive handle's pointer to a live update
-        // is an initialised `git_oid`, any of whose bytes may be written; the result
-        // borrows this handle exclusively, so nothing else reaches the update meanwhile.
-        unsafe { OidMut::from_ptr(addr_of_mut!((*p).id)) }.expect("a field is never NULL")
+        // SAFETY: the exclusive handle's pointer addresses a live update; the projection forms no
+        // reference to it.
+        let id = unsafe { &raw mut (*p).id };
+        // SAFETY: `id` addresses an initialised `git_oid`, any of whose bytes may be written; the
+        // result borrows this handle exclusively, so nothing else reaches the update meanwhile.
+        unsafe { OidMut::from_ptr(id) }.expect("a field is never NULL")
     }
 
     /// Replaces the id with a copy of `id`, type and all 32 bytes.
     ///
-    /// Field: git_tree_update.id
+    /// Field: `git_tree_update.id`
     pub fn set_id(&mut self, id: OidRef<'_>) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let id_ptr = unsafe { &raw mut (*p).id };
         // SAFETY: a write through the exclusive handle's pointer to a live update; the
         // field is plain bytes, and `id` is copied out before the write.
-        unsafe { addr_of_mut!((*p).id).write(copy_id(id)) }
+        unsafe { id_ptr.write(copy_id(id)) }
     }
 
     /// Replaces the mode of an upsert's entry.
     ///
-    /// Field: git_tree_update.filemode
+    /// Field: `git_tree_update.filemode`
     pub fn set_filemode(&mut self, filemode: FileMode) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let filemode_ptr = unsafe { &raw mut (*p).filemode };
         // SAFETY: a write through the exclusive handle's pointer to a live update of a
         // variant's value, which keeps `filemode`'s guarantee.
-        unsafe { addr_of_mut!((*p).filemode).write(filemode.raw()) }
+        unsafe { filemode_ptr.write(filemode.raw()) }
     }
 
     /// Replaces the path; the old string, borrowed, needs no release.
     ///
-    /// Field: git_tree_update.path
+    /// Field: `git_tree_update.path`
     pub fn set_path(&mut self, path: &'p CStr) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let path_ptr = unsafe { &raw mut (*p).path };
         // SAFETY: a write through the exclusive handle's pointer to a live update of a
         // `&'p CStr`'s pointer, which keeps `path`'s guarantee; the old pointer is
         // borrowed, so nothing is released.
-        unsafe { addr_of_mut!((*p).path).write(path.as_ptr()) }
+        unsafe { path_ptr.write(path.as_ptr()) }
     }
 }
 
@@ -958,7 +1020,7 @@ const _: () = assert!(
 /// }
 /// ```
 ///
-/// Wraps: git_tree
+/// Wraps: `git_tree`
 /// Handwritten
 #[repr(transparent)]
 pub struct Tree<'r>(ffi::git_tree, PhantomData<(*const (), &'r ())>);
@@ -1017,7 +1079,6 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// `ptr` must be NULL or address a live tree looked up in a repository that
     /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
     /// least that long) and which no one writes during `'a`.
-    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_tree) -> Option<Self> {
         // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
         // live `git_tree` that outlives `'a` and is not written meanwhile.
@@ -1031,6 +1092,7 @@ impl<'a, 'r> TreeRef<'a, 'r> {
 
     /// The tree `object` is, borrowed as long as `object` is; `None` for an object of
     /// another type.
+    #[must_use]
     pub fn from_object(object: ObjectRef<'a, 'r>) -> Option<Self> {
         if !is_tree(object) {
             return None;
@@ -1044,6 +1106,11 @@ impl<'a, 'r> TreeRef<'a, 'r> {
 
     /// The tree as the object it is, borrowed as long as this handle: what every
     /// `git_object` routine takes.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a handle is never NULL"
+    )]
     pub fn as_object(&self) -> ObjectRef<'a, 'r> {
         // SAFETY: a `git_tree` starts with its `git_object`, so the tree's pointer is
         // its object's, live and unwritten for `'a` as the tree is, of a repository that
@@ -1056,7 +1123,11 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// tree, now also kept alive by the result, which may outlive this borrow but not
     /// the repository.
     ///
-    /// Wraps: git_tree_dup
+    /// Wraps: `git_tree_dup`
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a handle is never NULL"
+    )]
     pub fn to_tree(&self) -> TreeArc<'r> {
         let tree = self.0.as_non_null();
         // SAFETY: the handle addresses a live tree for `'a`, whose reference its holder
@@ -1075,26 +1146,39 @@ fn is_tree(object: ObjectRef<'_, '_>) -> bool {
     object.kind() == ObjectType::Tree
 }
 
-impl<'a, 'r> TreeMut<'a, 'r> {
+impl<'r> TreeMut<'_, 'r> {
     /// Borrows a raw pointer exclusively; `None` if null.
     ///
     /// # Safety
     ///
     /// As [`TreeRef::from_ptr`], plus: nothing else reaches the tree while the result
     /// lives, its repository's cache included.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_tree) -> Option<Self> {
         // SAFETY: the caller upholds `TreeRef::from_ptr`'s contract and exclusivity.
         unsafe { TreeRef::from_ptr(ptr) }.map(|r| TreeMut(r, PhantomData))
     }
 
     /// Writable pointer to the C object.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tree {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> TreeRef<'_, 'r> {
         self.0
     }
@@ -1126,8 +1210,8 @@ impl fmt::Debug for TreeMut<'_, '_> {
 /// the copy increments the same count and hands back the same pointer. Neither can
 /// fail, and neither allocates.
 ///
-/// Wraps: git_tree_free
-/// Wraps: git_tree_dup
+/// Wraps: `git_tree_free`
+/// Wraps: `git_tree_dup`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TreeFree;
@@ -1154,7 +1238,7 @@ unsafe impl<'r> CRefClone<Tree<'r>> for TreeFree {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `ptr` addresses a live tree whose reference
         // the caller holds, per `c_up_ref`'s contract.
-        let rc = unsafe { ffi::git_tree_dup(&mut out, ptr.as_ptr().cast()) };
+        let rc = unsafe { ffi::git_tree_dup(&raw mut out, ptr.as_ptr().cast()) };
         debug_assert_eq!(out, ptr.as_ptr().cast());
         rc == 0
     }
@@ -1172,6 +1256,10 @@ impl<'r> Tree<'r> {
     /// cache's size limit, caches it, so that every later lookup of the id, as a tree
     /// or as an object, yields the same tree while the cache keeps it.
     ///
+    /// Wraps: `git_tree_lookup`
+    ///
+    /// # Errors
+    ///
     /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup) with
     /// type [`ObjectType::Tree`] does:
     /// with [`ErrorCode::NotFound`]
@@ -1180,7 +1268,9 @@ impl<'r> Tree<'r> {
     /// and with libgit2's error when the tree cannot be read or parsed. An `id` of
     /// another type than `repo`'s is refused before the call, as there.
     ///
-    /// Wraps: git_tree_lookup
+    /// # Panics
+    ///
+    /// Panics, with `a lookup succeeded without a tree`, only if libgit2 breaks its contract.
     pub fn lookup(repo: RepositoryRef<'r>, id: OidRef<'_>) -> Result<TreeArc<'r>, RepositoryError> {
         id_fits(repo, id)?;
         let mut out = ptr::null_mut();
@@ -1188,7 +1278,8 @@ impl<'r> Tree<'r> {
         // repository on this thread, whose odb libgit2 loads and whose cache it fills
         // through this shared handle, as `RepositoryRef` allows; `id` is a live id of
         // the repository's type (checked above), read for the call only.
-        let rc = unsafe { ffi::git_tree_lookup(&mut out, repo.as_ptr().cast_mut(), id.as_ptr()) };
+        let rc =
+            unsafe { ffi::git_tree_lookup(&raw mut out, repo.as_ptr().cast_mut(), id.as_ptr()) };
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
         }
@@ -1209,7 +1300,17 @@ impl<'r> Tree<'r> {
     /// with type tree does, and refuses an `id` of another type than `repo`'s as it
     /// does, whatever `len`.
     ///
-    /// Wraps: git_tree_lookup_prefix
+    /// Wraps: `git_tree_lookup_prefix`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`Object::lookup_prefix`](crate::libgit2::object::object::Object::lookup_prefix)
+    /// with type tree does, and refuses an `id` of another type than `repo`'s as it does, whatever
+    /// `len`.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a lookup succeeded without a tree`, only if libgit2 breaks its contract.
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -1220,7 +1321,7 @@ impl<'r> Tree<'r> {
         // SAFETY: as in `lookup`; libgit2 clamps `len` to the repository's length, and
         // copies at most `(len + 1) / 2` of `id`'s bytes, with its type, into its key.
         let rc = unsafe {
-            ffi::git_tree_lookup_prefix(&mut out, repo.as_ptr().cast_mut(), id.as_ptr(), len)
+            ffi::git_tree_lookup_prefix(&raw mut out, repo.as_ptr().cast_mut(), id.as_ptr(), len)
         };
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
@@ -1234,6 +1335,14 @@ impl<'r> Tree<'r> {
 
     /// `object`'s reference, as a tree's: the same object, still counted once, now
     /// owned as the tree it is; `object` back, untouched, when it is not of type tree.
+    ///
+    /// # Errors
+    ///
+    /// Gives `object` back, untouched, when it is not of type tree.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an owner is never NULL"
+    )]
     pub fn from_object(object: ObjectArc<'r>) -> Result<TreeArc<'r>, ObjectArc<'r>> {
         if !is_tree(object.as_ref()) {
             return Err(object);
@@ -1248,6 +1357,10 @@ impl<'r> Tree<'r> {
 
     /// `tree`'s reference, as an object's: the same tree, still counted once, now owned
     /// as an object.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an owner is never NULL"
+    )]
     pub fn into_object(tree: TreeArc<'r>) -> ObjectArc<'r> {
         let raw = tree.into_c();
         // SAFETY: the reference the tree owner gave up, to a live tree, which starts
@@ -1267,17 +1380,6 @@ impl<'r> Tree<'r> {
     /// dropping a tree the updates left empty. With no update it writes `baseline`
     /// again. The ids of the trees, commits and blobs it writes are of `repo`'s type.
     ///
-    /// Fails with `-1` and a `GIT_ERROR_TREE` error for two updates of one path
-    /// ("duplicate entries given for update"), a path crossing an entry that is not a
-    /// tree ("D/F conflict when updating tree"), and an upsert replacing an entry with
-    /// one of another type ("cannot replace 'blob' with 'tree' at '…'"); with
-    /// libgit2's error for an upsert the tree builder refuses (an invalid name or mode,
-    /// a zero id, or, under strict object creation, an object `repo` lacks with the
-    /// mode's type), a removal of an entry the tree lacks ("failed to remove entry:
-    /// file isn't in the tree - …"), a tree that cannot be read, or an object database
-    /// that cannot be loaded or written. Trees written before the failure stay in the
-    /// object database.
-    ///
     /// Three inputs are refused before libgit2 runs, with `-1`, whatever the updates'
     /// order: a `baseline` of another object id type than `repo`'s, and an upsert of
     /// an id of another type that libgit2 would look up (any mode but a commit's, a
@@ -1288,7 +1390,20 @@ impl<'r> Tree<'r> {
     /// would write into a corrupt tree, its length truncated (see
     /// [`TreeBuilderMut::insert`]).
     ///
-    /// Wraps: git_tree_create_updated
+    /// Wraps: `git_tree_create_updated`
+    ///
+    /// # Errors
+    ///
+    /// Fails with `-1` and a `GIT_ERROR_TREE` error for two updates of one path
+    /// ("duplicate entries given for update"), a path crossing an entry that is not a
+    /// tree ("D/F conflict when updating tree"), and an upsert replacing an entry with
+    /// one of another type ("cannot replace 'blob' with 'tree' at '…'"); with
+    /// libgit2's error for an upsert the tree builder refuses (an invalid name or mode,
+    /// a zero id, or, under strict object creation, an object `repo` lacks with the
+    /// mode's type), a removal of an entry the tree lacks ("failed to remove entry:
+    /// file isn't in the tree - …"), a tree that cannot be read, or an object database
+    /// that cannot be loaded or written. Trees written before the failure stay in the
+    /// object database.
     pub fn create_updated(
         repo: RepositoryRef<'r>,
         baseline: Option<TreeRef<'_, '_>>,
@@ -1354,7 +1469,12 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in
     /// the tree, which writes it once, when it is parsed.
     ///
-    /// Wraps: git_tree_id
+    /// Wraps: `git_tree_id`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a live tree has an id`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live tree for `'a`; libgit2 only reads it, and
         // returns the address of the id cached in its object (`&obj->cached.oid`).
@@ -1383,7 +1503,12 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: git_tree_owner
+    /// Wraps: `git_tree_owner`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a tree always has a repository`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live tree for `'a`, which libgit2 only reads.
         let repo = unsafe { ffi::git_tree_owner(self.as_ptr()) };
@@ -1397,7 +1522,8 @@ impl<'a, 'r> TreeRef<'a, 'r> {
 
     /// The number of entries the tree lists: one per name.
     ///
-    /// Wraps: git_tree_entrycount
+    /// Wraps: `git_tree_entrycount`
+    #[must_use]
     pub fn len(&self) -> usize {
         // SAFETY: the handle addresses a live tree for `'a`, whose entry array libgit2
         // filled when parsing it and only reads the size of here.
@@ -1405,6 +1531,7 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     }
 
     /// Whether the tree lists no entry: the empty tree.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -1427,16 +1554,15 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// }
     /// ```
     ///
-    /// Wraps: git_tree_entry_byindex
+    /// Wraps: `git_tree_entry_byindex`
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<TreeEntryRef<'a>> {
-        // SAFETY: the handle addresses a live tree for `'a`; libgit2 checks `index`
-        // against the entry count and returns NULL past it, or the address of the entry
-        // in the tree's array, which the tree keeps, unwritten, until it is freed after
+        // SAFETY: the handle addresses a live tree for `'a`; libgit2 checks `index` against the
+        // entry count and returns NULL past it, or the address of the entry in the tree's array.
+        let entry = unsafe { ffi::git_tree_entry_byindex(self.as_ptr(), index) };
+        // SAFETY: `entry` is NULL or an entry the tree keeps, unwritten, until it is freed after
         // `'a`.
-        unsafe {
-            let entry = ffi::git_tree_entry_byindex(self.as_ptr(), index);
-            TreeEntryRef::from_ptr(entry.cast_mut())
-        }
+        unsafe { TreeEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// The tree's entry named `name`, the very bytes of the tree's own name for it, with
@@ -1447,17 +1573,16 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// thread's error. A miss sets no error otherwise. [`TreeEntry::bypath`] looks a
     /// path up through the subtrees.
     ///
-    /// Wraps: git_tree_entry_byname
+    /// Wraps: `git_tree_entry_byname`
+    #[must_use]
     pub fn get_by_name(&self, name: &CStr) -> Option<TreeEntryRef<'a>> {
-        // SAFETY: the handle addresses a live tree for `'a`, only read; `name` is
-        // NUL-terminated and read for the call only, within its length (a name longer
-        // than 65535 bytes is compared on its first `len % 65536` bytes and its full
-        // length, and matches nothing). The result is NULL or an entry of the tree's
-        // array, live and unwritten until the tree is freed after `'a`.
-        unsafe {
-            let entry = ffi::git_tree_entry_byname(self.as_ptr(), name.as_ptr());
-            TreeEntryRef::from_ptr(entry.cast_mut())
-        }
+        // SAFETY: the handle addresses a live tree for `'a`, only read; `name` is NUL-terminated
+        // and read for the call only, within its length (a name longer than 65535 bytes is compared
+        // on its first `len % 65536` bytes and its full length, and matches nothing).
+        let entry = unsafe { ffi::git_tree_entry_byname(self.as_ptr(), name.as_ptr()) };
+        // SAFETY: `entry` is NULL or an entry of the tree's array, live and unwritten until the
+        // tree is freed after `'a`.
+        unsafe { TreeEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// The first entry, in the tree's order, naming the object `id`; `None` when no
@@ -1468,19 +1593,23 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// matches nothing, and neither does a SHA-1 id whose unused tail bytes are not zero
     /// (libgit2 zeroes them in every id it parses).
     ///
-    /// Wraps: git_tree_entry_byid
+    /// Wraps: `git_tree_entry_byid`
+    #[must_use]
     pub fn get_by_id(&self, id: OidRef<'_>) -> Option<TreeEntryRef<'a>> {
-        // SAFETY: the handle addresses a live tree for `'a`, only read; `id` is a live,
-        // whole `git_oid`, compared bytewise for the call only. The result is NULL or an
-        // entry of the tree's array, live and unwritten until the tree is freed after
-        // `'a`.
-        unsafe {
-            let entry = ffi::git_tree_entry_byid(self.as_ptr(), id.as_ptr());
-            TreeEntryRef::from_ptr(entry.cast_mut())
-        }
+        // SAFETY: the handle addresses a live tree for `'a`, only read; `id` is a live, whole
+        // `git_oid`, compared bytewise for the call only.
+        let entry = unsafe { ffi::git_tree_entry_byid(self.as_ptr(), id.as_ptr()) };
+        // SAFETY: `entry` is NULL or an entry of the tree's array, live and unwritten until the
+        // tree is freed after `'a`.
+        unsafe { TreeEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// The tree's entries, in its order, each lent as [`get`](Self::get) lends one.
+    #[must_use]
+    #[expect(
+        clippy::iter_without_into_iter,
+        reason = "the handle is Copy, and its iterator borrows the C object for the handle's lifetime, not the handle"
+    )]
     pub fn iter(&self) -> TreeEntries<'a, 'r> {
         TreeEntries {
             tree: *self,
@@ -1498,13 +1627,6 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// releases it once walked, so a subtree's entries are lent for the call alone (see
     /// [`WalkCallback`]). A pre-order [`WalkAction::Skip`] keeps the walk out of the
     /// subtree the entry names, which is then not even looked up.
-    ///
-    /// Fails with the error of the subtree lookup that failed, after the calls before
-    /// it: [`ErrorCode::NotFound`] when the object database lacks a subtree, or holds an
-    /// object of another type under its id, and libgit2's error when one cannot be read
-    /// or parsed, or memory runs out. When the closure stops the walk, libgit2 leaves
-    /// "`git_tree_walk` callback returned -7" as the thread's error unless one is set
-    /// already (by a libgit2 call the closure made, say).
     ///
     /// libgit2 calls back synchronously, on this thread, so the closure may use this
     /// tree and its repository's shared handles meanwhile, walking the tree again
@@ -1556,7 +1678,16 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// assert!(paths.contains(&"ab/de/fgh/1.txt".to_owned()));
     /// ```
     ///
-    /// Wraps: git_tree_walk
+    /// Wraps: `git_tree_walk`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the error of the subtree lookup that failed, after the calls before
+    /// it: [`ErrorCode::NotFound`] when the object database lacks a subtree, or holds an
+    /// object of another type under its id, and libgit2's error when one cannot be read
+    /// or parsed, or memory runs out. When the closure stops the walk, libgit2 leaves
+    /// "`git_tree_walk` callback returned -7" as the thread's error unless one is set
+    /// already (by a libgit2 call the closure made, say).
     pub fn walk(
         &self,
         mode: WalkMode,
@@ -1697,7 +1828,7 @@ impl FusedIterator for TreeEntries<'_, '_> {}
 /// copyable::<TreeBuilderBox<'static>>();
 /// ```
 ///
-/// Wraps: git_treebuilder
+/// Wraps: `git_treebuilder`
 /// Handwritten
 #[repr(transparent)]
 pub struct TreeBuilder<'r>(ffi::git_treebuilder, PhantomData<(*const (), &'r ())>);
@@ -1738,14 +1869,20 @@ unsafe impl<'r> CCell for TreeBuilder<'r> {
         Self: 'a;
 }
 
-impl<'a, 'r> TreeBuilderRef<'a, 'r> {
+impl<'r> TreeBuilderRef<'_, 'r> {
     /// Borrows a raw pointer; `None` if null.
     ///
     /// # Safety
     ///
     /// `ptr` must be NULL or address a live tree builder, which no one frees or writes
     /// during `'a`, built for a repository that outlives `'r`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_treebuilder) -> Option<Self> {
         NonNull::new(ptr.cast_mut()).map(|p| {
             // SAFETY: a non-null pointer the caller vouches for, per this function's
@@ -1755,14 +1892,14 @@ impl<'a, 'r> TreeBuilderRef<'a, 'r> {
     }
 
     /// Read-only pointer to the C object.
-    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_treebuilder {
         self.0.as_non_null().as_ptr().cast()
     }
 
     /// The number of entries the builder holds: one per distinct file name.
     ///
-    /// Wraps: git_treebuilder_entrycount
+    /// Wraps: `git_treebuilder_entrycount`
+    #[must_use]
     pub fn len(&self) -> usize {
         // SAFETY: the handle addresses a live builder that no one writes while it is
         // borrowed; `git_treebuilder_entrycount` takes it mutably but only reads the size
@@ -1771,6 +1908,7 @@ impl<'a, 'r> TreeBuilderRef<'a, 'r> {
     }
 
     /// Whether the builder holds no entry, so that writing it writes the empty tree.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -1795,14 +1933,20 @@ impl<'a, 'r> TreeBuilderRef<'a, 'r> {
     }
 }
 
-impl<'a, 'r> TreeBuilderMut<'a, 'r> {
+impl<'r> TreeBuilderMut<'_, 'r> {
     /// Borrows a raw pointer exclusively; `None` if null.
     ///
     /// # Safety
     ///
     /// As [`TreeBuilderRef::from_ptr`], plus: nothing else reaches the builder while the
     /// result lives.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_treebuilder) -> Option<Self> {
         // SAFETY: the caller upholds `TreeBuilderRef::from_ptr`'s contract and
         // exclusivity.
@@ -1815,6 +1959,7 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> TreeBuilderRef<'_, 'r> {
         self.0
     }
@@ -1827,7 +1972,7 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// Removes every entry, freeing each; the builder stays usable, and still writes
     /// into the repository it was built for. Writing it now writes the empty tree.
     ///
-    /// Wraps: git_treebuilder_clear
+    /// Wraps: `git_treebuilder_clear`
     pub fn clear(&mut self) {
         // SAFETY: the exclusive handle's pointer addresses a live builder that nothing
         // else reaches meanwhile; `git_treebuilder_clear` frees the entries it owns and
@@ -1854,7 +1999,7 @@ impl fmt::Debug for TreeBuilderMut<'_, '_> {
 /// every entry it holds and its map, then the struct, without reaching the repository.
 /// libgit2 has no copy routine, so the policy does not clone.
 ///
-/// Wraps: git_treebuilder_free
+/// Wraps: `git_treebuilder_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TreeBuilderFree;
@@ -1879,9 +2024,11 @@ const _: () =
 impl<'r> TreeBuilder<'r> {
     /// An empty builder for `repo`: writing it straight away writes the empty tree.
     ///
-    /// Fails, with libgit2's error, only when it runs out of memory.
+    /// Wraps: `git_treebuilder_new`
     ///
-    /// Wraps: git_treebuilder_new
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, only when it runs out of memory.
     pub fn new(repo: RepositoryRef<'r>) -> Result<TreeBuilderBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -1890,7 +2037,7 @@ impl<'r> TreeBuilder<'r> {
         // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
         // the builder only records; no source tree. The runtime is pinned, so a failure
         // is reported on live thread-local state.
-        let rc = unsafe { ffi::git_treebuilder_new(&mut out, repo, ptr::null()) };
+        let rc = unsafe { ffi::git_treebuilder_new(&raw mut out, repo, ptr::null()) };
         // SAFETY: on success `git_treebuilder_new` writes a fresh builder for `repo` that
         // the caller owns alone, released by `git_treebuilder_free` as `TreeBuilderFree`
         // does; it keeps `repo`, which outlives `'r`. On failure it leaves `out` NULL.
@@ -1906,10 +2053,12 @@ impl<'r> TreeBuilder<'r> {
     /// tree, as libgit2 does. An object of another type than tree has no [`TreeRef`]
     /// ([`TreeRef::from_object`] refuses it), so libgit2 never reads one as a tree.
     ///
+    /// Wraps: `git_treebuilder_new`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, when it runs out of memory, having freed the entries
     /// it copied.
-    ///
-    /// Wraps: git_treebuilder_new
     pub fn from_tree(
         repo: RepositoryRef<'r>,
         source: TreeRef<'_, '_>,
@@ -1923,7 +2072,7 @@ impl<'r> TreeBuilder<'r> {
         // tree for the call, which the handle it came from keeps alive, only read. The
         // runtime is pinned.
         let rc = unsafe {
-            ffi::git_treebuilder_new(&mut out, repo.as_ptr().cast_mut(), source.as_ptr())
+            ffi::git_treebuilder_new(&raw mut out, repo.as_ptr().cast_mut(), source.as_ptr())
         };
         // SAFETY: as in `new`: a fresh builder for `repo` the caller owns alone, or NULL.
         constructed(rc, unsafe { TreeBuilderBox::from_c(out) })
@@ -1946,7 +2095,7 @@ fn constructed(
 /// The longest entry name a tree stores: its entries record a name's length in 16 bits.
 const NAME_MAX: usize = u16::MAX as usize;
 
-impl<'a, 'r> TreeBuilderRef<'a, 'r> {
+impl<'a> TreeBuilderRef<'a, '_> {
     /// The builder's entry named `name`, the very bytes it was inserted or seeded under;
     /// `None` when the builder holds none.
     ///
@@ -1964,22 +2113,21 @@ impl<'a, 'r> TreeBuilderRef<'a, 'r> {
     /// }
     /// ```
     ///
-    /// Wraps: git_treebuilder_get
+    /// Wraps: `git_treebuilder_get`
+    #[must_use]
     pub fn get(&self, name: &CStr) -> Option<TreeEntryRef<'a>> {
-        // SAFETY: the shared handle's pointer addresses a live builder that nothing
-        // writes during `'a`; `name` is NUL-terminated and read for the call only.
-        // `git_treebuilder_get` only probes the builder's map, setting no error on a
-        // miss, and returns NULL or the entry the map holds, which stays live and
-        // unchanged until the builder next removes, replaces or clears its entries,
-        // all of which need an exclusive borrow, excluded during `'a`.
-        unsafe {
-            let entry = ffi::git_treebuilder_get(self.as_ptr().cast_mut(), name.as_ptr());
-            TreeEntryRef::from_ptr(entry.cast_mut())
-        }
+        // SAFETY: the shared handle's pointer addresses a live builder that nothing writes during
+        // `'a`; `name` is NUL-terminated and read for the call only. `git_treebuilder_get` only
+        // probes the builder's map, setting no error on a miss.
+        let entry = unsafe { ffi::git_treebuilder_get(self.as_ptr().cast_mut(), name.as_ptr()) };
+        // SAFETY: `entry` is NULL or the entry the map holds, which stays live and unchanged until
+        // the builder next removes, replaces or clears its entries, all of which need an exclusive
+        // borrow, excluded during `'a`.
+        unsafe { TreeEntryRef::from_ptr(entry.cast_mut()) }
     }
 }
 
-impl<'a, 'r> TreeBuilderMut<'a, 'r> {
+impl TreeBuilderMut<'_, '_> {
     /// Inserts an entry named `name` for the object `id` of file mode `mode`, or, when
     /// the builder already holds an entry of that name, gives it `id` and `mode` in its
     /// place.
@@ -2010,13 +2158,15 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// write a malformed tree, as libgit2 does; so is any id libgit2 would not look up
     /// with strict object creation turned off, which the wrapper refuses all the same.
     ///
+    /// Wraps: `git_treebuilder_insert`
+    ///
+    /// # Errors
+    ///
     /// Fails, with a `GIT_ERROR_INVALID` error "tree entry path too long", for a `name`
     /// of more than 65535 bytes, which a tree cannot store. libgit2 accepts one, sets
     /// that error and returns success, then writes a corrupt tree object with the name's
     /// length truncated: Rust refuses it before calling libgit2. Fails with libgit2's
     /// error when it runs out of memory.
-    ///
-    /// Wraps: git_treebuilder_insert
     pub fn insert(&mut self, name: &CStr, id: OidRef<'_>, mode: FileMode) -> Result<(), ErrorBuf> {
         self.insert_entry(name, id, mode).map(|_| ())
     }
@@ -2038,7 +2188,15 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// }
     /// ```
     ///
-    /// Wraps: git_treebuilder_insert
+    /// Wraps: `git_treebuilder_insert`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`insert`](Self::insert) does.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an insertion succeeded without an entry`, only if libgit2 breaks its contract.
     pub fn insert_entry(
         &mut self,
         name: &CStr,
@@ -2063,7 +2221,7 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
         // unreadable one, a non-zero id) is of the repository's type, checked above.
         let rc = unsafe {
             ffi::git_treebuilder_insert(
-                &mut out,
+                &raw mut out,
                 self.as_mut_ptr(),
                 name.as_ptr(),
                 id.as_ptr(),
@@ -2082,10 +2240,12 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
 
     /// Removes the entry named `name`, freeing it.
     ///
+    /// Wraps: `git_treebuilder_remove`
+    ///
+    /// # Errors
+    ///
     /// Fails, with a `GIT_ERROR_TREE` error "failed to remove entry: file isn't in the
     /// tree - `name`", when the builder holds no entry of that name.
-    ///
-    /// Wraps: git_treebuilder_remove
     pub fn remove(&mut self, name: &CStr) -> Result<(), ErrorBuf> {
         // SAFETY: the exclusive handle's pointer addresses a live builder that nothing
         // else reaches meanwhile, and no handle to its entries outlives that borrow;
@@ -2104,11 +2264,6 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// inserted without the lookup, or seeded from a tree, may name an object the
     /// database lacks.
     ///
-    /// Fails with the code and error of libgit2, or of the database's backends: when
-    /// the database cannot be loaded (always for a repository without a git directory,
-    /// [`Repository::new`](crate::libgit2::repository::repository::Repository::new),
-    /// unless one was set), the object cannot be written, or memory runs out.
-    ///
     /// When memory runs out while the builder's write buffer grows, libgit2 marks that
     /// buffer as out of memory for good: neither a later write nor
     /// [`clear`](Self::clear) resets it, so every later write of this builder fails with
@@ -2116,7 +2271,14 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// a new builder writes them. This is libgit2's defect, which the wrapper cannot
     /// reach into the builder to undo.
     ///
-    /// Wraps: git_treebuilder_write
+    /// Wraps: `git_treebuilder_write`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the code and error of libgit2, or of the database's backends: when
+    /// the database cannot be loaded (always for a repository without a git directory,
+    /// [`Repository::new`](crate::libgit2::repository::repository::Repository::new),
+    /// unless one was set), the object cannot be written, or memory runs out.
     pub fn write(&mut self) -> Result<Oid, RepositoryError> {
         let mut id = Oid::zeroed();
         let out = id.as_mut().as_mut_ptr();
@@ -2177,7 +2339,7 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// assert!(builder.as_ref().get(c"keep").is_some());
     /// ```
     ///
-    /// Wraps: git_treebuilder_filter
+    /// Wraps: `git_treebuilder_filter`
     pub fn remove_if(&mut self, filter: &mut TreeBuilderFilter<'_>) {
         let builder = self.as_mut_ptr();
         let rc = filter.filter_with(|f, payload| {
@@ -2254,8 +2416,8 @@ impl fmt::Debug for TreeEntryMut<'_> {
 /// `git_tree_entry_bypath`: an entry borrowed from a tree or builder is part of its
 /// parent's storage, and is reached through a [`TreeEntryRef`] alone.
 ///
-/// Wraps: git_tree_entry_free
-/// Wraps: git_tree_entry_dup
+/// Wraps: `git_tree_entry_free`
+/// Wraps: `git_tree_entry_dup`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TreeEntryFree;
@@ -2291,7 +2453,7 @@ fn dup(source: TreeEntryRef<'_>) -> Option<TreeEntryBox> {
     // entry nothing writes while the shared handle lives, whose NUL-terminated name, id
     // and mode are read for the call only. The runtime is pinned, so a failure is
     // reported on live thread-local state.
-    let rc = unsafe { ffi::git_tree_entry_dup(&mut out, source.as_ptr()) };
+    let rc = unsafe { ffi::git_tree_entry_dup(&raw mut out, source.as_ptr()) };
     if rc < 0 {
         return None;
     }
@@ -2311,20 +2473,26 @@ impl TreeEntry {
     /// a trailing `/` is accepted only after a tree, and an empty component (an empty
     /// `path`, or a leading or doubled `/`) is an invalid path.
     ///
+    /// Wraps: `git_tree_entry_bypath`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`]
     /// (class `GIT_ERROR_TREE`) for an invalid path, a component the tree lacks, or a
     /// `/` after an entry that is not a tree; and with libgit2's error when a subtree
     /// cannot be read, or the copy cannot be allocated. A commit or tag is peeled to its
     /// tree by [`ObjectRef::lookup_bypath`].
     ///
-    /// Wraps: git_tree_entry_bypath
+    /// # Panics
+    ///
+    /// Panics, with `a lookup succeeded without an entry`, only if libgit2 breaks its contract.
     pub fn bypath(tree: TreeRef<'_, '_>, path: &CStr) -> Result<TreeEntryBox, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; `tree` is a live tree,
         // unwritten while the handle lives, whose repository is live for the handle's
         // `'r` and used on this thread only, as `RepositoryRef` allows, where libgit2
         // looks the subtrees up; `path` is NUL-terminated and read for the call only.
-        let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_ptr(), path.as_ptr()) };
+        let rc = unsafe { ffi::git_tree_entry_bypath(&raw mut out, tree.as_ptr(), path.as_ptr()) };
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
         }
@@ -2340,22 +2508,31 @@ impl<'a> TreeEntryRef<'a> {
     /// entry, or in the tree's data the entry points into, so it lives as long as the
     /// entry's borrow.
     ///
-    /// Wraps: git_tree_entry_name
+    /// Wraps: `git_tree_entry_name`
+    #[must_use]
     pub fn name(&self) -> &'a CStr {
-        // SAFETY: the handle addresses a live entry, unchanged while it is borrowed for
-        // `'a`; its name is a NUL-terminated string that its owner (the entry's own
-        // block, or the tree or builder it belongs to) keeps for at least as long.
-        unsafe { CStr::from_ptr(ffi::git_tree_entry_name(self.as_ptr())) }
+        // SAFETY: the handle addresses a live entry, unchanged while it is borrowed for `'a`.
+        let name = unsafe { ffi::git_tree_entry_name(self.as_ptr()) };
+        // SAFETY: its name is a NUL-terminated string that its owner (the entry's own block, or the
+        // tree or builder it belongs to) keeps for at least as long.
+        unsafe { CStr::from_ptr(name) }
     }
 
     /// The id of the object the entry names, held inside the entry and lent for as long
     /// as its borrow. It is of the object id type of the tree the entry was read from.
     ///
-    /// Wraps: git_tree_entry_id
+    /// Wraps: `git_tree_entry_id`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an entry's id is a field of it"
+    )]
     pub fn id(&self) -> OidRef<'a> {
-        // SAFETY: the handle addresses a live entry for `'a`; the id is a field of it,
-        // which no one writes while the entry is borrowed shared.
-        let id = unsafe { OidRef::from_ptr(ffi::git_tree_entry_id(self.as_ptr()).cast_mut()) };
+        // SAFETY: the handle addresses a live entry for `'a`.
+        let id = unsafe { ffi::git_tree_entry_id(self.as_ptr()) };
+        // SAFETY: the id is a field of the entry, which no one writes while the entry is borrowed
+        // shared.
+        let id = unsafe { OidRef::from_ptr(id.cast_mut()) };
         id.expect("an entry's id is a field of it")
     }
 
@@ -2366,7 +2543,13 @@ impl<'a> TreeEntryRef<'a> {
     /// [`FileMode::Unreadable`]; [`filemode_raw`](Self::filemode_raw) has the mode as
     /// stored.
     ///
-    /// Wraps: git_tree_entry_filemode
+    /// Wraps: `git_tree_entry_filemode`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a normalised file mode is always a named one`, only if libgit2 breaks its
+    /// contract.
+    #[must_use]
     pub fn filemode(&self) -> FileMode {
         // SAFETY: the handle addresses a live entry for `'a`, whose mode libgit2 reads.
         let raw = unsafe { ffi::git_tree_entry_filemode(self.as_ptr()) };
@@ -2377,7 +2560,8 @@ impl<'a> TreeEntryRef<'a> {
     /// spells (old git's group-writable `0o100664`, say); [`FileMode::try_from`] names
     /// it when it is one of the header's modes.
     ///
-    /// Wraps: git_tree_entry_filemode_raw
+    /// Wraps: `git_tree_entry_filemode_raw`
+    #[must_use]
     pub fn filemode_raw(&self) -> ffi::git_filemode_t {
         // SAFETY: the handle addresses a live entry for `'a`, whose mode libgit2 reads.
         unsafe { ffi::git_tree_entry_filemode_raw(self.as_ptr()) }
@@ -2387,7 +2571,12 @@ impl<'a> TreeEntryRef<'a> {
     /// gitlink's is [`ObjectType::Commit`], a directory's [`ObjectType::Tree`], any
     /// other [`ObjectType::Blob`]. The object itself is not read.
     ///
-    /// Wraps: git_tree_entry_type
+    /// Wraps: `git_tree_entry_type`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an entry's type is always a named one`, only if libgit2 breaks its contract.
+    #[must_use]
     pub fn kind(&self) -> ObjectType {
         // SAFETY: the handle addresses a live entry for `'a`, whose mode libgit2 reads.
         let raw = unsafe { ffi::git_tree_entry_type(self.as_ptr()) };
@@ -2399,7 +2588,8 @@ impl<'a> TreeEntryRef<'a> {
     /// `a.c`, and the file `a` before both). Entries of equal names and kinds compare
     /// equal whatever their ids.
     ///
-    /// Wraps: git_tree_entry_cmp
+    /// Wraps: `git_tree_entry_cmp`
+    #[must_use]
     pub fn cmp_in_tree(&self, other: TreeEntryRef<'_>) -> Ordering {
         // SAFETY: both handles address live entries, unchanged while borrowed; libgit2
         // reads their names, name lengths and modes.
@@ -2412,6 +2602,10 @@ impl<'a> TreeEntryRef<'a> {
     /// parse, as [`Object::lookup`](crate::libgit2::object::object::Object::lookup)
     /// gives. The entry need not come from `repo`.
     ///
+    /// Wraps: `git_tree_entry_to_object`
+    ///
+    /// # Errors
+    ///
     /// Fails as [`Object::lookup`](crate::libgit2::object::object::Object::lookup)
     /// does: with [`ErrorCode::NotFound`] when the repository has no such object (a
     /// submodule's commit, say), and with libgit2's error when it cannot be read. An
@@ -2419,7 +2613,9 @@ impl<'a> TreeEntryRef<'a> {
     /// `GIT_ERROR_INVALID` error "specified object ID type does not match repository
     /// object ID type", where libgit2 would format the id out of bounds.
     ///
-    /// Wraps: git_tree_entry_to_object
+    /// # Panics
+    ///
+    /// Panics, with `a lookup succeeded without an object`, only if libgit2 breaks its contract.
     pub fn to_object<'r>(&self, repo: RepositoryRef<'r>) -> Result<ObjectArc<'r>, RepositoryError> {
         id_fits(repo, self.id())?;
         let mut out = ptr::null_mut();
@@ -2428,7 +2624,7 @@ impl<'a> TreeEntryRef<'a> {
         // through this shared handle, as `RepositoryRef` allows; the entry is live for
         // `'a` and only its id, of `repo`'s type (checked above), is read.
         let rc = unsafe {
-            ffi::git_tree_entry_to_object(&mut out, repo.as_ptr().cast_mut(), self.as_ptr())
+            ffi::git_tree_entry_to_object(&raw mut out, repo.as_ptr().cast_mut(), self.as_ptr())
         };
         if rc < 0 {
             return Err(RepositoryError::from_libgit2(rc));
@@ -2445,9 +2641,11 @@ impl<'a> TreeEntryRef<'a> {
     /// entry borrowed from a tree or builder becomes owned this way; an owner also
     /// copies with `Clone`.
     ///
-    /// Fails with libgit2's error when it runs out of memory, or cannot be initialised.
+    /// Wraps: `git_tree_entry_dup`
     ///
-    /// Wraps: git_tree_entry_dup
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when it runs out of memory, or cannot be initialised.
     pub fn to_tree_entry(&self) -> Result<TreeEntryBox, ErrorBuf> {
         dup(*self).ok_or_else(last)
     }
@@ -2517,7 +2715,7 @@ type FilterFn<'f> = dyn FnMut(TreeEntryRef<'_>) -> bool + 'f;
 /// send(TreeBuilderFilter::new(&mut f));
 /// ```
 ///
-/// Wraps: git_treebuilder_filter_cb
+/// Wraps: `git_treebuilder_filter_cb`
 /// Handwritten
 pub struct TreeBuilderFilter<'f> {
     f: &'f mut FilterFn<'f>,
@@ -2536,6 +2734,10 @@ impl<'f> TreeBuilderFilter<'f> {
 
     /// Calls the filter with `entry`, through the trampoline libgit2 calls, and returns
     /// whether libgit2 would remove it. A panic of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is never NULL"
+    )]
     pub fn call(&mut self, entry: TreeEntryRef<'_>) -> bool {
         let rc = self.filter_with(|callback, payload| {
             let callback = callback.expect("the trampoline is never NULL");
@@ -2713,7 +2915,7 @@ mod unit_tests {
 
     /// A builder `git_treebuilder_new` hands out, adopted through `from_c`, is borrowed
     /// back through `from_ptr`, cleared through the handle, released through
-    /// `TreeBuilderFree` exactly once on drop (ASan: leak, double free), and given back
+    /// `TreeBuilderFree` exactly once on drop (`ASan`: leak, double free), and given back
     /// through `into_c` without a release.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -2725,7 +2927,7 @@ mod unit_tests {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, a live repository, no source tree.
             let rc = unsafe {
-                ffi::git_treebuilder_new(&mut out, repo.as_ptr().cast_mut(), ptr::null())
+                ffi::git_treebuilder_new(&raw mut out, repo.as_ptr().cast_mut(), ptr::null())
             };
             assert_eq!(rc, 0);
             out
@@ -2741,7 +2943,7 @@ mod unit_tests {
         let mut builder = unsafe { TreeBuilderBox::from_c(p) }.unwrap();
         assert_eq!(builder.as_c_ptr(), p);
         let id = ffi::git_oid {
-            type_: ffi::GIT_OID_SHA1 as u8,
+            type_: u8::try_from(ffi::GIT_OID_SHA1).unwrap(),
             id: [0x11; 32],
         };
         // SAFETY: a live builder, a NUL-terminated name and a live id; a commit entry is
@@ -2751,7 +2953,7 @@ mod unit_tests {
                 ptr::null_mut(),
                 p,
                 c"sub".as_ptr(),
-                &id,
+                &raw const id,
                 ffi::GIT_FILEMODE_COMMIT,
             )
         };
@@ -2826,7 +3028,9 @@ mod unit_tests {
             let base = updates.as_ptr().cast::<ffi::git_tree_update>();
             for (i, path) in paths.iter().enumerate() {
                 // SAFETY: `i` is within the live array, which is `[git_tree_update; 3]`.
-                let c = unsafe { base.add(i).read() };
+                let add = unsafe { base.add(i) };
+                // SAFETY: as above.
+                let c = unsafe { add.read() };
                 assert_eq!(c.path, path.as_ptr());
                 assert_eq!(c.action, ffi::GIT_TREE_UPDATE_REMOVE);
                 assert_eq!(updates[i].as_ref().as_ptr(), base.wrapping_add(i));
@@ -2836,6 +3040,10 @@ mod unit_tests {
         /// Each constructor fills every field of the C struct; the getters read them
         /// back.
         #[test]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn constructors_fill_every_field() {
             let id = sha1(0xAB);
             let path = CString::new("dir/sub/file.txt").unwrap();
@@ -2847,7 +3055,10 @@ mod unit_tests {
             assert_eq!(c.path, path.as_ptr());
             let r = up.as_ref();
             assert_eq!(r.action(), UpdateAction::Upsert);
-            assert_eq!(r.id().raw_kind(), OidType::Sha1.raw() as u8);
+            assert_eq!(
+                r.id().raw_kind(),
+                u8::try_from(OidType::Sha1.raw()).unwrap()
+            );
             assert_eq!(r.id().id(), id.as_ref().id());
             assert_eq!(r.filemode(), FileMode::BlobExecutable);
             assert_eq!(r.path(), path.as_c_str());
@@ -2900,7 +3111,7 @@ mod unit_tests {
                 assert!(id.id_mut().set_elem(31, 0xFF));
             }
             let c = raw(&update);
-            assert_eq!(c.id.type_, OidType::Sha256.raw() as u8);
+            assert_eq!(c.id.type_, u8::try_from(OidType::Sha256.raw()).unwrap());
             assert_eq!(c.id.id[..20], [2; 20]);
             assert_eq!(c.id.id[31], 0xFF);
             assert_eq!(update.as_ref().id().kind(), Some(OidType::Sha256));
@@ -2917,7 +3128,7 @@ mod unit_tests {
         #[test]
         fn handles_and_copies() {
             let mut update = TreeUpdate::remove(c"x");
-            let at = core::ptr::from_ref(&update).cast::<ffi::git_tree_update>();
+            let at = ptr::from_ref(&update).cast::<ffi::git_tree_update>();
             {
                 let mut m = update.as_mut();
                 assert_eq!(m.as_mut_ptr().cast_const(), at);
@@ -3021,11 +3232,14 @@ mod unit_tests {
         /// C's id and type of a live object.
         fn view(object: ObjectRef<'_, '_>) -> (String, ffi::git_object_t) {
             let p = object.as_ptr();
-            // SAFETY: `p` is a live object the handle borrows; its id lives as long as it
-            // and is formatted at once.
-            unsafe {
-                let id = OidRef::from_ptr(ffi::git_object_id(p).cast_mut()).unwrap();
-                (id.to_hex_string().unwrap(), ffi::git_object_type(p))
+            {
+                // SAFETY: `p` is a live object the handle borrows; its id lives as long as it
+                // and is formatted at once.
+                let object_id = unsafe { ffi::git_object_id(p) };
+                // SAFETY: as above.
+                let id = unsafe { OidRef::from_ptr(object_id.cast_mut()).unwrap() };
+                // SAFETY: as above.
+                unsafe { (id.to_hex_string().unwrap(), ffi::git_object_type(p)) }
             }
         }
 
@@ -3128,7 +3342,7 @@ mod unit_tests {
             assert_eq!(e.code(), Some(ErrorCode::Ambiguous));
 
             let mut wide = Oid::from_raw(&sha1(TREE).as_ref().id(), OidType::Sha256).unwrap();
-            for kind in [OidType::Sha256.raw() as u8, 0, 9, u8::MAX] {
+            for kind in [u8::try_from(OidType::Sha256.raw()).unwrap(), 0, 9, u8::MAX] {
                 wide.as_mut().set_raw_kind(kind);
                 let mut refused = vec![Tree::lookup(r, wide.as_ref()).unwrap_err()];
                 for len in [0, 4, 7, 40, 41, 64, usize::MAX] {
@@ -3221,7 +3435,7 @@ mod unit_tests {
     /// `git_tree_entry`'s owner, handles, getters and lifecycle policy, and the
     /// builder filter's callback.
     mod tree_entry {
-        use core::ffi::{CStr, c_char, c_int, c_void};
+        use core::ffi::{CStr, c_char, c_void};
         use core::mem::size_of;
         use std::process::Command;
         use std::sync::atomic::Ordering::SeqCst;
@@ -3267,7 +3481,7 @@ mod unit_tests {
             );
         }
 
-        /// As [`isolated`], with LeakSanitizer off in the child, for bodies that drive
+        /// As [`isolated`], with `LeakSanitizer` off in the child, for bodies that drive
         /// libgit2 down allocation failures on which it leaks.
         fn isolated_tolerating_leaks(test: &str, body: fn()) {
             let name = test.split_once("::").map_or(test, |(_, rest)| rest);
@@ -3351,7 +3565,7 @@ mod unit_tests {
             // member set; libgit2 copies it before anything is allocated.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };
@@ -3379,7 +3593,8 @@ mod unit_tests {
         fn adopt_bypath(tree: TreeRef<'_, '_>, path: &CStr) -> TreeEntryBox {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, the live tree and a NUL-terminated path.
-            let rc = unsafe { ffi::git_tree_entry_bypath(&mut out, tree.as_ptr(), path.as_ptr()) };
+            let rc =
+                unsafe { ffi::git_tree_entry_bypath(&raw mut out, tree.as_ptr(), path.as_ptr()) };
             assert_eq!(rc, 0);
             // SAFETY: a fresh entry the caller owns, freed by `git_tree_entry_free`.
             unsafe { TreeEntryBox::from_c(out) }.unwrap()
@@ -3388,16 +3603,24 @@ mod unit_tests {
         /// C's name, hex id and raw mode of a live entry.
         fn view(entry: TreeEntryRef<'_>) -> (String, String, u32) {
             let p = entry.as_ptr();
-            // SAFETY: `p` is a live entry the handle borrows; its name and id live as long
-            // as it does and are copied at once.
-            unsafe {
-                let name = CStr::from_ptr(ffi::git_tree_entry_name(p));
-                let id = OidRef::from_ptr(ffi::git_tree_entry_id(p).cast_mut()).unwrap();
-                (
-                    name.to_str().unwrap().to_owned(),
-                    id.to_hex_string().unwrap(),
-                    ffi::git_tree_entry_filemode_raw(p),
-                )
+            {
+                // SAFETY: `p` is a live entry the handle borrows; its name and id live as long
+                // as it does and are copied at once.
+                let tree_entry_name = unsafe { ffi::git_tree_entry_name(p) };
+                // SAFETY: as above.
+                let name = unsafe { CStr::from_ptr(tree_entry_name) };
+                // SAFETY: as above.
+                let tree_entry_id = unsafe { ffi::git_tree_entry_id(p) };
+                // SAFETY: as above.
+                let id = unsafe { OidRef::from_ptr(tree_entry_id.cast_mut()).unwrap() };
+                // SAFETY: as above.
+                unsafe {
+                    (
+                        name.to_str().unwrap().to_owned(),
+                        id.to_hex_string().unwrap(),
+                        ffi::git_tree_entry_filemode_raw(p),
+                    )
+                }
             }
         }
 
@@ -3421,7 +3644,7 @@ mod unit_tests {
 
         fn raw_entry() -> RawEntry {
             RawEntry {
-                attr: ffi::GIT_FILEMODE_BLOB as u16,
+                attr: u16::try_from(ffi::GIT_FILEMODE_BLOB).unwrap(),
                 filename_len: 6,
                 oid: ffi::git_oid::default(),
                 filename: c"README".as_ptr(),
@@ -3529,7 +3752,7 @@ mod unit_tests {
         /// libgit2 leaks on some of these failures: where `git_tree_create_updated` runs
         /// out of memory for a stack level or a component's name, `GIT_ERROR_CHECK_ALLOC`
         /// returns past its cleanup, keeping every builder, tree and name on its stack.
-        /// The child runs with LeakSanitizer off.
+        /// The child runs with `LeakSanitizer` off.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn create_updated_reports_allocation_failures() {
@@ -3544,7 +3767,7 @@ mod unit_tests {
                         "crustify-tree-unit-{}-updated-oom",
                         std::process::id()
                     ));
-                    let _ = std::fs::remove_dir_all(&path);
+                    drop(std::fs::remove_dir_all(&path));
                     let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
                     let repo = Repository::init(&c_path, true).unwrap();
                     let id = Oid::from_string(README, OidType::Sha1).unwrap();
@@ -3585,7 +3808,7 @@ mod unit_tests {
                     }
                     assert!(refused > 10, "{refused}");
                     drop(repo);
-                    let _ = std::fs::remove_dir_all(&path);
+                    drop(std::fs::remove_dir_all(&path));
                 },
             );
         }
@@ -3649,7 +3872,7 @@ mod unit_tests {
         fn entry_of(name: &CStr, attr: u16, id: ffi::git_oid) -> RawEntry {
             RawEntry {
                 attr,
-                filename_len: name.to_bytes().len() as u16,
+                filename_len: u16::try_from(name.to_bytes().len()).unwrap(),
                 oid: id,
                 filename: name.as_ptr(),
             }
@@ -3707,16 +3930,16 @@ mod unit_tests {
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn modes_normalise_as_git_does() {
             let cases: [(u16, FileMode, ObjectType); 10] = [
-                (0o100644, FileMode::Blob, ObjectType::Blob),
-                (0o100664, FileMode::Blob, ObjectType::Blob),
-                (0o100755, FileMode::BlobExecutable, ObjectType::Blob),
-                (0o100700, FileMode::BlobExecutable, ObjectType::Blob),
-                (0o120000, FileMode::Link, ObjectType::Blob),
-                (0o040000, FileMode::Tree, ObjectType::Tree),
-                (0o040755, FileMode::Tree, ObjectType::Tree),
-                (0o160000, FileMode::Commit, ObjectType::Commit),
+                (0o100_644, FileMode::Blob, ObjectType::Blob),
+                (0o100_664, FileMode::Blob, ObjectType::Blob),
+                (0o100_755, FileMode::BlobExecutable, ObjectType::Blob),
+                (0o100_700, FileMode::BlobExecutable, ObjectType::Blob),
+                (0o120_000, FileMode::Link, ObjectType::Blob),
+                (0o040_000, FileMode::Tree, ObjectType::Tree),
+                (0o040_755, FileMode::Tree, ObjectType::Tree),
+                (0o160_000, FileMode::Commit, ObjectType::Commit),
                 (0, FileMode::Blob, ObjectType::Blob),
-                (0o000100, FileMode::BlobExecutable, ObjectType::Blob),
+                (0o000_100, FileMode::BlobExecutable, ObjectType::Blob),
             ];
             for (attr, mode, kind) in cases {
                 let mut raw = entry_of(c"x", attr, ffi::git_oid::default());
@@ -3731,11 +3954,15 @@ mod unit_tests {
         /// kinds are equal whatever the ids; the ordering is C's sign.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn entries_sort_in_tree_order() {
             use core::cmp::Ordering::*;
-            const FILE: u16 = 0o100644;
-            const DIR: u16 = 0o040000;
-            const LINK: u16 = 0o160000;
+            const FILE: u16 = 0o100_644;
+            const DIR: u16 = 0o040_000;
+            const LINK: u16 = 0o160_000;
             let other = Oid::from_string(README, OidType::Sha1).unwrap();
             /// A name and a mode.
             type Side = (&'static CStr, u16);
@@ -3795,13 +4022,13 @@ mod unit_tests {
             assert_eq!(nested.as_ref().kind(), ObjectType::Blob);
             let id = Oid::from_string(NESTED, OidType::Sha1).unwrap();
 
-            let mut missing = entry_of(c"sub", 0o160000, raw_id(&Oid::zero(OidType::Sha1)));
+            let mut missing = entry_of(c"sub", 0o160_000, raw_id(&Oid::zero(OidType::Sha1)));
             missing.oid.id[..20].fill(0xDE);
             let e = handle(&mut missing).to_object(repo.as_ref()).unwrap_err();
             assert_eq!(e.code(), Some(ErrorCode::NotFound));
 
-            let mut wide = entry_of(c"x", 0o100644, raw_id(&id));
-            wide.oid.type_ = ffi::GIT_OID_SHA256 as u8;
+            let mut wide = entry_of(c"x", 0o100_644, raw_id(&id));
+            wide.oid.type_ = u8::try_from(ffi::GIT_OID_SHA256).unwrap();
             let e = handle(&mut wide).to_object(repo.as_ref()).unwrap_err();
             assert_eq!(e.raw_code(), -1);
             assert_eq!(e.class(), Some(ErrorClass::Invalid));
@@ -3818,7 +4045,7 @@ mod unit_tests {
         }
 
         /// `git_treebuilder_filter` through the trampoline: the closure sees every entry
-        /// once, and the entries it returns `true` for are removed and freed (ASan).
+        /// once, and the entries it returns `true` for are removed and freed (`ASan`).
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn filters_remove_what_the_closure_picks() {
@@ -3868,14 +4095,12 @@ mod unit_tests {
             let mut calls = 0;
             let mut boom = |_: TreeEntryRef<'_>| {
                 calls += 1;
-                if calls == 2 {
-                    panic!("filter panicked");
-                }
+                assert!(calls != 2, "filter panicked");
                 true
             };
             let p = builder.as_mut().as_mut_ptr();
             let mut filter = TreeBuilderFilter::new(&mut boom);
-            let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
                 filter.filter_with(|callback, payload| {
                     // SAFETY: as in `filters_remove_what_the_closure_picks`.
                     unsafe { ffi::git_treebuilder_filter(p, callback, payload) }
@@ -3894,7 +4119,7 @@ mod unit_tests {
             let tree = lookup_tree(&repo);
             let mut always = |_: TreeEntryRef<'_>| -> bool { panic!("direct call") };
             let mut filter = TreeBuilderFilter::new(&mut always);
-            let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
                 filter.call(entry(tree.as_ref(), c"ab"))
             }));
             assert!(caught.is_err());
@@ -3980,7 +4205,7 @@ mod unit_tests {
                 assert!(runtime_pinned());
                 let path = std::env::temp_dir()
                     .join(format!("crustify-tree-unit-{}-{tag}", std::process::id()));
-                let _ = std::fs::remove_dir_all(&path);
+                drop(std::fs::remove_dir_all(&path));
                 let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
                 let repo = Repository::init(&c_path, true).unwrap();
                 Self {
@@ -3997,7 +4222,7 @@ mod unit_tests {
         impl Drop for TempRepo {
             fn drop(&mut self) {
                 drop(self.repo.take());
-                let _ = std::fs::remove_dir_all(&self.path);
+                drop(std::fs::remove_dir_all(&self.path));
             }
         }
 
@@ -4015,7 +4240,9 @@ mod unit_tests {
         fn name_of(entry: TreeEntryRef<'_>) -> CString {
             // SAFETY: a live entry the handle borrows; its name lives with it and is
             // copied at once.
-            unsafe { CStr::from_ptr(ffi::git_tree_entry_name(entry.as_ptr())) }.to_owned()
+            let tree_entry_name = unsafe { ffi::git_tree_entry_name(entry.as_ptr()) };
+            // SAFETY: as above.
+            unsafe { CStr::from_ptr(tree_entry_name) }.to_owned()
         }
 
         fn lookup<'r>(repo: &'r RepositoryBox, id: &Oid) -> TreeArc<'r> {
@@ -4084,12 +4311,16 @@ mod unit_tests {
                 entry: *const ffi::git_tree_entry,
                 payload: *mut c_void,
             ) -> c_int {
-                // SAFETY: `payload` is the walk's `State`, `root` and `entry` live for the
-                // call.
-                unsafe {
-                    let state = &mut *payload.cast::<State>();
-                    let root = CStr::from_ptr(root).to_str().unwrap();
-                    let name = CStr::from_ptr(ffi::git_tree_entry_name(entry));
+                {
+                    // SAFETY: `payload` is the walk's `State`, `root` and `entry` live for the
+                    // call.
+                    let state = unsafe { &mut *payload.cast::<State>() };
+                    // SAFETY: as above.
+                    let root = unsafe { CStr::from_ptr(root).to_str().unwrap() };
+                    // SAFETY: as above.
+                    let tree_entry_name = unsafe { ffi::git_tree_entry_name(entry) };
+                    // SAFETY: as above.
+                    let name = unsafe { CStr::from_ptr(tree_entry_name) };
                     let name = name.to_str().unwrap();
                     state.visits.push(format!("{root}{name}"));
                     (state.rule)(root, name)
@@ -4182,7 +4413,7 @@ mod unit_tests {
                         assert_eq!(
                             rust.2,
                             (
-                                ffi::GIT_ERROR_CALLBACK as c_int,
+                                ffi::GIT_ERROR_CALLBACK.cast_signed(),
                                 "git_tree_walk callback returned -7".into()
                             )
                         );
@@ -4374,9 +4605,7 @@ mod unit_tests {
             let mut calls = 0;
             let mut f = |_: &CStr, _: TreeEntryRef<'_>| {
                 calls += 1;
-                if calls == 2 {
-                    panic!("closure panicked");
-                }
+                assert!(calls != 2, "closure panicked");
                 WalkAction::Continue
             };
             let mut callback = WalkCallback::new(&mut f);
@@ -4392,7 +4621,7 @@ mod unit_tests {
                     let entry = unsafe { ffi::git_tree_entry_byindex(tree.as_c_ptr(), 0) };
                     // SAFETY: as above.
                     again = unsafe { cb.unwrap()(c"".as_ptr(), entry, payload) };
-                })
+                });
             }));
             let payload = resumed.unwrap_err();
             assert_eq!(payload.downcast_ref::<&str>(), Some(&"closure panicked"));
@@ -4419,7 +4648,7 @@ mod unit_tests {
                 filename: *const c_char,
             }
             let mut raw = RawEntry {
-                attr: ffi::GIT_FILEMODE_BLOB as u16,
+                attr: u16::try_from(ffi::GIT_FILEMODE_BLOB).unwrap(),
                 filename_len: 1,
                 oid: ffi::git_oid::default(),
                 filename: c"a".as_ptr(),
@@ -4436,13 +4665,11 @@ mod unit_tests {
                 let cb = cb.unwrap();
                 // SAFETY: the payload with NULL for a root or entry, which the trampoline
                 // checks before reading; `entry` is a live local nothing writes.
-                unsafe {
-                    [
-                        cb(ptr::null(), entry, payload),
-                        cb(c"".as_ptr(), ptr::null(), payload),
-                        cb(ptr::null(), ptr::null(), payload),
-                    ]
-                }
+                let cb2 = unsafe { cb(ptr::null(), entry, payload) };
+                // SAFETY: as above.
+                let cb3 = unsafe { cb(c"".as_ptr(), ptr::null(), payload) };
+                // SAFETY: as above.
+                unsafe { [cb2, cb3, cb(ptr::null(), ptr::null(), payload)] }
             });
             assert_eq!(rcs, [ffi::GIT_EUSER; 3]);
             assert!(callback.stopped());
@@ -4527,7 +4754,7 @@ mod unit_tests {
                 .as_mut()
                 .insert(c"keep", id(1).as_ref(), FileMode::Commit)
                 .unwrap();
-            for n in [65536, 65537, 70000, 131072] {
+            for n in [65536, 65537, 70000, 131_072] {
                 let name = long(n);
                 for e in [
                     builder
@@ -4571,7 +4798,7 @@ mod unit_tests {
             let temp = TempRepo::new("updated-foreign");
             let repo = temp.repo();
             let path = temp.path.with_extension("sha256");
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let mut opts = InitOptions::new();
             opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
             opts.as_mut().set_oid_type(Some(OidType::Sha256));
@@ -4633,7 +4860,7 @@ mod unit_tests {
             assert_eq!(e.message(), c"failed to insert entry: invalid null OID - z");
             drop(wide_tree);
             drop(wide);
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
         }
 
         /// The corrected divergence: `git_tree_create_updated` upserts a path component
@@ -4673,7 +4900,7 @@ mod unit_tests {
             assert_eq!(e.message(), c"failed to parse tree: object is corrupted");
 
             // Rust: refused, as a leaf or a directory, at every length past the limit.
-            for n in [65536, 65537, 131072] {
+            for n in [65536, 65537, 131_072] {
                 for path in [
                     long(n),
                     format!("dir/{}", long(n)),

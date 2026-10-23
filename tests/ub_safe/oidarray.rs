@@ -1,9 +1,9 @@
 //! UB tests for `git2/oidarray.h`: the `OidArray` value held by its `OidArrayVal`
 //! owner, its handles and their accessors, and the `git_oidarray_dispose` policy.
 //!
-//! Each array's ids sit in a buffer of exactly `len` ids (`from_slice`), so ASan flags
+//! Each array's ids sit in a buffer of exactly `len` ids (`from_slice`), so `ASan` flags
 //! any access past them; every replaced, taken, truncated or copied buffer must be
-//! released exactly once (ASan: double free, use after free; LSan: leak). Illegal
+//! released exactly once (`ASan`: double free, use after free; `LSan`: leak). Illegal
 //! borrows are in `compile_fail/`. Only the empty array is built without libgit2, so
 //! little runs under Miri.
 
@@ -21,13 +21,14 @@ use crate::fixture::isolated;
 fn oid(seed: u8) -> Oid {
     let mut oid = Oid::zeroed();
     oid.as_mut().set_kind(OidType::Sha1);
-    oid.as_mut()
-        .set_id(core::array::from_fn(|i| seed.wrapping_add(i as u8)));
+    oid.as_mut().set_id(core::array::from_fn(|i| {
+        seed.wrapping_add(u8::try_from(i).unwrap())
+    }));
     oid
 }
 
 fn oids(n: usize) -> Vec<Oid> {
-    (0..n).map(|i| oid(i as u8)).collect()
+    (0..n).map(|i| oid(u8::try_from(i).unwrap())).collect()
 }
 
 fn bytes(oid: OidRef<'_>) -> (u8, [u8; 32]) {
@@ -83,7 +84,7 @@ fn arrays_before_init() {
 
 /// Empty arrays, which never initialise libgit2, dropped while another thread's first
 /// allocation initialises it: their dispose must not reach `git__free`, which reads
-/// the allocator that initialisation writes (TSan). Alone in a child, so the
+/// the allocator that initialisation writes (`TSan`). Alone in a child, so the
 /// initialisation is really the process's first.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]

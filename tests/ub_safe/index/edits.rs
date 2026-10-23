@@ -23,19 +23,33 @@ use crate::fixture::{TempRepo, init, isolated};
 /// Adds an entry to either owner (raw, through the fixture: a shared index yields no
 /// exclusive handle for `IndexMut::add`).
 fn add(index: &impl Owner, path: &CStr, stage: u16, kind: OidType, byte: u8, mode: u32) {
-    add_staged(index, path, stage, kind.raw() as u8, byte, mode);
+    add_staged(
+        index,
+        path,
+        stage,
+        u8::try_from(kind.raw()).unwrap(),
+        byte,
+        mode,
+    );
 }
 
 fn seeded(paths: &[(&CStr, u16)]) -> IndexBox {
     let index = Index::new().unwrap();
     for (n, &(path, stage)) in paths.iter().enumerate() {
-        add(&index, path, stage, OidType::Sha1, n as u8 + 1, 0o100644);
+        add(
+            &index,
+            path,
+            stage,
+            OidType::Sha1,
+            u8::try_from(n).unwrap() + 1,
+            0o100_644,
+        );
     }
     index
 }
 
 /// The path an index lends lives as long as the handle's borrow of the owner, across
-/// writes and reads through other handles of the same owner. BSan targets this test.
+/// writes and reads through other handles of the same owner. `BSan` targets this test.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn path_borrows_outlive_writes_and_reads() {
@@ -43,7 +57,7 @@ fn path_borrows_outlive_writes_and_reads() {
     let scratch = Scratch::new("edits-path");
     let file = CString::new(scratch.file("index").to_str().unwrap()).unwrap();
     let mut index = Index::open(&file).unwrap();
-    add(&index, c"a", 0, OidType::Sha1, 1, 0o100644);
+    add(&index, c"a", 0, OidType::Sha1, 1, 0o100_644);
     let shared = index.as_ref();
     let path = shared.path().unwrap();
     let again = index.as_ref();
@@ -107,7 +121,7 @@ fn removals_free_entries_once() {
 
 /// Scans whose callbacks read every lent string to its end while C frees the entries
 /// already scanned, skip and abort, start another scan on another index, and panic;
-/// the index is consistent after each. BSan targets this test.
+/// the index is consistent after each. `BSan` targets this test.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn scan_callbacks_read_lent_paths_while_entries_go() {
@@ -165,16 +179,16 @@ fn scan_callbacks_read_lent_paths_while_entries_go() {
 
     // A panic stops the scan; libgit2 cleans up before it resumes.
     let mut f = |path: &CStr, _: Option<&CStr>| -> MatchedPathResult {
-        if path == c"\xff" {
-            panic!("stop here");
-        }
+        assert!(path != c"\xff", "stop here");
         MatchedPathResult::APPLY
     };
     let mut callback = MatchedPathCallback::new(&mut f);
     let panicked = catch_unwind(AssertUnwindSafe(|| {
-        let _ = index
-            .as_mut()
-            .remove_all(StrArrayView::default().as_ref(), Some(&mut callback));
+        drop(
+            index
+                .as_mut()
+                .remove_all(StrArrayView::default().as_ref(), Some(&mut callback)),
+        );
     }));
     assert!(panicked.is_err());
     // The same callback scans again, this time to completion with no match.
@@ -224,8 +238,8 @@ fn tree_writes_refuse_foreign_ids_without_overflow() {
     init();
     let repo = TempRepo::new("edits-foreign");
     let index = Index::with_oid_type(OidType::Sha256).unwrap();
-    add(&index, c"a", 0, OidType::Sha256, 1, 0o100644);
-    add(&index, c"dir/b", 0, OidType::Sha256, 2, 0o100644);
+    add(&index, c"a", 0, OidType::Sha256, 1, 0o100_644);
+    add(&index, c"dir/b", 0, OidType::Sha256, 2, 0o100_644);
     let shared: IndexArc = index.into();
     let mut repo = repo;
     set_repository_index(&mut repo, &shared);
@@ -233,7 +247,7 @@ fn tree_writes_refuse_foreign_ids_without_overflow() {
     // A SHA-1 index holding a SHA-256 id, added before any repository owned it (an
     // owned index looks each added id up, overflowing alike).
     let index = Index::new().unwrap();
-    add(&index, c"x", 0, OidType::Sha256, 3, 0o100644);
+    add(&index, c"x", 0, OidType::Sha256, 3, 0o100_644);
     let shared_sha1: IndexArc = index.into();
     let mut other = TempRepo::new("edits-foreign-other");
     set_repository_index(&mut other, &shared_sha1);
@@ -295,7 +309,7 @@ fn racy_index_file(paths: &[&str]) -> Vec<u8> {
     for path in paths {
         let start = file.len();
         // ctime, mtime (seconds, nanoseconds), dev, ino, mode, uid, gid, size.
-        for field in [0u32, 0, 0x7FFF_FFFF, 0, 0, 0, 0o100644, 0, 0, 0] {
+        for field in [0u32, 0, 0x7FFF_FFFF, 0, 0, 0, 0o100_644, 0, 0, 0] {
             file.extend_from_slice(&field.to_be_bytes());
         }
         file.extend_from_slice(&[0x11; 20]);

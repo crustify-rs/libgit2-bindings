@@ -2,12 +2,12 @@
 //! owner and the `OdbRef` handles it lends.
 //!
 //! Every constructor builds and releases odbs over every object id type, on success
-//! and on each failure (ASan flags a use after free or double free, LSan a leaked odb,
+//! and on each failure (`ASan` flags a use after free or double free, `LSan` a leaked odb,
 //! backend or path). Odbs are shared with repositories that drop before and after the
 //! owner, owners cross threads and drop there, and several threads use one odb through
-//! shared borrows at once, as its `Sync` claim allows (TSan flags a race). The first
+//! shared borrows at once, as its `Sync` claim allows (`TSan` flags a race). The first
 //! constructors of a process race to initialise libgit2. Handles are taken again and
-//! again from one owner and used between other calls (BSan). The odb readers and
+//! again from one owner and used between other calls (`BSan`). The odb readers and
 //! writers are stand-ins from `fixture::odb`.
 
 use std::ffi::CString;
@@ -29,7 +29,7 @@ impl TempDir {
     fn new(tag: &str) -> Self {
         let path =
             std::env::temp_dir().join(format!("crustify-odb-ub-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -44,7 +44,7 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        drop(fs::remove_dir_all(&self.0));
     }
 }
 
@@ -219,7 +219,7 @@ fn odbs_are_shared_and_sent_across_threads() {
 }
 
 /// The first libgit2 calls of a process are odb constructors, on several threads at
-/// once: each pins the runtime before allocating (TSan flags a race with
+/// once: each pins the runtime before allocating (`TSan` flags a race with
 /// `git_libgit2_init`'s allocator setup).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]

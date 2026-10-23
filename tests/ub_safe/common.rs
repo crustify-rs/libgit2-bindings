@@ -4,12 +4,12 @@
 //! `Feature` and `BuildInfo` are fieldless enums over C's `git_feature_t` and
 //! `git_buildinfo_t`. The only safe way in from a raw value is `from_raw` /
 //! `try_from`, which must reject every value without a variant rather than produce an
-//! invalid discriminant (which Miri and UBSan would flag on the next read); an `as`
+//! invalid discriminant (which Miri and `UBSan` would flag on the next read); an `as`
 //! cast to either does not compile (`compile_fail/`). `Features` keeps any `int`
 //! C hands it, so its operations must stay in range for every bit pattern, the sign
 //! bit included. They are plain values: nothing allocates, points or is freed, so
-//! there is no lifetime for ASan or BorrowSanitizer to catch, and sharing them across
-//! threads races nothing (TSan). None of them calls libgit2, so they also run under
+//! there is no lifetime for `ASan` or `BorrowSanitizer` to catch, and sharing them across
+//! threads races nothing (`TSan`). None of them calls libgit2, so they also run under
 //! Miri.
 //!
 //! Then the enum `LibraryOption`.
@@ -18,14 +18,14 @@
 //! ways in from a raw value are `from_raw` / `try_from` and, from the `int` that
 //! `git_libgit2_opts` takes, `from_key`; each must reject every value without a
 //! variant, negative keys included, rather than produce an invalid discriminant
-//! (which Miri and UBSan would flag on the next read); an `as` cast to it does not
+//! (which Miri and `UBSan` would flag on the next read); an `as` cast to it does not
 //! compile (`compile_fail/`). None of these calls libgit2, so they also run under
 //! Miri.
 //!
 //! The version queries and the safe option getters do call libgit2. The getters read
 //! globals only the `unsafe` setters write (`ub_unsafe/common.rs`), so any number of
-//! threads may read them at once (TSan); the string getters allocate and copy out
-//! (ASan, LSan); and the plain getters need no initialised libgit2, while the string
+//! threads may read them at once (`TSan`); the string getters allocate and copy out
+//! (`ASan`, `LSan`); and the plain getters need no initialised libgit2, while the string
 //! ones pin it first, so they run in a child process where nothing has initialised it.
 //! `feature_backend` and `build_info` return `'static` literals of libgit2.so's: the
 //! results outlive the threads that asked, and asking initialises nothing.
@@ -39,7 +39,7 @@ use libgit2::ffi;
 use libgit2::libgit2::core::common::{BuildInfo, Feature, Features, LibraryOption};
 
 /// Every value around the declared ones, each single bit, and a coarse stride across
-/// the whole type; BorrowSanitizer instruments each comparison, so the probe set stays
+/// the whole type; `BorrowSanitizer` instruments each comparison, so the probe set stays
 /// small.
 fn probes() -> impl Iterator<Item = u32> {
     (0..=300)
@@ -63,10 +63,13 @@ fn feature_from_raw_yields_only_valid_features() {
         if let Some(feature) = Feature::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(feature.raw(), raw);
-            assert!(!format!("{feature:?}").is_empty());
+            assert_ne!(format!("{feature:?}"), "");
             seen.insert(feature);
         } else {
-            assert_eq!(Feature::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                Feature::try_from(raw).map_err(libgit2::libgit2::core::common::UnnamedFeature::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), Feature::ALL.len());
@@ -78,10 +81,14 @@ fn build_info_from_raw_yields_only_valid_items() {
     for raw in probes() {
         if let Some(info) = BuildInfo::from_raw(black_box(raw)) {
             assert_eq!(info.raw(), raw);
-            assert!(!format!("{info:?}").is_empty());
+            assert_ne!(format!("{info:?}"), "");
             seen.insert(info);
         } else {
-            assert_eq!(BuildInfo::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                BuildInfo::try_from(raw)
+                    .map_err(libgit2::libgit2::core::common::UnnamedBuildInfo::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 2);
@@ -93,9 +100,9 @@ fn option_niche_holds_for_every_value() {
     // a rejected value must never alias a variant, nor a variant read as `None`.
     for raw in probes() {
         let feature = black_box(Feature::from_raw(raw));
-        assert_eq!(feature.map(Feature::raw).unwrap_or(raw), raw);
+        assert_eq!(feature.map_or(raw, Feature::raw), raw);
         let info = black_box(BuildInfo::from_raw(raw));
-        assert_eq!(info.map(BuildInfo::raw).unwrap_or(raw), raw);
+        assert_eq!(info.map_or(raw, BuildInfo::raw), raw);
     }
 }
 
@@ -108,7 +115,7 @@ fn features_stay_in_range_for_every_bit_pattern() {
         assert!(named.len() <= Feature::ALL.len());
         assert!(named.iter().all(|&f| set.contains(f)));
         assert_eq!(set.iter().count(), named.len());
-        assert!(!format!("{set:?}").is_empty());
+        assert_ne!(format!("{set:?}"), "");
         for feature in Feature::ALL {
             set.insert(feature);
             assert!(set.contains(feature));
@@ -149,7 +156,7 @@ fn values_cross_threads() {
 }
 
 /// Every value around the declared ones, a coarse stride across the whole type, and
-/// the extremes; BorrowSanitizer instruments each comparison, so the probe set stays
+/// the extremes; `BorrowSanitizer` instruments each comparison, so the probe set stays
 /// small.
 fn option_probes() -> impl Iterator<Item = ffi::git_libgit2_opt_t> {
     (0..=300)
@@ -165,11 +172,15 @@ fn from_raw_yields_only_valid_options() {
         if let Some(opt) = LibraryOption::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(opt.raw(), raw);
-            assert_eq!(opt.key() as ffi::git_libgit2_opt_t, raw);
-            assert!(!format!("{opt:?}").is_empty());
+            assert_eq!(opt.key().cast_unsigned(), raw);
+            assert_ne!(format!("{opt:?}"), "");
             seen.insert(opt);
         } else {
-            assert_eq!(LibraryOption::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                LibraryOption::try_from(raw)
+                    .map_err(libgit2::libgit2::core::common::UnnamedLibraryOption::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 48);
@@ -184,12 +195,9 @@ fn from_key_yields_only_valid_options() {
             Some(opt) => {
                 assert!(key >= 0);
                 assert_eq!(opt.key(), key);
-                assert_eq!(
-                    LibraryOption::from_raw(key as ffi::git_libgit2_opt_t),
-                    Some(opt)
-                );
+                assert_eq!(LibraryOption::from_raw(key.cast_unsigned()), Some(opt));
             }
-            None => assert!(key < 0 || LibraryOption::from_raw(key as u32).is_none()),
+            None => assert!(key < 0 || LibraryOption::from_raw(key.cast_unsigned()).is_none()),
         }
     }
 }
@@ -200,7 +208,7 @@ fn library_option_niche_holds_for_every_value() {
     // value must never alias a variant, nor a variant read as `None`.
     for raw in option_probes() {
         let opt = black_box(LibraryOption::from_raw(raw));
-        assert_eq!(opt.map(LibraryOption::raw).unwrap_or(raw), raw);
+        assert_eq!(opt.map_or(raw, LibraryOption::raw), raw);
     }
 }
 
@@ -258,10 +266,10 @@ mod options {
         ] {
             let _: &CStr = &common::search_path(level).unwrap();
         }
-        let _ = common::template_path().unwrap();
+        drop(common::template_path().unwrap());
         assert!(!common::user_agent().unwrap().is_empty());
         assert!(!common::user_agent_product().unwrap().is_empty());
-        let _ = common::homedir().unwrap();
+        drop(common::homedir().unwrap());
         let extensions = common::extensions().unwrap();
         assert!(extensions.as_ref().len() >= 3);
         for e in extensions.as_ref().iter() {
@@ -348,7 +356,7 @@ mod options {
                 for (backends, infos) in &answers {
                     assert_eq!((backends, infos), (&answers[0].0, &answers[0].1));
                     for backend in backends.iter().flatten() {
-                        assert!(!backend.to_bytes().is_empty());
+                        assert_ne!(backend.to_bytes(), b"");
                     }
                     assert_eq!(infos[0], Some(c"x86_64"));
                 }

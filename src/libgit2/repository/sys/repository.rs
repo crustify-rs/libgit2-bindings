@@ -71,7 +71,7 @@
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
-use core::ptr::{self, addr_of, addr_of_mut};
+use core::ptr::{self};
 
 use ffibox::define_ctype;
 
@@ -174,7 +174,13 @@ impl NewOptions {
     /// the current version and the default object id type ([`OidType::default`]).
     /// Needs no initialised libgit2.
     ///
-    /// Wraps: git_repository_new_options_init
+    /// Wraps: `git_repository_new_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> NewOptions {
         let mut raw = ffi::git_repository_new_options::default();
         // SAFETY: `raw` is a live `git_repository_new_options` the call may write, so
@@ -182,7 +188,7 @@ impl NewOptions {
         // version check passes, so it only copies the 8-byte
         // `GIT_REPOSITORY_NEW_OPTIONS_INIT` template into `raw`: no allocation and no
         // error state, so no initialised runtime is needed.
-        let rc = unsafe { ffi::git_repository_new_options_init(&mut raw, Self::VERSION) };
+        let rc = unsafe { ffi::git_repository_new_options_init(&raw mut raw, Self::VERSION) };
         assert_eq!(
             rc, 0,
             "git_repository_new_options_init refused its own version"
@@ -222,26 +228,35 @@ impl NewOptionsRef<'_> {
     /// The structure version. [`NewOptions::new`] sets [`NewOptions::VERSION`];
     /// libgit2 refuses the options with `GIT_ERROR_INVALID` if it is 0 or above that.
     ///
-    /// Field: git_repository_new_options.version
+    /// Field: `git_repository_new_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr2 = unsafe { &raw const (*self.as_ptr()).version };
         // SAFETY: a read through the shared handle's pointer to a live
         // `git_repository_new_options`; any value is a valid `u32`.
-        unsafe { addr_of!((*self.as_ptr()).version).read() }
+        unsafe { version_ptr2.read() }
     }
 
     /// The type of the repository's object ids; `None`, the default, means
     /// [`OidType::default`]. Every safe path stores `0` or a named type, so `None` is
     /// always the zero default.
     ///
-    /// Field: git_repository_new_options.oid_type
+    /// Field: `git_repository_new_options.oid_type`
+    #[must_use]
     pub fn oid_type(&self) -> Option<OidType> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let oid_type_ptr2 = unsafe { &raw const (*self.as_ptr()).oid_type };
         // SAFETY: a read through the shared handle's pointer to a live
         // `git_repository_new_options`; the field is a plain `u32`, any value valid.
-        let raw = unsafe { addr_of!((*self.as_ptr()).oid_type).read() };
+        let raw = unsafe { oid_type_ptr2.read() };
         OidType::from_raw(raw)
     }
 
     /// A copy of the options, as a value of its own.
+    #[must_use]
     pub fn to_options(&self) -> NewOptions {
         // SAFETY: a read of the whole live `git_repository_new_options` through the
         // shared handle's pointer; it is `Copy` plain data.
@@ -253,23 +268,29 @@ impl NewOptionsMut<'_> {
     /// Replaces the structure version. Any value is accepted; libgit2 refuses options
     /// whose version is 0 or above [`NewOptions::VERSION`].
     ///
-    /// Field: git_repository_new_options.version
+    /// Field: `git_repository_new_options.version`
     pub fn set_version(&mut self, version: u32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw mut (*self.as_mut_ptr()).version };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_repository_new_options`; the field is a plain integer.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).version).write(version) }
+        unsafe { version_ptr.write(version) }
     }
 
     /// Replaces the type of the repository's object ids; `None` stores `0`, which
     /// libgit2 reads as [`OidType::default`].
     ///
-    /// Field: git_repository_new_options.oid_type
+    /// Field: `git_repository_new_options.oid_type`
     pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
         let raw = oid_type.map_or(0, OidType::raw);
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let oid_type_ptr = unsafe { &raw mut (*self.as_mut_ptr()).oid_type };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_repository_new_options`; the field is a plain integer, and `raw` is 0 or
         // a type libgit2 names.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).oid_type).write(raw) }
+        unsafe { oid_type_ptr.write(raw) }
     }
 }
 
@@ -336,12 +357,6 @@ impl Repository {
     /// one, of the object id type `opts` names ([`OidType::default`] for `None`): a
     /// base for wiring custom backends into.
     ///
-    /// Fails with `GIT_ERROR_INVALID` "invalid version N on git_repository_new_options"
-    /// when the options' [version](NewOptionsMut::set_version) is 0 or above
-    /// [`NewOptions::VERSION`], and otherwise only when libgit2 runs out of memory or
-    /// cannot be initialised. libgit2 asserts that a non-zero object id type is one it
-    /// names, which every [`NewOptions`] holds.
-    ///
     /// ```
     /// use libgit2::libgit2::oid::oid::OidType;
     /// use libgit2::libgit2::repository::repository::Repository;
@@ -355,7 +370,15 @@ impl Repository {
     /// assert!(repo.as_ref().is_bare() && repo.as_ref().path().is_none());
     /// ```
     ///
-    /// Wraps: git_repository_new_ext
+    /// Wraps: `git_repository_new_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails with `GIT_ERROR_INVALID` "invalid version N on `git_repository_new_options`"
+    /// when the options' [version](NewOptionsMut::set_version) is 0 or above
+    /// [`NewOptions::VERSION`], and otherwise only when libgit2 runs out of memory or
+    /// cannot be initialised. libgit2 asserts that a non-zero object id type is one it
+    /// names, which every [`NewOptions`] holds.
     pub fn new_ext(opts: NewOptionsRef<'_>) -> Result<RepositoryBox, RepositoryError> {
         if !runtime_pinned() {
             return Err(unpinned());
@@ -367,7 +390,7 @@ impl Repository {
         // `oid_type`), for the call only, and whose `oid_type` is 0 or a type libgit2
         // names, so its assertion holds. The runtime is pinned, so a failure is reported
         // on live thread-local state.
-        let rc = unsafe { ffi::git_repository_new_ext(&mut out, opts) };
+        let rc = unsafe { ffi::git_repository_new_ext(&raw mut out, opts) };
         // SAFETY: `git_repository_new_ext` leaves `out` NULL when it refuses the
         // options, stores `repository_alloc`'s result (NULL on failure) otherwise, and
         // on success that is a fresh repository the caller owns alone.
@@ -384,9 +407,6 @@ impl RepositoryMut<'_> {
     ///
     /// A cache already loaded is released first, so this reloads it; libgit2 alone
     /// would leak it. On failure the repository is left without a cache.
-    ///
-    /// Fails with libgit2's error when the submodules cannot be read (a malformed
-    /// `.gitmodules`, say), or memory runs out.
     ///
     /// A shared handle can neither load nor clear the cache:
     ///
@@ -406,7 +426,12 @@ impl RepositoryMut<'_> {
     /// }
     /// ```
     ///
-    /// Wraps: git_repository_submodule_cache_all
+    /// Wraps: `git_repository_submodule_cache_all`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when the submodules cannot be read (a malformed
+    /// `.gitmodules`, say), or memory runs out.
     pub fn cache_submodules(&mut self) -> Result<(), RepositoryError> {
         self.clear_submodule_cache();
         // SAFETY: a live repository on this thread, exclusively borrowed, whose cache
@@ -424,7 +449,7 @@ impl RepositoryMut<'_> {
     /// repository again. Submodules looked up through the cache stay valid; each holds
     /// its own reference.
     ///
-    /// Wraps: git_repository_submodule_cache_clear
+    /// Wraps: `git_repository_submodule_cache_clear`
     pub fn clear_submodule_cache(&mut self) {
         // SAFETY: a live repository on this thread, exclusively borrowed, so no libgit2
         // routine holds its cache while the routine frees it and sets the slot to NULL.
@@ -445,7 +470,7 @@ fn odb_oid_type(odb: &OdbArc<'static>) -> Result<OidType, RepositoryError> {
     // SAFETY: `out` is a writable slot; `odb` a live odb no repository owns, which the
     // scratch repository takes a counted reference to. Every repository's runtime was
     // pinned when it was built, and so was the odb's.
-    let rc = unsafe { ffi::git_repository_wrap_odb(&mut out, odb.as_c_ptr()) };
+    let rc = unsafe { ffi::git_repository_wrap_odb(&raw mut out, odb.as_c_ptr()) };
     // SAFETY: `git_repository_wrap_odb` leaves `out` NULL on failure, or writes a fresh
     // repository the caller owns alone; it is freed at the end of this function, which
     // releases its reference to the odb and clears the odb's owner.
@@ -465,11 +490,13 @@ impl RepositoryMut<'_> {
     /// `core.worktree` in its configuration, then forgets its working directory. A
     /// bare repository is left as it is.
     ///
+    /// Wraps: `git_repository_set_bare`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when the configuration cannot be loaded or written
     /// (`GIT_EREADONLY` for a repository without a configuration file of its own),
     /// leaving the working directory in place.
-    ///
-    /// Wraps: git_repository_set_bare
     pub fn set_bare(&mut self) -> Result<(), RepositoryError> {
         // SAFETY: a live repository, written through the exclusive handle: libgit2
         // frees its working directory string, which no handle lends past this borrow.
@@ -499,7 +526,7 @@ impl RepositoryMut<'_> {
     /// target.as_mut().set_config(&config);
     /// ```
     ///
-    /// Wraps: git_repository_set_config
+    /// Wraps: `git_repository_set_config`
     pub fn set_config(&mut self, config: &ConfigArc<'static>) {
         // SAFETY: a live repository, written through the exclusive handle; `config` a
         // live config whose backends read no repository (`'static`), which libgit2
@@ -516,7 +543,7 @@ impl RepositoryMut<'_> {
     ///
     /// libgit2 does not compare the index's object id type with the repository's.
     ///
-    /// Wraps: git_repository_set_index
+    /// Wraps: `git_repository_set_index`
     pub fn set_index(&mut self, index: Option<&IndexArc>) {
         let index = index.map_or(ptr::null_mut(), IndexArc::as_c_ptr);
         // SAFETY: a live repository, written through the exclusive handle; `index` NULL
@@ -542,14 +569,16 @@ impl RepositoryMut<'_> {
     /// target.as_mut().set_odb(odb).unwrap();
     /// ```
     ///
+    /// Wraps: `git_repository_set_odb`
+    ///
+    /// # Errors
+    ///
     /// Fails, leaving the repository unchanged, when the odb's object id type is not
-    /// the repository's (GIT_ERROR_INVALID, "specified object ID type does not match
+    /// the repository's (`GIT_ERROR_INVALID`, "specified object ID type does not match
     /// repository object ID type"): libgit2 does not check it, and the repository's
     /// ids would then be formatted into paths of the odb's length. Reading the odb's
     /// type allocates a scratch repository, which can fail with `-1` when libgit2 runs
     /// out of memory.
-    ///
-    /// Wraps: git_repository_set_odb
     pub fn set_odb(&mut self, odb: OdbArc<'static>) -> Result<(), RepositoryError> {
         if odb_oid_type(&odb)? != self.as_ref().oid_type() {
             set(
@@ -574,12 +603,14 @@ impl RepositoryMut<'_> {
     /// as after the repository was copied elsewhere; with `recurse`, does the same in
     /// its submodules, whose failures are ignored.
     ///
+    /// Wraps: `git_repository_reinit_filesystem`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when the configuration cannot be read or written. A
     /// repository without a git directory is refused with [`ErrorCode::NotFound`]
-    /// (GIT_ERROR_INVALID, "path cannot exist in repository"): libgit2 would write a
+    /// (`GIT_ERROR_INVALID`, "path cannot exist in repository"): libgit2 would write a
     /// `config` file in the current directory.
-    ///
-    /// Wraps: git_repository_reinit_filesystem
     pub fn reinit_filesystem(&mut self, recurse: bool) -> Result<(), RepositoryError> {
         if self.as_ref().path().is_none() {
             return Err(pathless());
@@ -617,7 +648,7 @@ impl RepositoryRef<'_> {
     ///   its callbacks: such a routine may hold the previous refdb without a reference of its own,
     ///   which the swap releases.
     ///
-    /// Wraps: git_repository_set_refdb
+    /// Wraps: `git_repository_set_refdb`
     pub unsafe fn set_refdb(&self, refdb: &RefdbArc<'_>) {
         let repo = self.as_ptr().cast_mut();
         // SAFETY: a live repository, on this thread, which no libgit2 routine is using
@@ -653,7 +684,7 @@ impl RepositoryMut<'_> {
     /// let _ = commondir;
     /// ```
     ///
-    /// Wraps: git_repository__cleanup
+    /// Wraps: `git_repository__cleanup`
     pub fn cleanup(&mut self) {
         // SAFETY: a live repository, borrowed exclusively, so no handle reads what this
         // releases; counted sub-objects handed out keep their own references.
@@ -779,7 +810,7 @@ mod unit_tests {
                 "crustify-sys-repository-unit-{}-reload",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&dir);
+            drop(fs::remove_dir_all(&dir));
             let mut repo =
                 Repository::init(&CString::new(dir.as_os_str().as_bytes()).unwrap(), false)
                     .unwrap();
@@ -808,7 +839,7 @@ mod unit_tests {
                 "crustify-sys-repository-unit-{}-failed",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&dir);
+            drop(fs::remove_dir_all(&dir));
             let mut repo =
                 Repository::init(&CString::new(dir.as_os_str().as_bytes()).unwrap(), false)
                     .unwrap();
@@ -816,14 +847,11 @@ mod unit_tests {
             fs::write(dir.join(".gitmodules"), "[submodule \"sub\"\n").unwrap();
             let e = repo.as_mut().cache_submodules().unwrap_err();
             assert_eq!(e.raw_code(), -1);
-            assert_eq!(
-                e.class(),
-                Some(crate::libgit2::util::errors::ErrorClass::Config)
-            );
+            assert_eq!(e.class(), Some(ErrorClass::Config));
             // Lookups read the repository again: the broken `.gitmodules` fails them.
-            let (mut sm, raw) = (core::ptr::null_mut(), repo.as_c_ptr());
+            let (mut sm, raw) = (ptr::null_mut(), repo.as_c_ptr());
             // SAFETY: a writable slot, the box's live repository and a NUL-terminated name.
-            let rc = unsafe { ffi::git_submodule_lookup(&mut sm, raw, c"sub".as_ptr()) };
+            let rc = unsafe { ffi::git_submodule_lookup(&raw mut sm, raw, c"sub".as_ptr()) };
             assert!(rc < 0);
             drop(repo);
             fs::remove_dir_all(&dir).unwrap();
@@ -833,7 +861,7 @@ mod unit_tests {
     /// libc's allocator, refusing everything while `REFUSING` is set, installed in a
     /// child process before libgit2 initialises.
     mod refusing {
-        use core::ffi::{CStr, c_int, c_void};
+        use core::ffi::{CStr, c_void};
         use core::ptr::{self, NonNull};
         use std::process::Command;
         use std::sync::atomic::AtomicBool;
@@ -910,7 +938,7 @@ mod unit_tests {
             // every member set; libgit2 copies it before anything is allocated.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };

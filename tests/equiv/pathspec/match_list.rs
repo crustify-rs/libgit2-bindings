@@ -22,13 +22,14 @@ fn index(paths: &[&CStr]) -> IndexBox {
     for path in paths {
         let mut entry = ffi::git_index_entry {
             path: path.as_ptr(),
-            mode: 0o100644,
+            mode: 0o100_644,
             ..Default::default()
         };
-        entry.id.type_ = ffi::GIT_OID_SHA1 as _;
+        entry.id.type_ = u8::try_from(ffi::GIT_OID_SHA1).unwrap();
         entry.id.id[0] = 1;
         // SAFETY: sole index and initialized input; C copies the entry and path.
-        assert_eq!(unsafe { ffi::git_index_add(index.as_c_ptr(), &entry) }, 0);
+        let ret = unsafe { ffi::git_index_add(index.as_c_ptr(), &raw const entry) };
+        assert_eq!(ret, 0);
     }
     index
 }
@@ -78,39 +79,51 @@ fn safe_seen(list: MatchListRef<'_, '_>) -> Seen {
 }
 
 fn raw_seen(list: &RawList) -> Seen {
-    // SAFETY: every pointer here is returned from this live list, which its source
-    // diff (if any) outlives. C bounds-checks; all present strings are terminated.
-    unsafe {
-        let count = ffi::git_pathspec_match_list_entrycount(list.0);
+    {
+        // SAFETY: every pointer here is returned from this live list, which its source
+        // diff (if any) outlives. C bounds-checks; all present strings are terminated.
+        let count = unsafe { ffi::git_pathspec_match_list_entrycount(list.0) };
         let probes: Vec<_> = (0..=count).chain([usize::MAX]).collect();
-        let string = |p: *const core::ffi::c_char| {
-            if p.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(p).to_owned())
+        // SAFETY: as above.
+        let string = unsafe {
+            |p: *const core::ffi::c_char| {
+                if p.is_null() {
+                    None
+                } else {
+                    Some(CStr::from_ptr(p).to_owned())
+                }
             }
         };
+        // SAFETY: as above.
+
         Seen {
             count,
             entries: probes
                 .iter()
-                .map(|&i| string(ffi::git_pathspec_match_list_entry(list.0, i)))
+                // SAFETY: as above.
+                .map(|&i| string(unsafe { ffi::git_pathspec_match_list_entry(list.0, i) }))
                 .collect(),
-            failures: (0..=ffi::git_pathspec_match_list_failed_entrycount(list.0))
+            // SAFETY: as above.
+            failures: (0..=unsafe { ffi::git_pathspec_match_list_failed_entrycount(list.0) })
                 .chain([usize::MAX])
-                .map(|i| string(ffi::git_pathspec_match_list_failed_entry(list.0, i)))
+                // SAFETY: as above.
+                .map(|i| string(unsafe { ffi::git_pathspec_match_list_failed_entry(list.0, i) }))
                 .collect(),
             deltas: probes
                 .iter()
                 .map(|&i| {
-                    let p = ffi::git_pathspec_match_list_diff_entry(list.0, i);
+                    // SAFETY: as above.
+                    let p = unsafe { ffi::git_pathspec_match_list_diff_entry(list.0, i) };
                     if p.is_null() {
                         None
                     } else {
                         Some((
-                            (*p).status,
-                            string((*p).old_file.path),
-                            string((*p).new_file.path),
+                            // SAFETY: as above.
+                            unsafe { (*p).status },
+                            // SAFETY: as above.
+                            string(unsafe { (*p).old_file.path }),
+                            // SAFETY: as above.
+                            string(unsafe { (*p).new_file.path }),
                         ))
                     }
                 })
@@ -119,15 +132,23 @@ fn raw_seen(list: &RawList) -> Seen {
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the helper consumes what it reports, as its callers hand it over"
+)]
 fn compare_error(rc: i32, error: RepositoryError) {
     assert_eq!(rc, error.raw_code());
-    // SAFETY: the preceding C failure set this thread's error; it is copied before
-    // any other C operation. Successful safe allocations are not running here.
-    unsafe {
-        let e = ffi::git_error_last();
+    {
+        // SAFETY: the preceding C failure set this thread's error; it is copied before
+        // any other C operation. Successful safe allocations are not running here.
+        let e = unsafe { ffi::git_error_last() };
         assert!(!e.is_null());
-        assert_eq!((*e).klass, error.raw_class());
-        assert_eq!(CStr::from_ptr((*e).message), error.message());
+        // SAFETY: as above.
+        unsafe { assert_eq!((*e).klass, error.raw_class()) };
+        // SAFETY: as above.
+        let message = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { assert_eq!(CStr::from_ptr(message), error.message()) };
     }
 }
 
@@ -159,7 +180,7 @@ fn index_flag_sequences_and_release_order() {
             // slot. The source owners remain live; RawList releases each result.
             let rc = unsafe {
                 ffi::git_pathspec_match_index(
-                    &mut raw.0,
+                    &raw mut raw.0,
                     raw_index.as_c_ptr(),
                     bits,
                     raw_ps.as_c_ptr(),
@@ -189,9 +210,9 @@ fn index_flag_sequences_and_release_order() {
             // SAFETY: same independent initialized sources and writable out slot.
             unsafe {
                 ffi::git_pathspec_match_index(
-                    &mut raw.0,
+                    &raw mut raw.0,
                     raw_index.as_c_ptr(),
-                    libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
+                    ffi::GIT_PATHSPEC_FIND_FAILURES,
                     raw_ps.as_c_ptr(),
                 )
             },
@@ -234,7 +255,7 @@ fn diff_variants_retain_only_borrowed_deltas() {
                 // and unchanged until after RawList releases its borrowed pointers.
                 let rc = unsafe {
                     ffi::git_pathspec_match_diff(
-                        &mut raw.0,
+                        &raw mut raw.0,
                         raw_diff.as_c_ptr(),
                         bits,
                         raw_ps.as_c_ptr(),
@@ -264,7 +285,7 @@ fn tree_and_workdir_sources_and_bare_error() {
     for bare in [false, true] {
         let base =
             std::env::temp_dir().join(format!("crustify-list-equiv-{}-{bare}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        drop(std::fs::remove_dir_all(&base));
         let a = base.join("safe");
         let b = base.join("raw");
         let mut repo = Repository::init(&CString::new(a.to_str().unwrap()).unwrap(), bare).unwrap();
@@ -282,9 +303,9 @@ fn tree_and_workdir_sources_and_bare_error() {
         // a bare repo is a supported error case, not an invalid pointer.
         let rc = unsafe {
             ffi::git_pathspec_match_workdir(
-                &mut raw.0,
+                &raw mut raw.0,
                 raw_repo.as_c_ptr(),
-                libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
+                ffi::GIT_PATHSPEC_FIND_FAILURES,
                 raw_ps.as_c_ptr(),
             )
         };
@@ -317,9 +338,9 @@ fn tree_and_workdir_sources_and_bare_error() {
             // SAFETY: independently owned tree and pathspec; C copies every result.
             unsafe {
                 ffi::git_pathspec_match_tree(
-                    &mut raw_tree_list.0,
+                    &raw mut raw_tree_list.0,
                     raw_tree.as_c_ptr(),
-                    libgit2::ffi::GIT_PATHSPEC_FIND_FAILURES,
+                    ffi::GIT_PATHSPEC_FIND_FAILURES,
                     raw_ps.as_c_ptr(),
                 )
             },

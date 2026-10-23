@@ -58,15 +58,22 @@ fn init() {
 
 /// The calling thread's last error class and message.
 fn c_last() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-    // NUL-terminated string, both live until the next libgit2 call on this thread,
-    // after the copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -82,8 +89,11 @@ fn found(p: *const ffi::git_object) -> Outcome {
     let mut out = [0u8; 65];
     // SAFETY: `p` is a live object; its id lives as long as it and is formatted into
     // `out`, 65 writable bytes, NUL included.
+    let object_id = unsafe { ffi::git_object_id(p) };
+    // SAFETY: as above.
+    unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), object_id) };
+    // SAFETY: as above.
     unsafe {
-        ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), ffi::git_object_id(p));
         Outcome::Found(
             CStr::from_bytes_until_nul(&out)
                 .unwrap()
@@ -122,7 +132,7 @@ impl CSide {
         // SAFETY: a writable slot and a NUL-terminated path; no ceiling directories.
         let rc = unsafe {
             ffi::git_repository_open_ext(
-                &mut repo,
+                &raw mut repo,
                 path.as_ptr(),
                 ffi::GIT_REPOSITORY_OPEN_NO_SEARCH,
                 ptr::null(),
@@ -138,7 +148,7 @@ impl CSide {
     fn pathless() -> Self {
         let mut repo = ptr::null_mut();
         // SAFETY: a writable slot.
-        assert_eq!(unsafe { ffi::git_repository_new(&mut repo) }, 0);
+        assert_eq!(unsafe { ffi::git_repository_new(&raw mut repo) }, 0);
         Self {
             repo,
             held: Vec::new(),
@@ -152,7 +162,7 @@ impl CSide {
         // SAFETY: a writable id, and `hex.len()` readable bytes of hex digits.
         let rc = unsafe {
             ffi::git_oid_from_prefix(
-                &mut id,
+                &raw mut id,
                 step.hex.as_ptr().cast(),
                 step.hex.len(),
                 ffi::GIT_OID_SHA1,
@@ -163,10 +173,14 @@ impl CSide {
         let kind = ObjectType::raw_or_any(step.kind);
         // SAFETY: a writable slot, the live repository, a live id of its type read for
         // the call, and a named type or `GIT_OBJECT_ANY`.
-        let rc = unsafe {
-            match step.len {
-                None => ffi::git_object_lookup(&mut out, self.repo, &id, kind),
-                Some(len) => ffi::git_object_lookup_prefix(&mut out, self.repo, &id, len, kind),
+        let rc = match step.len {
+            // SAFETY: as above.
+            None => unsafe { ffi::git_object_lookup(&raw mut out, self.repo, &raw const id, kind) },
+            Some(len) => {
+                // SAFETY: as above.
+                unsafe {
+                    ffi::git_object_lookup_prefix(&raw mut out, self.repo, &raw const id, len, kind)
+                }
             }
         };
         if rc < 0 {
@@ -187,7 +201,7 @@ impl CSide {
             .map(|&o| {
                 let mut dest = ptr::null_mut();
                 // SAFETY: `o` is a live reference this side holds.
-                assert_eq!(unsafe { ffi::git_object_dup(&mut dest, o) }, 0);
+                assert_eq!(unsafe { ffi::git_object_dup(&raw mut dest, o) }, 0);
                 assert_eq!(dest, o);
                 dest
             })
@@ -207,8 +221,9 @@ impl Drop for CSide {
             for &o in &self.held {
                 ffi::git_object_free(o);
             }
-            ffi::git_repository_free(self.repo);
         }
+        // SAFETY: as above.
+        unsafe { ffi::git_repository_free(self.repo) };
     }
 }
 
@@ -364,7 +379,7 @@ fn lookups_in_a_repository_without_paths_match_c() {
 fn lookups_of_unparsable_objects_match_c() {
     init();
     let path = std::env::temp_dir().join(format!("crustify-object-equiv-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
     let path_str = path.to_str().unwrap().to_owned();
     let objects: [(&[u8], ffi::git_object_t); 5] = [
         (b"tree nope\n", ffi::GIT_OBJECT_COMMIT),
@@ -384,18 +399,23 @@ fn lookups_of_unparsable_objects_match_c() {
             .map(|(data, kind)| {
                 let mut id = ffi::git_oid::default();
                 let mut out = [0u8; 41];
-                // SAFETY: a live odb, a writable id, `data` read for the call; the id is
-                // formatted into 41 writable bytes, NUL included.
-                unsafe {
-                    let rc = ffi::git_odb_write(
-                        &mut id,
-                        odb.as_c_ptr(),
-                        data.as_ptr().cast(),
-                        data.len(),
-                        *kind,
-                    );
+                {
+                    // SAFETY: a live odb, a writable id, `data` read for the call; the id is
+                    // formatted into 41 writable bytes, NUL included.
+                    let rc = unsafe {
+                        ffi::git_odb_write(
+                            &raw mut id,
+                            odb.as_c_ptr(),
+                            data.as_ptr().cast(),
+                            data.len(),
+                            *kind,
+                        )
+                    };
                     assert_eq!(rc, 0);
-                    ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), &id);
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), &raw const id)
+                    };
                 }
                 CStr::from_bytes_until_nul(&out)
                     .unwrap()
@@ -429,7 +449,7 @@ fn lookups_of_unparsable_objects_match_c() {
     let rust = Repository::open(&CString::new(path_str.as_str()).unwrap()).unwrap();
     compare(CSide::open(&path_str), &rust, &steps);
     drop(rust);
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
 }
 
 mod peel_and_bypath {
@@ -501,7 +521,7 @@ mod peel_and_bypath {
     ) -> (Outcome, bool, *mut ffi::git_object) {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot, a live object and a named type or `GIT_OBJECT_ANY`.
-        let rc = unsafe { ffi::git_object_peel(&mut out, base, ObjectType::raw_or_any(kind)) };
+        let rc = unsafe { ffi::git_object_peel(&raw mut out, base, ObjectType::raw_or_any(kind)) };
         if rc < 0 {
             let (class, message) = c_last();
             return (Outcome::Failed(rc, class, message), false, ptr::null_mut());
@@ -519,7 +539,7 @@ mod peel_and_bypath {
         // or `GIT_OBJECT_ANY`.
         let rc = unsafe {
             ffi::git_object_lookup_bypath(
-                &mut out,
+                &raw mut out,
                 base,
                 path.as_ptr(),
                 ObjectType::raw_or_any(kind),
@@ -569,12 +589,14 @@ mod peel_and_bypath {
             let mut id = ffi::git_oid::default();
             // SAFETY: a writable id and 40 readable hex digits.
             let rc = unsafe {
-                ffi::git_oid_from_prefix(&mut id, hex.as_ptr().cast(), 40, ffi::GIT_OID_SHA1)
+                ffi::git_oid_from_prefix(&raw mut id, hex.as_ptr().cast(), 40, ffi::GIT_OID_SHA1)
             };
             assert_eq!(rc, 0);
             let mut base = ptr::null_mut();
             // SAFETY: a writable slot, the live repository and a live id of its type.
-            let rc = unsafe { ffi::git_object_lookup(&mut base, c.repo, &id, ffi::GIT_OBJECT_ANY) };
+            let rc = unsafe {
+                ffi::git_object_lookup(&raw mut base, c.repo, &raw const id, ffi::GIT_OBJECT_ANY)
+            };
             assert_eq!(rc, 0);
             c_bases.push(base);
             let oid = Oid::from_prefix(hex.as_bytes(), OidType::Sha1).unwrap();
@@ -687,14 +709,13 @@ mod id_options {
         opts: *const ffi::git_object_id_options,
     ) -> (u32, ffi::git_object_t, ffi::git_oid_t, bool) {
         // SAFETY: live options, read field by field.
-        unsafe {
-            (
-                (*opts).version,
-                (*opts).object_type,
-                (*opts).oid_type,
-                !(*opts).filters.is_null(),
-            )
-        }
+        let version = unsafe { (*opts).version };
+        // SAFETY: as above.
+        let object_type = unsafe { (*opts).object_type };
+        // SAFETY: as above.
+        let oid_type = unsafe { (*opts).oid_type };
+        // SAFETY: as above.
+        unsafe { (version, object_type, oid_type, !(*opts).filters.is_null()) }
     }
 
     /// What `git_object_id_from_buffer` makes of `data` through `opts`: the id's hex, or
@@ -708,7 +729,7 @@ mod id_options {
         // SAFETY: a writable id; `data.len()` readable bytes (a live one for none); live
         // options whose list, if any, is live and used by nothing else meanwhile.
         let rc = unsafe {
-            ffi::git_object_id_from_buffer(&mut out, bytes.as_ptr().cast(), data.len(), opts)
+            ffi::git_object_id_from_buffer(&raw mut out, bytes.as_ptr().cast(), data.len(), opts)
         };
         if rc < 0 {
             let (class, message) = c_last();
@@ -716,7 +737,7 @@ mod id_options {
         }
         let mut hex = [0u8; 65];
         // SAFETY: the id libgit2 wrote; 65 writable bytes, NUL included.
-        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &raw const out) };
         Ok(CStr::from_bytes_until_nul(&hex)
             .unwrap()
             .to_str()
@@ -733,14 +754,14 @@ mod id_options {
         let mut out = ffi::git_oid::default();
         // SAFETY: a writable id; a NUL-terminated path; live options whose list, if any,
         // is live and used by nothing else meanwhile.
-        let rc = unsafe { ffi::git_object_id_from_file(&mut out, path.as_ptr(), opts) };
+        let rc = unsafe { ffi::git_object_id_from_file(&raw mut out, path.as_ptr(), opts) };
         if rc < 0 {
             let (class, message) = c_last();
             return Err((rc, class, message));
         }
         let mut hex = [0u8; 65];
         // SAFETY: the id libgit2 wrote; 65 writable bytes, NUL included.
-        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &out) };
+        unsafe { ffi::git_oid_tostr(hex.as_mut_ptr().cast(), hex.len(), &raw const out) };
         Ok(CStr::from_bytes_until_nul(&hex)
             .unwrap()
             .to_str()
@@ -773,7 +794,7 @@ mod id_options {
                 "crustify-id-files-equiv-{}-{side}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             std::fs::create_dir_all(dir.join("directory")).unwrap();
             let mut paths = Vec::new();
             for (i, data) in CONTENTS.iter().enumerate() {
@@ -790,7 +811,7 @@ mod id_options {
 
     impl Drop for Files {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -853,7 +874,7 @@ mod id_options {
                 "crustify-id-options-equiv-{}-{side}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let mut repo = Repository::init(&c_path, false).unwrap();
             std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
@@ -884,7 +905,7 @@ mod id_options {
     impl Drop for Workdir {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -951,8 +972,9 @@ mod id_options {
     fn new_matches_init() {
         let mut c = ffi::git_object_id_options::default();
         // SAFETY: writable options, overwritten with the template.
-        let rc =
-            unsafe { ffi::git_object_id_options_init(&mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION) };
+        let rc = unsafe {
+            ffi::git_object_id_options_init(&raw mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION)
+        };
         assert_eq!(rc, 0);
         let template = ffi::git_object_id_options {
             version: ffi::GIT_OBJECT_ID_OPTIONS_VERSION,
@@ -961,16 +983,16 @@ mod id_options {
         let rust = ObjectIdOptions::new();
         let defaulted = ObjectIdOptions::default();
         assert_eq!(ObjectIdOptions::VERSION, c.version);
-        assert_eq!(c_fields(rust_raw(&rust)), c_fields(&c));
-        assert_eq!(c_fields(rust_raw(&defaulted)), c_fields(&c));
-        assert_eq!(c_fields(&template), c_fields(&c));
+        assert_eq!(c_fields(rust_raw(&rust)), c_fields(&raw const c));
+        assert_eq!(c_fields(rust_raw(&defaulted)), c_fields(&raw const c));
+        assert_eq!(c_fields(&raw const template), c_fields(&raw const c));
         assert_eq!(rust.as_ref().version(), c.version);
         init();
-        assert_eq!(observe(rust_raw(&rust)), observe(&c));
+        assert_eq!(observe(rust_raw(&rust)), observe(&raw const c));
         // The wrappers, through the default options and through none, against C's.
         let (c_files, rust_files) = (Files::new("init-c"), Files::new("init-rust"));
         let mut rust = rust;
-        let expected = c_ids(&c, &c_files);
+        let expected = c_ids(&raw const c, &c_files);
         assert_eq!(rust_ids(&mut rust, &rust_files), expected);
         assert_eq!(c_ids(ptr::null(), &c_files), expected);
         let mut none: Vec<_> = CONTENTS
@@ -984,12 +1006,12 @@ mod id_options {
                 .map(|p| relative(outcome(id_from_file(p, None)), &rust_files)),
         );
         assert_eq!(none, expected);
-        assert!(
+        assert_eq!(
             expected[CONTENTS.len()..]
                 .iter()
                 .filter(|r| r.is_err())
-                .count()
-                == 2
+                .count(),
+            2
         );
     }
 
@@ -1010,12 +1032,12 @@ mod id_options {
             let mut c = ffi::git_object_id_options::default();
             // SAFETY: writable options, overwritten with the template.
             let rc = unsafe {
-                ffi::git_object_id_options_init(&mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION)
+                ffi::git_object_id_options_init(&raw mut c, ffi::GIT_OBJECT_ID_OPTIONS_VERSION)
             };
             assert_eq!(rc, 0);
             let mut rust = ObjectIdOptions::new();
             let (c_files, rust_files) = (Files::new("steps-c"), Files::new("steps-rust"));
-            assert_eq!(observe(&c), observe(rust_raw(&rust)), "initial");
+            assert_eq!(observe(&raw const c), observe(rust_raw(&rust)), "initial");
             let (mut crlf, mut empty) = (Some(rust_crlf.as_mut()), Some(rust_empty.as_mut()));
             let mut safe = Some(rust_safe.as_mut());
             for (i, step) in ID_SCRIPT.into_iter().enumerate() {
@@ -1057,17 +1079,17 @@ mod id_options {
                     expected_fields,
                     "step {i}: {step:?}"
                 );
-                let seen = observe(&c);
+                let seen = observe(&raw const c);
                 assert_eq!(seen, observe(rust_raw(&rust)), "step {i}: {step:?}");
                 // The wrappers through Rust's options, against C through its own.
                 let wrapped = rust_ids(&mut rust, &rust_files);
-                assert_eq!(wrapped, c_ids(&c, &c_files), "step {i}: {step:?}");
+                assert_eq!(wrapped, c_ids(&raw const c, &c_files), "step {i}: {step:?}");
                 assert_eq!(wrapped[..CONTENTS.len()], seen.1[..], "step {i}: {step:?}");
                 if let IdStep::Safe = step {
                     // The refusing list fails the CRLF content, on both sides alike.
                     let refused = (
                         -1,
-                        ffi::GIT_ERROR_FILTER as c_int,
+                        ffi::GIT_ERROR_FILTER.cast_signed(),
                         "CRLF would be replaced by LF in 'a.txt'".to_owned(),
                     );
                     assert_eq!(seen.1[2], Err(refused));
@@ -1126,7 +1148,9 @@ mod types_and_contents {
         init();
         for raw in (-5..12).chain([i32::MIN, i32::MAX]) {
             // SAFETY: a plain value; the result is a static string.
-            let c_name = unsafe { CStr::from_ptr(ffi::git_object_type2string(raw)) };
+            let object_type2string = unsafe { ffi::git_object_type2string(raw) };
+            // SAFETY: as above.
+            let c_name = unsafe { CStr::from_ptr(object_type2string) };
             let rust_name = ObjectType::from_raw(raw).map_or("", ObjectType::name);
             assert_eq!(c_name.to_str().unwrap(), rust_name, "{raw}");
             // SAFETY: a plain value.
@@ -1219,7 +1243,7 @@ mod types_and_contents {
         // for none), read for the call; named types.
         let rc = unsafe {
             ffi::git_object_rawcontent_is_valid(
-                &mut valid,
+                &raw mut valid,
                 buf,
                 copy.len(),
                 kind.raw(),
@@ -1353,17 +1377,18 @@ mod kind_and_short_id {
 
     impl Copy {
         fn new(abbrev: Option<&str>) -> Self {
+            use std::fmt::Write as _;
             let path = std::env::temp_dir().join(format!(
                 "crustify-object-equiv-{}-abbrev-{}",
                 std::process::id(),
                 abbrev.unwrap_or("default")
             ));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             copy_dir(Path::new(TESTREPO), &path);
             if let Some(abbrev) = abbrev {
                 let config = path.join("config");
                 let mut text = std::fs::read_to_string(&config).unwrap();
-                text.push_str(&format!("[core]\n\tabbrev = {abbrev}\n"));
+                let _ = write!(text, "[core]\n\tabbrev = {abbrev}\n");
                 std::fs::write(&config, text).unwrap();
             }
             Self(path)
@@ -1372,7 +1397,7 @@ mod kind_and_short_id {
 
     impl Drop for Copy {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            drop(std::fs::remove_dir_all(&self.0));
         }
     }
 
@@ -1385,21 +1410,28 @@ mod kind_and_short_id {
             reserved: 0,
             size: 0,
         };
-        // SAFETY: a live object of a live repository; `buf` an empty buffer, disposed
-        // once read.
-        unsafe {
-            let kind = ffi::git_object_type(object);
-            let rc = ffi::git_object_short_id(&mut buf, object);
-            let short = if rc < 0 {
-                let (class, message) = c_last();
-                Err((rc, class, message))
-            } else {
-                let short = CStr::from_ptr(buf.ptr).to_str().unwrap().to_owned();
-                assert_eq!(short.len(), buf.size);
-                Ok(short)
+        {
+            // SAFETY: a live object of a live repository; `buf` an empty buffer, disposed
+            // once read.
+            let kind = unsafe { ffi::git_object_type(object) };
+            // SAFETY: as above.
+            let rc = unsafe { ffi::git_object_short_id(&raw mut buf, object) };
+            // SAFETY: as above.
+            let short = unsafe {
+                if rc < 0 {
+                    let (class, message) = c_last();
+                    Err((rc, class, message))
+                } else {
+                    let short = CStr::from_ptr(buf.ptr).to_str().unwrap().to_owned();
+                    assert_eq!(short.len(), buf.size);
+                    Ok(short)
+                }
             };
-            if buf.reserved > 0 {
-                ffi::git_buf_dispose(&mut buf);
+            // SAFETY: as above.
+            unsafe {
+                if buf.reserved > 0 {
+                    ffi::git_buf_dispose(&raw mut buf);
+                }
             }
             (kind, short)
         }
@@ -1448,14 +1480,22 @@ mod kind_and_short_id {
                 // SAFETY: writable slots, the side's live repository and a live id.
                 unsafe {
                     assert_eq!(
-                        ffi::git_oid_from_string(&mut id, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
+                        ffi::git_oid_from_string(&raw mut id, c_hex.as_ptr(), ffi::GIT_OID_SHA1),
                         0
                     );
+                };
+                // SAFETY: as above.
+                unsafe {
                     assert_eq!(
-                        ffi::git_object_lookup(&mut out, c.repo, &id, ffi::GIT_OBJECT_ANY),
+                        ffi::git_object_lookup(
+                            &raw mut out,
+                            c.repo,
+                            &raw const id,
+                            ffi::GIT_OBJECT_ANY
+                        ),
                         0
                     );
-                }
+                };
                 c.held.push(out);
                 let rust_id = Oid::from_string(&c_hex, OidType::Sha1).unwrap();
                 rust.push(Object::lookup(rust_repo.as_ref(), rust_id.as_ref(), None).unwrap());
@@ -1474,8 +1514,8 @@ mod kind_and_short_id {
             assert_eq!(rs, cs, "{abbrev:?} again");
             assert_eq!(cs, c_first[0]);
             match abbrev {
-                Some("3") | Some("x") | Some("true") => {
-                    assert!(c_first.iter().all(|s| s.1.is_err()))
+                Some("3" | "x" | "true") => {
+                    assert!(c_first.iter().all(|s| s.1.is_err()));
                 }
                 Some("4") => assert_eq!(c_first[4].1.as_deref(), Ok("498bc0")),
                 _ => assert!(
@@ -1533,44 +1573,65 @@ mod id_and_owner {
         let mut id = ffi::git_oid::default();
         let hex = CString::new(hex).unwrap();
         // SAFETY: a writable id and a NUL-terminated hex string.
-        let rc = unsafe { ffi::git_oid_from_string(&mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
+        let rc = unsafe { ffi::git_oid_from_string(&raw mut id, hex.as_ptr(), ffi::GIT_OID_SHA1) };
         assert_eq!(rc, 0);
         id
     }
 
     fn c_find(repo: *mut ffi::git_repository, find: Find) -> *mut ffi::git_object {
         let mut out = ptr::null_mut();
-        // SAFETY: writable slots, the live repository, live ids and paths; every
-        // intermediate object is freed once.
-        unsafe {
+        {
+            // SAFETY: writable slots, the live repository, live ids and paths; every
+            // intermediate object is freed once.
             let rc = match find {
                 Find::Full(hex) => {
-                    ffi::git_object_lookup(&mut out, repo, &sha1(hex), ffi::GIT_OBJECT_ANY)
+                    // SAFETY: as above.
+                    unsafe {
+                        ffi::git_object_lookup(&raw mut out, repo, &sha1(hex), ffi::GIT_OBJECT_ANY)
+                    }
                 }
-                Find::Prefix(hex) => ffi::git_object_lookup_prefix(
-                    &mut out,
-                    repo,
-                    &sha1(hex),
-                    7,
-                    ffi::GIT_OBJECT_ANY,
-                ),
+                // SAFETY: as above.
+                Find::Prefix(hex) => unsafe {
+                    ffi::git_object_lookup_prefix(
+                        &raw mut out,
+                        repo,
+                        &sha1(hex),
+                        7,
+                        ffi::GIT_OBJECT_ANY,
+                    )
+                },
                 Find::Peel(hex, _) | Find::Path(hex, _) => {
                     let mut from = ptr::null_mut();
                     assert_eq!(
-                        ffi::git_object_lookup(&mut from, repo, &sha1(hex), ffi::GIT_OBJECT_ANY),
+                        // SAFETY: as above.
+                        unsafe {
+                            ffi::git_object_lookup(
+                                &raw mut from,
+                                repo,
+                                &sha1(hex),
+                                ffi::GIT_OBJECT_ANY,
+                            )
+                        },
                         0
                     );
                     let rc = match find {
-                        Find::Peel(_, kind) => ffi::git_object_peel(&mut out, from, kind),
-                        Find::Path(_, path) => ffi::git_object_lookup_bypath(
-                            &mut out,
-                            from,
-                            path.as_ptr(),
-                            ffi::GIT_OBJECT_ANY,
-                        ),
+                        // SAFETY: as above.
+                        Find::Peel(_, kind) => unsafe {
+                            ffi::git_object_peel(&raw mut out, from, kind)
+                        },
+                        // SAFETY: as above.
+                        Find::Path(_, path) => unsafe {
+                            ffi::git_object_lookup_bypath(
+                                &raw mut out,
+                                from,
+                                path.as_ptr(),
+                                ffi::GIT_OBJECT_ANY,
+                            )
+                        },
                         _ => unreachable!(),
                     };
-                    ffi::git_object_free(from);
+                    // SAFETY: as above.
+                    unsafe { ffi::git_object_free(from) };
                     rc
                 }
             };
@@ -1581,25 +1642,29 @@ mod id_and_owner {
 
     fn c_id(object: *const ffi::git_object) -> (String, u8) {
         let mut out = [0u8; 65];
-        // SAFETY: a live object, whose id lives as long as it; 65 writable bytes.
-        unsafe {
-            let id = ffi::git_object_id(object);
-            ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id);
-            (
-                CStr::from_bytes_until_nul(&out)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-                (*id).type_ as u8,
-            )
+        {
+            // SAFETY: a live object, whose id lives as long as it; 65 writable bytes.
+            let id = unsafe { ffi::git_object_id(object) };
+            // SAFETY: as above.
+            unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    CStr::from_bytes_until_nul(&out)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned(),
+                    (*id).type_,
+                )
+            }
         }
     }
 
-    fn rust_find<'r>(
-        repo: libgit2::libgit2::repository::repository::RepositoryRef<'r>,
+    fn rust_find(
+        repo: libgit2::libgit2::repository::repository::RepositoryRef<'_>,
         find: Find,
-    ) -> ObjectArc<'r> {
+    ) -> ObjectArc<'_> {
         let id = |hex: &str| Oid::from_string(&CString::new(hex).unwrap(), OidType::Sha1).unwrap();
         match find {
             Find::Full(hex) => Object::lookup(repo, id(hex).as_ref(), None),
@@ -1623,7 +1688,7 @@ mod id_and_owner {
         let path = CString::new(TESTREPO).unwrap();
         let mut c_repo = ptr::null_mut();
         // SAFETY: a writable slot and a NUL-terminated path.
-        let rc = unsafe { ffi::git_repository_open(&mut c_repo, path.as_ptr()) };
+        let rc = unsafe { ffi::git_repository_open(&raw mut c_repo, path.as_ptr()) };
         assert_eq!(rc, 0);
         let rust_repo = Repository::open(&path).unwrap();
         let repo = rust_repo.as_ref();

@@ -41,7 +41,7 @@ use core::ffi::{CStr, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::ptr::{self, addr_of, addr_of_mut};
+use core::ptr::{self};
 
 use ffibox::{CBorrowedPtr, CCell};
 
@@ -98,7 +98,7 @@ use crate::libgit2::object::tree::TreeRef;
 /// Not `Clone`: the payloads its callbacks receive may be exclusive borrows, which a
 /// copy would alias. Build another with [`new`](Self::new) instead.
 ///
-/// Wraps: git_checkout_options
+/// Wraps: `git_checkout_options`
 /// Handwritten
 #[repr(transparent)]
 pub struct CheckoutOptions<'o>(
@@ -150,7 +150,13 @@ impl<'o> CheckoutOptions<'o> {
     /// `GIT_CHECKOUT_OPTIONS_VERSION`, and with that version it reaches no global, no
     /// allocator and no thread state, so this needs no initialised library.
     ///
-    /// Wraps: git_checkout_options_init
+    /// Wraps: `git_checkout_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_checkout_options>::uninit();
         // SAFETY: `raw` is writable storage for one `git_checkout_options`, which
@@ -167,6 +173,7 @@ impl<'o> CheckoutOptions<'o> {
 
     /// Shared handle to the options — the getters, and the pointer for C calls that
     /// read them.
+    #[must_use]
     pub fn as_ref(&self) -> CheckoutOptionsRef<'_, 'o> {
         // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
         CheckoutOptionsRef(unsafe { CBorrowedPtr::new(ptr::NonNull::from(self)) })
@@ -203,7 +210,6 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// baseline tree and index outlive `'o` (strings NULL or NUL-terminated; `paths` as
     /// [`StrArrayRef`] requires; the tree NULL or one a [`TreeRef<'o, 'o>`] may
     /// designate; the index NULL or one an [`IndexRef<'o>`] may designate).
-    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_checkout_options) -> Option<Self> {
         let ptr = ptr::NonNull::new(ptr.cast::<CheckoutOptions<'o>>())?;
         // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
@@ -220,71 +226,99 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The structure's version, `GIT_CHECKOUT_OPTIONS_VERSION`; fixed by
     /// [`CheckoutOptions::new`].
     ///
-    /// Field: git_checkout_options.version
+    /// Field: `git_checkout_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let version_ptr = unsafe { &raw const (*p).version };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).version).read() }
+        unsafe { version_ptr.read() }
     }
 
     /// The checkout strategy, the raw bits of `git_checkout_strategy_t`: 0, the default,
     /// is a safe checkout.
     ///
-    /// Field: git_checkout_options.checkout_strategy
+    /// Field: `git_checkout_options.checkout_strategy`
+    #[must_use]
     pub fn strategy(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let checkout_strategy_ptr = unsafe { &raw const (*p).checkout_strategy };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).checkout_strategy).read() }
+        unsafe { checkout_strategy_ptr.read() }
     }
 
     /// Whether filters such as CRLF conversion are skipped when files are written; no
     /// by default.
     ///
-    /// Field: git_checkout_options.disable_filters
+    /// Field: `git_checkout_options.disable_filters`
+    #[must_use]
     pub fn disable_filters(&self) -> bool {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let disable_filters_ptr = unsafe { &raw const (*p).disable_filters };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let disable = unsafe { addr_of!((*p).disable_filters).read() };
+        let disable = unsafe { disable_filters_ptr.read() };
         disable != 0
     }
 
     /// The mode directories are created with; 0, the default, means `0755`.
     ///
-    /// Field: git_checkout_options.dir_mode
+    /// Field: `git_checkout_options.dir_mode`
+    #[must_use]
     pub fn dir_mode(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let dir_mode_ptr = unsafe { &raw const (*p).dir_mode };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).dir_mode).read() }
+        unsafe { dir_mode_ptr.read() }
     }
 
     /// The mode files are created with; 0, the default, means the blob's own (`0644`
     /// or `0755`).
     ///
-    /// Field: git_checkout_options.file_mode
+    /// Field: `git_checkout_options.file_mode`
+    #[must_use]
     pub fn file_mode(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let file_mode_ptr = unsafe { &raw const (*p).file_mode };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).file_mode).read() }
+        unsafe { file_mode_ptr.read() }
     }
 
     /// The `open(2)` flags files are written with; 0, the default, and any negative
     /// value mean `O_CREAT | O_TRUNC | O_WRONLY`.
     ///
-    /// Field: git_checkout_options.file_open_flags
+    /// Field: `git_checkout_options.file_open_flags`
+    #[must_use]
     pub fn file_open_flags(&self) -> i32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let file_open_flags_ptr = unsafe { &raw const (*p).file_open_flags };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).file_open_flags).read() }
+        unsafe { file_open_flags_ptr.read() }
     }
 
     /// The situations the notification callback is called for, the raw bits of
     /// `git_checkout_notify_t`; none by default.
     ///
-    /// Field: git_checkout_options.notify_flags
+    /// Field: `git_checkout_options.notify_flags`
+    #[must_use]
     pub fn notify_flags(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let notify_flags_ptr = unsafe { &raw const (*p).notify_flags };
         // SAFETY: a read through the shared handle's pointer to live options.
-        unsafe { addr_of!((*p).notify_flags).read() }
+        unsafe { notify_flags_ptr.read() }
     }
 
     /// The notification callback and its payload; `None` and NULL by default.
@@ -292,17 +326,21 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_notify_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: git_checkout_options.notify_cb
-    /// Field: git_checkout_options.notify_payload
+    /// Field: `git_checkout_options.notify_cb`
+    /// Field: `git_checkout_options.notify_payload`
+    #[must_use]
     pub fn notify_callback(&self) -> (ffi::git_checkout_notify_cb, *mut c_void) {
         let p = self.as_ptr();
-        // SAFETY: reads through the shared handle's pointer to live options.
-        unsafe {
-            (
-                addr_of!((*p).notify_cb).read(),
-                addr_of!((*p).notify_payload).read(),
-            )
-        }
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let notify_cb_ptr = unsafe { &raw const (*p).notify_cb };
+        // SAFETY: as above.
+        let notify_payload_ptr = unsafe { &raw const (*p).notify_payload };
+        // SAFETY: reads the initialised field.
+        let notify_cb = unsafe { notify_cb_ptr.read() };
+        // SAFETY: as above.
+        let notify_payload = unsafe { notify_payload_ptr.read() };
+        (notify_cb, notify_payload)
     }
 
     /// The progress callback and its payload; `None` and NULL by default.
@@ -310,17 +348,21 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_progress_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: git_checkout_options.progress_cb
-    /// Field: git_checkout_options.progress_payload
+    /// Field: `git_checkout_options.progress_cb`
+    /// Field: `git_checkout_options.progress_payload`
+    #[must_use]
     pub fn progress_callback(&self) -> (ffi::git_checkout_progress_cb, *mut c_void) {
         let p = self.as_ptr();
-        // SAFETY: reads through the shared handle's pointer to live options.
-        unsafe {
-            (
-                addr_of!((*p).progress_cb).read(),
-                addr_of!((*p).progress_payload).read(),
-            )
-        }
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let progress_cb_ptr = unsafe { &raw const (*p).progress_cb };
+        // SAFETY: as above.
+        let progress_payload_ptr = unsafe { &raw const (*p).progress_payload };
+        // SAFETY: reads the initialised field.
+        let progress_cb = unsafe { progress_cb_ptr.read() };
+        // SAFETY: as above.
+        let progress_payload = unsafe { progress_payload_ptr.read() };
+        (progress_cb, progress_payload)
     }
 
     /// The performance-data callback and its payload; `None` and NULL by default.
@@ -328,32 +370,43 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_perfdata_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: git_checkout_options.perfdata_cb
-    /// Field: git_checkout_options.perfdata_payload
+    /// Field: `git_checkout_options.perfdata_cb`
+    /// Field: `git_checkout_options.perfdata_payload`
+    #[must_use]
     pub fn perfdata_callback(&self) -> (ffi::git_checkout_perfdata_cb, *mut c_void) {
         let p = self.as_ptr();
-        // SAFETY: reads through the shared handle's pointer to live options.
-        unsafe {
-            (
-                addr_of!((*p).perfdata_cb).read(),
-                addr_of!((*p).perfdata_payload).read(),
-            )
-        }
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let perfdata_cb_ptr = unsafe { &raw const (*p).perfdata_cb };
+        // SAFETY: as above.
+        let perfdata_payload_ptr = unsafe { &raw const (*p).perfdata_payload };
+        // SAFETY: reads the initialised field.
+        let perfdata_cb = unsafe { perfdata_cb_ptr.read() };
+        // SAFETY: as above.
+        let perfdata_payload = unsafe { perfdata_payload_ptr.read() };
+        (perfdata_cb, perfdata_payload)
     }
 
     /// The paths, or wildmatch patterns, the checkout is restricted to; empty, the
     /// default, means every path. Borrowed from the options, since the array header is
     /// stored in them.
     ///
-    /// Field: git_checkout_options.paths
+    /// Field: `git_checkout_options.paths`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field address is not NULL"
+    )]
     pub fn paths(&self) -> StrArrayRef<'a> {
         let p = self.as_ptr();
-        // SAFETY: projects the embedded `git_strarray` of the live options, which outlive
-        // `'a`. Every setter leaves it NULL with count 0, or a copy of an array a
-        // `StrArrayRef<'o>` vouched for, whose strings outlive `'o` and so `'a`; nothing
-        // writes it while this shared handle lives, and the result has no write
-        // operation.
-        let paths = unsafe { StrArrayRef::from_ptr(addr_of!((*p).paths).cast_mut()) };
+        // SAFETY: the shared handle's pointer addresses the live options, which outlive `'a`; the
+        // projection forms no reference to them.
+        let paths_ptr = unsafe { &raw const (*p).paths };
+        // SAFETY: `paths_ptr` addresses the options' embedded `git_strarray`. Every setter leaves
+        // it NULL with count 0, or a copy of an array a `StrArrayRef<'o>` vouched for, whose
+        // strings outlive `'o` and so `'a`; nothing writes it while this shared handle lives, and
+        // the result has no write operation.
+        let paths = unsafe { StrArrayRef::from_ptr(paths_ptr.cast_mut()) };
         paths.expect("a field address is not NULL")
     }
 
@@ -361,86 +414,104 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// default, means `HEAD`'s (unless a [`baseline_index`](Self::baseline_index) is
     /// set). Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_checkout_options.baseline
+    /// Field: `git_checkout_options.baseline`
+    #[must_use]
     pub fn baseline(&self) -> Option<TreeRef<'o, 'o>> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `TreeRef<'o, 'o>`'s pointer, a tree its holder keeps
-        // live and nobody writes for `'o`, of a repository outliving `'o`, which this
-        // handle only lends on.
-        unsafe { TreeRef::from_ptr(addr_of!((*p).baseline).read()) }
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let baseline_ptr = unsafe { &raw const (*p).baseline };
+        // SAFETY: reads the initialised field; nothing writes it while the options are shared.
+        let baseline = unsafe { baseline_ptr.read() };
+        // SAFETY: every setter stores NULL or a `TreeRef<'o, 'o>`'s pointer, a tree its holder
+        // keeps live and nobody writes for `'o`, of a repository outliving `'o`, which this handle
+        // only lends on.
+        unsafe { TreeRef::from_ptr(baseline) }
     }
 
     /// The baseline index, which overrides [`baseline`](Self::baseline); `None` by
     /// default. Borrowed for `'o`, as it was set.
     ///
-    /// Field: git_checkout_options.baseline_index
+    /// Field: `git_checkout_options.baseline_index`
+    #[must_use]
     pub fn baseline_index(&self) -> Option<IndexRef<'o>> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or an `IndexRef<'o>`'s pointer, an index its holder keeps
-        // live for `'o`, which this handle only lends on.
-        unsafe { IndexRef::from_ptr(addr_of!((*p).baseline_index).read()) }
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let index_ptr = unsafe { &raw const (*p).baseline_index };
+        // SAFETY: reads the initialised field; nothing writes it while the options are shared.
+        let index = unsafe { index_ptr.read() };
+        // SAFETY: every setter stores NULL or an `IndexRef<'o>`'s pointer, an index its holder
+        // keeps live for `'o`, which this handle only lends on.
+        unsafe { IndexRef::from_ptr(index) }
     }
 
     /// The directory files are written to; `None`, the default, means the repository's
     /// working directory.
     ///
-    /// Field: git_checkout_options.target_directory
+    /// Field: `git_checkout_options.target_directory`
+    #[must_use]
     pub fn target_directory(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let target_directory_ptr = unsafe { &raw const (*p).target_directory };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { target_directory_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).target_directory).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The name of the common ancestor's side in conflict markers; `None`, the
     /// default, means `"ancestor"`.
     ///
-    /// Field: git_checkout_options.ancestor_label
+    /// Field: `git_checkout_options.ancestor_label`
+    #[must_use]
     pub fn ancestor_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let ancestor_label_ptr = unsafe { &raw const (*p).ancestor_label };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { ancestor_label_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).ancestor_label).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The name of "our" side in conflict markers; `None`, the default, means
     /// `"ours"`.
     ///
-    /// Field: git_checkout_options.our_label
+    /// Field: `git_checkout_options.our_label`
+    #[must_use]
     pub fn our_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let our_label_ptr = unsafe { &raw const (*p).our_label };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { our_label_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).our_label).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 
     /// The name of "their" side in conflict markers; `None`, the default, means
     /// `"theirs"`.
     ///
-    /// Field: git_checkout_options.their_label
+    /// Field: `git_checkout_options.their_label`
+    #[must_use]
     pub fn their_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
-        // SAFETY: a read through the shared handle's pointer to live options. Every
-        // setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let their_label_ptr = unsafe { &raw const (*p).their_label };
+        // SAFETY: reads the initialised field; nothing writes it while the handle is shared.
+        let s = unsafe { their_label_ptr.read() };
+        // SAFETY: every setter stores NULL or a `&'o CStr`'s pointer, a NUL-terminated string that
         // outlives `'o` and that nothing writes, being shared-borrowed.
-        unsafe {
-            let s = addr_of!((*p).their_label).read();
-            (!s.is_null()).then(|| CStr::from_ptr(s))
-        }
+        (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) })
     }
 }
 
@@ -474,7 +545,7 @@ impl fmt::Debug for CheckoutOptionsRef<'_, '_> {
     }
 }
 
-impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
+impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Borrows the options at `ptr` exclusively; `None` if it is NULL.
     ///
     /// # Safety
@@ -482,7 +553,6 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// As [`CheckoutOptionsRef::from_ptr`], plus: nothing else reads or writes the
     /// options while the result lives, and whatever the setters store may stay there
     /// for as long as the options' owner expects `'o` borrows to.
-    #[allow(dead_code)]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_checkout_options) -> Option<Self> {
         // SAFETY: the caller upholds `CheckoutOptionsRef::from_ptr`'s contract, and
         // excludes every other access for `'a`.
@@ -496,6 +566,7 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> CheckoutOptionsRef<'_, 'o> {
         self.0
     }
@@ -508,66 +579,84 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// Sets the checkout strategy, the raw bits of `git_checkout_strategy_t`. libgit2
     /// tests the bits it knows and ignores the rest.
     ///
-    /// Field: git_checkout_options.checkout_strategy
+    /// Field: `git_checkout_options.checkout_strategy`
     pub fn set_strategy(&mut self, strategy: u32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let checkout_strategy_ptr = unsafe { &raw mut (*p).checkout_strategy };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).checkout_strategy).write(strategy) }
+        unsafe { checkout_strategy_ptr.write(strategy) }
     }
 
     /// Sets whether filters such as CRLF conversion are skipped when files are
     /// written.
     ///
-    /// Field: git_checkout_options.disable_filters
+    /// Field: `git_checkout_options.disable_filters`
     pub fn set_disable_filters(&mut self, disable: bool) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let disable_filters_ptr = unsafe { &raw mut (*p).disable_filters };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).disable_filters).write(c_int::from(disable)) }
+        unsafe { disable_filters_ptr.write(c_int::from(disable)) }
     }
 
     /// Sets the mode directories are created with; 0 means `0755`.
     ///
-    /// Field: git_checkout_options.dir_mode
+    /// Field: `git_checkout_options.dir_mode`
     pub fn set_dir_mode(&mut self, mode: u32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let dir_mode_ptr = unsafe { &raw mut (*p).dir_mode };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).dir_mode).write(mode) }
+        unsafe { dir_mode_ptr.write(mode) }
     }
 
     /// Sets the mode files are created with; 0 means the blob's own.
     ///
-    /// Field: git_checkout_options.file_mode
+    /// Field: `git_checkout_options.file_mode`
     pub fn set_file_mode(&mut self, mode: u32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let file_mode_ptr = unsafe { &raw mut (*p).file_mode };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).file_mode).write(mode) }
+        unsafe { file_mode_ptr.write(mode) }
     }
 
     /// Sets the `open(2)` flags files are written with; 0 or a negative value means
     /// `O_CREAT | O_TRUNC | O_WRONLY`. Flags that cannot write the file (`O_EXCL` over
     /// an existing one, say) make the checkout fail with libgit2's error.
     ///
-    /// Field: git_checkout_options.file_open_flags
+    /// Field: `git_checkout_options.file_open_flags`
     pub fn set_file_open_flags(&mut self, flags: i32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let file_open_flags_ptr = unsafe { &raw mut (*p).file_open_flags };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).file_open_flags).write(flags) }
+        unsafe { file_open_flags_ptr.write(flags) }
     }
 
     /// Sets the situations the notification callback is called for, the raw bits of
     /// `git_checkout_notify_t`.
     ///
-    /// Field: git_checkout_options.notify_flags
+    /// Field: `git_checkout_options.notify_flags`
     pub fn set_notify_flags(&mut self, flags: u32) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let notify_flags_ptr = unsafe { &raw mut (*p).notify_flags };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).notify_flags).write(flags) }
+        unsafe { notify_flags_ptr.write(flags) }
     }
 
     /// Sets the notification callback and the payload it is passed; `None` calls
@@ -586,20 +675,23 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// must be sound to call that way, and `payload` must stay valid for whatever
     /// `callback` does with it.
     ///
-    /// Field: git_checkout_options.notify_cb
-    /// Field: git_checkout_options.notify_payload
+    /// Field: `git_checkout_options.notify_cb`
+    /// Field: `git_checkout_options.notify_payload`
     pub unsafe fn set_notify_callback(
         &mut self,
         callback: ffi::git_checkout_notify_cb,
         payload: *mut c_void,
     ) {
         let p = self.as_mut_ptr();
-        // SAFETY: writes through the exclusive handle's pointer to live options; the
-        // fields are plain data, so the old values need no drop.
-        unsafe {
-            addr_of_mut!((*p).notify_cb).write(callback);
-            addr_of_mut!((*p).notify_payload).write(payload);
-        }
+        // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let notify_cb_ptr = unsafe { &raw mut (*p).notify_cb };
+        // SAFETY: as above.
+        let notify_payload_ptr = unsafe { &raw mut (*p).notify_payload };
+        // SAFETY: the fields are plain data, so the old values need no drop.
+        unsafe { notify_cb_ptr.write(callback) };
+        // SAFETY: as above.
+        unsafe { notify_payload_ptr.write(payload) };
     }
 
     /// Sets the progress callback and the payload it is passed; `None` calls nothing.
@@ -613,20 +705,23 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// As [`set_notify_callback`](Self::set_notify_callback), for
     /// `git_checkout_progress_cb`'s arguments: the path may be NULL.
     ///
-    /// Field: git_checkout_options.progress_cb
-    /// Field: git_checkout_options.progress_payload
+    /// Field: `git_checkout_options.progress_cb`
+    /// Field: `git_checkout_options.progress_payload`
     pub unsafe fn set_progress_callback(
         &mut self,
         callback: ffi::git_checkout_progress_cb,
         payload: *mut c_void,
     ) {
         let p = self.as_mut_ptr();
-        // SAFETY: writes through the exclusive handle's pointer to live options; the
-        // fields are plain data, so the old values need no drop.
-        unsafe {
-            addr_of_mut!((*p).progress_cb).write(callback);
-            addr_of_mut!((*p).progress_payload).write(payload);
-        }
+        // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let progress_cb_ptr = unsafe { &raw mut (*p).progress_cb };
+        // SAFETY: as above.
+        let progress_payload_ptr = unsafe { &raw mut (*p).progress_payload };
+        // SAFETY: the fields are plain data, so the old values need no drop.
+        unsafe { progress_cb_ptr.write(callback) };
+        // SAFETY: as above.
+        unsafe { progress_payload_ptr.write(payload) };
     }
 
     /// Sets the performance-data callback and the payload it is passed; `None` calls
@@ -641,20 +736,23 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// As [`set_notify_callback`](Self::set_notify_callback), for
     /// `git_checkout_perfdata_cb`'s arguments.
     ///
-    /// Field: git_checkout_options.perfdata_cb
-    /// Field: git_checkout_options.perfdata_payload
+    /// Field: `git_checkout_options.perfdata_cb`
+    /// Field: `git_checkout_options.perfdata_payload`
     pub unsafe fn set_perfdata_callback(
         &mut self,
         callback: ffi::git_checkout_perfdata_cb,
         payload: *mut c_void,
     ) {
         let p = self.as_mut_ptr();
-        // SAFETY: writes through the exclusive handle's pointer to live options; the
-        // fields are plain data, so the old values need no drop.
-        unsafe {
-            addr_of_mut!((*p).perfdata_cb).write(callback);
-            addr_of_mut!((*p).perfdata_payload).write(payload);
-        }
+        // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let perfdata_cb_ptr = unsafe { &raw mut (*p).perfdata_cb };
+        // SAFETY: as above.
+        let perfdata_payload_ptr = unsafe { &raw mut (*p).perfdata_payload };
+        // SAFETY: the fields are plain data, so the old values need no drop.
+        unsafe { perfdata_cb_ptr.write(callback) };
+        // SAFETY: as above.
+        unsafe { perfdata_payload_ptr.write(payload) };
     }
 
     /// Restricts the checkout to `paths`: wildmatch patterns, or exact paths with the
@@ -668,35 +766,44 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     ///
     /// [`StrArrayView`]: crate::libgit2::core::strarray::StrArrayView
     ///
-    /// Field: git_checkout_options.paths
+    /// Field: `git_checkout_options.paths`
     pub fn set_paths(&mut self, paths: StrArrayRef<'o>) {
         // A NULL array reads as empty whatever its count; C would read `count` strings.
         let count = paths.len();
-        // SAFETY: a read through the shared handle's pointer to a live `git_strarray`.
-        let strings = unsafe { addr_of!((*paths.as_ptr()).strings).read() };
+        // SAFETY: the shared handle's pointer addresses a live `git_strarray`; the projection forms
+        // no reference to it.
+        let strings_ptr = unsafe { &raw const (*paths.as_ptr()).strings };
+        // SAFETY: reads the initialised field.
+        let strings = unsafe { strings_ptr.read() };
         let raw = ffi::git_strarray {
             strings: if count == 0 { ptr::null_mut() } else { strings },
             count,
         };
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let paths_ptr2 = unsafe { &raw mut (*p).paths };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data. `raw` is NULL with count 0, or `count` non-NULL strings in
         // an array that `paths` vouches for for `'o`, as `paths()` requires.
-        unsafe { addr_of_mut!((*p).paths).write(raw) }
+        unsafe { paths_ptr2.write(raw) }
     }
 
     /// Lifts the path restriction: every path is checked out.
     ///
-    /// Field: git_checkout_options.paths
+    /// Field: `git_checkout_options.paths`
     pub fn clear_paths(&mut self) {
         let empty = ffi::git_strarray {
             strings: ptr::null_mut(),
             count: 0,
         };
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let paths_ptr = unsafe { &raw mut (*p).paths };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).paths).write(empty) }
+        unsafe { paths_ptr.write(empty) }
     }
 
     /// Sets the baseline tree the working directory is compared against; `None` means
@@ -706,14 +813,17 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// The tree is borrowed for `'o` from the owner holding it, which then outlives the
     /// options, as does the repository the tree was looked up in.
     ///
-    /// Field: git_checkout_options.baseline
+    /// Field: `git_checkout_options.baseline`
     pub fn set_baseline(&mut self, tree: Option<TreeRef<'o, 'o>>) {
         let tree = tree.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let baseline_ptr = unsafe { &raw mut (*p).baseline };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop. The tree is NULL or one a
         // `TreeRef<'o, 'o>` vouches for, as `baseline()` requires.
-        unsafe { addr_of_mut!((*p).baseline).write(tree) }
+        unsafe { baseline_ptr.write(tree) }
     }
 
     /// Sets the baseline index, which overrides the [baseline
@@ -724,58 +834,70 @@ impl<'a, 'o> CheckoutOptionsMut<'a, 'o> {
     /// options, and an [`IndexBox`](crate::libgit2::index::index::IndexBox) lends no
     /// exclusive handle meanwhile.
     ///
-    /// Field: git_checkout_options.baseline_index
+    /// Field: `git_checkout_options.baseline_index`
     pub fn set_baseline_index(&mut self, index: Option<IndexRef<'o>>) {
         let index = index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let baseline_index_ptr = unsafe { &raw mut (*p).baseline_index };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop. The index is NULL or one
         // an `IndexRef<'o>` vouches for, as `baseline_index()` requires.
-        unsafe { addr_of_mut!((*p).baseline_index).write(index) }
+        unsafe { baseline_index_ptr.write(index) }
     }
 
     /// Sets the directory files are written to, created when missing; `None` means
     /// the repository's working directory, which a bare repository lacks.
     ///
-    /// Field: git_checkout_options.target_directory
+    /// Field: `git_checkout_options.target_directory`
     pub fn set_target_directory(&mut self, directory: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
-        // SAFETY: a write through the exclusive handle's pointer to live options; the
-        // field is plain data, so the old value needs no drop.
-        unsafe {
-            addr_of_mut!((*p).target_directory).write(directory.map_or(ptr::null(), CStr::as_ptr))
-        }
+        // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let directory_ptr = unsafe { &raw mut (*p).target_directory };
+        // SAFETY: the field is plain data, so the old value needs no drop.
+        unsafe { directory_ptr.write(directory.map_or(ptr::null(), CStr::as_ptr)) };
     }
 
     /// Sets the name of the common ancestor's side in conflict markers; `None` means
     /// `"ancestor"`.
     ///
-    /// Field: git_checkout_options.ancestor_label
+    /// Field: `git_checkout_options.ancestor_label`
     pub fn set_ancestor_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let ancestor_label_ptr = unsafe { &raw mut (*p).ancestor_label };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).ancestor_label).write(label.map_or(ptr::null(), CStr::as_ptr)) }
+        unsafe { ancestor_label_ptr.write(label.map_or(ptr::null(), CStr::as_ptr)) }
     }
 
     /// Sets the name of "our" side in conflict markers; `None` means `"ours"`.
     ///
-    /// Field: git_checkout_options.our_label
+    /// Field: `git_checkout_options.our_label`
     pub fn set_our_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let our_label_ptr = unsafe { &raw mut (*p).our_label };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).our_label).write(label.map_or(ptr::null(), CStr::as_ptr)) }
+        unsafe { our_label_ptr.write(label.map_or(ptr::null(), CStr::as_ptr)) }
     }
 
     /// Sets the name of "their" side in conflict markers; `None` means `"theirs"`.
     ///
-    /// Field: git_checkout_options.their_label
+    /// Field: `git_checkout_options.their_label`
     pub fn set_their_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let their_label_ptr = unsafe { &raw mut (*p).their_label };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).their_label).write(label.map_or(ptr::null(), CStr::as_ptr)) }
+        unsafe { their_label_ptr.write(label.map_or(ptr::null(), CStr::as_ptr)) }
     }
 }
 
@@ -982,7 +1104,9 @@ mod unit_tests {
         // The options share the view's `char *` array.
         let shared = view.as_ref().as_ptr();
         // SAFETY: a read of the view's live `git_strarray`.
-        let strings = unsafe { addr_of!((*shared).strings).read() };
+        let strings_ptr = unsafe { &raw const (*shared).strings };
+        // SAFETY: as above.
+        let strings = unsafe { strings_ptr.read() };
         assert_eq!(options.0.paths.strings, strings);
         assert_eq!(options.0.paths.count, 2);
 
@@ -1004,7 +1128,7 @@ mod unit_tests {
             count: 3,
         };
         // SAFETY: `stale` is a live array, NULL, which the handles read as empty.
-        let stale = unsafe { StrArrayRef::from_ptr(&mut stale) }.unwrap();
+        let stale = unsafe { StrArrayRef::from_ptr(&raw mut stale) }.unwrap();
         options.as_mut().set_paths(stale);
         assert_eq!(options.0.paths.count, 0);
         assert!(options.as_ref().paths().is_empty());
@@ -1020,7 +1144,7 @@ mod unit_tests {
             count: 0,
         };
         // SAFETY: a live array of count 0; nothing is read through it.
-        let empty = unsafe { StrArrayRef::from_ptr(&mut raw) }.unwrap();
+        let empty = unsafe { StrArrayRef::from_ptr(&raw mut raw) }.unwrap();
         let mut options = template();
         options.as_mut().set_paths(empty);
         assert!(
@@ -1040,13 +1164,17 @@ mod unit_tests {
         let mut options = template();
         options.as_mut().set_paths(view.as_ref());
         let o = options.as_ref();
-        let field = addr_of!(options.0.paths);
+        let field = &raw const options.0.paths;
         assert_eq!(o.paths().as_ptr(), field);
         assert_eq!(o.paths().get(0), Some(c"a"));
         assert_eq!(o.paths().get(1), None);
     }
 
     #[test]
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "short names for the sides and values the steps compare"
+    )]
     fn raw_seams_round_trip() {
         let mut payloads = [0u8; 3];
         let [a, b, c] = payloads
@@ -1056,11 +1184,11 @@ mod unit_tests {
         let mut m = options.as_mut();
         // SAFETY: the callbacks ignore their arguments and are never called: no libgit2
         // routine sees these options; the payloads outlive them.
-        unsafe {
-            m.set_notify_callback(Some(notify), a);
-            m.set_progress_callback(Some(progress), b);
-            m.set_perfdata_callback(Some(perfdata), c);
-        }
+        unsafe { m.set_notify_callback(Some(notify), a) };
+        // SAFETY: as above.
+        unsafe { m.set_progress_callback(Some(progress), b) };
+        // SAFETY: as above.
+        unsafe { m.set_perfdata_callback(Some(perfdata), c) };
         let o = m.as_ref();
         let (n, np) = o.notify_callback();
         let (p, pp) = o.progress_callback();
@@ -1073,11 +1201,11 @@ mod unit_tests {
 
         let mut m = options.as_mut();
         // SAFETY: clearing stores nothing libgit2 would call or read.
-        unsafe {
-            m.set_notify_callback(None, ptr::null_mut());
-            m.set_progress_callback(None, ptr::null_mut());
-            m.set_perfdata_callback(None, ptr::null_mut());
-        }
+        unsafe { m.set_notify_callback(None, ptr::null_mut()) };
+        // SAFETY: as above.
+        unsafe { m.set_progress_callback(None, ptr::null_mut()) };
+        // SAFETY: as above.
+        unsafe { m.set_perfdata_callback(None, ptr::null_mut()) };
         m.set_baseline(None);
         m.set_baseline_index(None);
         assert_eq!(fields(options.as_ref()), fields(template().as_ref()));
@@ -1139,8 +1267,8 @@ mod unit_tests {
         m.set_dir_mode(0o755);
         m.set_our_label(Some(c"mine"));
         m.set_paths(view.as_ref());
-        let shown = format!("{:?}", m);
-        assert_eq!(shown, format!("{:?}", options));
+        let shown = format!("{m:?}");
+        assert_eq!(shown, format!("{options:?}"));
         for field in [
             "version: 1",
             "strategy: 0x2",

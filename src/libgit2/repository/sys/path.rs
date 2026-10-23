@@ -23,7 +23,7 @@ use crate::ffi;
 /// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name,
 /// all of which `git_path_is_gitfile` refuses.
 ///
-/// Wraps: git_path_gitfile
+/// Wraps: `git_path_gitfile`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -39,6 +39,7 @@ pub enum GitFile {
 impl GitFile {
     /// The variant whose C value is `raw`; `None` for every value the header does not
     /// name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_path_gitfile) -> Option<Self> {
         match raw {
             ffi::GIT_PATH_GITFILE_GITIGNORE => Some(Self::Gitignore),
@@ -49,6 +50,7 @@ impl GitFile {
     }
 
     /// The C value, as `git_path_is_gitfile` takes it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_path_gitfile {
         self as ffi::git_path_gitfile
     }
@@ -77,6 +79,7 @@ pub struct UnnamedGitFile(ffi::git_path_gitfile);
 
 impl UnnamedGitFile {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_path_gitfile {
         self.0
     }
@@ -96,7 +99,7 @@ impl std::error::Error for UnnamedGitFile {}
 /// `GIT_ERROR_OS`, "invalid filesystem for path validation: " and the text of whatever
 /// `errno` held; [`from_raw`](Self::from_raw) gives `None` for exactly those.
 ///
-/// Wraps: git_path_fs
+/// Wraps: `git_path_fs`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -113,6 +116,7 @@ pub enum Filesystem {
 impl Filesystem {
     /// The variant whose C value is `raw`; `None` for any value libgit2's header does not
     /// name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_path_fs) -> Option<Self> {
         match raw {
             ffi::GIT_PATH_FS_GENERIC => Some(Self::Generic),
@@ -123,6 +127,7 @@ impl Filesystem {
     }
 
     /// The C value, as libgit2's functions take it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_path_fs {
         self as ffi::git_path_fs
     }
@@ -151,6 +156,7 @@ pub struct UnnamedFilesystem(ffi::git_path_fs);
 
 impl UnnamedFilesystem {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_path_fs {
         self.0
     }
@@ -197,7 +203,8 @@ impl std::error::Error for UnnamedFilesystem {}
 /// ));
 /// ```
 ///
-/// Wraps: git_path_is_gitfile
+/// Wraps: `git_path_is_gitfile`
+#[must_use]
 pub fn is_gitfile(component: &CStr, file: GitFile, fs: Filesystem) -> bool {
     let len = component.count_bytes();
     // SAFETY: `component` is NUL-terminated and holds `len` bytes before its NUL, so

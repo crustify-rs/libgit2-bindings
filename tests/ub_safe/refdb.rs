@@ -2,7 +2,7 @@
 //!
 //! `RefdbBox` (the sole reference `git_refdb_open` gives out) and `RefdbArc` (one of
 //! several) both release through `git_refdb_free`, the down-ref; every refdb is freed
-//! once (ASan flags a double free, LSan a leak), whatever the order its owners drop
+//! once (`ASan` flags a double free, `LSan` a leak), whatever the order its owners drop
 //! in, whether through a box or after conversion into an arc, and always before the
 //! repository it borrows (the borrow of the fixture enforces it; outliving it does
 //! not compile, per `Refdb`'s doctests). The handles reborrow without aliasing an
@@ -10,7 +10,7 @@
 //!
 //! Refdbs are neither `Send` nor `Sync`, so nothing here crosses threads with one;
 //! several threads each opening and dropping refdbs of their own repository exercise
-//! libgit2's shared state (its allocator, the repositories' caches) under TSan.
+//! libgit2's shared state (its allocator, the repositories' caches) under `TSan`.
 //!
 //! Then the enum `RefdbType` (`git_refdb_t`), in `refdb_type`.
 
@@ -41,8 +41,8 @@ fn handles_reborrow_and_drop_once() {
     assert_eq!(exclusive(db.as_mut()), "Refdb { .. }");
     // The exclusive handle again, after the shared ones are gone.
     let mut m = db.as_mut();
-    let _ = exclusive(m.as_mut());
-    let _ = exclusive(m);
+    drop(exclusive(m.as_mut()));
+    drop(exclusive(m));
     drop(db);
 }
 
@@ -61,7 +61,7 @@ fn owners_drop_in_any_order() {
         }
     }
     for a in &arcs {
-        let _ = shared(a.as_ref());
+        drop(shared(a.as_ref()));
     }
     // Drop from the back, the front, then the rest.
     drop(arcs.pop());
@@ -74,6 +74,10 @@ fn owners_drop_in_any_order() {
 /// owner is covariant in `'r`.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
+#[expect(
+    clippy::items_after_statements,
+    reason = "each helper item sits beside the steps that use it"
+)]
 fn owners_shorten_their_repository_borrow() {
     let repo = TempRepo::new("refdb-shorten");
     fn shorten<'s, 'l: 's>(b: RefdbBox<'l>) -> RefdbBox<'s> {
@@ -81,7 +85,7 @@ fn owners_shorten_their_repository_borrow() {
     }
     let db = shorten(repo.refdb());
     let arc: RefdbArc<'_> = db.into();
-    let _ = shared(arc.as_ref());
+    drop(shared(arc.as_ref()));
 }
 
 #[test]
@@ -107,9 +111,9 @@ mod refdb_type {
     //!
     //! The only safe way in from a raw value is `from_raw` / `try_from`, which must reject
     //! every value without a variant rather than produce an invalid discriminant (which
-    //! Miri and UBSan would flag on the next read); an `as` cast to it does not compile
+    //! Miri and `UBSan` would flag on the next read); an `as` cast to it does not compile
     //! (`compile_fail/`). It owns and points at nothing and none of these tests calls
-    //! libgit2, so they also run under Miri; the sweep strides under BSan.
+    //! libgit2, so they also run under Miri; the sweep strides under `BSan`.
 
     use std::hint::black_box;
     use std::thread;
@@ -153,7 +157,7 @@ mod refdb_type {
     fn option_niche_holds() {
         for raw in probes() {
             let kind = black_box(RefdbType::from_raw(raw));
-            assert_eq!(kind.map(RefdbType::raw).unwrap_or(raw), raw);
+            assert_eq!(kind.map_or(raw, RefdbType::raw), raw);
         }
     }
 

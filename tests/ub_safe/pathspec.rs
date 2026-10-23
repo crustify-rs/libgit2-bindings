@@ -22,9 +22,9 @@ fn copied_inputs_and_reborrows() {
     for _ in 0..64 {
         let mut compiled = {
             let inputs = [
-                std::ffi::CString::new("src/*.rs").unwrap(),
-                std::ffi::CString::new("!src/skip.rs").unwrap(),
-                std::ffi::CString::new(vec![0xFF, b'*']).unwrap(),
+                CString::new("src/*.rs").unwrap(),
+                CString::new("!src/skip.rs").unwrap(),
+                CString::new(vec![0xFF, b'*']).unwrap(),
             ];
             let view = StrArrayView::new(&inputs);
             Pathspec::new(view.as_ref()).unwrap()
@@ -69,8 +69,8 @@ fn empty_owned_and_borrowed_inputs() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn empty_patterns_beside_others_are_refused() {
-    let empty = std::ffi::CString::new("").unwrap();
-    let other = std::ffi::CString::new("a").unwrap();
+    let empty = CString::new("").unwrap();
+    let other = CString::new("a").unwrap();
     for patterns in [[&other, &empty], [&empty, &other]] {
         let view = StrArrayView::new(&patterns);
         assert!(Pathspec::new(view.as_ref()).is_err());
@@ -103,7 +103,7 @@ fn independent_thread_local_lifecycles() {
 }
 
 /// Every flag bit, including both case flags and bits C does not know; sampled under
-/// BSan, whose per-call cost makes the full sweep slow.
+/// `BSan`, whose per-call cost makes the full sweep slow.
 fn all_flag_sets() -> impl Iterator<Item = PathspecFlags> {
     let stride = if cfg!(bsan) { 7 } else { 1 };
     (0..64)

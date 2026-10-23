@@ -16,7 +16,7 @@
 //! without a peeled id: both sides are read back through the same C getters and
 //! compared with `git_reference_cmp`. Then each side is released through its own path
 //! (`git_reference_free` on the C pointer, the box's drop on the Rust one), which
-//! ASan's leak check holds to exactly once.
+//! `ASan`'s leak check holds to exactly once.
 //!
 //! Documented divergence, outside these comparisons: `git_reference_dup` of a
 //! reference from `git_reference__alloc` dereferences its NULL reference database and
@@ -41,15 +41,22 @@ fn init() {
 
 /// The calling thread's last error class and message.
 fn c_last() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL after init, and its message is a
-    // NUL-terminated string, both live until the next libgit2 call on this thread,
-    // after the copy.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL after init, and its message is a
+        // NUL-terminated string, both live until the next libgit2 call on this thread,
+        // after the copy.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -65,7 +72,7 @@ impl Repo {
         init();
         let path =
             std::env::temp_dir().join(format!("crustify-refs-equiv-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
         let mut opts = InitOptions::new();
         opts.as_mut().set_flags(InitFlag::Bare | InitFlag::Mkdir);
@@ -95,7 +102,7 @@ impl Repo {
         let mut out = ptr::null_mut();
         // SAFETY: a live slot, the live repository and a NUL-terminated name, read for
         // the call.
-        let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+        let rc = unsafe { ffi::git_reference_lookup(&raw mut out, self.repo, name.as_ptr()) };
         assert_eq!(rc, 0, "lookup {name:?}: {:?}", c_last());
         out
     }
@@ -114,7 +121,7 @@ impl Drop for Repo {
         // SAFETY: the repository `new` opened, freed once; every reference read from
         // it is gone.
         unsafe { ffi::git_repository_free(self.repo) };
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -130,21 +137,34 @@ struct View {
 
 fn id(oid: *const ffi::git_oid) -> Option<(u8, [u8; 32])> {
     // SAFETY: NULL, or an id inside a live reference, copied out at once.
-    (!oid.is_null()).then(|| unsafe { ((*oid).type_, (*oid).id) })
+    (!oid.is_null()).then(|| (unsafe { (*oid).type_ }, unsafe { (*oid).id }))
 }
 
 /// C's view of the live reference at `p`.
 fn view(p: *const ffi::git_reference) -> View {
-    // SAFETY: `p` is a live reference, read for the calls only; every string and id it
-    // hands back lives as long as it and is copied at once.
-    unsafe {
-        let symbolic = ffi::git_reference_symbolic_target(p);
-        View {
-            name: CStr::from_ptr(ffi::git_reference_name(p)).to_owned(),
-            kind: ffi::git_reference_type(p),
-            target: id(ffi::git_reference_target(p)),
-            peel: id(ffi::git_reference_target_peel(p)),
-            symbolic: (!symbolic.is_null()).then(|| CStr::from_ptr(symbolic).to_owned()),
+    {
+        // SAFETY: `p` is a live reference, read for the calls only; every string and id it
+        // hands back lives as long as it and is copied at once.
+        let symbolic = unsafe { ffi::git_reference_symbolic_target(p) };
+        // SAFETY: as above.
+        let reference_name = unsafe { ffi::git_reference_name(p) };
+        // SAFETY: as above.
+        let cstr = unsafe { CStr::from_ptr(reference_name) };
+        // SAFETY: as above.
+        let reference_type = unsafe { ffi::git_reference_type(p) };
+        // SAFETY: as above.
+        let reference_target = unsafe { ffi::git_reference_target(p) };
+        // SAFETY: as above.
+        let reference_target_peel = unsafe { ffi::git_reference_target_peel(p) };
+        // SAFETY: as above.
+        unsafe {
+            View {
+                name: cstr.to_owned(),
+                kind: reference_type,
+                target: id(reference_target),
+                peel: id(reference_target_peel),
+                symbolic: (!symbolic.is_null()).then(|| CStr::from_ptr(symbolic).to_owned()),
+            }
         }
     }
 }
@@ -165,7 +185,7 @@ fn owner(p: *const ffi::git_reference) -> *mut ffi::git_repository {
 fn c_dup(p: *mut ffi::git_reference) -> (c_int, *mut ffi::git_reference) {
     let mut out = ptr::null_mut();
     // SAFETY: a live slot and a live attached reference, read for the call.
-    let rc = unsafe { ffi::git_reference_dup(&mut out, p) };
+    let rc = unsafe { ffi::git_reference_dup(&raw mut out, p) };
     (rc, out)
 }
 
@@ -268,7 +288,7 @@ fn direct_matches_git_reference_alloc() {
                 let c = unsafe {
                     ffi::git_reference__alloc(
                         name.as_ptr(),
-                        &c_target,
+                        &raw const c_target,
                         c_peel.as_ref().map_or(ptr::null(), ptr::from_ref),
                     )
                 };

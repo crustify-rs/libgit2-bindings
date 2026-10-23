@@ -83,11 +83,11 @@ fn run_rust(steps: &[Step]) -> Vec<c_int> {
         .map(|step| match step {
             Step::Init => {
                 let r = init().unwrap();
-                let n = r.count().get() as c_int;
+                let n = i32::try_from(r.count().get()).unwrap();
                 held.push(r);
                 n
             }
-            Step::Shutdown => held.pop().unwrap().shutdown().unwrap() as c_int,
+            Step::Shutdown => i32::try_from(held.pop().unwrap().shutdown().unwrap()).unwrap(),
         })
         .collect()
 }
@@ -164,7 +164,8 @@ fn c_init_fails_without_memory() {
                 .cast_mut();
             // SAFETY: `Allocator` is `#[repr(transparent)]` over `git_allocator`, so `raw`
             // addresses a complete one, which libgit2 copies before anything is allocated.
-            let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, raw) };
+            let rc =
+                unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), raw) };
             assert_eq!(rc, 0);
             assert_eq!(c_init(), -1);
         },

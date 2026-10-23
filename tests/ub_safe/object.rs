@@ -6,14 +6,14 @@
 //! object to every lookup of one id (blobs aside, which it does not keep): every owner
 //! gives back its one reference through `git_object_free` exactly once, and every clone
 //! takes one through `git_object_dup`.
-//! A miscount frees an object the cache or another owner still reads, which ASan
-//! flags, or leaks it, which LSan does. The tests share objects between lookups and
+//! A miscount frees an object the cache or another owner still reads, which `ASan`
+//! flags, or leaks it, which `LSan` does. The tests share objects between lookups and
 //! clones, drop them in every order, let the cache evict objects owners still hold (a
 //! tiny cache limit) and run with the cache off (a fresh object per lookup), and C
 //! reads each survivor back. Every failing lookup must leave nothing behind, and an id
 //! of another type than the repository's, which libgit2 would format out of bounds,
 //! must be refused before it reaches C. libgit2 copies the id it is given: the tests
-//! overwrite and free each id right after its lookup (BSan). A peel or a lookup by
+//! overwrite and free each id right after its lookup (`BSan`). A peel or a lookup by
 //! path derives one object from another through the repository: the derived object
 //! owns one reference of its own, whether it is a fresh object, a cached one or the
 //! very object it was derived from, and outlives the object it came from, the trees
@@ -28,12 +28,12 @@
 //! holding a filter list it applies through them: the tests set every object and id
 //! type and a list (empty, or `crlf`) through the safe setters, have C hash content
 //! through the options (`id_from_buffer`) between Rust's own shared and exclusive
-//! reborrows of them (BorrowSanitizer), and drop the options before the list and the
+//! reborrows of them (`BorrowSanitizer`), and drop the options before the list and the
 //! list before its repository, which the borrows enforce: outliving the list, or
 //! reaching it otherwise while the options hold it, does not compile
 //! (`compile_fail/object_id_options_*` and the doctests on `ObjectIdOptions`). A list
 //! read back through the options is the one lent, and C applies it while it lives
-//! (ASan). Loading a filter list initialises libgit2's filters unsynchronised (see
+//! (`ASan`). Loading a filter list initialises libgit2's filters unsynchronised (see
 //! `filter.rs`), so those tests run alone in a child process. `id_from_file` hashes a
 //! file through the same options, reading it whole and keeping nothing of its path.
 //!
@@ -162,7 +162,7 @@ fn clone_chains_release_every_reference_in_any_order() {
     }
 }
 
-/// Every failure leaves no object behind (LSan), and its code and class.
+/// Every failure leaves no object behind (`LSan`), and its code and class.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn failures_leave_nothing_behind() {
@@ -370,7 +370,7 @@ fn without_a_cache_each_lookup_is_a_fresh_object() {
 
 /// An object the database holds but libgit2 cannot parse fails its lookup, through
 /// every constructor and type filter, and its half-parsed object is freed (a tree's
-/// entries included): ASan flags a bad free, LSan a leak. A well-formed one beside it
+/// entries included): `ASan` flags a bad free, `LSan` a leak. A well-formed one beside it
 /// is still found.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -484,7 +484,7 @@ fn derived_objects_count_their_own_reference() {
             _ => {}
         }
         while let Some(object) = chain.pop() {
-            let _ = object_view(&object);
+            drop(object_view(&object));
         }
         chain = copies;
         assert_eq!(chain.iter().map(object_view).collect::<Vec<_>>(), views);
@@ -493,7 +493,7 @@ fn derived_objects_count_their_own_reference() {
     drop(repo);
 }
 
-/// Every refused peel and lookup by path leaves nothing behind (LSan), the trees and
+/// Every refused peel and lookup by path leaves nothing behind (`LSan`), the trees and
 /// tags read on the way included; the error is libgit2's, with its code.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -619,7 +619,7 @@ const CRLF: &str = "c30dea8a3641ea99b125d04d599d843712292759";
 
 /// Every object and id type, and the defaults, reach C through the options, which
 /// hashes or refuses each; Rust's reborrows of the options interleave with C's reads
-/// of them (BorrowSanitizer), and the getters read back what the setters wrote.
+/// of them (`BorrowSanitizer`), and the getters read back what the setters wrote.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn id_options_are_read_by_c_between_reborrows() {
@@ -664,14 +664,14 @@ fn id_options_are_read_by_c_between_reborrows() {
         }
     }
     assert!(opts.as_ref().filters().is_none());
-    assert!(!format!("{opts:?}").is_empty());
+    assert_ne!(format!("{opts:?}"), "");
 }
 
 /// A list lent to the options is applied by C through them (CRLF to LF before the
 /// blob is hashed), read back while they hold it, ignored for other object types and
 /// when empty; the options go before the lists, the lists before their repository,
-/// and a second list may replace the first while both outlive the options (ASan,
-/// LSan).
+/// and a second list may replace the first while both outlive the options (`ASan`,
+/// `LSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn id_options_apply_the_list_they_borrow() {
@@ -681,7 +681,7 @@ fn id_options_apply_the_list_they_borrow() {
             crate::fixture::init();
             let path =
                 std::env::temp_dir().join(format!("crustify-id-options-ub-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let repo = Repository::init(&c_path, false).unwrap();
             std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
@@ -714,22 +714,22 @@ fn id_options_apply_the_list_they_borrow() {
             drop(crlf);
             drop(empty);
             drop(repo);
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
         },
     );
 }
 
 /// `id_from_file` reads exactly the file it is given and keeps nothing: an empty file,
 /// one longer than libgit2's 64 KiB read buffer, each named by a heap path freed right
-/// after the call (ASan, BSan: a retained pointer), the defaults and every id type; a
-/// missing path and a directory fail, leaving nothing open or allocated (LSan). The
+/// after the call (`ASan`, `BSan`: a retained pointer), the defaults and every id type; a
+/// missing path and a directory fail, leaving nothing open or allocated (`LSan`). The
 /// ids agree with [`id_from_buffer`] over the same bytes.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn ids_of_files_read_them_whole() {
     crate::fixture::init();
     let dir = std::env::temp_dir().join(format!("crustify-id-file-ub-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
     std::fs::create_dir_all(&dir).unwrap();
     // Past the 64 KiB read buffer; smaller under BorrowSanitizer, which hashes slowly.
     let len = if cfg!(bsan) { 70_000 } else { 200_000 };
@@ -771,12 +771,12 @@ fn ids_of_files_read_them_whole() {
     );
     let directory = id_from_file(&CString::new(dir.to_str().unwrap()).unwrap(), None);
     assert_eq!(directory.unwrap_err().class(), Some(ErrorClass::Os));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
 }
 
 /// A file's content runs through the options' list as a buffer's does: CRLF to LF for
 /// a blob, the list read back while the options hold it, and nothing kept once they
-/// are gone (ASan, LSan). Loading the list initialises libgit2's filters, so the test
+/// are gone (`ASan`, `LSan`). Loading the list initialises libgit2's filters, so the test
 /// runs alone in a child process.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -787,7 +787,7 @@ fn ids_of_files_apply_the_list_they_borrow() {
             crate::fixture::init();
             let path = std::env::temp_dir()
                 .join(format!("crustify-id-file-list-ub-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let c_path = CString::new(path.to_str().unwrap()).unwrap();
             let repo = Repository::init(&c_path, false).unwrap();
             std::fs::write(path.join(".gitattributes"), "*.txt text\n").unwrap();
@@ -813,7 +813,7 @@ fn ids_of_files_apply_the_list_they_borrow() {
             assert_eq!(crate::fixture::filter_count(&crlf), 1);
             drop(crlf);
             drop(repo);
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
         },
     );
 }
@@ -825,13 +825,13 @@ mod kinds_short_ids_and_contents {
     //! `content_is_valid` (`git_object_rawcontent_is_valid`).
     //!
     //! A short id is a fresh `git_buf` of libgit2's allocator, which the returned owner
-    //! releases once (ASan: double free; LSan: leak), and which outlives the object, the
+    //! releases once (`ASan`: double free; `LSan`: leak), and which outlives the object, the
     //! repository and the object database libgit2 loaded for it. A content check hashes
     //! and parses exactly the bytes it is lent: each content sits in an exact-length
-    //! heap allocation (ASan: a read past it), every prefix of well-formed contents is
-    //! checked, and the bytes are rewritten between checks (BSan: libgit2 retains no
+    //! heap allocation (`ASan`: a read past it), every prefix of well-formed contents is
+    //! checked, and the bytes are rewritten between checks (`BSan`: libgit2 retains no
     //! pointer into them); the object it parses them into is freed before it returns
-    //! (LSan). The first checks of a process race to initialise libgit2 (TSan). A name
+    //! (`LSan`). The first checks of a process race to initialise libgit2 (`TSan`). A name
     //! is read up to its NUL, from an exact-length allocation too.
     //!
     //! Objects are neither `Send` nor `Sync`, so `kind` and `short_id` stay on one
@@ -929,7 +929,7 @@ mod kinds_short_ids_and_contents {
     }
 
     /// Small contents, checked twice with the bytes rewritten between: libgit2 keeps no
-    /// pointer into them (BSan), and gives the same verdicts.
+    /// pointer into them (`BSan`), and gives the same verdicts.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn content_checks_retain_no_pointer() {
@@ -956,7 +956,7 @@ mod kinds_short_ids_and_contents {
     }
 
     /// Many threads make the first calls at once, in a process where nothing has
-    /// initialised libgit2, and keep checking contents and names (TSan).
+    /// initialised libgit2, and keep checking contents and names (`TSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn first_checks_race_initialisation() {
@@ -1008,7 +1008,7 @@ mod kinds_short_ids_and_contents {
 /// An object's id lives in the object, as long as any owner of it does; its owner is
 /// the repository handle it was looked up through, which outlives the object and looks
 /// further objects up into the same cache. An id written over after its lookup does not
-/// change it (BSan: libgit2 copied it).
+/// change it (`BSan`: libgit2 copied it).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn ids_and_owners_borrow_from_their_object() {

@@ -78,7 +78,7 @@ fn records_copy_inputs_and_are_freed_once() {
 fn records_survive_a_write_and_reread() {
     init();
     let dir = std::env::temp_dir().join(format!("crustify-reuc-ub-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(std::fs::remove_dir_all(&dir));
     std::fs::create_dir_all(&dir).unwrap();
     let file = CString::new(dir.join("index").to_str().unwrap()).unwrap();
     let mut index = Index::open(&file).unwrap();
@@ -101,5 +101,5 @@ fn records_survive_a_write_and_reread() {
     assert_eq!(index.as_ref().reuc_entry_count(), 3);
     assert_eq!(index.as_mut().find_reuc(c"y/z"), Some(1));
     drop(index);
-    let _ = std::fs::remove_dir_all(dir);
+    drop(std::fs::remove_dir_all(dir));
 }

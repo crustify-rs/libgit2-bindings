@@ -20,13 +20,20 @@ mod git_file {
     }
 
     fn c_last() -> (c_int, String) {
-        // SAFETY: the runtime is initialised; the error is copied before any other call.
-        unsafe {
-            let e = ffi::git_error_last();
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
+        {
+            // SAFETY: the runtime is initialised; the error is copied before any other call.
+            let e = unsafe { ffi::git_error_last() };
+            // SAFETY: as above.
+            let klass = unsafe { (*e).klass };
+            // SAFETY: as above.
+            let message2 = unsafe { (*e).message };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    klass,
+                    CStr::from_ptr(message2).to_string_lossy().into_owned(),
+                )
+            }
         }
     }
 
@@ -73,18 +80,15 @@ mod git_file {
         let probes = (0..=64).chain([0x7FFF_FFFF, 0x8000_0000, u32::MAX - 1, u32::MAX]);
         for raw in probes {
             let c = is_gitfile(c".gitmodules", raw);
-            match GitFile::from_raw(raw) {
-                Some(file) => {
-                    assert_eq!(file.raw(), raw);
-                    assert_eq!(c, (c_int::from(file == GitFile::Gitmodules), None), "{raw}");
-                }
-                None => {
-                    // A `GIT_ERROR_OS` message carries the thread's `errno` after it.
-                    let (rc, err) = c;
-                    let (class, message) = err.unwrap();
-                    assert_eq!((rc, class), (-1, ffi::GIT_ERROR_OS as c_int), "{raw}");
-                    assert!(message.starts_with("invalid gitfile for path validation"));
-                }
+            if let Some(file) = GitFile::from_raw(raw) {
+                assert_eq!(file.raw(), raw);
+                assert_eq!(c, (c_int::from(file == GitFile::Gitmodules), None), "{raw}");
+            } else {
+                // A `GIT_ERROR_OS` message carries the thread's `errno` after it.
+                let (rc, err) = c;
+                let (class, message) = err.unwrap();
+                assert_eq!((rc, class), (-1, ffi::GIT_ERROR_OS.cast_signed()), "{raw}");
+                assert!(message.starts_with("invalid gitfile for path validation"));
             }
         }
     }
@@ -98,7 +102,7 @@ mod git_file {
                 for name in names(other) {
                     let (rc, err) = is_gitfile(name, file.into());
                     assert_eq!(err, None);
-                    assert_eq!(rc == 1, file == other, "{file:?} against {:?}", name);
+                    assert_eq!(rc == 1, file == other, "{file:?} against {name:?}");
                 }
             }
             // Not a git file at all.
@@ -125,7 +129,7 @@ mod filesystem {
 
     /// Takes a `git_libgit2_init` reference that is never released.
     fn init() {
-        core::mem::forget(libgit2::libgit2::core::global::init().unwrap());
+        let _ = core::mem::ManuallyDrop::new(libgit2::libgit2::core::global::init().unwrap());
     }
 
     /// `git_path_is_gitfile(name, gitfile, fs)`, with the thread's error on failure.
@@ -140,7 +144,9 @@ mod filesystem {
         let name = CString::new(name).unwrap();
         let len = name.as_bytes().len();
         // SAFETY: the calling thread's `errno`, valid for writes.
-        unsafe { libc::__errno_location().write(0) };
+        let value2 = unsafe { libc::__errno_location() };
+        // SAFETY: as above.
+        unsafe { value2.write(0) };
         // SAFETY: `name` is NUL-terminated and `len` long, read for the call only (the
         // NTFS check reads past `len` up to the NUL, which the `CString` supplies).
         let rc = unsafe { ffi::git_path_is_gitfile(name.as_ptr(), len, gitfile.raw(), fs) };
@@ -150,13 +156,17 @@ mod filesystem {
         // SAFETY: libgit2 is initialised; the result is live until the next libgit2 call
         // on this thread, and is copied before one.
         let e = unsafe { ffi::git_error_last() };
-        // SAFETY: as above, with a NUL-terminated message.
-        Err(unsafe {
-            (
-                (*e).klass,
-                CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-            )
-        })
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message = unsafe { (*e).message };
+        // SAFETY: as above, a NUL-terminated message; it is copied.
+        Err((
+            klass,
+            unsafe { CStr::from_ptr(message) }
+                .to_string_lossy()
+                .into_owned(),
+        ))
     }
 
     /// `.gitmodules` spellings and whether NTFS's and HFS+'s rules match each one.
@@ -196,7 +206,7 @@ mod filesystem {
     fn from_raw_accepts_what_git_path_is_gitfile_accepts() {
         init();
         let invalid = (
-            ffi::GIT_ERROR_OS as c_int,
+            ffi::GIT_ERROR_OS.cast_signed(),
             "invalid filesystem for path validation: ".to_owned(),
         );
         let probes = (0..=16).chain([0x7FFF_FFFF, 0x8000_0000, u32::MAX - 1, u32::MAX]);
@@ -324,7 +334,7 @@ mod is_gitfile {
     }
 
     /// Short names of the bytes the rules branch on, from a seeded generator; a stride
-    /// keeps BorrowSanitizer's run short.
+    /// keeps `BorrowSanitizer`'s run short.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn seeded_short_names_match_c() {
@@ -337,7 +347,7 @@ mod is_gitfile {
             seed ^= seed << 17;
             let len = (seed % 16) as usize;
             let bytes: Vec<u8> = (0..len)
-                .map(|i| ALPHABET[((seed >> (i * 4)) as usize ^ i) % ALPHABET.len()])
+                .map(|i| ALPHABET[(usize::try_from(seed >> (i * 4)).unwrap() ^ i) % ALPHABET.len()])
                 .collect();
             check(&CString::new(bytes).unwrap());
         }

@@ -1,9 +1,9 @@
 //! UB tests for `git2/buffer.h`: the `Buf` value held by its `BufVal` owner, its
 //! handles and their accessors, and the `git_buf_dispose` policy.
 //!
-//! Buffers built in Rust hold exactly `len + 1` bytes (`from_bytes`), so ASan flags any
+//! Buffers built in Rust hold exactly `len + 1` bytes (`from_bytes`), so `ASan` flags any
 //! access past the terminator; every replaced, taken or copied allocation must be
-//! released exactly once (ASan: double free, use after free; LSan: leak). libgit2's
+//! released exactly once (`ASan`: double free, use after free; `LSan`: leak). libgit2's
 //! own results come from the `GIT_OPT_GET_*` options through [`fill_from_option`], in a
 //! child process, since the options are unsynchronised globals. Illegal borrows are in
 //! `compile_fail/`. Only empty buffers are built without libgit2, so little runs under
@@ -20,7 +20,9 @@ use crate::fixture::{fill_from_option, isolated, set_str_option};
 
 /// `len` bytes without a NUL, so a C string read must stop at the terminator.
 fn pattern(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i % 255) as u8 + 1).collect()
+    (0..len)
+        .map(|i| u8::try_from(i % 255).unwrap() + 1)
+        .collect()
 }
 
 #[test]
@@ -67,7 +69,7 @@ fn buffers_before_init() {
 
 /// Empty buffers, which never initialise libgit2, dropped while another thread's first
 /// allocation initialises it: their dispose must not reach `git__free`, which reads the
-/// allocator that initialisation writes (TSan). Alone in a child, so the initialisation
+/// allocator that initialisation writes (`TSan`). Alone in a child, so the initialisation
 /// is really the process's first.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -131,7 +133,7 @@ fn views_stay_in_bounds() {
 }
 
 /// `set_bytes` writes in place up to `capacity - 1` bytes, its NUL in the last byte,
-/// and allocates afresh from `capacity` bytes on: ASan flags an off-by-one write.
+/// and allocates afresh from `capacity` bytes on: `ASan` flags an off-by-one write.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn set_bytes_at_the_capacity_boundary() {
@@ -196,7 +198,7 @@ fn moves_and_replacements_release_once() {
 
 /// libgit2's results: an owned string, refilled in place and reallocated, the
 /// unallocated static empty string, which is never freed, and a Rust-built allocation
-/// libgit2 reuses. C writes each buffer between Rust's reads (BSan: no stale view).
+/// libgit2 reuses. C writes each buffer between Rust's reads (`BSan`: no stale view).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn libgit2_results_are_read_reused_and_released_once() {
@@ -253,7 +255,7 @@ fn libgit2_results_are_read_reused_and_released_once() {
 }
 
 /// Shared handles read one buffer from several threads at once; owners and the
-/// contents taken from them move to other threads and drop there (TSan).
+/// contents taken from them move to other threads and drop there (`TSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn buffers_shared_and_sent_across_threads() {

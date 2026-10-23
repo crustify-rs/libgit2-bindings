@@ -12,11 +12,11 @@ use libgit2::libgit2::raw::{
 
 use crate::fixture::{Pair, filled, isolated};
 
-/// Up to just past a page; whole-slice comparisons keep BSan's per-access cost low.
+/// Up to just past a page; whole-slice comparisons keep `BSan`'s per-access cost low.
 const SIZES: [usize; 7] = [1, 2, 7, 16, 63, 4096, 4097];
 
 fn pattern(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i * 31 + 7) as u8).collect()
+    (0..len).map(|i| (i * 31 + 7).to_le_bytes()[0]).collect()
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn vec_uninit_clones_as_bytes_before_promotion() {
     assert_eq!(half.len(), 16);
     drop(half);
     for (i, slot) in v.as_mut_slice().iter_mut().enumerate() {
-        slot.write(i as u32);
+        slot.write(u32::try_from(i).unwrap());
     }
     let w = v.clone();
     drop(v);
@@ -170,7 +170,7 @@ fn owners_cross_threads() {
         .collect();
     for (i, h) in handles.into_iter().enumerate() {
         let pair = h.join().unwrap();
-        assert_eq!(pair.as_ref().b(), i as u32);
+        assert_eq!(pair.as_ref().b(), u32::try_from(i).unwrap());
     }
 }
 
@@ -226,7 +226,7 @@ const STR_LENS: [usize; 8] = [0, 1, 2, 7, 16, 63, 4095, 4096];
 fn text(len: usize, seed: u8) -> CString {
     CString::new(
         (0..len)
-            .map(|i| b'!' + ((i as u8).wrapping_mul(7) ^ seed) % 90)
+            .map(|i| b'!' + (i.to_le_bytes()[0].wrapping_mul(7) ^ seed) % 90)
             .collect::<Vec<_>>(),
     )
     .unwrap()
@@ -277,13 +277,13 @@ fn str_clone_is_independent_and_outlives_its_source() {
 fn str_vec_copies_runs_of_every_shape() {
     for n in [1, 2, 3, 17, 512] {
         let src: Vec<CString> = (0..n)
-            .map(|i| text(STR_LENS[i % STR_LENS.len()], i as u8))
+            .map(|i| text(STR_LENS[i % STR_LENS.len()], i.to_le_bytes()[0]))
             .collect();
         let v = OdbDataStrVec::dup_all(&src).unwrap();
         assert_eq!((v.len(), v.is_empty()), (n, false));
         assert_eq!(
             strs(&v),
-            src.iter().map(|s| s.as_bytes()).collect::<Vec<_>>()
+            src.iter().map(CString::as_bytes).collect::<Vec<_>>()
         );
         assert_eq!(
             v.as_slice().last().unwrap().as_c_str(),

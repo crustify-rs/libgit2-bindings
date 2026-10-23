@@ -368,24 +368,29 @@ impl Numbering {
 }
 
 fn last_error() -> (c_int, CString) {
-    // SAFETY: `git_error_last` never returns NULL; the error is copied out before the
-    // next libgit2 call on this thread.
-    unsafe {
-        let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_owned())
+    {
+        // SAFETY: `git_error_last` never returns NULL; the error is copied out before the
+        // next libgit2 call on this thread.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe { (klass, CStr::from_ptr(message2).to_owned()) }
     }
 }
 
 fn set_str(class: ffi::git_error_t, message: &CStr) -> c_int {
     // SAFETY: `message` is a live C string, which libgit2 copies.
-    unsafe { ffi::git_error_set_str(class as c_int, message.as_ptr()) }
+    unsafe { ffi::git_error_set_str(class.cast_signed(), message.as_ptr()) }
 }
 
 fn install(allocator: *const ffi::git_allocator) {
     // SAFETY: `allocator` is NULL (the default allocator) or addresses a
     // `git_allocator` with every member set, which libgit2 copies; every family
     // installed here is libc-backed, so live blocks stay valid across the switch.
-    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, allocator) };
+    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), allocator) };
     assert_eq!(rc, 0);
 }
 
@@ -413,23 +418,26 @@ fn workload() -> Vec<Step> {
         step(&mut || set_str(ffi::GIT_ERROR_ODB, &long));
         step(&mut || set_str(ffi::GIT_ERROR_INDEX, c"shrinks back"));
         // An allocation libgit2 makes and frees for the caller.
-        step(&mut || OdbDataStrFree::dup(c"a string").map_or(-1, |s| s.len() as c_int));
+        step(&mut || {
+            OdbDataStrFree::dup(c"a string").map_or(-1, |s| i32::try_from(s.len()).unwrap())
+        });
         // A zero-byte request, which libgit2 makes and releases like any other.
         step(&mut || {
-            // SAFETY: the routines ignore `backend`; a NULL result owns nothing, and a
-            // block is released once.
-            unsafe {
-                let p = ffi::git_odb_backend_data_alloc(ptr::null_mut(), 0);
+            {
+                // SAFETY: the routines ignore `backend`; a NULL result owns nothing, and a
+                // block is released once.
+                let p = unsafe { ffi::git_odb_backend_data_alloc(ptr::null_mut(), 0) };
                 let got = !p.is_null();
-                ffi::git_odb_backend_data_free(ptr::null_mut(), p);
-                got as c_int
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_backend_data_free(ptr::null_mut(), p) };
+                c_int::from(got)
             }
         });
         // A refused allocation, reported as out of memory.
         step(&mut || {
             // SAFETY: the routine ignores `backend`; a NULL result owns nothing.
             let p = unsafe { ffi::git_odb_backend_data_alloc(ptr::null_mut(), REFUSED) };
-            p.is_null() as c_int
+            c_int::from(p.is_null())
         });
         step(&mut || {
             // SAFETY: no arguments.
@@ -465,7 +473,7 @@ fn libgit2_drives_both_allocators_alike() {
                 gfree: Some(c_traced_free),
             };
             let rust_side = Allocator::new::<Traced>();
-            install(&c_side);
+            install(&raw const c_side);
             // SAFETY: no arguments; refcounted, never released in this process.
             assert!(unsafe { ffi::git_libgit2_init() } > 0);
 
@@ -473,7 +481,7 @@ fn libgit2_drives_both_allocators_alike() {
                 install(allocator);
                 workload()
             };
-            let c_steps = run(&c_side);
+            let c_steps = run(&raw const c_side);
             let rust_steps = run((&raw const rust_side).cast());
             // NULL restores the default allocator, libc's as well.
             install(ptr::null());
@@ -521,7 +529,7 @@ fn libgit2_drives_both_allocators_alike() {
                 "{:?}",
                 c_steps[4].events
             );
-            assert_eq!(c_steps[5].error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
+            assert_eq!(c_steps[5].error.0, ffi::GIT_ERROR_NOMEMORY.cast_signed());
         },
     );
 }

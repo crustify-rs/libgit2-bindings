@@ -1,5 +1,5 @@
 //! Lists own copied names and failures, but borrow diff deltas. Repeated reborrows
-//! and C-retained pathspec references exercise the foreign boundary under BSan.
+//! and C-retained pathspec references exercise the foreign boundary under `BSan`.
 //! Every constructor is safe; no unsafe operation is permitted in these tests.
 #![forbid(unsafe_code)]
 
@@ -67,7 +67,7 @@ fn empty_large_failure_lists_and_flags() {
     let names: Vec<_> = (0..130)
         .map(|i| CString::new(format!("absent/{i}")).unwrap())
         .collect();
-    let refs: Vec<_> = names.iter().map(|s| s.as_c_str()).collect();
+    let refs: Vec<_> = names.iter().map(CString::as_c_str).collect();
     let ps = patterns(&refs);
     let mut list = MatchList::from_index(
         index.as_mut(),
@@ -134,7 +134,7 @@ fn borrowed_diff_deltas_and_independent_failures() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn tree_and_workdir_lists_release_sources() {
     let path = std::env::temp_dir().join(format!("crustify-match-list-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
     let cpath = CString::new(path.to_str().unwrap()).unwrap();
     let mut repo = Repository::init(&cpath, false).unwrap();
     std::fs::write(path.join("a.txt"), b"text").unwrap();
@@ -186,7 +186,7 @@ fn tree_and_workdir_lists_release_sources() {
     assert_eq!(workdir.as_ref().entry(0), Some(c"a.txt"));
     std::fs::remove_dir_all(&path).unwrap();
     let bare_path = path.with_extension("bare");
-    let _ = std::fs::remove_dir_all(&bare_path);
+    drop(std::fs::remove_dir_all(&bare_path));
     let bare_cpath = CString::new(bare_path.to_str().unwrap()).unwrap();
     let mut bare = Repository::init(&bare_cpath, true).unwrap();
     let ps = patterns(&[c"*"]);
@@ -200,7 +200,7 @@ fn tree_and_workdir_lists_release_sources() {
 fn generated_diff_borrows_deltas_without_retaining_sources() {
     let path =
         std::env::temp_dir().join(format!("crustify-match-generated-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
+    drop(std::fs::remove_dir_all(&path));
     let repo = Repository::init(&CString::new(path.to_str().unwrap()).unwrap(), true).unwrap();
     let id = create_from_buffer(repo.as_ref(), b"new text").unwrap();
     let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();

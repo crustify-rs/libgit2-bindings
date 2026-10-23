@@ -4,10 +4,10 @@
 //!
 //! libgit2 reads the name up to its NUL, copies it into a reference name in its
 //! allocator, and writes the verdict into a Rust local. Each name sits in an
-//! exact-length heap buffer (a `CString`), so ASan flags any read past its NUL, and the
-//! copy must be released (LSan). The name is rewritten between calls (BSan: libgit2
+//! exact-length heap buffer (a `CString`), so `ASan` flags any read past its NUL, and the
+//! copy must be released (`LSan`). The name is rewritten between calls (`BSan`: libgit2
 //! keeps no pointer into it), and many threads check names at once, racing the first
-//! call's initialisation of libgit2 (TSan).
+//! call's initialisation of libgit2 (`TSan`).
 
 use std::ffi::{CStr, CString};
 use std::thread;
@@ -104,15 +104,15 @@ mod tag_object {
     //! object to every lookup of its id, as a tag or as an object: every owner gives back
     //! its one reference through `git_tag_free` (or `git_object_free`, once handed over as
     //! an object) exactly once, and every clone takes one through `git_tag_dup`. A miscount
-    //! frees a tag the cache or another owner still reads (ASan), or leaks it (LSan). The
+    //! frees a tag the cache or another owner still reads (`ASan`), or leaks it (`LSan`). The
     //! tests share tags between lookups, clones and conversions, drop them in every order,
     //! let the cache evict tags owners still hold and run without a cache. Every failing
     //! lookup must leave nothing behind, a half-parsed tag included (its name, tagger and
     //! message), and an id of another type than the repository's must be refused before
-    //! it reaches C. libgit2 copies the id it is given (BSan: the tests overwrite and free
+    //! it reaches C. libgit2 copies the id it is given (`BSan`: the tests overwrite and free
     //! it right after), and a tag keeps a bare pointer to its repository, which its target
-    //! lookup follows across Rust reborrows of that repository (BSan). Tags are not
-    //! `Send`, so the threaded test gives each thread its own repository (TSan).
+    //! lookup follows across Rust reborrows of that repository (`BSan`). Tags are not
+    //! `Send`, so the threaded test gives each thread its own repository (`TSan`).
     //!
     //! A tag cannot outlive its repository, nor a handle its owner, and no owner lends an
     //! exclusive handle (`compile_fail/` and doctests). Every test calls libgit2, so Miri
@@ -121,11 +121,11 @@ mod tag_object {
     //! The getters (`id`, `name`, `message`, `tagger`, `target_id`, `target_kind`) lend
     //! what the tag holds for as long as the handle's borrow: the tests read every getter
     //! of every tag while other owners of the same tag come and go, and after the cache
-    //! evicted it, as long as one owner remains (ASan); none outlives the last owner
+    //! evicted it, as long as one owner remains (`ASan`); none outlives the last owner
     //! (doctests). A tagger is `Send` and `Sync` while the tag is not: threads read one
-    //! tag's tagger at once while the tag's owner stays on its thread (TSan). `target`
-    //! and `peel` hand out owners of their own that outlive the tag (ASan, LSan), looked
-    //! up through the repository the tag keeps, across Rust reborrows of it (BSan), as
+    //! tag's tagger at once while the tag's owner stays on its thread (`TSan`). `target`
+    //! and `peel` hand out owners of their own that outlive the tag (`ASan`, `LSan`), looked
+    //! up through the repository the tag keeps, across Rust reborrows of it (`BSan`), as
     //! `owner` hands that repository back.
 
     use std::ffi::CString;
@@ -185,15 +185,15 @@ mod tag_object {
     /// Every getter's value, read through an owner while the others are dropped.
     fn read(tag: TagRef<'_, '_>) -> Read {
         let tagger = tag.tagger().map(|t| {
-            let len =
-                t.name().map_or(0, |n| n.count_bytes()) + t.email().map_or(0, |e| e.count_bytes());
+            let len = t.name().map_or(0, std::ffi::CStr::count_bytes)
+                + t.email().map_or(0, std::ffi::CStr::count_bytes);
             (len, t.when().seconds())
         });
         let _ = tag.target_kind();
         (
             tag.id().to_hex_string().unwrap(),
             tag.name().to_bytes().to_vec(),
-            tag.message().map(|m| m.count_bytes()),
+            tag.message().map(std::ffi::CStr::count_bytes),
             tagger,
             tag.target_id().to_hex_string().unwrap(),
         )
@@ -216,7 +216,7 @@ mod tag_object {
             drop(first);
             let as_object = Tag::into_object(second.clone());
             assert_eq!(name.to_bytes(), expected.1);
-            assert_eq!(message.map(|m| m.count_bytes()), expected.2);
+            assert_eq!(message.map(std::ffi::CStr::count_bytes), expected.2);
             assert_eq!(tagger.map(|t| t.when().seconds()), expected.3.map(|t| t.1));
             assert_eq!(target_id.to_hex_string().unwrap(), expected.4);
             assert_eq!(tag_id.to_hex_string().unwrap(), hex_id);
@@ -284,7 +284,7 @@ mod tag_object {
                     for _ in 0..64 {
                         assert_eq!(tagger.name(), Some(c"Vicent Marti"));
                         assert_eq!(tagger.email(), Some(c"tanoku@gmail.com"));
-                        assert_eq!(tagger.when().seconds(), 1281578440);
+                        assert_eq!(tagger.when().seconds(), 1_281_578_440);
                     }
                 });
             }
@@ -354,7 +354,7 @@ mod tag_object {
         }
     }
 
-    /// Every failure leaves no object behind (LSan), with its code and class; objects of
+    /// Every failure leaves no object behind (`LSan`), with its code and class; objects of
     /// other types are looked up, and released, by libgit2 before it refuses them.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -431,7 +431,7 @@ mod tag_object {
 
     /// Tags the database holds but libgit2 cannot parse fail their lookup, through both
     /// constructors, and the half-parsed tag is freed with whatever the parse had
-    /// allocated (its name, a tagger it could not parse): ASan flags a bad free, LSan a
+    /// allocated (its name, a tagger it could not parse): `ASan` flags a bad free, `LSan` a
     /// leak. A well-formed tag without tagger or message beside them is found.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -637,18 +637,18 @@ mod repository_tags {
     //! `list_match` (`git_tag_create_lightweight`, `_create_from_buffer`, `_delete`,
     //! `_list`, `_list_match`) and `ForeachCallback` (`git_tag_foreach_cb`).
     //!
-    //! Names, patterns and buffers sit in exact-length allocations (ASan: a read past
-    //! their NUL) and are rewritten after each call (BSan: libgit2 keeps no pointer into
+    //! Names, patterns and buffers sit in exact-length allocations (`ASan`: a read past
+    //! their NUL) and are rewritten after each call (`BSan`: libgit2 keeps no pointer into
     //! them). A listing is an array and strings of libgit2's allocator that the returned
-    //! owner releases once (ASan, LSan), and that outlives the repository. A buffer
+    //! owner releases once (`ASan`, `LSan`), and that outlives the repository. A buffer
     //! naming the zero id as its target, which libgit2 would answer by freeing an
     //! uninitialised pointer, and buffers libgit2 would leak part of (a malformed
-    //! tagger, no message, an invalid reference name), never reach libgit2 (ASan,
-    //! LSan). A failed listing leaks in libgit2 itself, so that test runs
-    //! with LeakSanitizer off in its child. Each thread lists tags of a repository of
-    //! its own, the first calls of a fresh process racing to initialise libgit2 (TSan);
+    //! tagger, no message, an invalid reference name), never reach libgit2 (`ASan`,
+    //! `LSan`). A failed listing leaks in libgit2 itself, so that test runs
+    //! with `LeakSanitizer` off in its child. Each thread lists tags of a repository of
+    //! its own, the first calls of a fresh process racing to initialise libgit2 (`TSan`);
     //! tests that write references run in a child, on one thread, since glibc's
-    //! `tzset` (the reflog's time) is reported by TSan against any concurrent caller.
+    //! `tzset` (the reflog's time) is reported by `TSan` against any concurrent caller.
     //!
     //! A callback's name and id cannot outlive the call, nor the callback cross threads
     //! (doctests); a panicking closure resumes after the call.
@@ -657,13 +657,13 @@ mod repository_tags {
     //! `git_tag_annotation_create`, `git_tag_foreach`). A tagger reaches libgit2 as a
     //! borrowed `const git_signature *` it only prints: a view over strings the test
     //! rewrites and frees right after, an owned signature, and the tagger of a tag that
-    //! is released after the call (ASan, BSan); names and messages up to a megabyte sit
+    //! is released after the call (`ASan`, `BSan`); names and messages up to a megabyte sit
     //! in exact-length buffers. `foreach` lends the closure each name and id for its
     //! call; the closure breaks with codes of either sign, panics, re-enters `foreach`
     //! with a callback of its own, and writes the reference database during the walk
     //! (deleting and creating tags), which libgit2 tolerates, failing the walk when a
     //! tag it was about to visit is gone. Walks run on threads at once, each over a
-    //! repository of its own (TSan); tests that write references run in a child.
+    //! repository of its own (`TSan`); tests that write references run in a child.
 
     use std::ffi::{CStr, CString, c_int};
     use std::num::NonZero;
@@ -710,7 +710,7 @@ mod repository_tags {
             init();
             let path =
                 std::env::temp_dir().join(format!("crustify-tag-ub-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
+            drop(std::fs::remove_dir_all(&path));
             let source = concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/c/tests/resources/testrepo.git"
@@ -731,7 +731,7 @@ mod repository_tags {
     impl Drop for Sandbox {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.path);
+            drop(std::fs::remove_dir_all(&self.path));
         }
     }
 
@@ -750,7 +750,7 @@ mod repository_tags {
     /// Tags of names of many lengths are created, listed, matched and deleted; the
     /// listings outlive the repository, and every argument is rewritten after its call.
     /// In a child: writing a reference reads the time through glibc's `tzset`, which
-    /// TSan reports against any concurrent caller.
+    /// `TSan` reports against any concurrent caller.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn tags_are_created_listed_and_deleted() {
@@ -902,9 +902,9 @@ mod repository_tags {
     }
 
     /// Threads of a fresh process list and match tags at once, each in a repository of its
-    /// own, racing libgit2's initialisation and allocator (TSan); the tags are created
+    /// own, racing libgit2's initialisation and allocator (`TSan`); the tags are created
     /// and deleted on the main thread, before and after, since writing a reference reads
-    /// the time through glibc's `tzset`, which TSan reports against any concurrent caller.
+    /// the time through glibc's `tzset`, which `TSan` reports against any concurrent caller.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn tags_on_threads() {
@@ -982,7 +982,8 @@ mod repository_tags {
                         CString::new("w".repeat(len + 1)).unwrap(),
                         CString::new(format!("{}@example.com", "e".repeat(len))).unwrap(),
                     );
-                    let view = SignatureView::new(&who, &mail, Time::new(i as i64, 0));
+                    let view =
+                        SignatureView::new(&who, &mail, Time::new(i64::try_from(i).unwrap(), 0));
                     let id = create(
                         repo.as_ref(),
                         &name,

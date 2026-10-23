@@ -99,7 +99,7 @@ type ParentFn<'f> = dyn FnMut(usize) -> Option<Oid> + 'f;
 /// send(ParentCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: git_commit_parent_callback
+/// Wraps: `git_commit_parent_callback`
 /// Handwritten
 pub struct ParentCallback<'f> {
     f: &'f mut ParentFn<'f>,
@@ -126,6 +126,10 @@ impl<'f> ParentCallback<'f> {
     /// and returns what libgit2 would read from it: the parent's id, kept by the callback
     /// until its next call, or `None` at the end of the list. A panic of the closure
     /// resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is never NULL"
+    )]
     pub fn call(&mut self, idx: usize) -> Option<OidRef<'_>> {
         let id = self.with_payload(|callback, payload| {
             let callback = callback.expect("the trampoline is never NULL");
@@ -228,15 +232,20 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
 /// `update_ref`, the reference is moved as `create` moves it, an existing one only from
 /// the first parent.
 ///
+/// Wraps: `git_commit_create_from_callback`
+///
+/// # Errors
+///
 /// Refuses, before libgit2 runs and with `GIT_ERROR_INVALID`, "specified object ID type
 /// does not match repository object ID type", a tree id or a parent id whose type is not
 /// `repo`'s, which libgit2 would format out of bounds (see the
 /// [`object` module](crate::libgit2::object::object#looking-objects-up)); and a
 /// signature `create` refuses. A panic of the callback's closure propagates before
 /// libgit2 runs.
-///
-/// Wraps: git_commit_create_from_callback
-#[allow(clippy::too_many_arguments)] // The C routine's parameters, in its order.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the C routine's parameters, in its order"
+)]
 pub fn create_from_callback(
     repo: RepositoryRef<'_>,
     update_ref: Option<&CStr>,
@@ -284,11 +293,16 @@ pub fn create_from_callback(
 
 /// [`create_from_callback`], with the parents given by id in order, as a slice.
 ///
+/// Wraps: `git_commit_create_from_ids`
+///
+/// # Errors
+///
 /// Refuses what [`create_from_callback`] refuses, a parent id of another type than
 /// `repo`'s included, and fails as it does.
-///
-/// Wraps: git_commit_create_from_ids
-#[allow(clippy::too_many_arguments)] // The C routine's parameters, in its order.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the C routine's parameters, in its order"
+)]
 pub fn create_from_ids(
     repo: RepositoryRef<'_>,
     update_ref: Option<&CStr>,
@@ -411,13 +425,11 @@ mod unit_tests {
         let mut calls = 0;
         let mut next = |_: usize| {
             calls += 1;
-            if calls == 1 {
-                panic!("no parent");
-            }
+            assert!(calls != 1, "no parent");
             Some(sha1(3))
         };
         let mut callback = ParentCallback::new(&mut next);
-        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| view(callback.call(0))));
+        let caught = catch_unwind(AssertUnwindSafe(|| view(callback.call(0))));
         assert_eq!(
             caught.unwrap_err().downcast_ref::<&str>(),
             Some(&"no parent")
@@ -458,14 +470,12 @@ mod unit_tests {
         assert_eq!(calls.get(), 4);
 
         let mut boom = |i: usize| -> Option<Oid> {
-            if i == 1 {
-                panic!("parent 1");
-            }
+            assert!(i != 1, "parent 1");
             Some(sha1(9))
         };
         let mut walked = false;
-        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let _ = ParentCallback::new(&mut boom).walk_with(OidType::Sha1, |_, _| walked = true);
+        let caught = catch_unwind(AssertUnwindSafe(|| {
+            drop(ParentCallback::new(&mut boom).walk_with(OidType::Sha1, |_, _| walked = true));
         }));
         assert_eq!(
             caught.unwrap_err().downcast_ref::<&str>(),
@@ -488,25 +498,36 @@ mod unit_tests {
             assert!(runtime_pinned());
             let dir = std::env::temp_dir()
                 .join(format!("crustify-parent-cb-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
             let (mut repo, mut builder, mut who) =
                 (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
             let mut tree = ffi::git_oid::default();
-            // SAFETY: writable slots, NUL-terminated strings and the live repository;
-            // the builder is freed once, the rest when the writer drops.
-            unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, path.as_ptr(), 1), 0);
-                assert_eq!(ffi::git_treebuilder_new(&mut builder, repo, ptr::null()), 0);
-                assert_eq!(ffi::git_treebuilder_write(&mut tree, builder), 0);
-                ffi::git_treebuilder_free(builder);
-                let rc = ffi::git_signature_new(
-                    &mut who,
-                    c"A U Thor".as_ptr(),
-                    c"a@example.com".as_ptr(),
-                    1_700_000_000,
-                    0,
-                );
+            {
+                // SAFETY: writable slots, NUL-terminated strings and the live repository;
+                // the builder is freed once, the rest when the writer drops.
+                unsafe { assert_eq!(ffi::git_repository_init(&raw mut repo, path.as_ptr(), 1), 0) };
+                // SAFETY: as above.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_treebuilder_new(&raw mut builder, repo, ptr::null()),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_treebuilder_write(&raw mut tree, builder), 0) };
+                // SAFETY: as above.
+                unsafe { ffi::git_treebuilder_free(builder) };
+                // SAFETY: as above.
+                let rc = unsafe {
+                    ffi::git_signature_new(
+                        &raw mut who,
+                        c"A U Thor".as_ptr(),
+                        c"a@example.com".as_ptr(),
+                        1_700_000_000,
+                        0,
+                    )
+                };
                 assert_eq!(rc, 0);
             }
             Self {
@@ -549,7 +570,7 @@ mod unit_tests {
                     self.who,
                     ptr::null(),
                     message.as_ptr(),
-                    &self.tree,
+                    &raw const self.tree,
                     cb,
                     payload,
                 )
@@ -573,18 +594,30 @@ mod unit_tests {
         /// database.
         fn parents(&self, id: &Oid) -> Vec<String> {
             let (mut odb, mut obj) = (ptr::null_mut(), ptr::null_mut());
-            // SAFETY: writable slots, the live repository and id; the object's data is
-            // `size` bytes, copied before the object and the odb are freed once.
-            let raw = unsafe {
-                assert_eq!(ffi::git_repository_odb(&mut odb, self.repo), 0);
-                assert_eq!(ffi::git_odb_read(&mut obj, odb, id.as_ref().as_ptr()), 0);
-                let data = core::slice::from_raw_parts(
-                    ffi::git_odb_object_data(obj).cast::<u8>(),
-                    ffi::git_odb_object_size(obj),
-                )
-                .to_vec();
-                ffi::git_odb_object_free(obj);
-                ffi::git_odb_free(odb);
+            let raw = {
+                // SAFETY: writable slots, the live repository and id; the object's data is
+                // `size` bytes, copied before the object and the odb are freed once.
+                unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, self.repo), 0) };
+                // SAFETY: as above.
+                unsafe {
+                    assert_eq!(
+                        ffi::git_odb_read(&raw mut obj, odb, id.as_ref().as_ptr()),
+                        0
+                    );
+                };
+                // SAFETY: as above.
+                let odb_object_data = unsafe { ffi::git_odb_object_data(obj) };
+                // SAFETY: as above.
+                let odb_object_size = unsafe { ffi::git_odb_object_size(obj) };
+                // SAFETY: as above.
+                let data = unsafe {
+                    core::slice::from_raw_parts(odb_object_data.cast::<u8>(), odb_object_size)
+                        .to_vec()
+                };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_object_free(obj) };
+                // SAFETY: as above.
+                unsafe { ffi::git_odb_free(odb) };
                 String::from_utf8(data).unwrap()
             };
             raw.lines()
@@ -607,11 +640,10 @@ mod unit_tests {
     impl Drop for Writer {
         fn drop(&mut self) {
             // SAFETY: each is live and freed once, the repository last.
-            unsafe {
-                ffi::git_signature_free(self.who);
-                ffi::git_repository_free(self.repo);
-            }
-            let _ = std::fs::remove_dir_all(&self.dir);
+            unsafe { ffi::git_signature_free(self.who) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 
@@ -698,8 +730,8 @@ mod unit_tests {
         let w = Writer::new("panics");
         let mut boom = |_: usize| -> Option<Oid> { panic!("no parent") };
         let mut callback = ParentCallback::new(&mut boom);
-        let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let _ = w.create_with(c"panicked\n", &mut callback);
+        let caught = catch_unwind(AssertUnwindSafe(|| {
+            drop(w.create_with(c"panicked\n", &mut callback));
         }));
         assert_eq!(
             caught.unwrap_err().downcast_ref::<&str>(),
@@ -723,7 +755,10 @@ mod unit_tests {
                 assert!(runtime_pinned());
                 // SAFETY: an option taking an `int`; this child runs nothing else.
                 let rc = unsafe {
-                    ffi::git_libgit2_opts(ffi::GIT_OPT_ENABLE_STRICT_OBJECT_CREATION as c_int, 0)
+                    ffi::git_libgit2_opts(
+                        ffi::GIT_OPT_ENABLE_STRICT_OBJECT_CREATION.cast_signed(),
+                        0,
+                    )
                 };
                 assert_eq!(rc, 0);
                 let w = Writer::new("lenient");
@@ -747,11 +782,12 @@ mod unit_tests {
                     assert_eq!(i, 0);
                     panic!("no parent")
                 };
-                let caught = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    let _ = ParentCallback::new(&mut boom)
-                        .walk_with(OidType::Sha1, |cb, payload| {
+                let caught = catch_unwind(AssertUnwindSafe(|| {
+                    drop(
+                        ParentCallback::new(&mut boom).walk_with(OidType::Sha1, |cb, payload| {
                             w.create_updating(Some(branch), c"panicked\n", cb, payload)
-                        });
+                        }),
+                    );
                 }));
                 assert_eq!(
                     caught.unwrap_err().downcast_ref::<&str>(),
@@ -829,7 +865,7 @@ mod unit_tests {
                 "crustify-commit-by-id-{}-{tag}",
                 std::process::id()
             ));
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(std::fs::remove_dir_all(&dir));
             let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
             let repo = Repository::init(&path, true).unwrap();
             Self {
@@ -846,7 +882,7 @@ mod unit_tests {
     impl Drop for Scratch {
         fn drop(&mut self) {
             drop(self.repo.take());
-            let _ = std::fs::remove_dir_all(&self.dir);
+            drop(std::fs::remove_dir_all(&self.dir));
         }
     }
 

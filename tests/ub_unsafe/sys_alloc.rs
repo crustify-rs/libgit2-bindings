@@ -18,7 +18,7 @@ unsafe extern "C" {
 }
 
 /// libc's allocator behind `Alloc`, refusing [`REFUSED`] bytes: a request libc cannot
-/// meet would abort under ASan (`allocator_may_return_null=0`) instead of failing.
+/// meet would abort under `ASan` (`allocator_may_return_null=0`) instead of failing.
 struct Libc;
 
 const REFUSED: usize = 1 << 40;
@@ -69,7 +69,9 @@ unsafe fn scribble(p: *mut c_void, len: usize, seed: u8) {
     let p = p.cast::<u8>();
     for i in 0..len {
         // SAFETY: `i < len`.
-        unsafe { p.add(i).write(seed.wrapping_add(i as u8)) };
+        let add = unsafe { p.add(i) };
+        // SAFETY: as above.
+        unsafe { add.write(seed.wrapping_add(i.to_le_bytes()[0])) };
     }
     // SAFETY: the `len` bytes were just written.
     let bytes = unsafe { slice::from_raw_parts(p, len) };
@@ -77,7 +79,7 @@ unsafe fn scribble(p: *mut c_void, len: usize, seed: u8) {
         bytes
             .iter()
             .enumerate()
-            .all(|(i, &b)| b == seed.wrapping_add(i as u8))
+            .all(|(i, &b)| b == seed.wrapping_add(i.to_le_bytes()[0]))
     );
 }
 
@@ -95,7 +97,7 @@ fn malloc_member_returns_writable_aligned_blocks() {
         let align = (1usize << len.ilog2()).min(16);
         assert_eq!(p as usize % align, 0, "aligned as malloc aligns");
         // SAFETY: `p` holds `len` writable bytes.
-        unsafe { scribble(p, len, len as u8) };
+        unsafe { scribble(p, len, len.to_le_bytes()[0]) };
         // SAFETY: `p` is a live block of this family, given up.
         unsafe { free(p) };
     }
@@ -117,22 +119,18 @@ fn malloc_member_accepts_zero_bytes() {
 fn zero_byte_requests_are_allocations() {
     let (malloc, realloc, free) = members();
     // SAFETY: NULL `file`; each non-NULL result is a block released below.
-    let (a, b) = unsafe {
-        (
-            malloc(0, ptr::null(), 0),
-            realloc(ptr::null_mut(), 0, c"".as_ptr(), 0),
-        )
-    };
+    let malloc2 = unsafe { malloc(0, ptr::null(), 0) };
+    // SAFETY: as above.
+    let (a, b) = unsafe { (malloc2, realloc(ptr::null_mut(), 0, c"".as_ptr(), 0)) };
     // SAFETY: `a` is NULL or a live block of this family, given up on success.
     let grown = unsafe { realloc(a, 8, ptr::null(), 0) };
     assert!(!grown.is_null());
     // SAFETY: `grown` holds 8 writable bytes.
     unsafe { scribble(grown, 8, 3) };
     // SAFETY: `grown` is a live block; `b` is NULL or one; each given up once.
-    unsafe {
-        free(grown);
-        free(b);
-    }
+    unsafe { free(grown) };
+    // SAFETY: as above.
+    unsafe { free(b) };
 }
 
 #[test]
@@ -193,16 +191,12 @@ fn free_member_ignores_null() {
 fn free_member_releases_blocks_from_either_allocating_member() {
     let (malloc, realloc, free) = members();
     // SAFETY: NULL `file`; both blocks are released below.
-    let (a, b) = unsafe {
-        (
-            malloc(32, ptr::null(), 0),
-            realloc(ptr::null_mut(), 32, ptr::null(), 0),
-        )
-    };
+    let malloc2 = unsafe { malloc(32, ptr::null(), 0) };
+    // SAFETY: as above.
+    let (a, b) = unsafe { (malloc2, realloc(ptr::null_mut(), 32, ptr::null(), 0)) };
     assert!(!a.is_null() && !b.is_null());
     // SAFETY: two distinct live blocks of this family, each given up once.
-    unsafe {
-        free(a);
-        free(b);
-    }
+    unsafe { free(a) };
+    // SAFETY: as above.
+    unsafe { free(b) };
 }

@@ -3,9 +3,9 @@
 //! `git_strarray_dispose` policy.
 //!
 //! Every owned string sits in an allocation of exactly its length and terminator
-//! (`from_strs`), and every array in one of exactly `len` pointers, so ASan flags any
+//! (`from_strs`), and every array in one of exactly `len` pointers, so `ASan` flags any
 //! read past them; every replaced, taken, truncated or copied string must be released
-//! exactly once (ASan: double free, use after free; LSan: leak). libgit2's own results
+//! exactly once (`ASan`: double free, use after free; `LSan`: leak). libgit2's own results
 //! (the extension list) carry spare capacity and, when empty, a non-NULL array. Illegal
 //! borrows are in `compile_fail/`. Views and empty arrays are built without libgit2,
 //! so they run under Miri.
@@ -25,7 +25,7 @@ use crate::fixture::{isolated, set_extensions};
 /// `n` distinct strings of lengths 0, 1, 2, ..., so each allocation's size differs.
 fn strings(n: usize) -> Vec<CString> {
     (0..n)
-        .map(|i| CString::new(vec![b'a' + (i % 26) as u8; i]).unwrap())
+        .map(|i| CString::new(vec![b'a' + u8::try_from(i % 26).unwrap(); i]).unwrap())
         .collect()
 }
 
@@ -120,7 +120,7 @@ fn arrays_before_init() {
 
 /// Empty arrays, which never initialise libgit2, dropped and emptied while another
 /// thread's first allocation initialises it: their dispose must not reach
-/// `git__free`, which reads the allocator that initialisation writes (TSan). Alone in a
+/// `git__free`, which reads the allocator that initialisation writes (`TSan`). Alone in a
 /// child, so the initialisation is really the process's first.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -275,7 +275,7 @@ fn handles_reborrow() {
     assert_eq!(x.get(0), y.get(0));
 }
 
-/// Owners and views shared by reference, and owners moved, across threads (TSan).
+/// Owners and views shared by reference, and owners moved, across threads (`TSan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn arrays_shared_and_moved_across_threads() {

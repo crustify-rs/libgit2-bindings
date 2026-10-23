@@ -5,7 +5,7 @@
 //! `git_reference_t`, `git_submodule_recurse_t` and `git_submodule_update_t`
 //! (unsigned). The only safe way in from a raw value is `from_raw` / `try_from`, which
 //! must reject every value without a variant rather than produce an invalid
-//! discriminant (which Miri and UBSan would flag on the next read); an `as` cast to
+//! discriminant (which Miri and `UBSan` would flag on the next read); an `as` cast to
 //! any of them, or an infallible conversion to `ObjectType` or `ReferenceType`, does
 //! not compile (`compile_fail/`). None of them owns or points at anything, and none of
 //! these tests calls libgit2, so they also run under Miri.
@@ -16,19 +16,19 @@
 //! field out of a pointer, so these tests exercise every getter and setter on every
 //! holder Rust has for one (a local, a heap slot, an element of a run that moves when
 //! it grows, a copy), through reborrows, and across threads under the `Send` / `Sync`
-//! the crate asserts (TSan). Reading padding through a getter, a misaligned
+//! the crate asserts (`TSan`). Reading padding through a getter, a misaligned
 //! projection or a write through the shared handle would be flagged by Miri and
 //! ASan/UBSan. Handles that outlive their value, aliased exclusive handles and setters
 //! on the shared handle do not compile (`compile_fail/`). None of them calls libgit2,
 //! so all run under Miri; no C routine keeps a pointer to a bare `git_time`, so
-//! there is no foreign write or retained pointer to race (BSan).
+//! there is no foreign write or retained pointer to race (`BSan`).
 //!
 //! Then the enum `FileMode`.
 //!
 //! `FileMode` is a fieldless enum over C's `git_filemode_t`. The only safe way in
 //! from a raw value is `from_raw` / `try_from`, which must reject every value
 //! without a variant rather than produce an invalid discriminant (which Miri and
-//! UBSan would flag on the next read); an `as` cast to it does not compile
+//! `UBSan` would flag on the next read); an `as` cast to it does not compile
 //! (`compile_fail/`). None of these calls libgit2, so they also run under Miri.
 //!
 //! Then `git_writestream`, in `write_streams`: Rust and C streams, their owners and
@@ -37,7 +37,7 @@
 //! Then the enum `SubmoduleIgnore` (`git_submodule_ignore_t`, signed, `-1` and
 //! `1..=4`): converting C values is checked before any variant exists, so no value can
 //! reach an invalid discriminant. Rust only, so Miri runs it; the sweep stays small
-//! for BSan.
+//! for `BSan`.
 //!
 //! Then `BranchType` (`git_branch_t`): its raw conversions yield only valid variants
 //! for every input, so a C value can never make an invalid enum; pure Rust, so Miri runs
@@ -60,7 +60,7 @@ use libgit2::libgit2::core::types::{
 };
 
 /// Every value around the declared ones, then a coarse stride across the whole
-/// type; BorrowSanitizer instruments each comparison, so the probe set stays small.
+/// type; `BorrowSanitizer` instruments each comparison, so the probe set stays small.
 fn probes() -> impl Iterator<Item = u32> {
     (0..=300).chain((0..=u32::MAX).step_by(1 << 26)).chain([
         i32::MAX as u32,
@@ -79,22 +79,24 @@ fn from_raw_yields_only_valid_variants() {
             // Reading the discriminant back validates it.
             Some(v) => {
                 assert_eq!(v.raw(), raw);
-                assert!(!format!("{v:?}").is_empty());
+                assert_ne!(format!("{v:?}"), "");
                 recurse.insert(v);
             }
             None => assert_eq!(
-                SubmoduleRecurse::try_from(raw).map_err(|e| e.raw()),
+                SubmoduleRecurse::try_from(raw)
+                    .map_err(libgit2::libgit2::core::types::UnnamedSubmoduleRecurse::raw),
                 Err(raw)
             ),
         }
         match SubmoduleUpdate::from_raw(black_box(raw)) {
             Some(v) => {
                 assert_eq!(v.raw(), raw);
-                assert!(!format!("{v:?}").is_empty());
+                assert_ne!(format!("{v:?}"), "");
                 update.insert(v);
             }
             None => assert_eq!(
-                SubmoduleUpdate::try_from(raw).map_err(|e| e.raw()),
+                SubmoduleUpdate::try_from(raw)
+                    .map_err(libgit2::libgit2::core::types::UnnamedSubmoduleUpdate::raw),
                 Err(raw)
             ),
         }
@@ -109,9 +111,9 @@ fn option_niche_holds_for_every_value() {
     // never alias a variant, nor a variant read as `None`.
     for raw in probes() {
         let r = black_box(SubmoduleRecurse::from_raw(raw));
-        assert_eq!(r.map(SubmoduleRecurse::raw).unwrap_or(raw), raw);
+        assert_eq!(r.map_or(raw, SubmoduleRecurse::raw), raw);
         let u = black_box(SubmoduleUpdate::from_raw(raw));
-        assert_eq!(u.map(SubmoduleUpdate::raw).unwrap_or(raw), raw);
+        assert_eq!(u.map_or(raw, SubmoduleUpdate::raw), raw);
     }
 }
 
@@ -156,7 +158,7 @@ fn values_cross_threads() {
 }
 
 /// Every value around the declared ones, then a coarse stride across the whole type;
-/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+/// `BorrowSanitizer` instruments each comparison, so the probe set stays small.
 fn object_probes() -> impl Iterator<Item = ffi::git_object_t> {
     (-300..=300)
         .chain((ffi::git_object_t::MIN..=ffi::git_object_t::MAX).step_by(1 << 26))
@@ -183,7 +185,7 @@ fn object_from_raw_yields_only_valid_types() {
             // Reading the discriminant back validates it.
             assert_eq!(kind.raw(), raw);
             assert_eq!(ObjectType::raw_or_any(Some(kind)), raw);
-            assert!(!format!("{kind:?}").is_empty());
+            assert_ne!(format!("{kind:?}"), "");
             seen.insert(kind);
         } else {
             assert_eq!(
@@ -201,7 +203,7 @@ fn reference_from_raw_yields_only_valid_types() {
     for raw in reference_probes() {
         if let Some(kind) = ReferenceType::from_raw(black_box(raw)) {
             assert_eq!(kind.raw(), raw);
-            assert!(!format!("{kind:?}").is_empty());
+            assert_ne!(format!("{kind:?}"), "");
             seen.insert(kind);
         } else {
             assert_eq!(
@@ -219,14 +221,14 @@ fn object_and_reference_option_niches_hold() {
     // never alias a variant, nor a variant read as `None`.
     for raw in object_probes() {
         let kind = black_box(ObjectType::from_raw(raw));
-        assert_eq!(kind.map(ObjectType::raw).unwrap_or(raw), raw);
+        assert_eq!(kind.map_or(raw, ObjectType::raw), raw);
         // The "any" filter is the one value `None` maps back to.
         let filter = black_box(ObjectType::raw_or_any(kind));
         assert_eq!(filter, kind.map_or(ffi::GIT_OBJECT_ANY, ObjectType::raw));
     }
     for raw in reference_probes() {
         let kind = black_box(ReferenceType::from_raw(raw));
-        assert_eq!(kind.map(ReferenceType::raw).unwrap_or(raw), raw);
+        assert_eq!(kind.map_or(raw, ReferenceType::raw), raw);
     }
 }
 
@@ -359,12 +361,15 @@ fn raw_values_convert_both_ways() {
         let raw = ffi::git_time {
             time: -7,
             offset: 330,
-            sign: sign as _,
+            sign: sign.cast_signed(),
         };
         let time = Time::from(raw);
         assert_eq!(read(time.as_ref()), (-7, 330, sign));
         let back = ffi::git_time::from(time);
-        assert_eq!((back.time, back.offset, back.sign as u8), (-7, 330, sign));
+        assert_eq!(
+            (back.time, back.offset, back.sign.cast_unsigned()),
+            (-7, 330, sign)
+        );
     }
 }
 
@@ -375,7 +380,7 @@ fn equality_and_hash_never_read_padding() {
     let a = Time::from(ffi::git_time {
         time: 9,
         offset: -9,
-        sign: b'-' as _,
+        sign: b'-'.cast_signed(),
     });
     let b = Time::new(9, -9);
     assert_eq!(a, b);
@@ -441,16 +446,21 @@ fn a_locked_time_has_one_writer_at_a_time() {
             });
         }
     });
-    assert_eq!(time.lock().unwrap().as_ref().seconds(), 4 * rounds as i64);
+    assert_eq!(
+        time.lock().unwrap().as_ref().seconds(),
+        4 * i64::from(rounds)
+    );
 }
 
 /// Every type nibble with the permission bits git trees spell, the values around
 /// the declared ones, a coarse stride across the whole type and its extremes;
-/// BorrowSanitizer instruments each comparison, so the probe set stays small.
+/// `BorrowSanitizer` instruments each comparison, so the probe set stays small.
 fn mode_probes() -> impl Iterator<Item = ffi::git_filemode_t> {
     let kinds = (0..16)
         .flat_map(|t| [0, 0o644, 0o755, 0o664, 0o777, 0o001, 0o100].map(move |p| (t << 12) | p));
-    let named = [0o000000, 0o040000, 0o100644, 0o100755, 0o120000, 0o160000];
+    let named = [
+        0o000_000, 0o040_000, 0o100_644, 0o100_755, 0o120_000, 0o160_000,
+    ];
     let around = named
         .into_iter()
         .flat_map(|m: u32| [m.wrapping_sub(1), m, m + 1]);
@@ -458,8 +468,8 @@ fn mode_probes() -> impl Iterator<Item = ffi::git_filemode_t> {
         .chain(around)
         .chain((0..=ffi::git_filemode_t::MAX).step_by(1 << 26))
         .chain([
-            0o177777,
-            0o200000,
+            0o177_777,
+            0o200_000,
             ffi::git_filemode_t::MAX - 1,
             ffi::git_filemode_t::MAX,
         ])
@@ -473,10 +483,14 @@ fn from_raw_yields_only_valid_modes() {
         if let Some(mode) = FileMode::from_raw(black_box(raw)) {
             // Reading the discriminant back validates it.
             assert_eq!(mode.raw(), raw);
-            assert!(!format!("{mode:?}").is_empty());
+            assert_ne!(format!("{mode:?}"), "");
             seen.insert(mode);
         } else {
-            assert_eq!(FileMode::try_from(raw).map_err(|e| e.raw()), Err(raw));
+            assert_eq!(
+                FileMode::try_from(raw)
+                    .map_err(libgit2::libgit2::core::types::UnnamedFileMode::raw),
+                Err(raw)
+            );
         }
     }
     assert_eq!(seen.len(), 6);
@@ -488,7 +502,7 @@ fn mode_option_niche_holds_for_every_value() {
     // must never alias a variant, nor a variant read as `None`.
     for raw in mode_probes() {
         let mode = black_box(FileMode::from_raw(raw));
-        assert_eq!(mode.map(FileMode::raw).unwrap_or(raw), raw);
+        assert_eq!(mode.map_or(raw, FileMode::raw), raw);
         // The unreadable mode is 0, the value a zeroed discriminant would hold.
         assert_eq!(mode == Some(FileMode::Unreadable), raw == 0);
     }
@@ -536,11 +550,11 @@ mod write_streams {
         Filters, TempRepo, blob_stream, commit_blob, init, isolated, stream_buffer, upper_streams,
     };
 
-    /// Up to just past a page; whole-slice comparisons keep BSan's per-access cost low.
+    /// Up to just past a page; whole-slice comparisons keep `BSan`'s per-access cost low.
     const SIZES: [usize; 7] = [0, 1, 2, 7, 63, 4096, 4097];
 
     fn pattern(len: usize) -> Vec<u8> {
-        (0..len).map(|i| (i * 31 + 7) as u8).collect()
+        (0..len).map(|i| (i * 31 + 7).to_le_bytes()[0]).collect()
     }
 
     /// What a writer saw, in order.
@@ -648,7 +662,7 @@ mod write_streams {
             let shared = stream.as_ref();
             let _ = (shared, stream.writer());
         }
-        assert!(stream.writer().is_empty());
+        assert_eq!(stream.writer().as_slice(), b"");
     }
 
     /// A borrowed writer outlives the stream; the stream's members reach it only while
@@ -737,7 +751,7 @@ mod write_streams {
     }
 
     /// Dropping a blob stream frees it, written or not, through its own `free` member:
-    /// LSan flags a leak, ASan a double free.
+    /// `LSan` flags a leak, `ASan` a double free.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn blob_stream_drops_unwritten_and_written() {
@@ -1030,7 +1044,7 @@ fn every_raw_value_converts_to_a_variant_or_none() {
 fn branch_types_cross_threads() {
     fn send_sync<T: Send + Sync + Copy>() {}
     send_sync::<BranchType>();
-    let kind = std::thread::spawn(|| BranchType::Local | BranchType::Remote)
+    let kind = thread::spawn(|| BranchType::Local | BranchType::Remote)
         .join()
         .unwrap();
     assert_eq!(kind, BranchType::All);
@@ -1043,11 +1057,11 @@ mod signatures {
     //!
     //! Every getter and setter runs on every holder, through reborrows, over strings up
     //! to a page long; replaced strings, copies and views outlive what they came from
-    //! (ASan flags a use after free, LSan a leaked string, Miri the view's projections);
+    //! (`ASan` flags a use after free, `LSan` a leaked string, Miri the view's projections);
     //! libgit2 reads a signature while Rust holds borrowed strings out of it, and C's
-    //! copies are read after Rust's reborrows (BSan); owners and views cross threads
+    //! copies are read after Rust's reborrows (`BSan`); owners and views cross threads
     //! under the `Send` / `Sync` the crate asserts, and race the process's first
-    //! initialisation (TSan). Handles that outlive their owner or strings, strings
+    //! initialisation (`TSan`). Handles that outlive their owner or strings, strings
     //! held across a setter, aliased exclusive handles and setters on the shared handle
     //! do not compile (`compile_fail/`). Only the view tests avoid libgit2, so only they
     //! run under Miri.
@@ -1070,7 +1084,7 @@ mod signatures {
     /// `len` printable bytes, none trimmed or refused by `git_signature_new`.
     fn text(len: usize, seed: u8) -> CString {
         let bytes = (0..len)
-            .map(|i| b'a' + ((i as u8).wrapping_add(seed) % 26))
+            .map(|i| b'a' + (i.to_le_bytes()[0].wrapping_add(seed) % 26))
             .collect::<Vec<_>>();
         CString::new(bytes).unwrap()
     }
@@ -1086,7 +1100,7 @@ mod signatures {
         assert_eq!(name.to_bytes().len(), name.count_bytes());
         let when = sig.when();
         let _ = (when.seconds(), when.offset_minutes(), when.sign());
-        assert!(!format!("{sig:?}").is_empty());
+        assert_ne!(format!("{sig:?}"), "");
         (name.to_owned(), email.to_owned(), when.to_time())
     }
 
@@ -1102,7 +1116,7 @@ mod signatures {
         m.set_when(Time::new(1, 2));
         assert_eq!(m.as_ref().name(), Some(name));
         assert_eq!(m.as_ref().email(), Some(email));
-        assert!(!format!("{m:?}").is_empty());
+        assert_ne!(format!("{m:?}"), "");
     }
 
     #[test]
@@ -1110,11 +1124,15 @@ mod signatures {
     fn owned_signatures_stay_in_bounds() {
         init();
         for (i, &len) in LENS.iter().enumerate() {
-            let (name, email) = (text(len, i as u8), text(len, 7));
-            let mut sig = Signature::new(&name, &email, i as i64, -60).unwrap();
+            let (name, email) = (text(len, u8::try_from(i).unwrap()), text(len, 7));
+            let mut sig = Signature::new(&name, &email, i64::try_from(i).unwrap(), -60).unwrap();
             assert_eq!(
                 read(sig.as_ref()),
-                (name.clone(), email.clone(), Time::new(i as i64, -60))
+                (
+                    name.clone(),
+                    email.clone(),
+                    Time::new(i64::try_from(i).unwrap(), -60)
+                )
             );
             write_all(sig.as_mut(), &email, &name);
             assert_eq!(read(sig.as_ref()).0, email);
@@ -1151,7 +1169,7 @@ mod signatures {
         assert_eq!(read(b.as_ref()).0, c"Second".to_owned());
     }
 
-    /// Repeated replacement releases each string once (ASan: double free; LSan: leak).
+    /// Repeated replacement releases each string once (`ASan`: double free; `LSan`: leak).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn repeated_replacement_releases_each_string_once() {
@@ -1159,7 +1177,7 @@ mod signatures {
         let mut sig = Signature::new(c"N", c"e@x", 0, 0).unwrap();
         let mut kept = Vec::new();
         for i in 0..64 {
-            let s = text(1 + i % 9, i as u8);
+            let s = text(1 + i % 9, u8::try_from(i).unwrap());
             if i % 2 == 0 {
                 sig.as_mut().set_name(dup(&s));
                 sig.as_mut().set_email(dup(&s));
@@ -1181,7 +1199,7 @@ mod signatures {
     fn view_copies_outlive_the_borrowed_strings() {
         init();
         for (i, &len) in LENS.iter().enumerate() {
-            let (name, email) = (text(len, i as u8), text(len, 3));
+            let (name, email) = (text(len, u8::try_from(i).unwrap()), text(len, 3));
             let copy = {
                 let view = SignatureView::new(&name, &email, Time::new(-5, 90));
                 let r = view.as_ref();
@@ -1213,7 +1231,7 @@ mod signatures {
 
     /// libgit2 reads a signature (copying it, writing it into a commit through the
     /// copy) while Rust holds strings borrowed out of it, and Rust reads C's copies
-    /// after reborrowing the original (BSan: foreign reads under Rust borrows).
+    /// after reborrowing the original (`BSan`: foreign reads under Rust borrows).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn libgit2_reads_while_strings_are_borrowed() {
@@ -1240,7 +1258,7 @@ mod signatures {
         assert_eq!(copy.as_ref().when().seconds(), 10);
     }
 
-    /// Constructor failures hand out nothing, and leave no allocation behind (LSan).
+    /// Constructor failures hand out nothing, and leave no allocation behind (`LSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn refused_constructions_leave_nothing() {
@@ -1255,7 +1273,7 @@ mod signatures {
     }
 
     /// `Signature::now`, alone in a child: libgit2 reads the local zone through glibc's
-    /// `mktime` and `gmtime_r`, which serialise on a lock of glibc's own that TSan
+    /// `mktime` and `gmtime_r`, which serialise on a lock of glibc's own that `TSan`
     /// cannot see, so two concurrent calls (from any two tests) read as a race on
     /// glibc's copy of `TZ`. The calls are sound; they only run where nothing else does.
     #[test]
@@ -1263,7 +1281,7 @@ mod signatures {
     fn now_stays_in_bounds() {
         isolated(concat!(module_path!(), "::now_stays_in_bounds"), || {
             for (i, &len) in LENS.iter().enumerate() {
-                let (name, email) = (text(len, i as u8), text(len, 7));
+                let (name, email) = (text(len, u8::try_from(i).unwrap()), text(len, 7));
                 let mut now = Signature::now(&name, &email).unwrap();
                 assert_eq!(read(now.as_ref()).1, email);
                 write_all(now.as_mut(), &email, &name);
@@ -1276,7 +1294,7 @@ mod signatures {
     }
 
     /// Owners move to other threads and drop there; shared handles and views are read
-    /// from many at once, and copied concurrently (TSan).
+    /// from many at once, and copied concurrently (`TSan`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn signatures_cross_threads() {
@@ -1330,7 +1348,7 @@ mod signatures {
 
     /// Constructors succeed and fail on many threads at once: each thread's refusals
     /// land in its own error state, and nothing but libgit2's allocator is shared
-    /// (TSan). `now` is left out: glibc's zone lock is invisible to TSan.
+    /// (`TSan`). `now` is left out: glibc's zone lock is invisible to `TSan`.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn constructors_run_concurrently() {
@@ -1340,8 +1358,9 @@ mod signatures {
             for i in 0..8usize {
                 s.spawn(move || {
                     for j in 0..rounds {
-                        let name = text(1 + (i + j) % 40, j as u8);
-                        let built = Signature::new(&name, c"c@x", j as i64, 0).unwrap();
+                        let name = text(1 + (i + j) % 40, u8::try_from(j).unwrap());
+                        let built =
+                            Signature::new(&name, c"c@x", i64::try_from(j).unwrap(), 0).unwrap();
                         let line = [name.as_bytes(), b" <c@x> 7 +0100"].concat();
                         let parsed = Signature::parse(&CString::new(line).unwrap()).unwrap();
                         assert_eq!(built.as_ref().name(), parsed.as_ref().name());
@@ -1371,7 +1390,7 @@ mod signatures {
 
     /// Views read and dropped, and copies made of them, while another thread's first
     /// constructor initialises libgit2: every path into libgit2 is ordered after the
-    /// initialisation by the runtime pin (TSan). Alone in a child, so the
+    /// initialisation by the runtime pin (`TSan`). Alone in a child, so the
     /// initialisation is really the process's first.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]

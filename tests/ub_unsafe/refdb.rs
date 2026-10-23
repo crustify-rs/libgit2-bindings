@@ -4,7 +4,7 @@
 //!
 //! `new` is called within its contract: a live backend of the repository, which the
 //! refdb borrows (the fixture's borrow supplies `'r`) on one thread. Both reference storage formats
-//! are covered. Every refdb built is freed once with its backend (ASan, LSan), and the backend
+//! are covered. Every refdb built is freed once with its backend (`ASan`, `LSan`), and the backend
 //! reaches the repository only while it is live (a compaction through each refdb runs the backend's
 //! repository reads). A refused backend stays the caller's, untouched, and is freed
 //! by the caller once (a double free if libgit2 had taken it), or handed to a later
@@ -38,7 +38,7 @@ impl Repo {
             "crustify-refdb-ub-unsafe-{}-{tag}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&path);
+        drop(std::fs::remove_dir_all(&path));
         let c_path = CString::new(path.to_str().unwrap()).unwrap();
         let mut opts = InitOptions::new();
         let mut m = opts.as_mut();
@@ -57,7 +57,7 @@ impl Repo {
     fn fs_backend(&self) -> NonNull<ffi::git_refdb_backend> {
         let mut out = ptr::null_mut();
         // SAFETY: a writable slot and the live repository.
-        let rc = unsafe { ffi::git_refdb_backend_fs(&mut out, self.repo.as_c_ptr()) };
+        let rc = unsafe { ffi::git_refdb_backend_fs(&raw mut out, self.repo.as_c_ptr()) };
         assert_eq!(rc, 0);
         NonNull::new(out).unwrap()
     }
@@ -80,7 +80,7 @@ impl Drop for Repo {
     fn drop(&mut self) {
         // The repository is freed after (refdbs borrowing it are gone); freeing touches
         // no file.
-        let _ = std::fs::remove_dir_all(&self.path);
+        drop(std::fs::remove_dir_all(&self.path));
     }
 }
 
@@ -101,7 +101,9 @@ const FORMATS: [(&str, ffi::git_refdb_t); 2] = [
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn open_builds_independent_refdbs() {
-    let _reftable = REFTABLE.lock().unwrap_or_else(|e| e.into_inner());
+    let _reftable = REFTABLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     for (tag, format) in FORMATS {
         let repo = Repo::new(&format!("open-{tag}"), format);
         let dbs: Vec<_> = (0..4).map(|_| repo.open()).collect();
@@ -125,7 +127,9 @@ fn open_builds_independent_refdbs() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn open_borrows_only_its_own_repository() {
-    let _reftable = REFTABLE.lock().unwrap_or_else(|e| e.into_inner());
+    let _reftable = REFTABLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let repo = Repo::new("open-own", ffi::GIT_REFDB_FILES);
     let db = repo.open();
     for i in 0..3 {
@@ -179,18 +183,18 @@ fn new_leaves_a_refused_backend_to_its_caller() {
     // accepted once restored: the refdb frees it, once.
     let backend = repo.fs_backend();
     let b = backend.as_ptr();
-    // SAFETY: the live backend, which only this test reaches until it is handed over.
-    let unlock = unsafe {
-        (*b).version = 0;
-        (*b).unlock
+    let unlock = {
+        // SAFETY: the live backend, which only this test reaches until it is handed over.
+        unsafe { (*b).version = 0 };
+        // SAFETY: as above.
+        unsafe { (*b).unlock }
     };
     // SAFETY: a live backend nothing else owns.
     assert!(unsafe { repo.with_backend(backend) }.is_err());
     // SAFETY: as above, still ours after the refusal.
-    unsafe {
-        (*b).version = ffi::GIT_REFDB_BACKEND_VERSION;
-        (*b).unlock = None;
-    }
+    unsafe { (*b).version = ffi::GIT_REFDB_BACKEND_VERSION };
+    // SAFETY: as above.
+    unsafe { (*b).unlock = None };
     // SAFETY: a live backend nothing else owns.
     let err = unsafe { repo.with_backend(backend) }.unwrap_err();
     assert_eq!(err.message(), c"incomplete refdb backend implementation");
@@ -208,5 +212,7 @@ fn new_leaves_a_refused_backend_to_its_caller() {
     // SAFETY: a live backend nothing else owns.
     assert!(unsafe { repo.with_backend(backend) }.is_err());
     // SAFETY: the refused backend, still ours, released once.
-    unsafe { ((*backend.as_ptr()).free.unwrap())(backend.as_ptr()) };
+    let value = unsafe { (*backend.as_ptr()).free };
+    // SAFETY: as above.
+    unsafe { (value.unwrap())(backend.as_ptr()) };
 }

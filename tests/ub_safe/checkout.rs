@@ -4,16 +4,16 @@
 //! The options store pointers to the strings and path arrays their setters borrow, and
 //! read them back through the getters; every source here is an allocation of exactly
 //! its length (`CString`, `StrArrayView`'s pointer array, `StrArray::from_strs`'
-//! copies), so ASan flags a read past one, and every borrowed source is released after
-//! the options, exactly once (ASan, LSan). The handles reborrow while the options keep
-//! those pointers (BSan). Options are built on several threads while another
+//! copies), so `ASan` flags a read past one, and every borrowed source is released after
+//! the options, exactly once (`ASan`, `LSan`). The handles reborrow while the options keep
+//! those pointers (`BSan`). Options are built on several threads while another
 //! initialises libgit2 for the first time: `git_checkout_options_init` touches no
-//! global state, so nothing races (TSan). Illegal borrows are in `compile_fail/`, and
+//! global state, so nothing races (`TSan`). Illegal borrows are in `compile_fail/`, and
 //! in the type's doctests.
 //!
 //! The baseline index is borrowed from its owner, an `IndexBox` or an `IndexArc`, and
-//! the baseline tree from its `TreeArc`: real checkouts read them (ASan), libgit2 counts
-//! a reference of its own on the tree for each call, which it must give back (LSan),
+//! the baseline tree from its `TreeArc`: real checkouts read them (`ASan`), libgit2 counts
+//! a reference of its own on the tree for each call, which it must give back (`LSan`),
 //! and the owners release them only after the options. The checkout routines and the
 //! repository are not wrapped yet: [`repo`] stands in for them, as `fixture` does for
 //! other missing constructors.
@@ -42,7 +42,7 @@ const GIT_CHECKOUT_FORCE: u32 = 1 << 1;
 /// `n` distinct strings of lengths 1, 2, 3, ...
 fn strings(n: usize) -> Vec<CString> {
     (1..=n)
-        .map(|i| CString::new(vec![b'a' + (i % 26) as u8; i]).unwrap())
+        .map(|i| CString::new(vec![b'a' + u8::try_from(i % 26).unwrap(); i]).unwrap())
         .collect()
 }
 
@@ -95,7 +95,7 @@ fn defaults_then_every_setter() {
         m.set_disable_filters(round % 2 == 0);
         m.set_dir_mode(round * 7);
         m.set_file_mode(u32::MAX - round);
-        m.set_file_open_flags(i32::MIN + round as i32);
+        m.set_file_open_flags(i32::MIN + round.cast_signed());
         m.set_notify_flags(!round);
         let o = m.as_ref();
         assert_eq!(o.strategy(), round.rotate_left(round));
@@ -103,7 +103,7 @@ fn defaults_then_every_setter() {
         assert_eq!((o.dir_mode(), o.file_mode()), (round * 7, u32::MAX - round));
         assert_eq!(
             (o.file_open_flags(), o.notify_flags()),
-            (i32::MIN + round as i32, !round)
+            (i32::MIN + round.cast_signed(), !round)
         );
         assert_eq!(o.version(), 1);
     }
@@ -142,13 +142,13 @@ fn borrowed_strings_and_paths_from_every_source() {
         match round % 4 {
             0 => assert_eq!(
                 paths,
-                owned_strs.iter().map(|s| s.as_bytes()).collect::<Vec<_>>()
+                owned_strs.iter().map(CString::as_bytes).collect::<Vec<_>>()
             ),
             1 => assert_eq!(
                 paths,
-                view_strs.iter().map(|s| s.as_bytes()).collect::<Vec<_>>()
+                view_strs.iter().map(CString::as_bytes).collect::<Vec<_>>()
             ),
-            _ => assert!(paths.is_empty()),
+            _ => assert!(paths.is_empty(), "{paths:?}"),
         }
         assert!(got.len() >= 5);
     }
@@ -248,7 +248,7 @@ fn options_on_threads_while_libgit2_initialises() {
                         for round in 0..32 {
                             let mut options = CheckoutOptions::new();
                             let mut m = options.as_mut();
-                            m.set_strategy((t * round) as u32);
+                            m.set_strategy(u32::try_from(t * round).unwrap());
                             m.set_paths(view.as_ref());
                             set_strings(m.as_mut(), shared);
                             assert_eq!(read_all(options.as_ref())[..4].len(), 4);
@@ -262,7 +262,10 @@ fn options_on_threads_while_libgit2_initialises() {
 
 /// Stands in for the repository, tree and checkout wrappers the crate does not have
 /// yet; replace it once they land.
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "stands in for the repository, tree and checkout wrappers the crate does not have yet"
+)]
 mod repo {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -277,7 +280,11 @@ mod repo {
 
     /// A non-bare repository whose working directory and index hold `old` (`a.txt`
     /// "old"), with a second tree, `new` (`a.txt` "new", `c.txt`); released on drop.
-    pub struct Repo {
+    #[expect(
+        clippy::struct_field_names,
+        reason = "the fields mirror the names of what they hold"
+    )]
+    pub(super) struct Repo {
         pub root: PathBuf,
         repo: *mut ffi::git_repository,
         pub old: Tree,
@@ -286,10 +293,10 @@ mod repo {
 
     /// One of the repository's trees.
     #[derive(Clone, Copy)]
-    pub struct Tree(*mut ffi::git_tree);
+    pub(super) struct Tree(*mut ffi::git_tree);
 
     impl Repo {
-        pub fn new(tag: &str) -> Self {
+        pub(super) fn new(tag: &str) -> Self {
             // libgit2 marks a filter initialised on its first load outside the registry
             // lock, so concurrent first loads race (TSan): the first repository is
             // built alone.
@@ -305,7 +312,7 @@ mod repo {
                 "crustify-checkout-ub-safe-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&root);
+            drop(fs::remove_dir_all(&root));
             let work = root.join("work");
             fs::create_dir_all(&work).unwrap();
             let c_work = CString::new(work.as_os_str().as_bytes()).unwrap();
@@ -314,9 +321,13 @@ mod repo {
             // SAFETY: live slots and a NUL-terminated path, read for the calls; the
             // index reference is released below.
             unsafe {
-                assert_eq!(ffi::git_repository_init(&mut repo, c_work.as_ptr(), 0), 0);
-                assert_eq!(ffi::git_repository_index(&mut index, repo), 0);
-            }
+                assert_eq!(
+                    ffi::git_repository_init(&raw mut repo, c_work.as_ptr(), 0),
+                    0
+                );
+            };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_repository_index(&raw mut index, repo), 0) };
             let tree = |files: &[(&str, &str)]| {
                 for (path, content) in files {
                     fs::write(work.join(path), content).unwrap();
@@ -328,21 +339,20 @@ mod repo {
                 let mut id = ffi::git_oid::default();
                 let mut tree = ptr::null_mut();
                 // SAFETY: live out-parameters and a live index and repository.
-                unsafe {
-                    assert_eq!(ffi::git_index_write_tree(&mut id, index), 0);
-                    assert_eq!(ffi::git_tree_lookup(&mut tree, repo, &id), 0);
-                }
+                unsafe { assert_eq!(ffi::git_index_write_tree(&raw mut id, index), 0) };
+                // SAFETY: as above.
+                unsafe { assert_eq!(ffi::git_tree_lookup(&raw mut tree, repo, &raw const id), 0) };
                 Tree(tree)
             };
             let new = tree(&[("a.txt", "new\n"), ("c.txt", "c\n")]);
             fs::remove_file(work.join("c.txt")).unwrap();
             let old = tree(&[("a.txt", "old\n")]);
             // SAFETY: the index and tree are live; the reference is released once.
-            unsafe {
-                assert_eq!(ffi::git_index_read_tree(index, old.0), 0);
-                assert_eq!(ffi::git_index_write(index), 0);
-                ffi::git_index_free(index);
-            }
+            unsafe { assert_eq!(ffi::git_index_read_tree(index, old.0), 0) };
+            // SAFETY: as above.
+            unsafe { assert_eq!(ffi::git_index_write(index), 0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_index_free(index) };
             Self {
                 root,
                 repo,
@@ -352,43 +362,49 @@ mod repo {
         }
 
         /// The working directory's `a.txt`.
-        pub fn a(&self) -> String {
+        pub(super) fn a(&self) -> String {
             fs::read_to_string(self.root.join("work/a.txt")).unwrap()
         }
 
         /// The repository's index, one more counted reference to it.
-        pub fn index(&self) -> IndexArc {
+        pub(super) fn index(&self) -> IndexArc {
             let mut index = ptr::null_mut();
             // SAFETY: the repository is live; the result is a new reference to its index,
             // which the repository also keeps, released by `git_index_free`.
-            unsafe {
-                assert_eq!(ffi::git_repository_index(&mut index, self.repo), 0);
-                IndexArc::from_c(index).unwrap()
-            }
+            unsafe { assert_eq!(ffi::git_repository_index(&raw mut index, self.repo), 0) };
+            // SAFETY: as above.
+            unsafe { IndexArc::from_c(index).unwrap() }
         }
 
         /// One more counted reference to `tree`, owned by the safe wrapper, which
         /// borrows the repository.
-        pub fn tree(&self, tree: Tree) -> TreeArc<'_> {
+        #[expect(
+            clippy::unused_self,
+            reason = "a method of the fixture, as its callers use it"
+        )]
+        pub(super) fn tree(&self, tree: Tree) -> TreeArc<'_> {
             let mut copy = ptr::null_mut();
             // SAFETY: the tree is live; `git_tree_dup` counts one more reference on it,
             // given to the owner and released by `git_tree_free`; the repository outlives
             // the owner, which borrows `self`.
-            unsafe {
-                assert_eq!(ffi::git_tree_dup(&mut copy, tree.0), 0);
-                TreeArc::from_c(copy).unwrap()
-            }
+            unsafe { assert_eq!(ffi::git_tree_dup(&raw mut copy, tree.0), 0) };
+            // SAFETY: as above.
+            unsafe { TreeArc::from_c(copy).unwrap() }
         }
 
         /// Fills `index` with `tree`'s entries.
-        pub fn read_tree(&self, index: &mut IndexBox, tree: Tree) {
+        #[expect(
+            clippy::unused_self,
+            reason = "a method of the fixture, as its callers use it"
+        )]
+        pub(super) fn read_tree(&self, index: &mut IndexBox, tree: Tree) {
             // SAFETY: the index is exclusively borrowed, and the tree live.
             let rc = unsafe { ffi::git_index_read_tree(index.as_c_ptr(), tree.0) };
             assert_eq!(rc, 0);
         }
 
         /// Checks `tree` out with `options`, as `git_checkout_tree`.
-        pub fn checkout(&self, tree: Tree, options: &CheckoutOptions<'_>) -> i32 {
+        pub(super) fn checkout(&self, tree: Tree, options: &CheckoutOptions<'_>) -> i32 {
             // `#[repr(transparent)]` over `git_checkout_options`, as documented.
             let options: *const ffi::git_checkout_options = ptr::from_ref(options).cast();
             // SAFETY: the repository and tree are live, and the options' safe setters
@@ -400,12 +416,12 @@ mod repo {
     impl Drop for Repo {
         fn drop(&mut self) {
             // SAFETY: the trees and repository are the references `build` took.
-            unsafe {
-                ffi::git_tree_free(self.old.0);
-                ffi::git_tree_free(self.new.0);
-                ffi::git_repository_free(self.repo);
-            }
-            let _ = fs::remove_dir_all(&self.root);
+            unsafe { ffi::git_tree_free(self.old.0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_tree_free(self.new.0) };
+            // SAFETY: as above.
+            unsafe { ffi::git_repository_free(self.repo) };
+            drop(fs::remove_dir_all(&self.root));
         }
     }
 }
@@ -461,7 +477,7 @@ fn a_shared_baseline_index_outlives_the_options_and_the_repository() {
 /// A baseline tree borrowed from its owner is read by real checkouts, through every
 /// owner of the same tree (a lookup's and its clones'), and replaced or cleared without
 /// a release; libgit2 counts a reference of its own on it for each call and gives it
-/// back (LSan). The options' borrows end before the trees are released (ASan).
+/// back (`LSan`). The options' borrows end before the trees are released (`ASan`).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn a_baseline_tree_is_read_then_released_after_the_options() {

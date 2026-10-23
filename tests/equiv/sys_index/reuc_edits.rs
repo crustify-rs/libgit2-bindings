@@ -21,7 +21,7 @@ impl Files {
     fn new(tag: &str) -> Self {
         let dir =
             std::env::temp_dir().join(format!("crustify-reuc-equiv-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
@@ -37,7 +37,7 @@ impl Files {
 
 impl Drop for Files {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        drop(std::fs::remove_dir_all(&self.0));
     }
 }
 
@@ -47,7 +47,7 @@ fn id(byte: u8) -> Oid {
 
 /// One side's mode as the C routine takes it: 0 for an absent side.
 fn raw_mode(side: Option<ReucSide<'_>>) -> c_int {
-    side.map_or(0, |side| side.mode as c_int)
+    side.map_or(0, |side| side.mode.cast_signed())
 }
 
 /// Both indexes' counts, then their files once written.
@@ -101,9 +101,8 @@ fn reuc_sequences_match() {
         let modes = [ancestor, ours, theirs].map(raw_mode);
         let ids = [ancestor, ours, theirs].map(|s| s.map(|s| s.id.to_oid()));
         let ptrs = ids.each_ref().map(|i| {
-            i.as_ref().map_or(ptr::null(), |i| {
-                std::ptr::from_ref(i).cast::<ffi::git_oid>()
-            })
+            i.as_ref()
+                .map_or(ptr::null(), |i| ptr::from_ref(i).cast::<ffi::git_oid>())
         });
         // SAFETY: a live index; the path and each id (or NULL with mode 0) are read and
         // copied for the call.
@@ -128,7 +127,7 @@ fn reuc_sequences_match() {
     let find = |c: &IndexBox, rust: &mut IndexBox, path: &CStr| {
         let mut at = usize::MAX;
         // SAFETY: a live index and writable slot; the path is read for the call.
-        let rc = unsafe { ffi::git_index_reuc_find(&mut at, c.as_c_ptr(), path.as_ptr()) };
+        let rc = unsafe { ffi::git_index_reuc_find(&raw mut at, c.as_c_ptr(), path.as_ptr()) };
         assert_eq!(
             (rc == 0).then_some(at),
             rust.as_mut().find_reuc(path),
@@ -175,7 +174,7 @@ fn reuc_records_read_from_a_file_match() {
     let files = Files::new("read");
     let mut writer = Index::open(&files.path("w")).unwrap();
     for (n, path) in [c"q", c"p", c"r/s"].into_iter().enumerate() {
-        let id = id(n as u8 + 1);
+        let id = id(u8::try_from(n).unwrap() + 1);
         writer
             .as_mut()
             .add_reuc(
@@ -194,7 +193,7 @@ fn reuc_records_read_from_a_file_match() {
     for path in [c"p", c"q", c"r/s", c"r"] {
         let mut at = usize::MAX;
         // SAFETY: a live index and writable slot; the path is read for the call.
-        let rc = unsafe { ffi::git_index_reuc_find(&mut at, c.as_c_ptr(), path.as_ptr()) };
+        let rc = unsafe { ffi::git_index_reuc_find(&raw mut at, c.as_c_ptr(), path.as_ptr()) };
         assert_eq!((rc == 0).then_some(at), rust.as_mut().find_reuc(path));
     }
     compare(&files, &c, &rust);

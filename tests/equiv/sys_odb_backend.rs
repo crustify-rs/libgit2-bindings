@@ -38,6 +38,10 @@ use libgit2::libgit2::raw::{
 };
 
 #[repr(C)]
+#[expect(
+    unreachable_pub,
+    reason = "`define_ctype!` makes its newtype `pub`, which names this layout"
+)]
 pub struct pair_st {
     pub a: u64,
     pub b: u32,
@@ -163,8 +167,9 @@ fn install_tracing_allocator() {
     };
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member set,
     // which it copies; nothing is allocated yet, so no storage changes allocator.
-    let rc =
-        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator) };
+    let rc = unsafe {
+        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
+    };
     assert_eq!(rc, 0);
     // SAFETY: no arguments; refcounted, never released in this process.
     assert!(unsafe { ffi::git_libgit2_init() } > 0);
@@ -247,14 +252,21 @@ impl Recorder {
 
 /// `git_error_last()`'s class and message.
 fn last_error() -> (c_int, String) {
-    // SAFETY: `git_error_last` never returns NULL; the error lives until the next
-    // libgit2 call on this thread, and is copied out before one.
-    unsafe {
-        let e = ffi::git_error_last();
-        (
-            (*e).klass,
-            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
-        )
+    {
+        // SAFETY: `git_error_last` never returns NULL; the error lives until the next
+        // libgit2 call on this thread, and is copied out before one.
+        let e = unsafe { ffi::git_error_last() };
+        // SAFETY: as above.
+        let klass = unsafe { (*e).klass };
+        // SAFETY: as above.
+        let message2 = unsafe { (*e).message };
+        // SAFETY: as above.
+        unsafe {
+            (
+                klass,
+                CStr::from_ptr(message2).to_string_lossy().into_owned(),
+            )
+        }
     }
 }
 
@@ -287,7 +299,7 @@ fn c_read(data: *const u8, len: usize) -> Vec<u8> {
 }
 
 fn pattern(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i * 13 + 5) as u8).collect()
+    (0..len).map(|i| (i * 13 + 5).to_le_bytes()[0]).collect()
 }
 
 // --- the comparisons ------------------------------------------------------------
@@ -319,6 +331,10 @@ fn traced_allocator_sequences() {
 }
 
 /// `memdup` then free: `from_slice` and drop.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn copy_then_release(len: usize) {
     let src = pattern(len);
     let mut b = backend();
@@ -341,6 +357,10 @@ fn copy_then_release(len: usize) {
 }
 
 /// A copy of a copy, the source released first: `clone`.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn clone_then_release_source_first(len: usize) {
     let src = pattern(len);
     let mut b = backend();
@@ -374,6 +394,14 @@ fn clone_then_release_source_first(len: usize) {
 }
 
 /// Allocate, then fill in place: `new_uninit` and `assume_init`.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
+#[expect(
+    clippy::cast_ptr_alignment,
+    reason = "libgit2's allocator returns memory aligned for any type, as malloc does"
+)]
 fn uninit_run_filled_in_place() {
     let mut b = backend();
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
@@ -385,8 +413,10 @@ fn uninit_run_filled_in_place() {
 
     for i in 0..n {
         // SAFETY: `p` holds `n` writable, aligned `u32`s.
-        unsafe { p.add(i).write(i as u32 * 3) };
-        v.as_mut_slice()[i].write(i as u32 * 3);
+        let add = unsafe { p.add(i) };
+        // SAFETY: as above.
+        unsafe { add.write(u32::try_from(i).unwrap() * 3) };
+        v.as_mut_slice()[i].write(u32::try_from(i).unwrap() * 3);
     }
     // SAFETY: every element was written above.
     let v = unsafe { v.assume_init() };
@@ -399,6 +429,10 @@ fn uninit_run_filled_in_place() {
 }
 
 /// Allocate and clear, as `git__calloc`: `new_zeroed`.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn zeroed_run() {
     let mut b = backend();
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
@@ -474,7 +508,7 @@ fn allocation_failures() {
         assert_eq!(c.steps, r.steps);
         assert!(matches!(r.steps[0][..], [Event::AllocFailed { .. }]));
         assert_eq!(c_error, last_error());
-        assert_eq!(c_error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
+        assert_eq!(c_error.0, ffi::GIT_ERROR_NOMEMORY.cast_signed());
     };
 
     fail(&mut || c_alloc(&mut backend(), 32).is_null(), &mut || {
@@ -559,7 +593,9 @@ fn traced_string_sequences() {
 }
 
 fn pattern_text(len: usize) -> Vec<u8> {
-    (0..len).map(|i| b'a' + (i % 26) as u8).collect()
+    (0..len)
+        .map(|i| b'a' + u8::try_from(i % 26).unwrap())
+        .collect()
 }
 
 /// `git__strdup` over the exported allocator: NULL on failure.
@@ -603,7 +639,9 @@ fn c_strarray_copy(strs: &[&CStr]) -> Result<ffi::git_strarray, ffi::git_strarra
             return Err(tgt);
         }
         // SAFETY: `tgt.count < strs.len()` slots of the array are in use.
-        unsafe { tgt.strings.add(tgt.count).write(copy) };
+        let add = unsafe { tgt.strings.add(tgt.count) };
+        // SAFETY: as above.
+        unsafe { add.write(copy) };
         tgt.count += 1;
     }
     Ok(tgt)
@@ -617,8 +655,12 @@ fn c_strarray_dispose(array: &mut ffi::git_strarray) {
 
 fn c_strings(array: &ffi::git_strarray) -> Vec<Vec<u8>> {
     (0..array.count)
-        // SAFETY: `array` holds `count` live strings.
-        .map(|i| c_str(unsafe { array.strings.add(i).read() }))
+        .map(|i| {
+            // SAFETY: `array` holds `count` live strings, and `i < count`.
+            let slot = unsafe { array.strings.add(i) };
+            // SAFETY: as above.
+            c_str(unsafe { slot.read() })
+        })
         .collect()
 }
 
@@ -631,6 +673,10 @@ fn is_zeroed(array: &ffi::git_strarray) -> bool {
 }
 
 /// `git__strdup` then free: `OdbDataStrFree::dup` and drop.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn str_copy_then_release(s: &CStr) {
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     let p = c.step(|| c_strdup(s));
@@ -646,6 +692,10 @@ fn str_copy_then_release(s: &CStr) {
 }
 
 /// A copy of a copy, the source released first: `clone`.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn str_clone_then_release_source_first(s: &CStr) {
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     let p = c.step(|| c_strdup(s));
@@ -730,14 +780,24 @@ fn run_handed_to_git_strarray_dispose(strs: &[&CStr]) {
 }
 
 /// A copy of a copy, the source released first: `OdbDataStrVec::clone`.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn run_clone_then_release_source_first(strs: &[&CStr]) {
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     let mut a = c.step(|| c_strarray_copy(strs).unwrap());
     let v = r.step(|| OdbDataStrVec::dup_all(strs).unwrap());
     let mut b = c.step(|| {
         let src: Vec<&CStr> = (0..a.count)
-            // SAFETY: `a` holds `count` live strings.
-            .map(|i| unsafe { CStr::from_ptr(a.strings.add(i).read()) })
+            .map(|i| {
+                // SAFETY: `a` holds `count` live strings, and `i < count`.
+                let slot = unsafe { a.strings.add(i) };
+                // SAFETY: as above.
+                let s = unsafe { slot.read() };
+                // SAFETY: as above, a live NUL-terminated string.
+                unsafe { CStr::from_ptr(s) }
+            })
             .collect();
         c_strarray_copy(&src).unwrap()
     });
@@ -757,6 +817,14 @@ fn run_clone_then_release_source_first(strs: &[&CStr]) {
 
 /// Strings moved out of a run and back into a fresh one keep their storage; only the
 /// array is replaced, as C moving the pointers into a new array would.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
+#[expect(
+    clippy::cast_ptr_alignment,
+    reason = "libgit2's allocator returns memory aligned for any type, as malloc does"
+)]
 fn run_moved_through_a_vec(strs: &[&CStr]) {
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     let mut a = c.step(|| c_strarray_copy(strs).unwrap());
@@ -813,7 +881,7 @@ fn string_allocation_failures() {
         assert_eq!(c.steps, r.steps, "allocation {at} refused");
         assert!(is_zeroed(&a));
         assert_eq!(c_error, last_error());
-        assert_eq!(c_error.0, ffi::GIT_ERROR_NOMEMORY as c_int);
+        assert_eq!(c_error.0, ffi::GIT_ERROR_NOMEMORY.cast_signed());
     }
 
     // A refused `git__strdup`, and a refused clone, leave their sources intact.
@@ -841,6 +909,10 @@ fn string_allocation_failures() {
 /// `GIT_OPT_GET_EXTENSIONS` hands out a `git_strarray` from a `git_vector`, its array
 /// with spare capacity: adopted, it reads and releases as `git_strarray_dispose`
 /// would.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "short names for the sides and values the steps compare"
+)]
 fn run_adopted_from_libgit2() {
     let get = || {
         let mut out = ffi::git_strarray {
@@ -848,8 +920,9 @@ fn run_adopted_from_libgit2() {
             count: 0,
         };
         // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills.
-        let rc =
-            unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+        let rc = unsafe {
+            ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS.cast_signed(), &raw mut out)
+        };
         assert_eq!(rc, 0);
         out
     };
@@ -858,7 +931,7 @@ fn run_adopted_from_libgit2() {
     // SAFETY: `GIT_OPT_SET_EXTENSIONS` takes an array of `len` strings, which it copies.
     let rc = unsafe {
         ffi::git_libgit2_opts(
-            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ffi::GIT_OPT_SET_EXTENSIONS.cast_signed(),
             ptrs.as_ptr(),
             ptrs.len(),
         )
@@ -877,8 +950,10 @@ fn run_adopted_from_libgit2() {
     let (mut c, mut r) = (Recorder::default(), Recorder::default());
     for (rec, array) in [(&mut c, &a), (&mut r, &b)] {
         for i in 0..array.count {
-            // SAFETY: `array` holds `count` live strings.
-            rec.adopt(unsafe { array.strings.add(i).read() }.cast());
+            // SAFETY: `array` holds `count` live strings, and `i < count`.
+            let slot = unsafe { array.strings.add(i) };
+            // SAFETY: as above.
+            rec.adopt(unsafe { slot.read() }.cast());
         }
         rec.adopt(array.strings.cast());
     }
@@ -896,7 +971,7 @@ fn run_adopted_from_libgit2() {
     // SAFETY: an empty list of user extensions.
     let rc = unsafe {
         ffi::git_libgit2_opts(
-            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ffi::GIT_OPT_SET_EXTENSIONS.cast_signed(),
             ptr::null::<*const c_char>(),
             0usize,
         )

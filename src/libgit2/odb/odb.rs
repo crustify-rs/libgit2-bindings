@@ -89,7 +89,7 @@ use crate::libgit2::util::sys::errors::runtime_pinned;
 /// }
 /// ```
 ///
-/// Wraps: git_odb
+/// Wraps: `git_odb`
 /// Handwritten
 #[repr(transparent)]
 pub struct Odb<'r>(
@@ -153,14 +153,20 @@ unsafe impl Send for OdbMut<'_, '_> {}
 // SAFETY: `&OdbMut` only reaches the shared handle, and `Odb` is `Sync`.
 unsafe impl Sync for OdbMut<'_, '_> {}
 
-impl<'a, 'r> OdbRef<'a, 'r> {
+impl<'r> OdbRef<'_, 'r> {
     /// Borrows the odb at `ptr`; `None` if it is NULL.
     ///
     /// # Safety
     ///
     /// `ptr` must be NULL or address a live odb that stays live for `'a`, owned by no
     /// repository or by one that outlives `'r`.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_odb) -> Option<Self> {
         // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
         // live `git_odb` that outlives `'a` and is not written meanwhile.
@@ -169,20 +175,26 @@ impl<'a, 'r> OdbRef<'a, 'r> {
 
     /// Pointer to the C object, for the routines that take a `git_odb *` and lock it
     /// themselves.
-    #[allow(dead_code)]
     pub(crate) fn as_ptr(&self) -> *mut ffi::git_odb {
         self.0.as_non_null().as_ptr().cast()
     }
 }
 
-impl<'a, 'r> OdbMut<'a, 'r> {
+impl<'r> OdbMut<'_, 'r> {
     /// Writable pointer to the C object.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_odb {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> OdbRef<'_, 'r> {
         self.0
     }
@@ -210,8 +222,8 @@ impl fmt::Debug for OdbMut<'_, '_> {
 /// odb no repository owns through `git_odb_new`, so [`OdbArc::new`](CArc::new) makes
 /// the odb [`Odb::new`] makes, reporting a failure as `None`.
 ///
-/// Wraps: git_odb_free
-/// Wraps: git_odb_new
+/// Wraps: `git_odb_free`
+/// Wraps: `git_odb_new`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbFree;
@@ -238,7 +250,7 @@ unsafe impl CNew<Odb<'static>> for OdbFree {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; the runtime is pinned, so a failure is
         // reported on live thread-local state.
-        let rc = unsafe { ffi::git_odb_new(&mut out) };
+        let rc = unsafe { ffi::git_odb_new(&raw mut out) };
         if rc < 0 {
             return None;
         }
@@ -349,7 +361,11 @@ impl Odb<'static> {
     /// Nothing can be read from it or written to it until a backend is added. Fails,
     /// with libgit2's error, when the odb cannot be allocated.
     ///
-    /// Wraps: git_odb_new
+    /// Wraps: `git_odb_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when the odb cannot be allocated.
     pub fn new() -> Result<OdbArc<'static>, ErrorBuf> {
         construct(|out| {
             // SAFETY: `out` is a writable slot, which the routine fills with a fresh
@@ -363,14 +379,18 @@ impl Odb<'static> {
     /// As [`new`](Self::new), which is this with [`OidType::Sha1`]; the object id type
     /// is the only setting `git_odb_options` holds.
     ///
-    /// Wraps: git_odb_new_ext
+    /// Wraps: `git_odb_new_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`new`](Self::new) does.
     pub fn with_oid_type(oid_type: OidType) -> Result<OdbArc<'static>, ErrorBuf> {
         let opts = options(oid_type);
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
             // success; `opts` is a live options struct of this version, which the
             // routine copies and does not retain. The runtime is pinned.
-            unsafe { ffi::git_odb_new_ext(out, &opts) }
+            unsafe { ffi::git_odb_new_ext(out, &raw const opts) }
         })
     }
 
@@ -379,12 +399,16 @@ impl Odb<'static> {
     /// directories its `info/alternates` names, and theirs, six levels deep, each
     /// read-only; a directory already open is skipped.
     ///
-    /// The directory must exist, but need not hold anything; an alternate that does not
-    /// exist is skipped. Fails, with libgit2's error, when `objects_dir` cannot be
-    /// examined (`GIT_ERROR_ODB`, `failed to load object database in '<dir>'`), when an
-    /// `info/alternates` file cannot be read, or when memory runs out.
+    /// The directory must exist, but need not hold anything; an alternate that does not exist is
+    /// skipped.
     ///
-    /// Wraps: git_odb_open
+    /// Wraps: `git_odb_open`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when `objects_dir` cannot be examined (`GIT_ERROR_ODB`, `failed
+    /// to load object database in '<dir>'`), when an `info/alternates` file cannot be read, or when
+    /// memory runs out.
     pub fn open(objects_dir: &CStr) -> Result<OdbArc<'static>, ErrorBuf> {
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
@@ -400,7 +424,11 @@ impl Odb<'static> {
     /// As [`open`](Self::open), which is this with [`OidType::Sha1`]; the backends read
     /// and write ids of `oid_type`.
     ///
-    /// Wraps: git_odb_open_ext
+    /// Wraps: `git_odb_open_ext`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`open`](Self::open) does.
     pub fn open_with_oid_type(
         objects_dir: &CStr,
         oid_type: OidType,
@@ -409,7 +437,7 @@ impl Odb<'static> {
         construct(|out| {
             // SAFETY: as in `open`; `opts` is a live options struct of this version,
             // which the routine copies and does not retain.
-            unsafe { ffi::git_odb_open_ext(out, objects_dir.as_ptr(), &opts) }
+            unsafe { ffi::git_odb_open_ext(out, objects_dir.as_ptr(), &raw const opts) }
         })
     }
 }
@@ -477,7 +505,7 @@ mod unit_tests {
         assert!(runtime_pinned());
         let mut raw = ptr::null_mut();
         // SAFETY: `raw` is a writable slot, filled with a fresh reference on success.
-        assert_eq!(unsafe { ffi::git_odb_new(&mut raw) }, 0);
+        assert_eq!(unsafe { ffi::git_odb_new(&raw mut raw) }, 0);
         // SAFETY: `raw` is the one reference `git_odb_new` created, given up here.
         let odb = unsafe { OdbArc::from_c(raw) }.unwrap();
         assert_eq!(odb.as_c_ptr(), raw);
@@ -529,11 +557,12 @@ mod unit_tests {
         let mut repo = ptr::null_mut();
         // SAFETY: `repo` is a writable slot; `raw` is a live odb, which the new
         // repository takes a reference to and owns.
-        assert_eq!(unsafe { ffi::git_repository_wrap_odb(&mut repo, raw) }, 0);
+        let ret = unsafe { ffi::git_repository_wrap_odb(&raw mut repo, raw) };
+        assert_eq!(ret, 0);
         drop(odb);
         let mut again = ptr::null_mut();
         // SAFETY: `repo` is live; the result is a new reference to its odb.
-        assert_eq!(unsafe { ffi::git_repository_odb(&mut again, repo) }, 0);
+        assert_eq!(unsafe { ffi::git_repository_odb(&raw mut again, repo) }, 0);
         assert_eq!(again, raw);
         // SAFETY: `again` is the reference just taken, adopted once.
         let again = unsafe { OdbArc::from_c(again) }.unwrap();
@@ -638,7 +667,7 @@ mod unit_tests {
         // family, as the default one is.
         let rc = unsafe {
             ffi::git_libgit2_opts(
-                ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                 allocator.as_ref().as_ptr(),
             )
         };
@@ -676,7 +705,7 @@ mod unit_tests {
     }
 
     /// Every allocation `git_odb_new_ext` makes fails in turn: each failure is an error
-    /// return with nothing adopted and nothing leaked (LSan), until enough succeed.
+    /// return with nothing adopted and nothing leaked (`LSan`), until enough succeed.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn allocation_failures_fail_cleanly() {

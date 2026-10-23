@@ -101,7 +101,7 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ops::{BitOr, BitOrAssign};
-use core::ptr::{self, NonNull, addr_of, addr_of_mut};
+use core::ptr::{self, NonNull, addr_of_mut};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -123,7 +123,7 @@ use crate::libgit2::workdir::checkout::{CheckoutOptionsMut, CheckoutOptionsRef};
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: git_worktree_prune_t
+/// Wraps: `git_worktree_prune_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -146,6 +146,7 @@ impl PruneFlag {
 
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_worktree_prune_t) -> Option<Self> {
         let mut i = 0;
         while i < Self::ALL.len() {
@@ -158,6 +159,7 @@ impl PruneFlag {
     }
 
     /// The C value, a single `git_worktree_prune_t` bit.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_worktree_prune_t {
         self as ffi::git_worktree_prune_t
     }
@@ -191,6 +193,7 @@ pub struct UnnamedPruneFlag(ffi::git_worktree_prune_t);
 
 impl UnnamedPruneFlag {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_worktree_prune_t {
         self.0
     }
@@ -216,7 +219,7 @@ impl std::error::Error for UnnamedPruneFlag {}
 /// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
 /// [`unnamed_bits`](Self::unnamed_bits) the rest.
 ///
-/// Wraps: git_worktree_prune_t
+/// Wraps: `git_worktree_prune_t`
 /// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct PruneFlags(u32);
@@ -234,32 +237,38 @@ impl PruneFlags {
     };
 
     /// The set with no flag: every check applies, and only the gitdir is removed.
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
     /// The set of every bit of `bits`, as `git_worktree_prune_options.flags` holds
     /// them; bits that no [`PruneFlag`] names are kept.
+    #[must_use]
     pub const fn from_bits_retain(bits: u32) -> Self {
         Self(bits)
     }
 
     /// The bits of the set, as `git_worktree_prune_options.flags` holds them.
+    #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
     /// The bits of the set that no [`PruneFlag`] names.
+    #[must_use]
     pub const fn unnamed_bits(self) -> u32 {
         self.0 & !Self::NAMED
     }
 
     /// Whether the set has no bit, named or not.
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     /// Whether `flag` is in the set.
+    #[must_use]
     pub const fn contains(self, flag: PruneFlag) -> bool {
         self.0 & flag.bit() != 0
     }
@@ -275,6 +284,7 @@ impl PruneFlags {
     }
 
     /// The named flags in the set, in ascending bit order.
+    #[must_use]
     pub fn iter(self) -> PruneFlagsIter {
         PruneFlagsIter { set: self, next: 0 }
     }
@@ -352,7 +362,7 @@ impl fmt::Debug for PruneFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("PruneFlags {")?;
         let mut sep = "";
-        for flag in self.iter() {
+        for flag in *self {
             write!(f, "{sep}{flag:?}")?;
             sep = " | ";
         }
@@ -482,14 +492,20 @@ impl PruneOptions {
     /// the current version and no flags, so every check applies and only the
     /// worktree's gitdir is removed. Needs no initialised libgit2.
     ///
-    /// Wraps: git_worktree_prune_options_init
+    /// Wraps: `git_worktree_prune_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> PruneOptions {
         let mut raw = ffi::git_worktree_prune_options::default();
         // SAFETY: `raw` is a live `git_worktree_prune_options` the call may write. With
         // the header's own version the routine's version check passes, so it only
         // copies the 8-byte `GIT_WORKTREE_PRUNE_OPTIONS_INIT` template into `raw`:
         // no allocation and no error state, so no initialised runtime is needed.
-        let rc = unsafe { ffi::git_worktree_prune_options_init(&mut raw, Self::VERSION) };
+        let rc = unsafe { ffi::git_worktree_prune_options_init(&raw mut raw, Self::VERSION) };
         assert_eq!(
             rc, 0,
             "git_worktree_prune_options_init refused its own version"
@@ -524,24 +540,33 @@ impl PruneOptionsRef<'_> {
     /// [`PruneOptions::VERSION`]; libgit2 refuses the options with
     /// `GIT_ERROR_INVALID` if it is 0 or above that.
     ///
-    /// Field: git_worktree_prune_options.version
+    /// Field: `git_worktree_prune_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr2 = unsafe { &raw const (*self.as_ptr()).version };
         // SAFETY: a read through the shared handle's pointer to a live
         // `git_worktree_prune_options`; any value is a valid `u32`.
-        unsafe { addr_of!((*self.as_ptr()).version).read() }
+        unsafe { version_ptr2.read() }
     }
 
     /// The prune flags, every stored bit kept.
     ///
-    /// Field: git_worktree_prune_options.flags
+    /// Field: `git_worktree_prune_options.flags`
+    #[must_use]
     pub fn flags(&self) -> PruneFlags {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr2 = unsafe { &raw const (*self.as_ptr()).flags };
         // SAFETY: a read through the shared handle's pointer to a live
         // `git_worktree_prune_options`; any value is a valid `u32`.
-        let bits = unsafe { addr_of!((*self.as_ptr()).flags).read() };
+        let bits = unsafe { flags_ptr2.read() };
         PruneFlags::from_bits_retain(bits)
     }
 
     /// A copy of the options, as a value of its own.
+    #[must_use]
     pub fn to_options(&self) -> PruneOptions {
         PruneOptions::from(ffi::git_worktree_prune_options {
             version: self.version(),
@@ -554,20 +579,26 @@ impl PruneOptionsMut<'_> {
     /// Replaces the structure version. Any value is accepted; libgit2 refuses
     /// options whose version is 0 or above [`PruneOptions::VERSION`].
     ///
-    /// Field: git_worktree_prune_options.version
+    /// Field: `git_worktree_prune_options.version`
     pub fn set_version(&mut self, version: u32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw mut (*self.as_mut_ptr()).version };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_worktree_prune_options`; the field is a plain integer.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).version).write(version) }
+        unsafe { version_ptr.write(version) }
     }
 
     /// Replaces the prune flags, every bit as given.
     ///
-    /// Field: git_worktree_prune_options.flags
+    /// Field: `git_worktree_prune_options.flags`
     pub fn set_flags(&mut self, flags: PruneFlags) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw mut (*self.as_mut_ptr()).flags };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_worktree_prune_options`; the field is a plain integer.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).flags).write(flags.bits()) }
+        unsafe { flags_ptr.write(flags.bits()) }
     }
 }
 
@@ -677,7 +708,7 @@ unsafe impl Sync for WorktreeMut<'_> {}
 /// Releases a worktree through `git_worktree_free`, which hands its six strings, then
 /// the struct, to `git__free`.
 ///
-/// Wraps: git_worktree_free
+/// Wraps: `git_worktree_free`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorktreeFree;
 
@@ -829,7 +860,7 @@ pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
 /// needs::<AddOptions<'static>>();
 /// ```
 ///
-/// Wraps: git_worktree_add_options
+/// Wraps: `git_worktree_add_options`
 /// Handwritten
 #[repr(transparent)]
 pub struct AddOptions<'o>(
@@ -887,7 +918,13 @@ impl<'o> AddOptions<'o> {
     /// with its own it reaches no global, no allocator and no thread state, so this needs
     /// no initialised library.
     ///
-    /// Wraps: git_worktree_add_options_init
+    /// Wraps: `git_worktree_add_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_worktree_add_options>::uninit();
         // SAFETY: `raw` is writable storage for one `git_worktree_add_options`, which
@@ -905,6 +942,7 @@ impl<'o> AddOptions<'o> {
 
     /// Shared handle to the options — the getters, and the pointer for C calls that
     /// read them.
+    #[must_use]
     pub fn as_ref(&self) -> AddOptionsRef<'_, 'o> {
         // SAFETY: `self` is a live, initialised value borrowed for the handle's lifetime.
         AddOptionsRef(unsafe { CBorrowedPtr::new(NonNull::from(self)) })
@@ -941,22 +979,30 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// The structure's version, `GIT_WORKTREE_ADD_OPTIONS_VERSION`; fixed by
     /// [`AddOptions::new`].
     ///
-    /// Field: git_worktree_add_options.version
+    /// Field: `git_worktree_add_options.version`
+    #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let version_ptr = unsafe { &raw const (*p).version };
         // SAFETY: a read through the shared handle's pointer to live options; any value
         // is a valid `u32`.
-        unsafe { addr_of!((*p).version).read() }
+        unsafe { version_ptr.read() }
     }
 
     /// Whether the new worktree is created locked: `git_worktree_add` then leaves an
     /// empty `locked` file (no reason) in its administrative directory.
     ///
-    /// Field: git_worktree_add_options.lock
+    /// Field: `git_worktree_add_options.lock`
+    #[must_use]
     pub fn lock(&self) -> bool {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let lock_ptr = unsafe { &raw const (*p).lock };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let lock = unsafe { addr_of!((*p).lock).read() };
+        let lock = unsafe { lock_ptr.read() };
         lock != 0
     }
 
@@ -964,11 +1010,15 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// named after the worktree is checked out rather than a new one created (which
     /// then fails, the branch existing).
     ///
-    /// Field: git_worktree_add_options.checkout_existing
+    /// Field: `git_worktree_add_options.checkout_existing`
+    #[must_use]
     pub fn checkout_existing(&self) -> bool {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let checkout_existing_ptr = unsafe { &raw const (*p).checkout_existing };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let existing = unsafe { addr_of!((*p).checkout_existing).read() };
+        let existing = unsafe { checkout_existing_ptr.read() };
         existing != 0
     }
 
@@ -977,11 +1027,15 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// worktree. `git_worktree_add` refuses a reference that is not a local branch
     /// (`refs/heads/...`) or that another working tree has checked out.
     ///
-    /// Field: git_worktree_add_options.ref
+    /// Field: `git_worktree_add_options.ref`
+    #[must_use]
     pub fn reference(&self) -> Option<ReferenceRef<'o, 'o>> {
         let p = self.as_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let ref_ptr = unsafe { &raw const (*p).ref_ };
         // SAFETY: a read through the shared handle's pointer to live options.
-        let reference = unsafe { addr_of!((*p).ref_).read() };
+        let reference = unsafe { ref_ptr.read() };
         // SAFETY: the field is NULL (as `new` leaves it) or was stored by
         // `set_reference` from a `ReferenceRef<'o, 'o>`: an attached reference that no
         // one frees or writes during `'o`, read through a repository that outlives
@@ -992,7 +1046,12 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// The options of the checkout of the new worktree's `HEAD`, which libgit2 copies
     /// into `git_checkout_head` on the new worktree.
     ///
-    /// Field: git_worktree_add_options.checkout_options
+    /// Field: `git_worktree_add_options.checkout_options`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: embedded checkout options are never NULL"
+    )]
     pub fn checkout_options(&self) -> CheckoutOptionsRef<'a, 'o> {
         let p = self.as_ptr().cast_mut();
         // SAFETY: the projection stays inside the live options this handle borrows.
@@ -1020,13 +1079,14 @@ impl fmt::Debug for AddOptionsRef<'_, '_> {
     }
 }
 
-impl<'a, 'o> AddOptionsMut<'a, 'o> {
+impl<'o> AddOptionsMut<'_, 'o> {
     /// Writable pointer to the C struct, for the setters.
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_worktree_add_options {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Reborrows shared.
+    #[must_use]
     pub fn as_ref(&self) -> AddOptionsRef<'_, 'o> {
         self.0
     }
@@ -1038,23 +1098,29 @@ impl<'a, 'o> AddOptionsMut<'a, 'o> {
 
     /// Sets whether the new worktree is created locked.
     ///
-    /// Field: git_worktree_add_options.lock
+    /// Field: `git_worktree_add_options.lock`
     pub fn set_lock(&mut self, lock: bool) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let lock_ptr = unsafe { &raw mut (*p).lock };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).lock).write(c_int::from(lock)) }
+        unsafe { lock_ptr.write(c_int::from(lock)) }
     }
 
     /// Sets whether an existing local branch named after the worktree is checked out
     /// when no reference is set.
     ///
-    /// Field: git_worktree_add_options.checkout_existing
+    /// Field: `git_worktree_add_options.checkout_existing`
     pub fn set_checkout_existing(&mut self, existing: bool) {
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let checkout_existing_ptr = unsafe { &raw mut (*p).checkout_existing };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop.
-        unsafe { addr_of_mut!((*p).checkout_existing).write(c_int::from(existing)) }
+        unsafe { checkout_existing_ptr.write(c_int::from(existing)) }
     }
 
     /// Sets the branch the new worktree's `HEAD` points at; `None` means none.
@@ -1069,21 +1135,28 @@ impl<'a, 'o> AddOptionsMut<'a, 'o> {
     /// The reference may belong to another repository than the one the worktree is
     /// added to; libgit2 then only takes its name.
     ///
-    /// Field: git_worktree_add_options.ref
+    /// Field: `git_worktree_add_options.ref`
     pub fn set_reference(&mut self, reference: Option<ReferenceRef<'o, 'o>>) {
         let reference = reference.map_or(ptr::null_mut(), |r| r.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
+        // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
+        // no reference to it.
+        let ref_ptr = unsafe { &raw mut (*p).ref_ };
         // SAFETY: a write through the exclusive handle's pointer to live options; the
         // field is plain data, so the old value needs no drop. The reference is NULL or
         // one a `ReferenceRef<'o, 'o>` vouches for, as `reference()` requires; libgit2
         // never writes through it.
-        unsafe { addr_of_mut!((*p).ref_).write(reference) }
+        unsafe { ref_ptr.write(reference) }
     }
 
     /// The exclusive handle to the embedded checkout options, which takes borrows for
     /// the same `'o` as these options.
     ///
-    /// Field: git_worktree_add_options.checkout_options
+    /// Field: `git_worktree_add_options.checkout_options`
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: embedded checkout options are never NULL"
+    )]
     pub fn checkout_options(&mut self) -> CheckoutOptionsMut<'_, 'o> {
         let p = self.as_mut_ptr();
         // SAFETY: the projection stays inside the live options this handle borrows.
@@ -1146,32 +1219,38 @@ impl WorktreeError {
 
     /// The returned code; `None` for one the header does not name
     /// ([`raw_code`](Self::raw_code) has it).
+    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
 
     /// The returned code, always negative.
+    #[must_use]
     pub fn raw_code(&self) -> c_int {
         self.code
     }
 
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         self.error.class()
     }
 
     /// The error's class as libgit2 stored it.
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
         self.error.raw_class()
     }
 
     /// The error message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         self.error.message()
     }
 
     /// The error, without the code.
+    #[must_use]
     pub fn error(&self) -> &ErrorBuf {
         &self.error
     }
@@ -1278,7 +1357,7 @@ fn same_name<'r>(
     // SAFETY: `out` is a writable slot; `repo` a live repository on this thread, which
     // the lookup reads (and whose reference database it may open); `name` is
     // NUL-terminated and live for the call.
-    let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.as_ptr().cast_mut(), name) };
+    let rc = unsafe { ffi::git_reference_lookup(&raw mut out, repo.as_ptr().cast_mut(), name) };
     if rc < 0 {
         return None;
     }
@@ -1300,13 +1379,15 @@ fn is_worktree_dir(dir: &Path) -> bool {
 /// `<commondir>/worktrees/` that hold a worktree's `commondir`, `gitdir` and `HEAD`
 /// files. The order is the directory's.
 ///
-/// Empty when there is no such directory, and for a repository without paths
-/// (`git_worktree_list` would list the process's working directory then). Every entry
-/// is checked, where libgit2 skips the one after each entry it drops (see the
-/// [module docs](self#routines)). Fails with libgit2's error when the directory cannot
-/// be read.
+/// Empty when there is no such directory, and for a repository without paths (`git_worktree_list`
+/// would list the process's working directory then). Every entry is checked, where libgit2 skips
+/// the one after each entry it drops (see the [module docs](self#routines)).
 ///
-/// Wraps: git_worktree_list
+/// Wraps: `git_worktree_list`
+///
+/// # Errors
+///
+/// Fails with libgit2's error when the directory cannot be read.
 pub fn list(repo: RepositoryRef<'_>) -> Result<StrArrayVal, WorktreeError> {
     let mut names = StrArray::new();
     let Some(commondir) = commondir(repo) else {
@@ -1342,11 +1423,18 @@ impl Worktree {
     /// The linked worktree `name` of `repo`: the one whose administrative directory is
     /// `<commondir>/worktrees/<name>`.
     ///
+    /// Wraps: `git_worktree_lookup`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::NotFound`] when there is no such directory (or `repo`
     /// has no paths), and with [`ErrorCode::Generic`] when it is not a worktree's (it
     /// lacks its `commondir`, `gitdir` or `HEAD` file) or a link in it cannot be read.
     ///
-    /// Wraps: git_worktree_lookup
+    /// # Panics
+    ///
+    /// Panics, with `git_worktree_lookup succeeded without a worktree`, only if libgit2 breaks its
+    /// contract.
     pub fn lookup(repo: RepositoryRef<'_>, name: &CStr) -> Result<WorktreeBox, WorktreeError> {
         if commondir(repo).is_none() {
             return Err(refused(ffi::GIT_ENOTFOUND, NO_PATH));
@@ -1358,7 +1446,7 @@ impl Worktree {
                 // `repo` is a live repository on this thread with a common directory,
                 // only read; `name` is NUL-terminated, copied and not retained.
                 unsafe {
-                    ffi::git_worktree_lookup(&mut out, repo.as_ptr().cast_mut(), name.as_ptr())
+                    ffi::git_worktree_lookup(&raw mut out, repo.as_ptr().cast_mut(), name.as_ptr())
                 }
             },
             |rc| match rc {
@@ -1375,10 +1463,17 @@ impl Worktree {
     /// The linked worktree `repo` was opened from: `repo` must have been opened at a
     /// worktree's working directory (or its administrative directory).
     ///
+    /// Wraps: `git_worktree_open_from_repository`
+    ///
+    /// # Errors
+    ///
     /// Fails with `GIT_ERROR_WORKTREE` "cannot open worktree of a non-worktree repo"
     /// otherwise, and with libgit2's error when the worktree's files cannot be read.
     ///
-    /// Wraps: git_worktree_open_from_repository
+    /// # Panics
+    ///
+    /// Panics, with `git_worktree_open_from_repository succeeded without a worktree`, only if
+    /// libgit2 breaks its contract.
     pub fn open_from_repository(repo: RepositoryRef<'_>) -> Result<WorktreeBox, WorktreeError> {
         let mut out = ptr::null_mut();
         checked(
@@ -1387,7 +1482,7 @@ impl Worktree {
                 // it untouched, leaves it NULL; `repo` is a live repository on this
                 // thread, only read.
                 unsafe {
-                    ffi::git_worktree_open_from_repository(&mut out, repo.as_ptr().cast_mut())
+                    ffi::git_worktree_open_from_repository(&raw mut out, repo.as_ptr().cast_mut())
                 }
             },
             |_| (ErrorClass::Worktree, c"not a valid worktree directory"),
@@ -1449,7 +1544,16 @@ impl Worktree {
     ///
     /// libgit2 reads the options, and copies the reference, for the call only.
     ///
-    /// Wraps: git_worktree_add
+    /// Wraps: `git_worktree_add`
+    ///
+    /// # Errors
+    ///
+    /// Fails as the paragraphs above describe: with [`ErrorCode::Exists`],
+    /// [`ErrorCode::InvalidSpec`] or [`ErrorCode::UnbornBranch`] when the new branch cannot be
+    /// created, with `GIT_ERROR_WORKTREE` for a branch that is not local or is checked out, with
+    /// [`ErrorCode::Exists`] or `GIT_ERROR_OS` when a directory cannot be made, with
+    /// [`ErrorCode::NotFound`] for a repository without paths, and with libgit2's error when the
+    /// checkout fails.
     pub fn add(
         repo: RepositoryRef<'_>,
         name: &CStr,
@@ -1495,7 +1599,7 @@ impl Worktree {
                 // the call only.
                 unsafe {
                     ffi::git_worktree_add(
-                        &mut out,
+                        &raw mut out,
                         repo.as_ptr().cast_mut(),
                         name.as_ptr(),
                         path.as_ptr(),
@@ -1534,7 +1638,8 @@ impl<'a> WorktreeRef<'a> {
     /// }
     /// ```
     ///
-    /// Wraps: git_worktree_name
+    /// Wraps: `git_worktree_name`
+    #[must_use]
     pub fn name(&self) -> &'a CStr {
         // SAFETY: a live worktree, only read.
         let name = unsafe { ffi::git_worktree_name(self.as_ptr()) };
@@ -1546,7 +1651,8 @@ impl<'a> WorktreeRef<'a> {
     /// The path of the worktree's working directory, as its `gitdir` file records it
     /// (the directory of the `.git` link), without a trailing slash.
     ///
-    /// Wraps: git_worktree_path
+    /// Wraps: `git_worktree_path`
+    #[must_use]
     pub fn path(&self) -> &'a CStr {
         // SAFETY: a live worktree, only read.
         let path = unsafe { ffi::git_worktree_path(self.as_ptr()) };
@@ -1560,10 +1666,12 @@ impl<'a> WorktreeRef<'a> {
     /// repository's working directory, the common directory and its own working
     /// directory, in that order.
     ///
+    /// Wraps: `git_worktree_validate`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::Generic`] and a `GIT_ERROR_WORKTREE` message naming the
     /// first one missing.
-    ///
-    /// Wraps: git_worktree_validate
     pub fn validate(&self) -> Result<(), WorktreeError> {
         checked(
             || {
@@ -1578,7 +1686,11 @@ impl<'a> WorktreeRef<'a> {
     /// Whether the worktree is locked: its administrative directory holds a `locked`
     /// file. Reads the file system, not the state [`WorktreeMut::lock`] recorded.
     ///
-    /// Wraps: git_worktree_is_locked
+    /// Wraps: `git_worktree_is_locked`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when the `locked` file cannot be read.
     pub fn is_locked(&self) -> Result<bool, WorktreeError> {
         let rc = checked(
             || {
@@ -1594,10 +1706,12 @@ impl<'a> WorktreeRef<'a> {
     /// The reason the worktree is locked: the contents of its `locked` file (empty when
     /// none was given), or `None` when it is not locked.
     ///
+    /// Wraps: `git_worktree_is_locked`
+    ///
+    /// # Errors
+    ///
     /// Fails, with libgit2's error, when the `locked` entry cannot be read (a
     /// directory, say).
-    ///
-    /// Wraps: git_worktree_is_locked
     pub fn lock_reason(&self) -> Result<Option<BufVal>, WorktreeError> {
         let mut reason = Buf::new();
         let rc = checked(
@@ -1616,11 +1730,15 @@ impl<'a> WorktreeRef<'a> {
     /// locked (unless [`PruneFlag::Locked`]), not valid (unless [`PruneFlag::Valid`];
     /// see [`validate`](Self::validate)), and its administrative directory exists.
     ///
-    /// When it is not prunable, libgit2 leaves the reason as the thread's last error,
-    /// which [`last`] reads. Fails when `opts`' version is not one libgit2 accepts, or
-    /// when the `locked` entry cannot be read.
+    /// When it is not prunable, libgit2 leaves the reason as the thread's last error, which
+    /// [`last`] reads.
     ///
-    /// Wraps: git_worktree_is_prunable
+    /// Wraps: `git_worktree_is_prunable`
+    ///
+    /// # Errors
+    ///
+    /// Fails when `opts`' version is not one libgit2 accepts, or when the `locked` entry cannot be
+    /// read.
     pub fn is_prunable(&self, opts: PruneOptionsRef<'_>) -> Result<bool, WorktreeError> {
         let rc = checked(
             || {
@@ -1642,13 +1760,15 @@ impl<'a> WorktreeRef<'a> {
     /// with [`PruneFlag::WorkingTree`], its working directory if it still has its
     /// `.git` link. The worktree itself stays readable.
     ///
+    /// Wraps: `git_worktree_prune`
+    ///
+    /// # Errors
+    ///
     /// Fails with [`ErrorCode::Generic`] and the reason
     /// [`is_prunable`](Self::is_prunable) gives when it is not prunable, with that
     /// routine's error when it fails (where libgit2 would prune all the same; see the
     /// [module docs](self#routines)), and with libgit2's error when a directory cannot
     /// be removed.
-    ///
-    /// Wraps: git_worktree_prune
     pub fn prune(&self, opts: PruneOptionsRef<'_>) -> Result<(), WorktreeError> {
         if !self.is_prunable(opts)? {
             return Err(WorktreeError::from_libgit2(
@@ -1673,9 +1793,6 @@ impl<'a> WorktreeRef<'a> {
 impl WorktreeMut<'_> {
     /// Locks the worktree: creates its `locked` file, holding `reason` (or nothing).
     ///
-    /// Fails with [`ErrorCode::Locked`] when it is already locked, and with libgit2's
-    /// error when the file cannot be created.
-    ///
     /// It writes the worktree, so a shared handle cannot lock it:
     ///
     /// ```compile_fail,E0599
@@ -1686,7 +1803,12 @@ impl WorktreeMut<'_> {
     /// }
     /// ```
     ///
-    /// Wraps: git_worktree_lock
+    /// Wraps: `git_worktree_lock`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::Locked`] when it is already locked, and with libgit2's
+    /// error when the file cannot be created.
     pub fn lock(&mut self, reason: Option<&CStr>) -> Result<(), WorktreeError> {
         let reason = reason.map_or(ptr::null(), CStr::as_ptr);
         let worktree = self.as_mut_ptr();
@@ -1704,10 +1826,12 @@ impl WorktreeMut<'_> {
     /// Unlocks the worktree: removes its `locked` file. `true` when it was locked,
     /// `false` when there was nothing to remove.
     ///
+    /// Wraps: `git_worktree_unlock`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when the file cannot be checked, and with
     /// `GIT_ERROR_OS` when it cannot be removed.
-    ///
-    /// Wraps: git_worktree_unlock
     pub fn unlock(&mut self) -> Result<bool, WorktreeError> {
         let worktree = self.as_mut_ptr();
         let rc = checked(
@@ -1890,7 +2014,7 @@ mod unit_tests {
                     "crustify-worktree-unit-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = fs::remove_dir_all(&base);
+                drop(fs::remove_dir_all(&base));
                 let repo_dir = base.join("repo");
                 let wt_dir = base.join("wt");
                 let admin = repo_dir.join(".git/worktrees/wt");
@@ -1900,7 +2024,7 @@ mod unit_tests {
                 // defaults.
                 let rc = unsafe {
                     ffi::git_repository_init_options_init(
-                        &mut opts,
+                        &raw mut opts,
                         ffi::GIT_REPOSITORY_INIT_OPTIONS_VERSION,
                     )
                 };
@@ -1910,7 +2034,8 @@ mod unit_tests {
                 let path = c_path.as_ptr();
                 // SAFETY: a live slot, a NUL-terminated path and live options, all read
                 // for the call only.
-                let rc = unsafe { ffi::git_repository_init_ext(&mut repo, path, &mut opts) };
+                let rc =
+                    unsafe { ffi::git_repository_init_ext(&raw mut repo, path, &raw mut opts) };
                 assert_eq!(rc, 0);
                 fs::create_dir_all(&admin).unwrap();
                 fs::create_dir_all(&wt_dir).unwrap();
@@ -1934,7 +2059,8 @@ mod unit_tests {
                 let mut out = ptr::null_mut();
                 // SAFETY: a live slot, the live repository and a NUL-terminated name,
                 // only read.
-                let rc = unsafe { ffi::git_worktree_lookup(&mut out, self.repo, name.as_ptr()) };
+                let rc =
+                    unsafe { ffi::git_worktree_lookup(&raw mut out, self.repo, name.as_ptr()) };
                 if rc == 0 { Ok(out) } else { Err(rc) }
             }
         }
@@ -1943,14 +2069,16 @@ mod unit_tests {
             fn drop(&mut self) {
                 // SAFETY: the repository this layout opened, freed once.
                 unsafe { ffi::git_repository_free(self.repo) };
-                let _ = fs::remove_dir_all(&self.base);
+                drop(fs::remove_dir_all(&self.base));
             }
         }
 
         /// The worktree's name, as `git_worktree_name` reads it through the box.
         fn name(w: &WorktreeBox) -> CString {
             // SAFETY: the box's live worktree, only read; its name lives as long as it.
-            unsafe { CStr::from_ptr(ffi::git_worktree_name(w.as_c_ptr())) }.to_owned()
+            let worktree_name = unsafe { ffi::git_worktree_name(w.as_c_ptr()) };
+            // SAFETY: as above.
+            unsafe { CStr::from_ptr(worktree_name) }.to_owned()
         }
 
         #[test]
@@ -2160,7 +2288,7 @@ mod unit_tests {
             assert_eq!(checkout.our_label(), Some(label.as_c_str()));
             assert_eq!(
                 checkout.as_ptr(),
-                addr_of!(opts.0.checkout_options),
+                &raw const opts.0.checkout_options,
                 "the handle addresses the embedded struct, not a copy"
             );
             assert!(o.lock());
@@ -2180,11 +2308,11 @@ mod unit_tests {
                     "crustify-worktree-add-unit-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = std::fs::remove_dir_all(&path);
+                drop(std::fs::remove_dir_all(&path));
                 let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
                 let mut repo = ptr::null_mut();
                 // SAFETY: a live slot and a NUL-terminated path, read for the call.
-                let rc = unsafe { ffi::git_repository_init(&mut repo, c_path.as_ptr(), 1) };
+                let rc = unsafe { ffi::git_repository_init(&raw mut repo, c_path.as_ptr(), 1) };
                 assert_eq!(rc, 0);
                 std::fs::write(
                     path.join("refs/heads/main"),
@@ -2198,7 +2326,8 @@ mod unit_tests {
             fn lookup(&self, name: &CStr) -> ReferenceBox<'_> {
                 let mut out = ptr::null_mut();
                 // SAFETY: a live slot, the live repository and a NUL-terminated name.
-                let rc = unsafe { ffi::git_reference_lookup(&mut out, self.repo, name.as_ptr()) };
+                let rc =
+                    unsafe { ffi::git_reference_lookup(&raw mut out, self.repo, name.as_ptr()) };
                 assert_eq!(rc, 0);
                 // SAFETY: a fresh attached reference the caller owns, released by
                 // `git_reference_free`; it borrows `self`, which frees the repository.
@@ -2210,7 +2339,7 @@ mod unit_tests {
             fn drop(&mut self) {
                 // SAFETY: the repository this fixture opened, freed once.
                 unsafe { ffi::git_repository_free(self.repo) };
-                let _ = std::fs::remove_dir_all(&self.path);
+                drop(std::fs::remove_dir_all(&self.path));
             }
         }
 
@@ -2255,7 +2384,7 @@ mod unit_tests {
                     "crustify-worktree-routines-{}-{tag}",
                     std::process::id()
                 ));
-                let _ = fs::remove_dir_all(&base);
+                drop(fs::remove_dir_all(&base));
                 let path = CString::new(base.join("repo").as_os_str().as_bytes()).unwrap();
                 let repo = Repository::init(&path, false).unwrap();
                 Self { base, repo }
@@ -2282,24 +2411,34 @@ mod unit_tests {
                 let mut raw = ffi::git_strarray::default();
                 // SAFETY: a live, empty array the routine fills; the live repository,
                 // only read.
-                let rc = unsafe { ffi::git_worktree_list(&mut raw, self.repo.as_c_ptr()) };
+                let rc = unsafe { ffi::git_worktree_list(&raw mut raw, self.repo.as_c_ptr()) };
                 assert_eq!(rc, 0);
                 let names = (0..raw.count)
-                    // SAFETY: `count` NUL-terminated strings, live until the dispose.
-                    .map(|i| unsafe { CStr::from_ptr(*raw.strings.add(i)) }.to_owned())
+                    .map(|i| {
+                        // SAFETY: `i < count`, and the array holds `count` pointers.
+                        let slot = unsafe { raw.strings.add(i) };
+                        // SAFETY: as above, `slot` addresses an initialised pointer.
+                        let s = unsafe { *slot };
+                        // SAFETY: a NUL-terminated string, live until the dispose.
+                        unsafe { CStr::from_ptr(s) }.to_owned()
+                    })
                     .collect();
                 // SAFETY: the array the routine filled, released once.
-                unsafe { ffi::git_strarray_dispose(&mut raw) };
+                unsafe { ffi::git_strarray_dispose(&raw mut raw) };
                 names
             }
         }
 
         impl Drop for Linked {
             fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.base);
+                drop(fs::remove_dir_all(&self.base));
             }
         }
 
+        #[expect(
+            clippy::needless_pass_by_value,
+            reason = "the helper consumes what it reports, as its callers hand it over"
+        )]
         fn sorted(names: StrArrayVal) -> Vec<CString> {
             let mut names: Vec<_> = names.as_ref().iter().map(CStr::to_owned).collect();
             names.sort();
@@ -2469,7 +2608,7 @@ mod unit_tests {
             let linked = Linked::new("error");
             let e = Worktree::lookup(linked.repo.as_ref(), c"absent").unwrap_err();
             assert_eq!(e.raw_code(), ffi::GIT_ENOTFOUND);
-            assert_eq!(e.raw_class(), ffi::GIT_ERROR_WORKTREE as c_int);
+            assert_eq!(e.raw_class(), ffi::GIT_ERROR_WORKTREE.cast_signed());
             assert_eq!(e.error().message(), e.message());
             assert_eq!(e.to_string(), "worktree does not exist");
             assert_eq!(
@@ -2527,12 +2666,12 @@ mod unit_tests {
                 "crustify-worktree-add-unit-{}-{tag}",
                 std::process::id()
             ));
-            let _ = fs::remove_dir_all(&path);
+            drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             path
         }
 
-        fn c_path(path: &std::path::Path) -> CString {
+        fn c_path(path: &Path) -> CString {
             CString::new(path.as_os_str().as_bytes()).unwrap()
         }
 
@@ -2558,7 +2697,7 @@ mod unit_tests {
                     // SAFETY: a writable slot, the live repository and a NUL-terminated
                     // name.
                     let rc = unsafe {
-                        ffi::git_reference_lookup(&mut out, main.as_c_ptr(), name.as_ptr())
+                        ffi::git_reference_lookup(&raw mut out, main.as_c_ptr(), name.as_ptr())
                     };
                     assert_eq!(rc, 0);
                     // SAFETY: a fresh attached reference the test owns alone, freed by
@@ -2585,7 +2724,13 @@ mod unit_tests {
                         // strings and live options; the release build fails the NULL
                         // common directory's assertion.
                         let rc = unsafe {
-                            ffi::git_worktree_add(&mut out, raw, c"wt".as_ptr(), wt.as_ptr(), opts)
+                            ffi::git_worktree_add(
+                                &raw mut out,
+                                raw,
+                                c"wt".as_ptr(),
+                                wt.as_ptr(),
+                                opts,
+                            )
                         };
                         // `(err = prettify_dir(..) < 0)`: the failure returns 1, and no
                         // worktree.
@@ -2603,22 +2748,26 @@ mod unit_tests {
 
         /// A non-bare repository at `path` with one commit, which `main` and `feature`
         /// name and `HEAD` points at through `main`.
-        fn committed(path: &std::path::Path) -> RepositoryBox {
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
+        fn committed(path: &Path) -> RepositoryBox {
             let repo = Repository::init(&c_path(path), false).unwrap();
             let mut odb = ptr::null_mut();
             // SAFETY: a writable slot and the live repository; the odb is released below.
-            let rc = unsafe { ffi::git_repository_odb(&mut odb, repo.as_c_ptr()) };
+            let rc = unsafe { ffi::git_repository_odb(&raw mut odb, repo.as_c_ptr()) };
             assert_eq!(rc, 0);
             let write = |data: &[u8], kind: ffi::git_object_t| {
                 let mut id = ffi::git_oid::default();
                 let (bytes, len) = (data.as_ptr().cast(), data.len());
                 // SAFETY: a writable id, the live odb and `data` readable for `len` bytes
                 // at a non-NULL address.
-                let rc = unsafe { ffi::git_odb_write(&mut id, odb, bytes, len, kind) };
+                let rc = unsafe { ffi::git_odb_write(&raw mut id, odb, bytes, len, kind) };
                 assert_eq!(rc, 0);
-                let mut hex = [0 as std::ffi::c_char; 65];
+                let mut hex = [0; 65];
                 // SAFETY: `hex` bounds the write, and the routine NUL-terminates in it.
-                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr(), hex.len(), &id) };
+                unsafe { ffi::git_oid_tostr(hex.as_mut_ptr(), hex.len(), &raw const id) };
                 // SAFETY: NUL-terminated within `hex`.
                 unsafe { CStr::from_ptr(hex.as_ptr()) }
                     .to_str()
@@ -2643,7 +2792,8 @@ mod unit_tests {
         fn lookup<'r>(repo: &'r RepositoryBox, name: &CStr) -> ReferenceBox<'r> {
             let mut out = ptr::null_mut();
             // SAFETY: a writable slot, the live repository and a NUL-terminated name.
-            let rc = unsafe { ffi::git_reference_lookup(&mut out, repo.as_c_ptr(), name.as_ptr()) };
+            let rc =
+                unsafe { ffi::git_reference_lookup(&raw mut out, repo.as_c_ptr(), name.as_ptr()) };
             assert_eq!(rc, 0, "{name:?}");
             // SAFETY: a fresh attached reference the test owns alone, released by
             // `git_reference_free`; `repo` outlives it.
@@ -2663,7 +2813,7 @@ mod unit_tests {
             let (name, path) = (name.as_ptr(), path.as_ptr());
             // SAFETY: a writable slot, the live repository, NUL-terminated strings and
             // live options whose reference outlives the call.
-            let rc = unsafe { ffi::git_worktree_add(&mut out, raw, name, path, opts) };
+            let rc = unsafe { ffi::git_worktree_add(&raw mut out, raw, name, path, opts) };
             let added = !out.is_null();
             // SAFETY: NULL or the fresh worktree, freed once.
             unsafe { ffi::git_worktree_free(out) };
@@ -2679,6 +2829,10 @@ mod unit_tests {
         /// check then concerns the right working trees. C's defect is shown alongside.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
+        #[expect(
+            clippy::items_after_statements,
+            reason = "each helper item sits beside the steps that use it"
+        )]
         fn add_checks_the_branch_in_the_repository_added_to() {
             let root = scratch("lent-reference");
             let feature = c"refs/heads/feature";

@@ -52,7 +52,7 @@
 //! the type: it prints the seconds through a 32-bit unsigned cast, so a time before
 //! the epoch or past 2106 is written wrapped, and it negates a negative offset as an
 //! `int`, which overflows for `i32::MIN` (undefined behaviour in C, an abort under
-//! UBSan). The wrappers of those routines must refuse such a time or document the
+//! `UBSan`). The wrappers of those routines must refuse such a time or document the
 //! wrap; the type itself carries what libgit2 stores.
 //!
 //! Times compare as libgit2 compares signatures' times: equal when all three fields
@@ -149,7 +149,7 @@ use crate::libgit2::util::sys::errors::{runtime_pinned, set, set_oom};
 /// [`from_raw`](Self::from_raw) gives `None` for both, and for every value
 /// `git_object_type_is_valid` refuses.
 ///
-/// Wraps: git_object_t
+/// Wraps: `git_object_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(i32)]
@@ -168,6 +168,7 @@ pub enum ObjectType {
 impl ObjectType {
     /// The variant whose C value is `raw`; `None` for `GIT_OBJECT_ANY`,
     /// `GIT_OBJECT_INVALID` and every value the header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_object_t) -> Option<Self> {
         match raw {
             ffi::GIT_OBJECT_COMMIT => Some(Self::Commit),
@@ -179,12 +180,14 @@ impl ObjectType {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_object_t {
         self as ffi::git_object_t
     }
 
     /// The C value of a type filter, as lookups and peels take it: `kind`'s value, or
     /// `GIT_OBJECT_ANY` for `None`, which accepts an object of any type.
+    #[must_use]
     pub const fn raw_or_any(kind: Option<Self>) -> ffi::git_object_t {
         match kind {
             Some(kind) => kind.raw(),
@@ -217,6 +220,7 @@ pub struct NotAnObjectType(ffi::git_object_t);
 
 impl NotAnObjectType {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_object_t {
         self.0
     }
@@ -237,7 +241,7 @@ impl std::error::Error for NotAnObjectType {}
 /// `GIT_REFERENCE_ALL` and every value the header does not name, such as the `-1`
 /// that `git_reference_type(NULL)` returns in a release build.
 ///
-/// Wraps: git_reference_t
+/// Wraps: `git_reference_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -252,6 +256,7 @@ pub enum ReferenceType {
 impl ReferenceType {
     /// The variant whose C value is `raw`; `None` for `GIT_REFERENCE_INVALID`,
     /// `GIT_REFERENCE_ALL` and every value the header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_reference_t) -> Option<Self> {
         match raw {
             ffi::GIT_REFERENCE_DIRECT => Some(Self::Direct),
@@ -261,6 +266,7 @@ impl ReferenceType {
     }
 
     /// The C value, as libgit2's functions return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_reference_t {
         self as ffi::git_reference_t
     }
@@ -290,6 +296,7 @@ pub struct NotAReferenceType(ffi::git_reference_t);
 
 impl NotAReferenceType {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_reference_t {
         self.0
     }
@@ -314,7 +321,7 @@ impl std::error::Error for NotAReferenceType {}
 /// [`Remote`](Self::Remote), never [`All`](Self::All). The three variants are the values
 /// every routine accepts; [`from_raw`](Self::from_raw) gives `None` for the rest.
 ///
-/// Wraps: git_branch_t
+/// Wraps: `git_branch_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -330,6 +337,7 @@ pub enum BranchType {
 impl BranchType {
     /// The variant whose C value is `raw`; `None` for any value libgit2's header does not
     /// name, `0` included.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_branch_t) -> Option<Self> {
         match raw {
             ffi::GIT_BRANCH_LOCAL => Some(Self::Local),
@@ -340,6 +348,7 @@ impl BranchType {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_branch_t {
         self as ffi::git_branch_t
     }
@@ -347,6 +356,7 @@ impl BranchType {
     /// Whether every branch `other` means is also one `self` means, as
     /// `git_branch_next` tests a listed branch's kind against the iterator's flags:
     /// [`All`](Self::All) contains every kind, and each kind contains itself.
+    #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.raw() & other.raw() == other.raw()
     }
@@ -389,6 +399,7 @@ pub struct UnnamedBranchType(ffi::git_branch_t);
 
 impl UnnamedBranchType {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_branch_t {
         self.0
     }
@@ -412,7 +423,7 @@ impl std::error::Error for UnnamedBranchType {}
 /// without a variant ("invalid value for fetchRecurseSubmodules"), and
 /// [`from_raw`](Self::from_raw) gives `None` for it.
 ///
-/// Wraps: git_submodule_recurse_t
+/// Wraps: `git_submodule_recurse_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -430,6 +441,7 @@ pub enum SubmoduleRecurse {
 impl SubmoduleRecurse {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_submodule_recurse_t) -> Option<Self> {
         match raw {
             ffi::GIT_SUBMODULE_RECURSE_NO => Some(Self::No),
@@ -440,6 +452,7 @@ impl SubmoduleRecurse {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_recurse_t {
         self as ffi::git_submodule_recurse_t
     }
@@ -476,6 +489,7 @@ pub struct UnnamedSubmoduleRecurse(ffi::git_submodule_recurse_t);
 
 impl UnnamedSubmoduleRecurse {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_recurse_t {
         self.0
     }
@@ -508,7 +522,7 @@ impl std::error::Error for UnnamedSubmoduleRecurse {}
 /// gives `None` for it, and `from_raw(raw).unwrap_or_default()` resolves it as
 /// libgit2 does.
 ///
-/// Wraps: git_submodule_update_t
+/// Wraps: `git_submodule_update_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -527,6 +541,7 @@ pub enum SubmoduleUpdate {
 impl SubmoduleUpdate {
     /// The variant whose C value is `raw`; `None` for `GIT_SUBMODULE_UPDATE_DEFAULT`
     /// and for a value this version of libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_submodule_update_t) -> Option<Self> {
         match raw {
             ffi::GIT_SUBMODULE_UPDATE_CHECKOUT => Some(Self::Checkout),
@@ -538,6 +553,7 @@ impl SubmoduleUpdate {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_update_t {
         self as ffi::git_submodule_update_t
     }
@@ -576,6 +592,7 @@ pub struct UnnamedSubmoduleUpdate(ffi::git_submodule_update_t);
 
 impl UnnamedSubmoduleUpdate {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_update_t {
         self.0
     }
@@ -606,7 +623,7 @@ impl std::error::Error for UnnamedSubmoduleUpdate {}
 /// zeroed options struct) as `Unspecified`; [`from_raw`](Self::from_raw) gives `None`
 /// for all of them. libgit2's own routines return only named values.
 ///
-/// Wraps: git_submodule_ignore_t
+/// Wraps: `git_submodule_ignore_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(i32)]
@@ -632,6 +649,7 @@ pub enum SubmoduleIgnore {
 impl SubmoduleIgnore {
     /// The variant whose C value is `raw`; `None` for a value this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_submodule_ignore_t) -> Option<Self> {
         match raw {
             ffi::GIT_SUBMODULE_IGNORE_UNSPECIFIED => Some(Self::Unspecified),
@@ -644,6 +662,7 @@ impl SubmoduleIgnore {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_ignore_t {
         self as ffi::git_submodule_ignore_t
     }
@@ -673,6 +692,7 @@ pub struct UnnamedSubmoduleIgnore(ffi::git_submodule_ignore_t);
 
 impl UnnamedSubmoduleIgnore {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_submodule_ignore_t {
         self.0
     }
@@ -707,7 +727,7 @@ const _: () = assert!(
 /// old git's group-writable `0100664`, or `0`, which reads as `Unreadable`.
 /// [`from_raw`](Self::from_raw) gives `None` for a value without a variant.
 ///
-/// Wraps: git_filemode_t
+/// Wraps: `git_filemode_t`
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -731,6 +751,7 @@ pub enum FileMode {
 impl FileMode {
     /// The variant whose C value is `raw`; `None` for a mode this version of
     /// libgit2's header does not name.
+    #[must_use]
     pub const fn from_raw(raw: ffi::git_filemode_t) -> Option<Self> {
         match raw {
             ffi::GIT_FILEMODE_UNREADABLE => Some(Self::Unreadable),
@@ -744,6 +765,7 @@ impl FileMode {
     }
 
     /// The C value, as libgit2's functions take and return it.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_filemode_t {
         self as ffi::git_filemode_t
     }
@@ -773,6 +795,7 @@ pub struct UnnamedFileMode(ffi::git_filemode_t);
 
 impl UnnamedFileMode {
     /// The value, as it was converted.
+    #[must_use]
     pub const fn raw(self) -> ffi::git_filemode_t {
         self.0
     }
@@ -837,6 +860,7 @@ impl Time {
     /// `i32::MIN` minutes.
     ///
     /// Handwritten
+    #[must_use]
     pub fn new(seconds: i64, offset_minutes: i32) -> Time {
         let mut time = Time::zeroed();
         let mut handle = time.as_mut();
@@ -861,24 +885,32 @@ impl From<Time> for ffi::git_time {
     }
 }
 
-impl<'a> TimeRef<'a> {
+impl TimeRef<'_> {
     /// Seconds since the epoch, 1970-01-01T00:00:00Z; negative before it.
     ///
-    /// Field: git_time.time
+    /// Field: `git_time.time`
+    #[must_use]
     pub fn seconds(&self) -> i64 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let time_ptr = unsafe { &raw const (*self.as_ptr()).time };
         // SAFETY: a read through the shared handle's pointer to a live `git_time`; any
         // value is a valid `i64`.
-        unsafe { addr_of!((*self.as_ptr()).time).read() }
+        unsafe { time_ptr.read() }
     }
 
     /// The timezone's offset from UTC in minutes, negative west of it. libgit2 parses
     /// at most 14 hours and 59 minutes either way, but stores whatever it is given.
     ///
-    /// Field: git_time.offset
+    /// Field: `git_time.offset`
+    #[must_use]
     pub fn offset_minutes(&self) -> i32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let offset_ptr = unsafe { &raw const (*self.as_ptr()).offset };
         // SAFETY: a read through the shared handle's pointer to a live `git_time`; any
         // value is a valid `i32`.
-        unsafe { addr_of!((*self.as_ptr()).offset).read() }
+        unsafe { offset_ptr.read() }
     }
 
     /// The sign character the offset was written with, as a byte: `b'+'` or `b'-'`
@@ -886,19 +918,23 @@ impl<'a> TimeRef<'a> {
     /// timezone, or whatever character a malformed one started with. `b'-'` with an
     /// offset of 0 is git's questionable `-0000`.
     ///
-    /// Field: git_time.sign
+    /// Field: `git_time.sign`
+    #[must_use]
     pub fn sign(&self) -> u8 {
-        // SAFETY: a read through the shared handle's pointer to a live `git_time`; any
-        // `char` is a valid byte.
-        unsafe { addr_of!((*self.as_ptr()).sign).read() as u8 }
+        // SAFETY: the shared handle's pointer addresses a live `git_time`; the projection forms no
+        // reference to it.
+        let sign_ptr = unsafe { &raw const (*self.as_ptr()).sign };
+        // SAFETY: reads the initialised field; any `char` is a valid byte.
+        unsafe { sign_ptr.read() }.cast_unsigned()
     }
 
     /// A copy of the time, as a value of its own.
+    #[must_use]
     pub fn to_time(&self) -> Time {
         Time::from(ffi::git_time {
             time: self.seconds(),
             offset: self.offset_minutes(),
-            sign: self.sign() as c_char,
+            sign: self.sign().cast_signed(),
         })
     }
 }
@@ -906,31 +942,40 @@ impl<'a> TimeRef<'a> {
 impl TimeMut<'_> {
     /// Replaces the seconds since the epoch.
     ///
-    /// Field: git_time.time
+    /// Field: `git_time.time`
     pub fn set_seconds(&mut self, seconds: i64) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let time_ptr = unsafe { &raw mut (*self.as_mut_ptr()).time };
         // SAFETY: a write through the exclusive handle's pointer to a live `git_time`;
         // the field is a plain integer.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).time).write(seconds) }
+        unsafe { time_ptr.write(seconds) }
     }
 
     /// Replaces the offset from UTC in minutes. The sign character is left as it is.
     /// Any value is accepted; `i32::MIN` is one libgit2 cannot write (see the [module
     /// docs](self)).
     ///
-    /// Field: git_time.offset
+    /// Field: `git_time.offset`
     pub fn set_offset_minutes(&mut self, offset_minutes: i32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let offset_ptr = unsafe { &raw mut (*self.as_mut_ptr()).offset };
         // SAFETY: a write through the exclusive handle's pointer to a live `git_time`;
         // the field is a plain integer.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).offset).write(offset_minutes) }
+        unsafe { offset_ptr.write(offset_minutes) }
     }
 
     /// Replaces the sign character. Any byte is accepted, as libgit2 accepts it.
     ///
-    /// Field: git_time.sign
+    /// Field: `git_time.sign`
     pub fn set_sign(&mut self, sign: u8) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let sign_ptr = unsafe { &raw mut (*self.as_mut_ptr()).sign };
         // SAFETY: a write through the exclusive handle's pointer to a live `git_time`;
         // the field is a plain `char`, which every byte fits.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).sign).write(sign as c_char) }
+        unsafe { sign_ptr.write(sign.cast_signed()) }
     }
 }
 
@@ -1050,8 +1095,8 @@ unsafe impl Sync for SignatureMut<'_> {}
 /// `None` and `Clone` aborts, as it does when the copy runs out of memory;
 /// [`SignatureRef::to_signature`] reports it as an error.
 ///
-/// Wraps: git_signature_free
-/// Wraps: git_signature_dup
+/// Wraps: `git_signature_free`
+/// Wraps: `git_signature_dup`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SignatureFree;
@@ -1071,8 +1116,15 @@ impl_cdupclone!(SignatureFree, Signature, signature_dup);
 /// `sig` must address a live `git_signature` whose `name` and `email` are each NULL or
 /// a NUL-terminated string, none of them written during the call.
 unsafe fn signature_dup(sig: *mut ffi::git_signature) -> *mut ffi::git_signature {
-    // SAFETY: per this function's contract `sig` addresses a live `git_signature`.
-    let (name, email) = unsafe { (addr_of!((*sig).name).read(), addr_of!((*sig).email).read()) };
+    // SAFETY: per this function's contract `sig` addresses a live `git_signature`; the projection
+    // forms no reference to it.
+    let name_ptr = unsafe { &raw const (*sig).name };
+    // SAFETY: as above.
+    let email_ptr = unsafe { &raw const (*sig).email };
+    // SAFETY: reads the initialised field.
+    let name = unsafe { name_ptr.read() };
+    // SAFETY: as above.
+    let email = unsafe { email_ptr.read() };
     if name.is_null() || email.is_null() || !runtime_pinned() {
         return ptr::null_mut();
     }
@@ -1081,7 +1133,7 @@ unsafe fn signature_dup(sig: *mut ffi::git_signature) -> *mut ffi::git_signature
     // NUL-terminated strings, only read. libgit2 writes the slot only on success, with a
     // fresh signature the caller owns. The runtime is pinned, so a failure is reported on
     // live thread-local state.
-    let rc = unsafe { ffi::git_signature_dup(&mut copy, sig) };
+    let rc = unsafe { ffi::git_signature_dup(&raw mut copy, sig) };
     if rc < 0 { ptr::null_mut() } else { copy }
 }
 
@@ -1110,6 +1162,10 @@ impl Signature {
     /// A signature of `name` and `email` at `seconds` since the epoch, in the zone
     /// `offset_minutes` east of UTC, signed as [`Time::new`] signs it.
     ///
+    /// Wraps: `git_signature_new`
+    ///
+    /// # Errors
+    ///
     /// libgit2 fails, with its error, when either string contains `<` or `>`; otherwise
     /// it trims both of the bytes git drops at their ends (every byte up to and including
     /// the space, and `,:;"\'`), and fails when either is then empty. Any time is
@@ -1118,8 +1174,6 @@ impl Signature {
     ///
     /// When libgit2 runs out of memory copying a string, it leaks the half-built
     /// signature before reporting the error.
-    ///
-    /// Wraps: git_signature_new
     pub fn new(
         name: &CStr,
         email: &CStr,
@@ -1136,7 +1190,7 @@ impl Signature {
         // state.
         let rc = unsafe {
             ffi::git_signature_new(
-                &mut out,
+                &raw mut out,
                 name.as_ptr(),
                 email.as_ptr(),
                 seconds,
@@ -1153,17 +1207,22 @@ impl Signature {
     /// clock's seconds, and the offset C's `mktime` derives for them.
     ///
     /// Concurrent calls are sound: glibc serialises its timezone state under a lock of
-    /// its own. ThreadSanitizer cannot see that lock, and reports them as a race on
+    /// its own. `ThreadSanitizer` cannot see that lock, and reports them as a race on
     /// glibc's copy of `TZ`.
     ///
-    /// Wraps: git_signature_now
+    /// Wraps: `git_signature_now`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`new`](Self::new) does, and with libgit2's error when the system clock or the
+    /// local timezone cannot be read.
     pub fn now(name: &CStr, email: &CStr) -> Result<SignatureBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
         }
         let mut out = ptr::null_mut();
         // SAFETY: as in `new`.
-        let rc = unsafe { ffi::git_signature_now(&mut out, name.as_ptr(), email.as_ptr()) };
+        let rc = unsafe { ffi::git_signature_now(&raw mut out, name.as_ptr(), email.as_ptr()) };
         // SAFETY: `git_signature_now` leaves `out` NULL on failure (adopted as `None`), or
         // writes a fresh signature from libgit2's allocator that the caller owns alone,
         // released by `git_signature_free` as `SignatureFree` does.
@@ -1174,17 +1233,20 @@ impl Signature {
     /// email between `<` and `>`, then optionally the seconds and the zone, as in
     /// `A U Thor <author@example.com> 1700000000 +0130`.
     ///
-    /// The name and email are trimmed as [`new`](Self::new) trims them, but may contain
-    /// angle brackets or be empty. A missing time leaves the epoch, and the zone is kept
-    /// as libgit2 reads it, a malformed one included (see [`Time`]). Fails, with
-    /// libgit2's error, without an email in angle brackets or with seconds that do not
+    /// The name and email are trimmed as [`new`](Self::new) trims them, but may contain angle
+    /// brackets or be empty. A missing time leaves the epoch, and the zone is kept as libgit2 reads
+    /// it, a malformed one included (see [`Time`]).
+    ///
+    /// Wraps: `git_signature_from_buffer`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, without an email in angle brackets or with seconds that do not
     /// parse.
     ///
     /// libgit2 reports success when it runs out of memory copying the name or the
     /// email, leaving it NULL; that signature is refused here, with the out-of-memory
     /// error, so every signature this builds has both.
-    ///
-    /// Wraps: git_signature_from_buffer
     pub fn parse(buf: &CStr) -> Result<SignatureBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -1192,7 +1254,7 @@ impl Signature {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot and `buf` a non-NULL NUL-terminated string, as
         // libgit2 asserts, read up to its NUL for the call only. The runtime is pinned.
-        let rc = unsafe { ffi::git_signature_from_buffer(&mut out, buf.as_ptr()) };
+        let rc = unsafe { ffi::git_signature_from_buffer(&raw mut out, buf.as_ptr()) };
         // SAFETY: `git_signature_from_buffer` leaves `out` NULL on failure (adopted as `None`), or
         // writes a fresh signature from libgit2's allocator that the caller owns alone,
         // released by `git_signature_free` as `SignatureFree` does.
@@ -1205,10 +1267,14 @@ impl<'a> SignatureRef<'a> {
     /// libgit2 ran out of memory copying it while it parsed the signature (a commit's,
     /// say); every signature this crate builds has one.
     ///
-    /// Field: git_signature.name
+    /// Field: `git_signature.name`
+    #[must_use]
     pub fn name(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let name_ptr = unsafe { &raw const (*self.as_ptr()).name };
         // SAFETY: a read through the shared handle's pointer to a live `git_signature`.
-        let name = unsafe { addr_of!((*self.as_ptr()).name).read() };
+        let name = unsafe { name_ptr.read() };
         // SAFETY: per the handles' invariant a non-NULL name is a NUL-terminated string
         // that outlives the handle, i.e. `'a`; nothing writes or frees it while a shared
         // handle lives, since that needs the exclusive one.
@@ -1218,17 +1284,26 @@ impl<'a> SignatureRef<'a> {
     /// The email, borrowed in place for as long as the signature is; `None` only where
     /// libgit2 ran out of memory copying it, as for [`name`](Self::name).
     ///
-    /// Field: git_signature.email
+    /// Field: `git_signature.email`
+    #[must_use]
     pub fn email(&self) -> Option<&'a CStr> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let email_ptr = unsafe { &raw const (*self.as_ptr()).email };
         // SAFETY: a read through the shared handle's pointer to a live `git_signature`.
-        let email = unsafe { addr_of!((*self.as_ptr()).email).read() };
+        let email = unsafe { email_ptr.read() };
         // SAFETY: as in `name`.
         (!email.is_null()).then(|| unsafe { CStr::from_ptr(email) })
     }
 
     /// When the action happened, borrowed in place for as long as the signature is.
     ///
-    /// Field: git_signature.when
+    /// Field: `git_signature.when`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field's address is not NULL"
+    )]
     pub fn when(&self) -> TimeRef<'a> {
         // SAFETY: a projection, without a read, of a live `git_signature`'s field.
         let when = unsafe { addr_of!((*self.as_ptr()).when) };
@@ -1241,11 +1316,13 @@ impl<'a> SignatureRef<'a> {
     /// `git_signature_dup` makes one. [`SignatureView`]s and the signatures libgit2's
     /// objects hold become owned this way; an owner also copies with `Clone`.
     ///
+    /// Wraps: `git_signature_dup`
+    ///
+    /// # Errors
+    ///
     /// Fails with libgit2's error when it runs out of memory, or cannot be initialised;
     /// and, with a `GIT_ERROR_INVALID` error set on the thread, for a signature without
     /// its name or its email, which `git_signature_dup` would crash on.
-    ///
-    /// Wraps: git_signature_dup
     pub fn to_signature(&self) -> Result<SignatureBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -1275,7 +1352,7 @@ impl SignatureMut<'_> {
     /// written into an object git cannot parse back. [`Signature::new`] refuses those
     /// brackets.
     ///
-    /// Field: git_signature.name
+    /// Field: `git_signature.name`
     pub fn set_name(&mut self, name: OdbDataStr) {
         drop(self.replace_name(name));
     }
@@ -1283,7 +1360,7 @@ impl SignatureMut<'_> {
     /// Replaces the name, handing back the one held before (`None` where libgit2 had
     /// lost it, as [`SignatureRef::name`] reads it).
     ///
-    /// Field: git_signature.name
+    /// Field: `git_signature.name`
     pub fn replace_name(&mut self, name: OdbDataStr) -> Option<OdbDataStr> {
         // SAFETY: a projection, without a read, of a live `git_signature`'s field
         // through the exclusive handle's pointer.
@@ -1296,7 +1373,7 @@ impl SignatureMut<'_> {
     /// for [`set_name`](Self::set_name); an email holding `>` or a newline breaks the
     /// objects libgit2 writes it into.
     ///
-    /// Field: git_signature.email
+    /// Field: `git_signature.email`
     pub fn set_email(&mut self, email: OdbDataStr) {
         drop(self.replace_email(email));
     }
@@ -1304,7 +1381,7 @@ impl SignatureMut<'_> {
     /// Replaces the email, handing back the one held before (`None` where libgit2 had
     /// lost it).
     ///
-    /// Field: git_signature.email
+    /// Field: `git_signature.email`
     pub fn replace_email(&mut self, email: OdbDataStr) -> Option<OdbDataStr> {
         // SAFETY: as in `replace_name`.
         let field = unsafe { addr_of_mut!((*self.as_mut_ptr()).email) };
@@ -1314,7 +1391,11 @@ impl SignatureMut<'_> {
 
     /// When the action happened, for its setters, borrowed in place.
     ///
-    /// Field: git_signature.when
+    /// Field: `git_signature.when`
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field's address is not NULL"
+    )]
     pub fn when_mut(&mut self) -> TimeMut<'_> {
         // SAFETY: a projection, without a read, of a live `git_signature`'s field
         // through the exclusive handle's pointer.
@@ -1326,11 +1407,14 @@ impl SignatureMut<'_> {
 
     /// Replaces when the action happened.
     ///
-    /// Field: git_signature.when
+    /// Field: `git_signature.when`
     pub fn set_when(&mut self, when: Time) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let when_ptr = unsafe { &raw mut (*self.as_mut_ptr()).when };
         // SAFETY: a write through the exclusive handle's pointer to a live
         // `git_signature`; `git_time` is plain data, with nothing to release.
-        unsafe { addr_of_mut!((*self.as_mut_ptr()).when).write(when.into()) }
+        unsafe { when_ptr.write(when.into()) }
     }
 }
 
@@ -1398,7 +1482,7 @@ impl Eq for SignatureRef<'_> {}
 /// let _ = view.as_mut();
 /// ```
 ///
-/// Wraps: git_signature
+/// Wraps: `git_signature`
 /// Handwritten
 pub struct SignatureView<'a> {
     /// `name` and `email` address the borrowed strings.
@@ -1415,6 +1499,7 @@ unsafe impl Sync for SignatureView<'_> {}
 
 impl<'a> SignatureView<'a> {
     /// A view of `name` and `email`, at `when`.
+    #[must_use]
     pub fn new(name: &'a CStr, email: &'a CStr, when: Time) -> Self {
         let raw = ffi::git_signature {
             name: name.as_ptr().cast_mut(),
@@ -1428,6 +1513,7 @@ impl<'a> SignatureView<'a> {
     }
 
     /// The shared handle, for reading the signature or passing it to C.
+    #[must_use]
     pub fn as_ref(&self) -> SignatureRef<'_> {
         self.signature.as_ref()
     }
@@ -1504,7 +1590,12 @@ impl WriteStream {
     /// `git_blob_create_from_stream` opens is committed instead, and closing it
     /// discards what was written (dropping it does the same).
     ///
-    /// Field: git_writestream.close
+    /// Field: `git_writestream.close`
+    ///
+    /// # Errors
+    ///
+    /// A negative return from `close` is an error, which comes back with the thread's last libgit2
+    /// error; the stream is freed either way.
     pub fn close(mut stream: WriteStreamBox) -> Result<(), StreamError> {
         // SAFETY: `stream` is dropped right below, so the stream is freed and never
         // written or closed again.
@@ -1518,6 +1609,8 @@ impl WriteStreamMut<'_> {
     /// Writes `data` into the stream: its `write` member, given the slice's pointer
     /// and length. The stream reads the bytes during the call only.
     ///
+    /// # Errors
+    ///
     /// A negative return is an error, which comes back with the thread's last libgit2
     /// error; any other return is success, as libgit2's callers read it.
     ///
@@ -1526,11 +1619,14 @@ impl WriteStreamMut<'_> {
     /// If the stream has no `write` member, which no producer leaves unset and the
     /// handle's invariant excludes.
     ///
-    /// Field: git_writestream.write
+    /// Field: `git_writestream.write`
     pub fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
         let stream = self.as_mut_ptr();
+        // SAFETY: `stream` is the handle's pointer to the live object it borrows; the projection
+        // forms no reference to it.
+        let write_ptr = unsafe { &raw const (*stream).write };
         // SAFETY: a read through the exclusive handle's pointer to a live header.
-        let write = unsafe { addr_of!((*stream).write).read() };
+        let write = unsafe { write_ptr.read() };
         let write = write.expect("a git_writestream always has a write member");
         // SAFETY: per the handle's invariant, `write` is the member the stream's
         // producer set for this header, in place in its container, and the stream
@@ -1551,11 +1647,14 @@ impl WriteStreamMut<'_> {
     /// Closing ends the stream: afterwards it must not be written or closed again
     /// through any handle, only freed, unless it is a [`RustWriteStream`]'s.
     ///
-    /// Field: git_writestream.close
+    /// Field: `git_writestream.close`
     pub(crate) unsafe fn close(&mut self) -> Result<(), StreamError> {
         let stream = self.as_mut_ptr();
+        // SAFETY: `stream` is the handle's pointer to the live object it borrows; the projection
+        // forms no reference to it.
+        let close_ptr = unsafe { &raw const (*stream).close };
         // SAFETY: a read through the exclusive handle's pointer to a live header.
-        let close = unsafe { addr_of!((*stream).close).read() };
+        let close = unsafe { close_ptr.read() };
         let close = close.expect("a git_writestream always has a close member");
         // SAFETY: as in `write`, for the `close` member; the caller ends the stream.
         let rc = unsafe { close(stream) };
@@ -1582,8 +1681,11 @@ fn check(rc: c_int) -> Result<(), StreamError> {
 /// `stream` is a live header in its container, with its members set, which the caller
 /// owns and does not use again.
 unsafe fn stream_free(stream: *mut ffi::git_writestream) {
-    // SAFETY: a read of the header the caller owns.
-    let free = unsafe { addr_of!((*stream).free).read() };
+    // SAFETY: per this function's contract the caller owns the live header; the projection forms no
+    // reference to it.
+    let free_ptr = unsafe { &raw const (*stream).free };
+    // SAFETY: reads the initialised member.
+    let free = unsafe { free_ptr.read() };
     if let Some(free) = free {
         // SAFETY: `free` is the member the stream's producer set for this header; it
         // releases the container, which the caller gives up.
@@ -1595,7 +1697,7 @@ unsafe fn stream_free(stream: *mut ffi::git_writestream) {
 /// header is embedded in: a blob writer's file buffer, hint path and allocation; a
 /// [`RustWriteStream`]'s box. Stateless: the routine is recovered from the object.
 ///
-/// Field: git_writestream.free
+/// Field: `git_writestream.free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WriteStreamFree;
@@ -1619,9 +1721,18 @@ pub type WriteStreamBox = CBox<WriteStream, WriteStreamFree>;
 /// Handwritten
 pub trait StreamWriter {
     /// Takes the next piece of the stream's data.
+    ///
+    /// # Errors
+    ///
+    /// An error ends the producer's write: libgit2 reports the failure of the operation that
+    /// streams into it.
     fn write(&mut self, data: &[u8]) -> Result<(), StreamError>;
 
     /// Ends the stream's data. The default accepts.
+    ///
+    /// # Errors
+    ///
+    /// An error fails the operation that streams into it, after the data was written.
     fn close(&mut self) -> Result<(), StreamError> {
         Ok(())
     }
@@ -1703,7 +1814,7 @@ struct Repr<W> {
 /// std::thread::spawn(move || drop(stream));
 /// ```
 ///
-/// Wraps: git_writestream
+/// Wraps: `git_writestream`
 /// Handwritten
 pub struct RustWriteStream<W: StreamWriter> {
     raw: NonNull<Repr<W>>,
@@ -1744,6 +1855,11 @@ impl<W: StreamWriter> RustWriteStream<W> {
     }
 
     /// Shared handle to the stream.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a box is never NULL"
+    )]
     pub fn as_ref(&self) -> WriteStreamRef<'_> {
         // SAFETY: the header of the live box this owner holds, in place in its `Repr`
         // with every member set to `Repr<W>`'s trampolines; shared for `&self`.
@@ -1751,6 +1867,10 @@ impl<W: StreamWriter> RustWriteStream<W> {
     }
 
     /// Exclusive handle to the stream, to write into it or lend it to code that does.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a box is never NULL"
+    )]
     pub fn as_mut(&mut self) -> WriteStreamMut<'_> {
         // SAFETY: as in `as_ref`, exclusive for `&mut self`; the trampolines accept any
         // order of calls.
@@ -1758,19 +1878,21 @@ impl<W: StreamWriter> RustWriteStream<W> {
     }
 
     /// The writer.
+    #[must_use]
     pub fn writer(&self) -> &W {
-        // SAFETY: the writer of the live box this owner holds; no member call runs
-        // while `&self` lives, since each needs a handle borrowed from `&mut self`.
-        unsafe { &*addr_of!((*self.raw.as_ptr()).writer) }
+        // SAFETY: the writer of the live box this owner holds; no member call runs while `&self`
+        // lives, since each needs a handle borrowed from `&mut self`.
+        unsafe { &(*self.raw.as_ptr()).writer }
     }
 
     /// The writer, exclusively.
     pub fn writer_mut(&mut self) -> &mut W {
         // SAFETY: as in `writer`, exclusive for `&mut self`.
-        unsafe { &mut *addr_of_mut!((*self.raw.as_ptr()).writer) }
+        unsafe { &mut (*self.raw.as_ptr()).writer }
     }
 
     /// The writer, the stream's header released.
+    #[must_use]
     pub fn into_inner(self) -> W {
         let this = ManuallyDrop::new(self);
         // SAFETY: the box this owner held, from `Box::leak` in `new`; `this` is never
@@ -1783,6 +1905,10 @@ impl<W: StreamWriter> RustWriteStream<W> {
     /// which drops the writer and the box.
     ///
     /// `WriteStreamBox` carries no lifetime, so the writer must borrow nothing.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a box is never NULL"
+    )]
     pub fn into_box(self) -> WriteStreamBox
     where
         W: 'static,
@@ -1818,7 +1944,7 @@ impl<W: StreamWriter + fmt::Debug> fmt::Debug for RustWriteStream<W> {
 /// `'a`.
 unsafe fn writer_of<'a, W>(stream: *mut ffi::git_writestream) -> &'a mut W {
     // SAFETY: per this function's contract; the header is at offset 0 of its `Repr`.
-    unsafe { &mut *addr_of_mut!((*stream.cast::<Repr<W>>()).writer) }
+    unsafe { &mut (*stream.cast::<Repr<W>>()).writer }
 }
 
 /// A writer's result as the member's return: 0, or the error's code once it is the
@@ -1897,6 +2023,7 @@ pub struct StreamError {
 
 impl StreamError {
     /// A failure in `class` described by `message`, returned as `GIT_ERROR`.
+    #[must_use]
     pub fn new(class: ErrorClass, message: &CStr) -> Self {
         Self {
             code: ErrorCode::Generic.raw(),
@@ -1907,6 +2034,7 @@ impl StreamError {
 
     /// The same failure, returned as `code` (`GIT_EUSER`, say). [`ErrorCode::Ok`]
     /// would read as success, so the code then stays `GIT_ERROR`.
+    #[must_use]
     pub fn with_code(mut self, code: ErrorCode) -> Self {
         if code != ErrorCode::Ok {
             self.code = code.raw();
@@ -1916,27 +2044,32 @@ impl StreamError {
 
     /// The returned code; `None` for one the header does not name, which a stream may
     /// return ([`raw_code`](Self::raw_code) has it).
+    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
 
     /// The returned code, always negative.
+    #[must_use]
     pub fn raw_code(&self) -> c_int {
         self.code
     }
 
     /// The error's class; `None` for a class the header does not name
     /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         ErrorClass::from_raw(self.class)
     }
 
     /// The error's class as libgit2 stores it.
+    #[must_use]
     pub fn raw_class(&self) -> c_int {
         self.class
     }
 
     /// The error message.
+    #[must_use]
     pub fn message(&self) -> &CStr {
         &self.message
     }
@@ -2290,7 +2423,7 @@ mod unit_tests {
         let raw = ffi::git_time {
             time: -42,
             offset: 330,
-            sign: b'x' as c_char,
+            sign: b'x'.cast_signed(),
         };
         let time = Time::from(raw);
         assert_eq!(time.as_ref().seconds(), -42);
@@ -2337,12 +2470,12 @@ mod unit_tests {
     }
 
     const MODES: [(ffi::git_filemode_t, FileMode); 6] = [
-        (0o000000, FileMode::Unreadable),
-        (0o040000, FileMode::Tree),
-        (0o100644, FileMode::Blob),
-        (0o100755, FileMode::BlobExecutable),
-        (0o120000, FileMode::Link),
-        (0o160000, FileMode::Commit),
+        (0o000_000, FileMode::Unreadable),
+        (0o040_000, FileMode::Tree),
+        (0o100_644, FileMode::Blob),
+        (0o100_755, FileMode::BlobExecutable),
+        (0o120_000, FileMode::Link),
+        (0o160_000, FileMode::Commit),
     ];
 
     #[test]
@@ -2358,12 +2491,12 @@ mod unit_tests {
     #[test]
     fn unnamed_modes_keep_their_value() {
         for raw in [
-            0o100664,
-            0o100600,
-            0o040755,
-            0o160755,
+            0o100_664,
+            0o100_600,
+            0o040_755,
+            0o160_755,
             1,
-            0o177777,
+            0o177_777,
             u32::MAX,
         ] {
             assert_eq!(FileMode::from_raw(raw), None);
@@ -2375,12 +2508,12 @@ mod unit_tests {
 
     #[test]
     fn unnamed_mode_displays_in_octal() {
-        let err = FileMode::try_from(0o100664).unwrap_err();
+        let err = FileMode::try_from(0o100_664).unwrap_err();
         assert_eq!(
             err.to_string(),
             "libgit2 file mode 0o100664 is not named by git2/types.h"
         );
-        let boxed: Box<dyn std::error::Error> = Box::new(err);
+        let boxed: Box<dyn Error> = Box::new(err);
         assert!(boxed.source().is_none());
     }
 
@@ -2666,7 +2799,7 @@ mod unit_tests {
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn stream_error_from_another_wrapper() {
             init();
-            crate::libgit2::util::sys::errors::set(ErrorClass::Index, c"from elsewhere");
+            set(ErrorClass::Index, c"from elsewhere");
             let error = StreamError::from(last());
             assert_eq!(
                 (error.code(), error.class(), error.message()),
@@ -2738,7 +2871,7 @@ mod unit_tests {
                     // every member set; libgit2 copies it before anything is allocated.
                     let rc = unsafe {
                         ffi::git_libgit2_opts(
-                            ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                            ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                             allocator.as_ref().as_ptr(),
                         )
                     };
@@ -2807,7 +2940,7 @@ mod unit_tests {
                 format!("libgit2 submodule ignore value {raw} is not named by git2/types.h")
             );
         }
-        let zero: Box<dyn std::error::Error> = Box::new(UnnamedSubmoduleIgnore(0));
+        let zero: Box<dyn Error> = Box::new(UnnamedSubmoduleIgnore(0));
         assert!(zero.source().is_none());
     }
 
@@ -2884,7 +3017,7 @@ mod unit_tests {
             isolated_with(test, body, true);
         }
 
-        /// As [`isolated`], with LeakSanitizer off in the child when `detect_leaks` is
+        /// As [`isolated`], with `LeakSanitizer` off in the child when `detect_leaks` is
         /// false: for bodies that drive libgit2 down a path on which it leaks.
         fn isolated_with(test: &str, body: fn(), detect_leaks: bool) {
             let name = test.split_once("::").map_or(test, |(_, rest)| rest);
@@ -2971,7 +3104,7 @@ mod unit_tests {
             // every member set; libgit2 copies it before anything is allocated.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };
@@ -2994,12 +3127,14 @@ mod unit_tests {
                     name: dup(name),
                     email: dup(email),
                     when: Time::new(5, -90).into(),
-                })
+                });
             };
-            // SAFETY: the storage now holds a signature whose strings are NULL or
-            // libgit2-allocated strings it owns, which `git_signature_free` releases with
-            // the struct, through the allocator `OdbDataFree` used.
-            unsafe { storage.assume_init().with_policy(SignatureFree).0 }
+            // SAFETY: the storage now holds a signature whose strings are NULL or libgit2-allocated
+            // strings it owns.
+            let signature = unsafe { storage.assume_init() };
+            // SAFETY: `git_signature_free` releases those strings with the struct, through the
+            // allocator `OdbDataFree` used.
+            unsafe { signature.with_policy(SignatureFree) }.0
         }
 
         #[test]
@@ -3122,7 +3257,7 @@ mod unit_tests {
                 let lost_name = sig
                     .as_mut()
                     .replace_name(OdbDataStrFree::dup(c"N").unwrap());
-                assert_eq!(lost_name.as_ref().map(|s| s.as_c_str()), name);
+                assert_eq!(lost_name.as_ref().map(ffibox::CStrBox::as_c_str), name);
                 if sig.as_ref().email().is_none() {
                     sig.as_mut().set_email(OdbDataStrFree::dup(c"n@m").unwrap());
                 }
@@ -3133,7 +3268,7 @@ mod unit_tests {
 
         /// `git_signature_from_buffer` reports success when it cannot copy the name or
         /// the email, leaving it NULL; `Signature::parse` refuses that signature with the
-        /// out-of-memory error, and frees what C built (LSan, in the asan variant).
+        /// out-of-memory error, and frees what C built (`LSan`, in the asan variant).
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn parse_refuses_a_signature_libgit2_lost_a_string_of() {
@@ -3153,15 +3288,15 @@ mod unit_tests {
                     GRANTS.store(1, SeqCst);
                     let mut out = ptr::null_mut();
                     // SAFETY: a writable slot and a NUL-terminated line, read for the call.
-                    let rc = unsafe { ffi::git_signature_from_buffer(&mut out, line.as_ptr()) };
+                    let rc = unsafe { ffi::git_signature_from_buffer(&raw mut out, line.as_ptr()) };
                     GRANTS.store(-1, SeqCst);
                     assert_eq!(rc, 0);
-                    // SAFETY: `out` is the signature C returned, read, then freed once.
-                    unsafe {
-                        assert!((*out).name.is_null());
-                        assert!(!(*out).email.is_null());
-                        ffi::git_signature_free(out);
-                    }
+                    // SAFETY: `out` is the signature C returned, live until it is freed below.
+                    assert!(unsafe { (*out).name }.is_null());
+                    // SAFETY: as above.
+                    assert!(!unsafe { (*out).email }.is_null());
+                    // SAFETY: freed once, after its last read.
+                    unsafe { ffi::git_signature_free(out) };
 
                     // The struct, the name, then the email refused: always an error.
                     for grants in 0..3 {
@@ -3207,7 +3342,7 @@ mod unit_tests {
         /// `try_clone` and `to_signature` report it, and the next request succeeds.
         ///
         /// libgit2 leaks the half-built struct (and the name) when a string allocation
-        /// fails, so the child runs without LeakSanitizer.
+        /// fails, so the child runs without `LeakSanitizer`.
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn constructors_report_each_allocation_failure() {

@@ -51,7 +51,7 @@ use crate::libgit2::util::sys::errors::runtime_pinned;
 /// require_sync::<TransactionBox<'static>>();
 /// ```
 ///
-/// Wraps: git_transaction
+/// Wraps: `git_transaction`
 /// Handwritten
 #[repr(transparent)]
 pub struct Transaction<'r>(ffi::git_transaction, PhantomData<(*const (), &'r ())>);
@@ -85,22 +85,37 @@ unsafe impl<'r> CCell for Transaction<'r> {
 }
 
 impl TransactionRef<'_, '_> {
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_ptr(&self) -> *const ffi::git_transaction {
         self.0.as_non_null().as_ptr().cast()
     }
 }
 
 impl<'r> TransactionMut<'_, 'r> {
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_transaction {
         self.0.0.as_non_null().as_ptr().cast()
     }
 
+    /// A shared handle over the same object, borrowed from this one.
+    #[must_use]
     pub fn as_ref(&self) -> TransactionRef<'_, 'r> {
         self.0
     }
 
+    /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> TransactionMut<'_, 'r> {
         TransactionMut(self.0, PhantomData)
     }
@@ -121,7 +136,7 @@ impl fmt::Debug for TransactionMut<'_, '_> {
 /// Releases pending locks without committing, then releases C's storage. The
 /// discriminator selects pool teardown for references or free for configuration.
 ///
-/// Wraps: git_transaction_free
+/// Wraps: `git_transaction_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TransactionFree;
@@ -149,7 +164,12 @@ impl<'r> Transaction<'r> {
     /// out of memory, libgit2 crashes rather than failing: `git_refdb_open` frees
     /// its uninitialised `db` when `git_refdb_new` cannot allocate it.
     ///
-    /// Wraps: git_transaction_new
+    /// Wraps: `git_transaction_new`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when the reference database cannot be opened or the transaction
+    /// cannot be allocated.
     pub fn new(repo: RepositoryRef<'r>) -> Result<TransactionBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -158,7 +178,7 @@ impl<'r> Transaction<'r> {
         // SAFETY: out is writable and repo is live for 'r; C stores that borrow
         // and obtains its own refdb reference. On failure it cleans its pool and
         // leaves out untouched. The runtime remains initialized through teardown.
-        let rc = unsafe { ffi::git_transaction_new(&mut out, repo.as_ptr().cast_mut()) };
+        let rc = unsafe { ffi::git_transaction_new(&raw mut out, repo.as_ptr().cast_mut()) };
         if rc < 0 {
             return Err(last());
         }
@@ -195,12 +215,19 @@ impl<'r> Transaction<'r> {
 pub struct ConfigTransaction<'c, 'r> {
     // Fields drop in declaration order: release the backend lock before the
     // config borrow. Never lend this common raw owner as a reference transaction.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     transaction: TransactionBox<'c>,
     config: ConfigMut<'c, 'r>,
 }
 
 impl<'c, 'r> ConfigTransaction<'c, 'r> {
-    /// Wraps: git_transaction_config_new
+    /// Wraps: `git_transaction_config_new`
     pub(crate) fn lock(mut config: ConfigMut<'c, 'r>) -> Result<Self, ConfigError> {
         if !runtime_pinned() {
             return Err(ConfigError::from_libgit2(ffi::GIT_ERROR));
@@ -210,7 +237,7 @@ impl<'c, 'r> ConfigTransaction<'c, 'r> {
         // the writer backend and retains one reference to it on success. The
         // returned owner keeps config live through unlock, and never treats this
         // config transaction as a reference transaction.
-        let rc = unsafe { ffi::git_config_lock(&mut out, config.as_mut_ptr()) };
+        let rc = unsafe { ffi::git_config_lock(&raw mut out, config.as_mut_ptr()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -224,18 +251,25 @@ impl<'c, 'r> ConfigTransaction<'c, 'r> {
         })
     }
 
+    /// The locked configuration the transaction writes through.
+    #[must_use]
     pub fn config(&self) -> ConfigRef<'_, 'r> {
         self.config.as_ref()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn config_mut(&mut self) -> ConfigMut<'_, 'r> {
         self.config.as_mut()
     }
 
     // The later commit-symbol wrapper must consume this owner: C clears cfg and
     // cfg_data after commit, so committing a config transaction twice is invalid.
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_transaction {
         self.transaction.as_c_ptr()
     }
@@ -253,31 +287,34 @@ mod unit_tests {
 
     #[test]
     fn layouts_and_handle_reborrows() {
-        assert_eq!(size_of::<Transaction>(), size_of::<ffi::git_transaction>());
         assert_eq!(
-            align_of::<Transaction>(),
+            size_of::<Transaction<'_>>(),
+            size_of::<ffi::git_transaction>()
+        );
+        assert_eq!(
+            align_of::<Transaction<'_>>(),
             align_of::<ffi::git_transaction>()
         );
         assert_eq!(
-            size_of::<TransactionBox>(),
+            size_of::<TransactionBox<'_>>(),
             size_of::<*mut ffi::git_transaction>()
         );
         assert_eq!(
-            size_of::<Option<TransactionBox>>(),
+            size_of::<Option<TransactionBox<'_>>>(),
             size_of::<*mut ffi::git_transaction>()
         );
         assert_eq!(
-            size_of::<TransactionRef>(),
+            size_of::<TransactionRef<'_, '_>>(),
             size_of::<*mut ffi::git_transaction>()
         );
         assert_eq!(
-            size_of::<TransactionMut>(),
+            size_of::<TransactionMut<'_, '_>>(),
             size_of::<*mut ffi::git_transaction>()
         );
         // SAFETY: bindgen represents this opaque type as a zero-sized byte array,
         // for which zero is valid. It is never passed to C or read as a C body.
         let mut raw = unsafe { core::mem::zeroed::<ffi::git_transaction>() };
-        let p = NonNull::from(&mut raw).cast::<Transaction>();
+        let p = NonNull::from(&mut raw).cast::<Transaction<'_>>();
         // SAFETY: raw is initialized opaque Rust-owned storage, live throughout
         // this test. No C function is called and no handle dereferences it.
         let shared = TransactionRef(unsafe { CBorrowedPtr::new(p) });
@@ -293,7 +330,7 @@ mod unit_tests {
         let path =
             std::env::temp_dir().join(format!("crustify-unit-tx-config-{}", std::process::id()));
         let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
-        let _ = std::fs::remove_file(&path);
+        drop(std::fs::remove_file(&path));
         let mut config = Config::new().unwrap();
         // SAFETY: a live sole config, writable file backend and NUL-terminated path;
         // no repository borrow is retained by this backend.
@@ -308,11 +345,14 @@ mod unit_tests {
                 ),
                 0
             );
+        };
+        // SAFETY: as above.
+        unsafe {
             assert_eq!(
                 ffi::git_config_set_int32(config.as_c_ptr(), c"a.b".as_ptr(), 1),
                 0
             );
-        }
+        };
         let mut tx = config.as_mut().lock().unwrap();
         // SAFETY: the exclusive reborrow keeps the config alive and the setter
         // stages a scalar copy. Commit is performed once, before dropping tx.
@@ -321,10 +361,11 @@ mod unit_tests {
                 ffi::git_config_set_int32(tx.config_mut().as_mut_ptr(), c"a.b".as_ptr(), 2),
                 0
             );
-            assert_eq!(ffi::git_transaction_commit(tx.as_mut_ptr()), 0);
-        }
+        };
+        // SAFETY: as above.
+        unsafe { assert_eq!(ffi::git_transaction_commit(tx.as_mut_ptr()), 0) };
         drop(tx); // Must not unlock again after C cleared cfg/cfg_data.
-        assert!(std::fs::read_to_string(&path).unwrap().contains("2"));
+        assert!(std::fs::read_to_string(&path).unwrap().contains('2'));
         drop(config);
         std::fs::remove_file(path).unwrap();
     }
@@ -348,7 +389,7 @@ mod unit_tests {
     }
 
     mod out_of_memory {
-        use core::ffi::{CStr, c_int, c_void};
+        use core::ffi::{CStr, c_void};
         use std::process::Command;
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering::SeqCst;
@@ -427,7 +468,7 @@ mod unit_tests {
             // every member set; libgit2 copies it before anything is allocated.
             let rc = unsafe {
                 ffi::git_libgit2_opts(
-                    ffi::GIT_OPT_SET_ALLOCATOR as c_int,
+                    ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(),
                     allocator.as_ref().as_ptr(),
                 )
             };
@@ -446,7 +487,7 @@ mod unit_tests {
                     let repo = Repository::new().unwrap();
                     let path = std::env::temp_dir()
                         .join(format!("crustify-unit-tx-oom-{}", std::process::id()));
-                    let _ = std::fs::remove_file(&path);
+                    drop(std::fs::remove_file(&path));
                     let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
                     let mut config = Config::new().unwrap();
                     // SAFETY: a live sole config and a NUL-terminated path; no repository.
@@ -462,7 +503,7 @@ mod unit_tests {
                     assert_eq!(rc, 0);
                     // A first error allocates the thread's error state, which an
                     // allocation failure would otherwise report instead.
-                    let _ = Config::new().unwrap().as_mut().lock().unwrap_err();
+                    drop(Config::new().unwrap().as_mut().lock().unwrap_err());
                     REFUSING.store(true, SeqCst);
                     // The pool's page is refused. A refused refdb allocation instead
                     // crashes in C (`git_refdb_open` frees an uninitialised pointer), see
@@ -479,7 +520,7 @@ mod unit_tests {
                     drop(config.as_mut().lock().unwrap());
                     assert!(!path.with_extension("lock").exists());
                     drop(config);
-                    let _ = std::fs::remove_file(path);
+                    drop(std::fs::remove_file(path));
                 },
             );
         }

@@ -1,15 +1,15 @@
 //! UB tests for `git2/mailmap.h`'s [`Mailmap`] owner and handles.
 //!
 //! A [`MailmapBox`] owns a C mailmap, its entry vector and every entry's strings, and
-//! frees them once through `git_mailmap_free` (ASan flags a double free or a use after
-//! free, LSan a leak). Each constructor is driven here: [`Mailmap::new`],
+//! frees them once through `git_mailmap_free` (`ASan` flags a double free or a use after
+//! free, `LSan` a leak). Each constructor is driven here: [`Mailmap::new`],
 //! [`Mailmap::from_buffer`] over well-formed, malformed and adversarial buffers
 //! (including the lines that make libgit2 leak, which the wrapper leaves out), and
 //! [`Mailmap::from_repository`] over a working directory, a bare repository, the
 //! `mailmap.file` and `mailmap.blob` settings, and a repository without paths. A
 //! mailmap keeps nothing of what built it, so it is used and dropped after its buffer
 //! and its repository. It is `Send` and `Sync`: boxes are built, shared and dropped
-//! across threads (TSan). The lookups are in [`lookups`] and [`signatures`]; the
+//! across threads (`TSan`). The lookups are in [`lookups`] and [`signatures`]; the
 //! handles here are only reborrowed. Illegal paths (a handle outliving its box, a
 //! shared handle next to an exclusive one) are in `compile_fail/`.
 
@@ -42,7 +42,7 @@ impl Scratch {
     fn new(tag: &str) -> Self {
         let path =
             std::env::temp_dir().join(format!("crustify-mailmap-ub-{}-{tag}", std::process::id()));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         fs::create_dir_all(&path).unwrap();
         Self(path.canonicalize().unwrap())
     }
@@ -50,7 +50,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        drop(fs::remove_dir_all(&self.0));
     }
 }
 
@@ -178,7 +178,7 @@ fn nul_bytes_are_refused_without_a_leak() {
 }
 
 /// A repository's mailmap, from each source libgit2 reads, outlives the repository
-/// (ASan flags a read of it, LSan a leak of what loading allocated).
+/// (`ASan` flags a read of it, `LSan` a leak of what loading allocated).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn repository_mailmaps_outlive_their_repository() {
@@ -217,7 +217,7 @@ fn repository_mailmaps_outlive_their_repository() {
 }
 
 /// Boxes are built on some threads, shared by reference across others, and dropped on
-/// yet others (TSan flags a race, ASan a free into the wrong state).
+/// yet others (`TSan` flags a race, `ASan` a free into the wrong state).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn mailmaps_cross_threads() {
@@ -238,7 +238,7 @@ fn mailmaps_cross_threads() {
             s.spawn(|| {
                 for mailmap in &built {
                     let shared = mailmap.as_ref();
-                    assert!(!format!("{shared:?}").is_empty());
+                    assert_ne!(format!("{shared:?}"), "");
                 }
             });
         }
@@ -263,13 +263,13 @@ fn mailmaps_cross_threads() {
 /// `MailmapMut::add_entry`.
 ///
 /// `resolve` hands back either the strings it was given or an entry's, which the
-/// mailmap owns: each is read after the other side is overwritten (ASan flags a string
+/// mailmap owns: each is read after the other side is overwritten (`ASan` flags a string
 /// read past its end or after it was freed). `add_entry` copies its strings, which are
-/// exact-length heap strings freed right after the call (BSan, ASan), and frees the entry
+/// exact-length heap strings freed right after the call (`BSan`, `ASan`), and frees the entry
 /// a later one for the same identity replaces, which no lookup still holds (the borrow
 /// checker; `compile_fail` doctest). An empty replaced email, which libgit2 leaks on,
-/// is refused (LSan). Lookups run on many threads through shared handles at once, and
-/// a mailmap filled on one thread is read on others (TSan).
+/// is refused (`LSan`). Lookups run on many threads through shared handles at once, and
+/// a mailmap filled on one thread is read on others (`TSan`).
 mod lookups {
     use std::ffi::{CStr, CString};
     use std::thread;
@@ -365,14 +365,14 @@ mod lookups {
 /// (`git_mailmap_resolve_signature`).
 ///
 /// A resolved signature is a fresh `git_signature` of libgit2's allocator, its strings
-/// copied from the input or the mailmap's entries: the owner releases it once (ASan:
-/// double free; LSan: leak), and it outlives both the mailmap and the input, which are
-/// on the heap and dropped first (ASan: a string still borrowed). Inputs come from
+/// copied from the input or the mailmap's entries: the owner releases it once (`ASan`:
+/// double free; `LSan`: leak), and it outlives both the mailmap and the input, which are
+/// on the heap and dropped first (`ASan`: a string still borrowed). Inputs come from
 /// every holder Rust has (an owned signature, a parsed one with a `-0000` zone, a
 /// [`SignatureView`] over heap strings freed right after the call) and resolve through
 /// entries, through no entry, and into strings libgit2 refuses (angle brackets, empty
 /// once trimmed), which leave nothing behind. A mailmap is `Sync`: signatures are
-/// resolved against one from several threads at once (TSan).
+/// resolved against one from several threads at once (`TSan`).
 ///
 /// [`MailmapRef::resolve_signature`]: libgit2::libgit2::object::mailmap::MailmapRef::resolve_signature
 /// [`SignatureView`]: libgit2::libgit2::core::types::SignatureView
@@ -419,7 +419,7 @@ mod signatures {
         drop(parsed);
         for i in 0..8 {
             let (name, email) = (exact(&format!("  Name {i} ")), exact("cto@coompany.xx"));
-            let view = SignatureView::new(&name, &email, Time::new(i, -i as i32));
+            let view = SignatureView::new(&name, &email, Time::new(i, i32::try_from(-i).unwrap()));
             resolved.push(
                 (*mailmap)
                     .as_ref()
@@ -443,7 +443,7 @@ mod signatures {
         assert_eq!(resolved[1].as_ref().when().sign(), b'-');
         for (i, sig) in resolved[2..].iter().enumerate() {
             assert_eq!(strings(sig), (format!("Name {i}"), "cto@company.xx".into()));
-            assert_eq!(sig.as_ref().when().seconds(), i as i64);
+            assert_eq!(sig.as_ref().when().seconds(), i64::try_from(i).unwrap());
         }
         let copies: Vec<_> = resolved.iter().map(Clone::clone).collect();
         drop(resolved);

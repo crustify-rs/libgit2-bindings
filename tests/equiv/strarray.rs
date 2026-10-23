@@ -133,8 +133,9 @@ fn install_tracing_allocator() {
     };
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member set,
     // which it copies; nothing is allocated yet, so no storage changes allocator.
-    let rc =
-        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator) };
+    let rc = unsafe {
+        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR.cast_signed(), &raw mut allocator)
+    };
     assert_eq!(rc, 0);
     // SAFETY: no arguments; refcounted, never released in this process.
     assert!(unsafe { ffi::git_libgit2_init() } > 0);
@@ -215,9 +216,15 @@ const EMPTY: ffi::git_strarray = ffi::git_strarray {
 /// The strings of a raw array, read as C code indexes them.
 fn c_contents(array: &ffi::git_strarray) -> Vec<Vec<u8>> {
     (0..array.count)
-        // SAFETY: `strings` holds at least `count` live strings whenever `count` is
-        // non-zero.
-        .map(|i| unsafe { CStr::from_ptr(*array.strings.add(i)) })
+        .map(|i| {
+            // SAFETY: `strings` holds at least `count` live strings whenever `count` is
+            // non-zero, and `i < count`.
+            let slot = unsafe { array.strings.add(i) };
+            // SAFETY: as above.
+            let s = unsafe { *slot };
+            // SAFETY: as above, a live NUL-terminated string.
+            unsafe { CStr::from_ptr(s) }
+        })
         .map(|s| s.to_bytes().to_vec())
         .collect()
 }
@@ -246,8 +253,10 @@ fn c_copy(src: &ffi::git_strarray) -> ffi::git_strarray {
     // SAFETY: the fresh array holds `count` pointers (`git__calloc` zeroes them).
     unsafe { ptr::write_bytes(tgt.strings, 0, src.count) };
     for i in 0..src.count {
-        // SAFETY: `src` holds `count` elements.
-        let s = unsafe { *src.strings.add(i) };
+        // SAFETY: `src` holds `count` elements, and `i < count`.
+        let slot = unsafe { src.strings.add(i) };
+        // SAFETY: as above.
+        let s = unsafe { *slot };
         if s.is_null() {
             continue;
         }
@@ -255,10 +264,11 @@ fn c_copy(src: &ffi::git_strarray) -> ffi::git_strarray {
         let bytes = unsafe { CStr::from_ptr(s) }.to_bytes_with_nul();
         let dup = c_alloc(bytes.len()).cast::<u8>();
         // SAFETY: `dup` is fresh and `bytes.len()` long; `tgt.count < src.count`.
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), dup, bytes.len());
-            *tgt.strings.add(tgt.count) = dup.cast();
-        }
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), dup, bytes.len()) };
+        // SAFETY: `tgt` has room for one more string past `count`.
+        let slot = unsafe { tgt.strings.add(tgt.count) };
+        // SAFETY: as above.
+        unsafe { *slot = dup.cast() };
         tgt.count += 1;
     }
     tgt
@@ -270,8 +280,10 @@ fn c_truncate(array: &mut ffi::git_strarray, len: usize) {
         return;
     }
     for i in len..array.count {
-        // SAFETY: `i < count`: an owned string, released once.
-        c_free(unsafe { *array.strings.add(i) }.cast());
+        // SAFETY: `i < count`: within the array.
+        let slot = unsafe { array.strings.add(i) };
+        // SAFETY: an owned string, released once.
+        c_free(unsafe { *slot }.cast());
     }
     array.count = len;
 }
@@ -291,7 +303,8 @@ fn c_take(array: &mut ffi::git_strarray) -> ffi::git_strarray {
 fn c_extensions() -> ffi::git_strarray {
     let mut out = EMPTY;
     // SAFETY: `GIT_OPT_GET_EXTENSIONS` takes a `git_strarray *`, which it fills.
-    let rc = unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS as c_int, &raw mut out) };
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_GET_EXTENSIONS.cast_signed(), &raw mut out) };
     assert_eq!(rc, 0);
     out
 }
@@ -302,7 +315,7 @@ fn set_extensions(names: &[&CStr]) {
     // SAFETY: an array of `len` strings, which libgit2 copies.
     let rc = unsafe {
         ffi::git_libgit2_opts(
-            ffi::GIT_OPT_SET_EXTENSIONS as c_int,
+            ffi::GIT_OPT_SET_EXTENSIONS.cast_signed(),
             ptrs.as_ptr(),
             ptrs.len(),
         )

@@ -661,7 +661,7 @@ mod custom_backends {
             match (matching.next(), matching.next()) {
                 (Some(_), Some(_)) => Err(not_unique()),
                 (Some((_, v)), None) => {
-                    *v = value.to_owned();
+                    value.clone_into(v);
                     Ok(())
                 }
                 _ => {
@@ -684,7 +684,7 @@ mod custom_backends {
             for (k, v) in &mut values.0 {
                 if k.as_c_str() == key && v.to_bytes().windows(pattern.len()).any(|w| w == pattern)
                 {
-                    *v = value.to_owned();
+                    value.clone_into(v);
                     replaced = true;
                 }
             }

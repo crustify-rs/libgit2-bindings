@@ -3,7 +3,7 @@
 //!
 //! libgit2 looks the thread's error state up under a TLS key that only exists while
 //! it is initialised, so each wrapper is also tried as a process's first contact with
-//! libgit2, where ASan flags a write through the nonexistent key. Messages are copied
+//! libgit2, where `ASan` flags a write through the nonexistent key. Messages are copied
 //! into a per-thread buffer: dropping the source, growing the buffer, racing threads
 //! and thread exit must neither dangle nor leak.
 
@@ -28,7 +28,7 @@ fn class(c: ErrorClass) -> c_int {
 
 fn text(len: usize, seed: u8) -> CString {
     let bytes = (0..len)
-        .map(|i| b'a' + (i as u8).wrapping_add(seed) % 26)
+        .map(|i| b'a' + i.to_le_bytes()[0].wrapping_add(seed) % 26)
         .collect::<Vec<_>>();
     CString::new(bytes).unwrap()
 }
@@ -164,7 +164,7 @@ fn messages_are_copied_at_every_size() {
         .into_iter()
         .enumerate()
     {
-        let expected = text(len, i as u8);
+        let expected = text(len, u8::try_from(i).unwrap());
         let source = expected.clone();
         errors::set(ErrorClass::Tree, &source);
         drop(source);
@@ -207,7 +207,7 @@ fn messages_and_classes_are_kept_verbatim() {
 }
 
 /// Every setter and `clear`, in alternation, on threads that check only their own
-/// errors; TSan flags any state the threads share unsynchronised.
+/// errors; `TSan` flags any state the threads share unsynchronised.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn threads_set_and_clear_concurrently() {
@@ -255,7 +255,7 @@ fn threads_set_and_clear_concurrently() {
 
 /// A thread-local destructor that sets and reads errors while its thread exits: the
 /// thread's state is allocated or reused there, and still released with the thread
-/// (LSan flags a leak, ASan a use after free of a state torn down first).
+/// (`LSan` flags a leak, `ASan` a use after free of a state torn down first).
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn errors_set_while_a_thread_exits_are_released() {
@@ -302,8 +302,8 @@ fn errors_set_while_a_thread_exits_are_released() {
     }
 }
 
-/// A thread that exits holding a message releases its error state with it; LSan
-/// flags a leak, ASan a double free.
+/// A thread that exits holding a message releases its error state with it; `LSan`
+/// flags a leak, `ASan` a double free.
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn thread_exit_releases_the_message() {
