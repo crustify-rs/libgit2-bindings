@@ -83,7 +83,7 @@ fn assert_equivalent(data: &[u8]) {
 /// A deterministic xorshift stream of inputs, biased towards the bytes the heuristic
 /// tells apart.
 fn generated() -> impl Iterator<Item = Vec<u8>> {
-    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
     let mut next = move || {
         state ^= state << 13;
         state ^= state >> 7;
@@ -91,7 +91,7 @@ fn generated() -> impl Iterator<Item = Vec<u8>> {
         state
     };
     const PICKS: [u8; 12] = [
-        0, 0x01, 0x08, b'\t', b'\n', 0x0c, 0x1b, b'a', 0x7f, 0xef, 0xfe, 0xff,
+        0, 0x01, 0x08, b'\t', b'\n', 0x0C, 0x1B, b'a', 0x7F, 0xEF, 0xFE, 0xFF,
     ];
     (0..2000).map(move |_| {
         let len = (next() % 400) as usize;
@@ -172,7 +172,7 @@ fn printable_ratio_around_128() {
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn whitespace_classes() {
     init();
-    for ws in [b' ', b'\t', b'\n', 0x0b, 0x0c, b'\r', 0x08, 0x1b, 0x7f] {
+    for ws in [b' ', b'\t', b'\n', 0x0B, 0x0C, b'\r', 0x08, 0x1B, 0x7F] {
         for count in [127, 128] {
             let mut run = vec![ws; count];
             run.push(0x01);
@@ -220,7 +220,7 @@ fn growing_buffer_sequence() {
         .iter()
         .copied()
         .chain(std::iter::repeat_n(b'w', 130))
-        .chain([0x01, 0x02, b'\n', 0x7f])
+        .chain([0x01, 0x02, b'\n', 0x7F])
         .chain(std::iter::repeat_n(b'w', 300))
         .chain([0]);
     for byte in steps {
@@ -373,10 +373,7 @@ mod filter_flags {
 
         fn build() -> Self {
             init();
-            let path = concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/c/tests/resources/crlf.git\0"
-            );
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/c/tests/resources/crlf.git\0");
             let mut repo = ptr::null_mut();
             // SAFETY: `repo` receives the repository; `path` is NUL-terminated.
             let rc = unsafe { ffi::git_repository_open_bare(&mut repo, path.as_ptr().cast()) };
@@ -1192,8 +1189,8 @@ mod filter_options {
 
     fn c_init(version: u32) -> (c_int, ffi::git_blob_filter_options) {
         let mut opts = ffi::git_blob_filter_options {
-            version: 0x5a5a,
-            flags: 0xa5a5,
+            version: 0x5A5A,
+            flags: 0xA5A5,
             reserved: NonNull::<u8>::dangling().as_ptr().cast(),
             attr_commit_id: ffi::git_oid::default(),
         };
@@ -1217,7 +1214,7 @@ mod filter_options {
         for (version, shown) in [(0, "0"), (2, "2"), (u32::MAX, "-1")] {
             let (rc, untouched) = c_init(version);
             assert_eq!(rc, -1);
-            assert_eq!((untouched.version, untouched.flags), (0x5a5a, 0xa5a5));
+            assert_eq!((untouched.version, untouched.flags), (0x5A5A, 0xA5A5));
             let message = format!("invalid version {shown} on git_blob_filter_options");
             assert_eq!(c_last(), (ffi::GIT_ERROR_INVALID as c_int, message));
         }
@@ -1241,11 +1238,11 @@ mod filter_options {
             Write::Flags(0),
             Write::Version(2),
             Write::Flags(u32::MAX),
-            Write::Id(1, 0xab),
+            Write::Id(1, 0xAB),
             Write::Reserved,
             Write::Version(-1),
             Write::Flags(0x8000_0009),
-            Write::Id(2, 0x5a),
+            Write::Id(2, 0x5A),
             Write::ClearReserved,
             Write::Id(0, 0),
             Write::Version(1),

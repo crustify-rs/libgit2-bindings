@@ -429,7 +429,7 @@ mod commit {
             let mut oid = Box::new(id(hex));
             let full = Commit::lookup(r, Oid::as_ref(&oid)).unwrap();
             let short = Commit::lookup_prefix(r, Oid::as_ref(&oid), 7 + i).unwrap();
-            Oid::as_mut(&mut oid).set_id([0xff; 32]);
+            Oid::as_mut(&mut oid).set_id([0xFF; 32]);
             drop(oid);
             assert!(CommitArc::ptr_eq(&full, &short));
             let copy = full.as_ref().to_commit();
@@ -533,7 +533,7 @@ mod commit {
                 ErrorClass::Object,
             );
         }
-        let wide = Oid::from_raw(&[0xa6; 32], OidType::Sha256).unwrap();
+        let wide = Oid::from_raw(&[0xA6; 32], OidType::Sha256).unwrap();
         assert_failed(Commit::lookup(r, wide.as_ref()), -1, ErrorClass::Invalid);
         assert_failed(
             Commit::lookup_prefix(r, wide.as_ref(), 64),
@@ -783,11 +783,10 @@ mod getters {
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
-    use crate::fixture::TempRepo;
-    use crate::fixture::isolated;
     use crate::fixture::object_and_tree_entry::{
         enable_caching, open_testrepo, repository, write_raw,
     };
+    use crate::fixture::{TempRepo, isolated};
 
     /// `testrepo.git`'s commits: `HEAD`, the merge, a root.
     const HEAD: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
@@ -851,7 +850,7 @@ mod getters {
         for hex in [HEAD, MERGE, ROOT] {
             let mut oid = Box::new(id(hex));
             let commit = Commit::lookup(r, Oid::as_ref(&oid)).unwrap();
-            Oid::as_mut(&mut oid).set_id([0xff; 32]);
+            Oid::as_mut(&mut oid).set_id([0xFF; 32]);
             drop(oid);
             let other = commit.clone();
             held.push(commit);
@@ -1164,7 +1163,6 @@ mod create_ext_options {
         // The default options write a plain commit and move no reference.
         let text = create(&repo, &mut CreateExtOptions::new()).unwrap();
         assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
-
     }
 }
 
@@ -1182,13 +1180,13 @@ mod create_ext_options {
 /// call and keeps nothing: two tests hand them to `create_from_tree` and
 /// `amend_from_tree`, everything they borrow on the heap and freed right after the call
 /// (ASan, BSan: a retained pointer), one with a signer whose closure writes its own state
-/// between calls and panics once, which the wrapper resumes. Options that outlive their borrows, aliased handles and a signer that
-/// does not outlive the options do not compile (`compile_fail/` and the type's doctests).
-/// The options are neither `Send` nor `Sync`; each thread builds its own and hands it to
-/// libgit2 in its own repository at once (TSan), on the path writing no reference: the
-/// tests that commit run in a child, on one thread, since glibc's `tzset` (the reflog's
-/// time) is reported by TSan against any concurrent caller. `CreateOptions::new` fills the options through
-/// libgit2, so Miri skips every test here; the module's `unit_tests` run the same
+/// between calls and panics once, which the wrapper resumes. Options that outlive their borrows,
+/// aliased handles and a signer that does not outlive the options do not compile (`compile_fail/`
+/// and the type's doctests). The options are neither `Send` nor `Sync`; each thread builds its own
+/// and hands it to libgit2 in its own repository at once (TSan), on the path writing no reference:
+/// the tests that commit run in a child, on one thread, since glibc's `tzset` (the reflog's
+/// time) is reported by TSan against any concurrent caller. `CreateOptions::new` fills the options
+/// through libgit2, so Miri skips every test here; the module's `unit_tests` run the same
 /// projections under Miri over options built in Rust.
 mod create_options {
     use std::cell::Cell;
@@ -1611,9 +1609,8 @@ mod committing_on_head {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::thread;
 
-    use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::core::types::{
-        Signature, SignatureBox, SignatureView, StreamError, Time,
+        FileMode, Signature, SignatureBox, SignatureView, StreamError, Time,
     };
     use libgit2::libgit2::object::blob::create_from_buffer;
     use libgit2::libgit2::object::commit::{
@@ -2449,7 +2446,10 @@ mod signers {
             state.rc.set(code);
             let result = create(&repo, &mut options);
             assert_eq!(result.as_ref().err(), (!written).then_some(&code), "{code}");
-            assert_eq!(result.map(|t| t.contains("gpgsig")).unwrap_or(false), written);
+            assert_eq!(
+                result.map(|t| t.contains("gpgsig")).unwrap_or(false),
+                written
+            );
         }
         drop(signer);
         assert_eq!(state.calls.get(), 5);
@@ -2462,15 +2462,28 @@ mod signers {
     fn replaced_and_cleared_signers() {
         let repo = TempRepo::new("signer-replaced");
         let (first, second) = (Signer::new(), Signer::new());
-        let mut f1 = |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| first.sign(b, c, c"1");
-        let mut f2 = |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| second.sign(b, c, c"2");
-        let (mut s1, mut s2) = (SignatureCallback::new(&mut f1), SignatureCallback::new(&mut f2));
+        let mut f1 =
+            |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| first.sign(b, c, c"1");
+        let mut f2 =
+            |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| second.sign(b, c, c"2");
+        let (mut s1, mut s2) = (
+            SignatureCallback::new(&mut f1),
+            SignatureCallback::new(&mut f2),
+        );
         let mut options = CreateExtOptions::new();
         options.as_mut().set_signer(Some(&mut s1));
         options.as_mut().set_signer(Some(&mut s2));
         assert!(options.as_ref().has_signer());
-        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig 2\n"));
-        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig 2\n"));
+        assert!(
+            create(&repo, &mut options)
+                .unwrap()
+                .contains("\ngpgsig 2\n")
+        );
+        assert!(
+            create(&repo, &mut options)
+                .unwrap()
+                .contains("\ngpgsig 2\n")
+        );
         options.as_mut().set_signer(None);
         assert!(!options.as_ref().has_signer());
         assert!(!create(&repo, &mut options).unwrap().contains("gpgsig"));
@@ -2502,7 +2515,11 @@ mod signers {
             caught.unwrap_err().downcast_ref::<&str>(),
             Some(&"signing panicked")
         );
-        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig ok\n"));
+        assert!(
+            create(&repo, &mut options)
+                .unwrap()
+                .contains("\ngpgsig ok\n")
+        );
         // Nothing is left to resume.
         signer.resume_panic();
         drop(signer);
@@ -2517,13 +2534,18 @@ mod signers {
                 s.spawn(move || {
                     let repo = TempRepo::new(&format!("signer-thread-{t}"));
                     let state = Signer::new();
-                    let mut f =
-                        |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| state.sign(b, c, c"t");
+                    let mut f = |b: CommitBuilderMut<'_>, _: RepositoryRef<'_>, c: &CStr| {
+                        state.sign(b, c, c"t")
+                    };
                     let mut signer = SignatureCallback::new(&mut f);
                     let mut options = CreateExtOptions::new();
                     options.as_mut().set_signer(Some(&mut signer));
                     for _ in 0..4 {
-                        assert!(create(&repo, &mut options).unwrap().contains("\ngpgsig t\n"));
+                        assert!(
+                            create(&repo, &mut options)
+                                .unwrap()
+                                .contains("\ngpgsig t\n")
+                        );
                     }
                     drop(signer);
                     assert_eq!(state.calls.get(), 4);
@@ -3219,10 +3241,11 @@ mod create_callback {
             ));
             match s.len() % 3 {
                 0 => Ok(None),
-                1 => Ok(Some(parents.first().map_or_else(
-                    || Oid::zero(OidType::Sha1),
-                    |p| p.id().to_oid(),
-                ))),
+                1 => Ok(Some(
+                    parents
+                        .first()
+                        .map_or_else(|| Oid::zero(OidType::Sha1), |p| p.id().to_oid()),
+                )),
                 _ => Err(StreamError::new(ErrorClass::Callback, c"no")),
             }
         };

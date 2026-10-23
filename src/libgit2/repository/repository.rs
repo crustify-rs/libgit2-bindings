@@ -360,8 +360,8 @@ impl Extend<InitFlag> for InitFlags {
 }
 
 impl IntoIterator for InitFlags {
-    type Item = InitFlag;
     type IntoIter = InitFlagsIter;
+    type Item = InitFlag;
 
     fn into_iter(self) -> InitFlagsIter {
         self.iter()
@@ -605,12 +605,12 @@ pub struct InitOptionsMut<'a, 'o>(
 // through its `PhantomData<&'a mut InitOptions<'o>>`.
 unsafe impl<'o> CCell for InitOptions<'o> {
     type C = ffi::git_repository_init_options;
-    type Ref<'a>
-        = InitOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = InitOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = InitOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -1402,8 +1402,8 @@ impl Extend<OpenFlag> for OpenFlags {
 }
 
 impl IntoIterator for OpenFlags {
-    type Item = OpenFlag;
     type IntoIter = OpenFlagsIter;
+    type Item = OpenFlag;
 
     fn into_iter(self) -> OpenFlagsIter {
         self.iter()
@@ -1630,7 +1630,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_repository
-    Repository, RepositoryRef, RepositoryMut, ffi::git_repository
+    Repository,
+    RepositoryRef,
+    RepositoryMut,
+    ffi::git_repository
 );
 
 /// Releases a repository through `git_repository_free`: the counted references it
@@ -2624,6 +2627,7 @@ type MergeheadFn<'f> = dyn FnMut(OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f
 ///
 /// ```
 /// use std::ops::ControlFlow;
+///
 /// use libgit2::libgit2::oid::oid::{Oid, OidType};
 /// use libgit2::libgit2::repository::repository::MergeheadCallback;
 ///
@@ -2754,7 +2758,8 @@ unsafe extern "C" fn mergehead_with(id: *const ffi::git_oid, payload: *mut c_voi
     }
 }
 
-// --- Routines: heads and lookups ---------------------------------------------------------------------
+// --- Routines: heads and lookups
+// ---------------------------------------------------------------------
 
 /// The failure of a routine that returned `rc`, with the thread's last error.
 fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
@@ -3230,13 +3235,13 @@ impl<'a> RepositoryRef<'a> {
     /// This is `git_repository_commit_parents` composed from the routines it calls,
     /// for two of its defects:
     ///
-    /// - when it fails after collecting `HEAD`'s commit (a `MERGE_HEAD` line it cannot
-    ///   parse, or naming no commit), it frees the commits it collected with `free`
-    ///   while the repository's object cache still holds them, which the next lookup of
-    ///   one, or freeing the repository, reads: a use after free;
-    /// - it puts whatever object `HEAD` resolves to in the array, as a commit: a tag,
-    ///   or a tree. Here a tag is peeled to its commit, as git does, and anything else
-    ///   is refused (code [`ErrorCode::InvalidSpec`]).
+    /// - when it fails after collecting `HEAD`'s commit (a `MERGE_HEAD` line it cannot parse, or
+    ///   naming no commit), it frees the commits it collected with `free` while the repository's
+    ///   object cache still holds them, which the next lookup of one, or freeing the repository,
+    ///   reads: a use after free;
+    /// - it puts whatever object `HEAD` resolves to in the array, as a commit: a tag, or a tree.
+    ///   Here a tag is peeled to its commit, as git does, and anything else is refused (code
+    ///   [`ErrorCode::InvalidSpec`]).
     ///
     /// It also leaks `HEAD`'s reference when `HEAD` names a missing object (inside
     /// `git_revparse_ext`, which drops the reference when the object lookup fails).
@@ -3388,6 +3393,7 @@ type FetchheadFn<'f> = dyn FnMut(FetchheadEntry<'_>) -> ControlFlow<()> + 'f;
 ///
 /// ```
 /// use std::ops::ControlFlow;
+///
 /// use libgit2::libgit2::oid::oid::{Oid, OidType};
 /// use libgit2::libgit2::repository::repository::{FetchheadEntry, FetchheadForeachCallback};
 ///
@@ -3398,7 +3404,12 @@ type FetchheadFn<'f> = dyn FnMut(FetchheadEntry<'_>) -> ControlFlow<()> + 'f;
 /// };
 /// let mut callback = FetchheadForeachCallback::new(&mut count);
 /// let id = Oid::zero(OidType::Sha1);
-/// let entry = FetchheadEntry { ref_name: None, remote_url: None, id: id.as_ref(), is_merge: true };
+/// let entry = FetchheadEntry {
+///     ref_name: None,
+///     remote_url: None,
+///     id: id.as_ref(),
+///     is_merge: true,
+/// };
 /// assert_eq!(callback.call(entry), ControlFlow::Continue(()));
 /// drop(callback);
 /// assert_eq!(merged, 1);
@@ -3650,7 +3661,7 @@ mod unit_tests {
             assert_eq!(set.bits(), 0x9);
             set |= InitFlag::NoReinit;
             set |= InitFlags::from(InitFlag::RelativeGitlink);
-            assert_eq!(set, InitFlags::from_bits_retain(0x4b));
+            assert_eq!(set, InitFlags::from_bits_retain(0x4B));
             assert_eq!(
                 set.into_iter().collect::<Vec<_>>(),
                 [
@@ -3664,7 +3675,7 @@ mod unit_tests {
             set.remove(InitFlag::Bare);
             assert!(!set.contains(InitFlag::Bare));
             set.extend([InitFlag::ExternalTemplate]);
-            assert_eq!(set.bits(), 0x6a);
+            assert_eq!(set.bits(), 0x6A);
             assert_eq!(InitFlags::default(), InitFlags::empty());
             assert!(InitFlags::default().is_empty());
         }
@@ -3680,7 +3691,7 @@ mod unit_tests {
             let truncated = InitFlags::from_bits_truncate(raw);
             assert_eq!(truncated, InitFlag::Bare.into());
             assert_eq!(truncated.unnamed_bits(), 0);
-            assert_eq!(InitFlags::from_bits_truncate(u32::MAX).bits(), 0x7b);
+            assert_eq!(InitFlags::from_bits_truncate(u32::MAX).bits(), 0x7B);
             assert!(InitFlags::from_bits_retain(0x4).iter().next().is_none());
         }
 
@@ -3765,7 +3776,7 @@ mod unit_tests {
                 seen |= flag.bit();
             }
             assert_eq!(OpenFlags::NAMED, seen);
-            assert_eq!(OpenFlags::NAMED, 0x1f);
+            assert_eq!(OpenFlags::NAMED, 0x1F);
         }
 
         #[test]
@@ -3809,7 +3820,7 @@ mod unit_tests {
             assert_eq!(more.unnamed_bits(), 1 << 7);
             assert_eq!(
                 OpenFlag::ALL.into_iter().collect::<OpenFlags>().bits(),
-                0x1f
+                0x1F
             );
         }
 
@@ -3820,7 +3831,7 @@ mod unit_tests {
             assert_eq!(iter.by_ref().count(), 5);
             assert_eq!(iter.size_hint(), (0, Some(0)));
             assert_eq!(iter.next(), None);
-            assert_eq!(OpenFlags::from_bits_retain(!0x1f).iter().next(), None);
+            assert_eq!(OpenFlags::from_bits_retain(!0x1F).iter().next(), None);
         }
 
         /// A formatter target refusing every write after the first `ok`.
@@ -3868,9 +3879,10 @@ mod unit_tests {
     }
 
     mod state {
-        use super::super::*;
         use std::collections::HashSet;
         use std::error::Error;
+
+        use super::super::*;
 
         /// Every `git_repository_state_t` constant, beside the variant that must carry it.
         const STATES: [(ffi::git_repository_state_t, RepositoryState); 12] = [
@@ -3984,17 +3996,16 @@ mod unit_tests {
     }
 
     mod repository_owner {
-        use super::super::*;
-
-        use std::process::Command;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-
-        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::PathBuf;
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        use super::super::*;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
         /// A scratch directory of its own under the temp dir, removed when dropped.
         struct Scratch {
@@ -4080,6 +4091,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -4093,6 +4105,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }
@@ -4326,8 +4339,9 @@ mod unit_tests {
     }
 
     mod init_options {
-        use super::super::*;
         use std::ffi::CString;
+
+        use super::super::*;
 
         /// `GIT_REPOSITORY_INIT_OPTIONS_INIT`, built in Rust so Miri can run the
         /// accessors; `new_matches_the_template` ties it to
@@ -4513,13 +4527,13 @@ mod unit_tests {
     }
 
     mod routines {
-        use super::super::*;
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::{Path, PathBuf};
         use std::process::Command;
 
+        use super::super::*;
         use crate::libgit2::odb::odb::Odb;
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
@@ -4651,14 +4665,13 @@ mod unit_tests {
     }
 
     mod heads_and_parts {
-        use super::super::*;
-
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::{Path, PathBuf};
         use std::process::Command;
 
+        use super::super::*;
         use crate::libgit2::oid::oid::Oid;
         use crate::libgit2::repository::worktree::WorktreeBox;
 
@@ -5036,12 +5049,12 @@ mod unit_tests {
     }
 
     mod head_and_lookups {
-        use super::super::*;
-
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::{Path, PathBuf};
+
+        use super::super::*;
 
         const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/c/tests/resources");
 
@@ -5434,12 +5447,13 @@ mod unit_tests {
     }
 
     mod init_ext_and_fetchhead {
-        use super::super::*;
         use core::cell::Cell;
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::{Path, PathBuf};
+
+        use super::super::*;
 
         fn scratch(tag: &str) -> PathBuf {
             let path = std::env::temp_dir().join(format!(

@@ -60,6 +60,7 @@ impl PairRef<'_> {
         // SAFETY: a read through the shared handle's pointer to a live `pair_st`.
         unsafe { core::ptr::addr_of!((*self.as_ptr()).a).read() }
     }
+
     pub fn b(&self) -> u32 {
         // SAFETY: as above.
         unsafe { core::ptr::addr_of!((*self.as_ptr()).b).read() }
@@ -80,7 +81,8 @@ impl PairMut<'_> {
 // --- `git2/sys/alloc.h` ------------------------------------------------------------
 
 use core::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 
 use libgit2::ffi;
 use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
@@ -1026,6 +1028,7 @@ pub mod index {
         fn c_ptr(&self) -> *mut ffi::git_index {
             self.as_c_ptr()
         }
+
         fn handle(&self) -> IndexRef<'_> {
             self.as_ref()
         }
@@ -1035,6 +1038,7 @@ pub mod index {
         fn c_ptr(&self) -> *mut ffi::git_index {
             self.as_c_ptr()
         }
+
         fn handle(&self) -> IndexRef<'_> {
             self.as_ref()
         }
@@ -1070,7 +1074,9 @@ pub mod index {
         let mut entry = IndexEntry::new(path, Oid::zeroed().as_ref(), FileMode::Blob);
         let mut handle = entry.as_mut();
         // `GIT_INDEX_ENTRY_STAGESHIFT`, a header macro.
-        handle.set_flags(EntryFlags::from_bits_retain(u32::from(stage) << 12)).unwrap();
+        handle
+            .set_flags(EntryFlags::from_bits_retain(u32::from(stage) << 12))
+            .unwrap();
         handle.id_mut().set_kind(OidType::Sha1);
         handle.id_mut().set_id(bytes);
         status(index.as_mut().add(entry.as_ref()))
@@ -1270,7 +1276,8 @@ pub mod annotated_commit {
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
     use std::ptr::{self, NonNull};
-    use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicPtr, AtomicUsize};
 
     use libgit2::ffi;
     use libgit2::libgit2::oid::oid::OidType;
@@ -2008,7 +2015,7 @@ pub mod filter_probe {
         SEEN.with_borrow_mut(|seen| seen.push((!id.is_null()).then(|| hex(id))));
         PAYLOADS.with_borrow_mut(|p| p.0 += 1);
         // SAFETY: libgit2's live payload slot; the list hands it back to `probe_cleanup`.
-        unsafe { payload.write(Box::into_raw(Box::new(0x5eed_u64)).cast()) };
+        unsafe { payload.write(Box::into_raw(Box::new(0x5EED_u64)).cast()) };
         0
     }
 
@@ -2016,7 +2023,7 @@ pub mod filter_probe {
     unsafe extern "C" fn probe_cleanup(_filter: *mut ffi::git_filter, payload: *mut c_void) {
         // SAFETY: the payload `probe_check` boxed, handed back once by the list's free.
         let value = unsafe { Box::from_raw(payload.cast::<u64>()) };
-        assert_eq!(*value, 0x5eed);
+        assert_eq!(*value, 0x5EED);
         PAYLOADS.with_borrow_mut(|p| p.1 += 1);
     }
 

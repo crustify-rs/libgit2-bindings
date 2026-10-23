@@ -113,12 +113,12 @@ pub struct ReferenceMut<'a, 'r>(
 // `PhantomData<&'a mut Reference<'r>>`.
 unsafe impl<'r> CCell for Reference<'r> {
     type C = ffi::git_reference;
-    type Ref<'a>
-        = ReferenceRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = ReferenceMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ReferenceRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -360,17 +360,19 @@ impl UnattachedReference {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::oid::oid::{Oid, OidType};
-    use crate::libgit2::util::errors::ErrorClass;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{c_int, c_void};
     use core::mem::size_of;
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
     use std::process::Command;
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::libgit2::oid::oid::{Oid, OidType};
+    use crate::libgit2::util::errors::ErrorClass;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -429,6 +431,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -442,6 +445,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }
@@ -619,7 +623,7 @@ mod unit_tests {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn unattached_raw_seam_round_trips() {
         assert!(runtime_pinned());
-        let id = sha1(0x5a);
+        let id = sha1(0x5A);
         // SAFETY: NUL-terminated name and a live id, copied; the result is a fresh
         // reference the caller owns.
         let raw = unsafe {

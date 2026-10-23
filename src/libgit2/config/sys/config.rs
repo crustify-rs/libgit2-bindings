@@ -29,14 +29,13 @@ use std::rc::Rc;
 
 use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, define_ctype};
 
+use crate::ffi;
 use crate::libgit2::config::config::{
     ConfigError, ConfigLevel, ConfigMut, EntryArc, EntryMut, EntryRef,
 };
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
 use crate::libgit2::util::sys::errors::set;
-
-use crate::ffi;
 
 /// Caller-owned memory backend options, borrowing strings for `'o`.
 ///
@@ -122,12 +121,12 @@ pub struct BackendMemoryOptionsMut<'a, 'o>(
 // reference to C memory. Mut is invariant in Self through its exclusive marker.
 unsafe impl<'o> CCell for BackendMemoryOptions<'o> {
     type C = ffi::git_config_backend_memory_options;
-    type Ref<'a>
-        = BackendMemoryOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = BackendMemoryOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = BackendMemoryOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -356,7 +355,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_config_backend_entry
-    BackendEntry, BackendEntryRef, BackendEntryMut, ffi::git_config_backend_entry
+    BackendEntry,
+    BackendEntryRef,
+    BackendEntryMut,
+    ffi::git_config_backend_entry
 );
 
 /// Releases one acquired reference through the entry's own callback. State is
@@ -653,12 +655,12 @@ pub struct IteratorMut<'a, 'c>(IteratorRef<'a, 'c>, PhantomData<&'a mut Iterator
 // in Iterator<'c>, and shared handles provide only reads, never advancement.
 unsafe impl<'c> CCell for Iterator<'c> {
     type C = ffi::git_config_iterator;
-    type Ref<'a>
-        = IteratorRef<'a, 'c>
-    where
-        Self: 'a;
     type Mut<'a>
         = IteratorMut<'a, 'c>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = IteratorRef<'a, 'c>
     where
         Self: 'a;
 }
@@ -851,10 +853,11 @@ impl IteratorNext {
 // libgit2 with USE_REGEX=pcre2; these bindings link the same system PCRE2 library,
 // use the same options and preserve arbitrary pattern/value bytes (not UTF-8).
 pub(crate) mod value_filter {
-    use super::*;
-    use crate::libgit2::util::sys::errors::set_oom;
     use ffibox::{CBox, impl_cdrop};
     use pcre2_sys as pcre;
+
+    use super::*;
+    use crate::libgit2::util::sys::errors::set_oom;
 
     define_ctype!(Regex, RegexRef, RegexMut, pcre::pcre2_code_8);
     /// PCRE2's compiled-pattern releaser, recovered through ffibox.
@@ -1026,7 +1029,10 @@ define_ctype!(
     /// No Send/Sync or Clone is asserted for arbitrary third-party backends.
     ///
     /// Wraps: git_config_backend
-    Backend, BackendRef, BackendMut, ffi::git_config_backend
+    Backend,
+    BackendRef,
+    BackendMut,
+    ffi::git_config_backend
 );
 
 /// Release dispatch selected by the allocation, not by another backend's vtable.
@@ -1280,12 +1286,14 @@ impl BackendRef<'_> {
         // SAFETY: initialized scalar under the shared handle.
         unsafe { addr_of!((*self.as_ptr()).version).read() }
     }
+
     /// C's integer flag, preserving noncanonical true values.
     /// Field: git_config_backend.readonly
     pub fn readonly_raw(&self) -> i32 {
         // SAFETY: initialized scalar under the shared handle.
         unsafe { addr_of!((*self.as_ptr()).readonly).read() }
     }
+
     pub fn is_readonly(&self) -> bool {
         self.readonly_raw() != 0
     }
@@ -1296,14 +1304,17 @@ impl BackendRef<'_> {
         // SAFETY: reads the pointer slot only, never its possibly stale referent.
         NonNull::new(unsafe { addr_of!((*self.as_ptr()).cfg).read() }).map(BackendConfigIdentity)
     }
+
     /// Field: git_config_backend.open
     pub fn open_callback(&self) -> BackendOpen {
         BackendOpen
     }
+
     /// Field: git_config_backend.free
     pub fn release_policy(&self) -> BackendFree {
         BackendFree
     }
+
     /// A callable which can only consume a transaction, not unlock an unrelated
     /// backend or a borrowed allocation that has not been locked.
     /// Field: git_config_backend.unlock
@@ -1389,6 +1400,7 @@ impl BackendMut<'_> {
         // SAFETY: exclusive opened backend, C reads/copies strings within the call.
         backend_status(unsafe { set(p, key.as_ptr(), value.as_ptr()) })
     }
+
     /// Field: git_config_backend.set_multivar
     pub fn set_multivar(
         &mut self,
@@ -1403,6 +1415,7 @@ impl BackendMut<'_> {
         // SAFETY: exclusive opened backend; strings are readable for this call only.
         backend_status(unsafe { set(p, key.as_ptr(), regexp.as_ptr(), value.as_ptr()) })
     }
+
     /// Field: git_config_backend.del
     pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
@@ -1411,6 +1424,7 @@ impl BackendMut<'_> {
         // SAFETY: exclusive opened backend; key is read only during this call.
         backend_status(unsafe { delete(p, key.as_ptr()) })
     }
+
     /// Field: git_config_backend.del_multivar
     pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         let p = self.as_mut_ptr();
@@ -1461,6 +1475,7 @@ impl BackendTransaction<'_> {
     pub fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
         self.backend.set(key, value)
     }
+
     pub fn set_multivar(
         &mut self,
         key: &CStr,
@@ -1469,12 +1484,15 @@ impl BackendTransaction<'_> {
     ) -> Result<(), ConfigError> {
         self.backend.set_multivar(key, regexp, value)
     }
+
     pub fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
         self.backend.delete(key)
     }
+
     pub fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
         self.backend.delete_multivar(key, regexp)
     }
+
     pub fn finish(self, commit: bool) -> Result<(), ConfigError> {
         BackendUnlock.call(self, commit)
     }
@@ -1535,6 +1553,7 @@ impl Drop for BackendTransaction<'_> {
 /// ```
 /// use std::collections::BTreeMap;
 /// use std::ffi::{CStr, CString};
+///
 /// use libgit2::libgit2::config::config::{Config, ConfigError, ConfigLevel};
 /// use libgit2::libgit2::config::sys::config::{
 ///     BackendEntry, BackendEntryArc, CustomBackend, EntryOrigin, UnopenedBackend,
@@ -1553,13 +1572,16 @@ impl Drop for BackendTransaction<'_> {
 ///     fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
 ///         self.0.get(key).map(|value| entry(key, value))
 ///     }
+///
 ///     fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
 ///         let entries: Vec<_> = self.0.iter().map(|(k, v)| Ok(entry(k, v))).collect();
 ///         Ok(entries.into_iter())
 ///     }
+///
 ///     fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
 ///         Ok(UnopenedBackend::new_readonly(self.clone()))
 ///     }
+///
 ///     fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
 ///         self.0.insert(key.to_owned(), value.to_owned());
 ///         Ok(())
@@ -1568,7 +1590,10 @@ impl Drop for BackendTransaction<'_> {
 ///
 /// let mut config = Config::new().unwrap();
 /// let backend = UnopenedBackend::new(Map::default());
-/// config.as_mut().add_backend(backend, ConfigLevel::APP, None, false).unwrap();
+/// config
+///     .as_mut()
+///     .add_backend(backend, ConfigLevel::APP, None, false)
+///     .unwrap();
 /// config.as_mut().set_string(c"core.editor", c"vi").unwrap();
 /// let value = config.as_ref().entry(c"core.editor").unwrap();
 /// assert_eq!(value.as_ref().value(), Some(c"vi"));
@@ -2260,9 +2285,10 @@ mod unit_tests {
     }
 
     mod backend_entries {
-        use super::*;
         use std::cell::Cell;
         use std::rc::Rc;
+
+        use super::*;
 
         // C has no standalone entry constructor. This Rust-owned fixture has static
         // strings; acquired-reference fixtures below pair a Box with its callback.
@@ -2407,9 +2433,10 @@ mod unit_tests {
     }
 
     mod iterators {
-        use super::*;
         use std::cell::Cell;
         use std::rc::Rc;
+
+        use super::*;
 
         #[repr(C)]
         struct Fixture {
@@ -2524,8 +2551,9 @@ mod unit_tests {
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2 and PCRE2")]
         fn multivar_regex_skips_valueless() {
-            use crate::libgit2::config::config::Config;
             use std::ffi::CString;
+
+            use crate::libgit2::config::config::Config;
             let file = std::env::temp_dir()
                 .join(format!("crustify-filter-correction-{}", std::process::id()));
             std::fs::write(&file, b"[a]\nk\nk =\nk = value\n").unwrap();
@@ -2582,9 +2610,10 @@ mod unit_tests {
     }
 
     mod backends {
-        use super::*;
         use std::cell::Cell;
         use std::rc::Rc;
+
+        use super::*;
 
         #[derive(Default)]
         struct State {
@@ -2781,7 +2810,8 @@ mod unit_tests {
         #[test]
         #[cfg_attr(miri, ignore = "installs C allocator and calls registration")]
         fn backend_registration_allocator_failures_release_owned_inputs() {
-            use crate::libgit2::config::config::{Config, unit_tests::*};
+            use crate::libgit2::config::config::Config;
+            use crate::libgit2::config::config::unit_tests::*;
             isolated(
                 concat!(
                     module_path!(),
@@ -2967,8 +2997,9 @@ mod unit_tests {
     }
 
     mod custom {
-        use super::*;
         use std::cell::RefCell;
+
+        use super::*;
 
         /// What a probe store saw, shared with the test.
         #[derive(Default)]
@@ -3064,10 +3095,12 @@ mod unit_tests {
                 self.record(&format!("open {} {}", level.raw(), repository.is_some()));
                 Ok(())
             }
+
             fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
                 self.record("get");
                 self.entry(key)
             }
+
             fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
                 self.record("iterator");
                 let values = self.seen.values.borrow().clone();
@@ -3077,10 +3110,12 @@ mod unit_tests {
                     .collect();
                 Ok(entries.into_iter())
             }
+
             fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
                 self.record("snapshot");
                 Ok(UnopenedBackend::new(Probe::new(&self.seen)))
             }
+
             fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
                 self.record("set");
                 match key.to_bytes() {
@@ -3097,10 +3132,12 @@ mod unit_tests {
                 self.seen.values.borrow_mut().push(pair);
                 Ok(())
             }
+
             fn lock(&mut self) -> Result<(), ConfigError> {
                 self.record("lock");
                 Ok(())
             }
+
             fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
                 self.record(&format!("unlock {commit}"));
                 Ok(())
@@ -3264,12 +3301,15 @@ mod unit_tests {
             struct Minimal;
             impl CustomBackend for Minimal {
                 type Entries = core::iter::Empty<Result<BackendEntryArc, ConfigError>>;
+
                 fn get(&mut self, _: &CStr) -> Option<BackendEntryArc> {
                     None
                 }
+
                 fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
                     Ok(core::iter::empty())
                 }
+
                 fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
                     Err(ConfigError::new(ErrorClass::Config, c"no snapshot"))
                 }

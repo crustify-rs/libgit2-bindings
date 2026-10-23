@@ -95,7 +95,10 @@ define_ctype!(
     /// [module docs](self#threads)).
     ///
     /// Wraps: git_mailmap
-    Mailmap, MailmapRef, MailmapMut, ffi::git_mailmap
+    Mailmap,
+    MailmapRef,
+    MailmapMut,
+    ffi::git_mailmap
 );
 
 // SAFETY: a mailmap owns its entries and their strings, all in libgit2's allocator,
@@ -232,10 +235,10 @@ impl Mailmap {
     /// The mailmap of `repo`, as git builds it, later sources overriding earlier ones
     /// entry by entry:
     ///
-    /// 1. the `.mailmap` file at the root of the working directory, for a repository
-    ///    that is not bare;
-    /// 2. the blob that the `mailmap.blob` setting names, by default `HEAD:.mailmap` in
-    ///    a bare repository and none otherwise;
+    /// 1. the `.mailmap` file at the root of the working directory, for a repository that is not
+    ///    bare;
+    /// 2. the blob that the `mailmap.blob` setting names, by default `HEAD:.mailmap` in a bare
+    ///    repository and none otherwise;
     /// 3. the file that the `mailmap.file` setting names.
     ///
     /// A source that is missing or cannot be read or parsed is skipped, as libgit2
@@ -286,10 +289,14 @@ impl<'a> MailmapRef<'a> {
     /// # if cfg!(miri) { return; }
     /// use libgit2::libgit2::object::mailmap::Mailmap;
     ///
-    /// let mailmap = Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
+    /// let mailmap =
+    ///     Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
     /// let (name, email) = mailmap.as_ref().resolve(c"Someone", c"old@example.com");
     /// assert_eq!((name, email), (c"Real Name", c"real@example.com"));
-    /// assert_eq!(mailmap.as_ref().resolve(c"A", c"a@example.com"), (c"A", c"a@example.com"));
+    /// assert_eq!(
+    ///     mailmap.as_ref().resolve(c"A", c"a@example.com"),
+    ///     (c"A", c"a@example.com")
+    /// );
     /// ```
     ///
     /// ```compile_fail,E0502
@@ -351,7 +358,8 @@ impl<'a> MailmapRef<'a> {
     /// use libgit2::libgit2::core::types::Signature;
     /// use libgit2::libgit2::object::mailmap::Mailmap;
     ///
-    /// let mailmap = Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
+    /// let mailmap =
+    ///     Mailmap::from_buffer(b"Real Name <real@example.com> <old@example.com>\n").unwrap();
     /// let old = Signature::new(c"Someone", c"old@example.com", 1_700_000_000, -90).unwrap();
     /// let real = mailmap.as_ref().resolve_signature(old.as_ref()).unwrap();
     /// assert_eq!(real.as_ref().name(), Some(c"Real Name"));
@@ -414,7 +422,12 @@ impl MailmapMut<'_> {
     /// let mut mailmap = Mailmap::new().unwrap();
     /// mailmap
     ///     .as_mut()
-    ///     .add_entry(Some(c"Real Name"), None, Some(c"Old Name"), c"old@example.com")
+    ///     .add_entry(
+    ///         Some(c"Real Name"),
+    ///         None,
+    ///         Some(c"Old Name"),
+    ///         c"old@example.com",
+    ///     )
     ///     .unwrap();
     /// let resolved = mailmap.as_ref().resolve(c"Old Name", c"old@example.com");
     /// assert_eq!(resolved, (c"Real Name", c"old@example.com"));
@@ -543,14 +556,16 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::repository::repository::Repository;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{CStr, c_char, c_int, c_void};
     use core::mem::size_of;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
     use std::thread;
+
+    use super::*;
+    use crate::libgit2::repository::repository::Repository;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -611,6 +626,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -624,6 +640,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

@@ -1,9 +1,10 @@
 //! Independent raw C initialization and public Rust memory-options operations, and
 //! Rust-implemented backends against a C-ABI backend serving the same store.
-use libgit2::ffi;
-use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
 use std::ffi::{CStr, CString};
 use std::mem::MaybeUninit;
+
+use libgit2::ffi;
+use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
 
 type Observation = (u32, Option<Vec<u8>>, Option<Vec<u8>>);
 
@@ -60,8 +61,8 @@ fn memory_options_init_and_mutation_match_c() {
         rust.as_mut().set_origin_path(origin);
         assert_eq!(observe_c(&raw), observe_rust(&rust));
     }
-    let c_bytes = CString::new(vec![0xff, b'x']).unwrap();
-    let rust_bytes = CString::new(vec![0xff, b'x']).unwrap();
+    let c_bytes = CString::new(vec![0xFF, b'x']).unwrap();
+    let rust_bytes = CString::new(vec![0xFF, b'x']).unwrap();
     raw.origin_path = c_bytes.as_ptr();
     rust.as_mut().set_origin_path(Some(&rust_bytes));
     assert_eq!(observe_c(&raw), observe_rust(&rust));
@@ -79,11 +80,12 @@ fn memory_options_init_and_mutation_match_c() {
 }
 
 mod backend_entries {
+    use std::ffi::{CStr, CString};
+    use std::ptr;
+
     use libgit2::ffi;
     use libgit2::libgit2::config::config::{Config, ConfigLevel};
     use libgit2::libgit2::config::sys::config::{BackendEntry, BackendEntryArc};
-    use std::ffi::{CStr, CString};
-    use std::ptr;
 
     #[derive(Debug, PartialEq, Eq)]
     struct Record {
@@ -341,12 +343,14 @@ mod backend_entries {
 }
 
 mod iterators {
-    use super::*;
+    use std::ptr;
+
     use libgit2::libgit2::config::config::{Config, ConfigLevel, EntryRef};
     use libgit2::libgit2::config::sys::config::IteratorBox;
     use libgit2::libgit2::util::errors::last;
     use libgit2::libgit2::util::sys::errors::clear;
-    use std::ptr;
+
+    use super::*;
 
     type Row = (
         Option<Vec<u8>>,
@@ -737,8 +741,9 @@ mod iterators {
 }
 
 mod backends {
-    use super::*;
     use libgit2::libgit2::config::sys::config::Backend;
+
+    use super::*;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls C")]
@@ -768,6 +773,11 @@ mod custom_backends {
     //! [`CustomBackend`]. Both are driven through libgit2's config routines in the
     //! same sequences, comparing returns, errors, outputs, the store's calls and
     //! its releases after each step.
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString, c_char, c_int};
+    use std::ptr::{self, addr_of_mut};
+    use std::rc::Rc;
+
     use libgit2::ffi;
     use libgit2::libgit2::config::config::{Config, ConfigBox, ConfigError, ConfigLevel};
     use libgit2::libgit2::config::sys::config::{
@@ -776,10 +786,6 @@ mod custom_backends {
     use libgit2::libgit2::repository::repository::RepositoryRef;
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode, last};
     use libgit2::libgit2::util::sys::errors::clear;
-    use std::cell::RefCell;
-    use std::ffi::{CStr, CString, c_char, c_int};
-    use std::ptr::{self, addr_of_mut};
-    use std::rc::Rc;
 
     type Pairs = Vec<(CString, CString)>;
     /// A store's failure: code, class, message.
@@ -812,12 +818,15 @@ mod custom_backends {
                 log: Rc::default(),
             }
         }
+
         fn record(&self, call: String) {
             self.log.borrow_mut().push(call);
         }
+
         fn writing(&mut self) -> &mut Pairs {
             self.staged.as_mut().unwrap_or(&mut self.values)
         }
+
         fn open(&mut self, level: c_int, repo: bool) -> Result<(), Failure> {
             self.record(format!("open {level} {repo}"));
             if self
@@ -829,6 +838,7 @@ mod custom_backends {
             }
             Ok(())
         }
+
         fn get(&mut self, key: &CStr) -> Option<(CString, CString)> {
             self.record(format!("get {key:?}"));
             self.values
@@ -837,6 +847,7 @@ mod custom_backends {
                 .find(|(k, _)| k.as_c_str() == key)
                 .cloned()
         }
+
         fn entries(&mut self) -> Result<Pairs, Failure> {
             self.record("iterator".to_owned());
             if self
@@ -848,6 +859,7 @@ mod custom_backends {
             }
             Ok(self.values.clone())
         }
+
         fn snapshot(&mut self) -> Store {
             self.record("snapshot".to_owned());
             Store {
@@ -856,6 +868,7 @@ mod custom_backends {
                 log: self.log.clone(),
             }
         }
+
         fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), Failure> {
             self.record(format!("set {key:?} {value:?}"));
             let values = self.writing();
@@ -872,6 +885,7 @@ mod custom_backends {
             }
             Ok(())
         }
+
         fn set_multivar(&mut self, key: &CStr, regexp: &CStr, value: &CStr) -> Result<(), Failure> {
             self.record(format!("set_multivar {key:?} {regexp:?} {value:?}"));
             let pattern = regexp.to_bytes().to_owned();
@@ -888,6 +902,7 @@ mod custom_backends {
             }
             Ok(())
         }
+
         fn delete(&mut self, key: &CStr) -> Result<(), Failure> {
             self.record(format!("del {key:?}"));
             let values = self.writing();
@@ -898,6 +913,7 @@ mod custom_backends {
                 _ => Ok(()),
             }
         }
+
         fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), Failure> {
             self.record(format!("del_multivar {key:?} {regexp:?}"));
             let pattern = regexp.to_bytes().to_owned();
@@ -909,6 +925,7 @@ mod custom_backends {
                 _ => Ok(()),
             }
         }
+
         fn lock(&mut self) -> Result<(), Failure> {
             self.record("lock".to_owned());
             if self.staged.is_some() {
@@ -917,6 +934,7 @@ mod custom_backends {
             self.staged = Some(self.values.clone());
             Ok(())
         }
+
         fn unlock(&mut self, commit: bool) -> Result<(), Failure> {
             self.record(format!("unlock {commit}"));
             let staged = self.staged.take().unwrap();
@@ -954,6 +972,7 @@ mod custom_backends {
 
     impl CustomBackend for Safe {
         type Entries = std::vec::IntoIter<Result<BackendEntryArc, ConfigError>>;
+
         fn open(
             &mut self,
             level: ConfigLevel,
@@ -963,9 +982,11 @@ mod custom_backends {
                 .open(level.raw(), repository.is_some())
                 .map_err(safe_error)
         }
+
         fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
             self.0.get(key).map(|(k, v)| safe_entry(&k, &v))
         }
+
         fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
             let pairs = self.0.entries().map_err(safe_error)?;
             Ok(pairs
@@ -974,12 +995,15 @@ mod custom_backends {
                 .collect::<Vec<_>>()
                 .into_iter())
         }
+
         fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
             Ok(UnopenedBackend::new_readonly(Safe(self.0.snapshot())))
         }
+
         fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
             self.0.set(key, value).map_err(safe_error)
         }
+
         fn set_multivar(
             &mut self,
             key: &CStr,
@@ -988,15 +1012,19 @@ mod custom_backends {
         ) -> Result<(), ConfigError> {
             self.0.set_multivar(key, regexp, value).map_err(safe_error)
         }
+
         fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
             self.0.delete(key).map_err(safe_error)
         }
+
         fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
             self.0.delete_multivar(key, regexp).map_err(safe_error)
         }
+
         fn lock(&mut self) -> Result<(), ConfigError> {
             self.0.lock().map_err(safe_error)
         }
+
         fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
             self.0.unlock(commit).map_err(safe_error)
         }
@@ -1276,6 +1304,7 @@ mod custom_backends {
         fn calls(&self) -> Vec<String> {
             self.log.take()
         }
+
         fn entry(&self, name: &CStr) -> (Outcome, Option<Fields>) {
             let mut out = ptr::null_mut();
             // SAFETY: a live config and key, a writable slot.
@@ -1299,6 +1328,7 @@ mod custom_backends {
             unsafe { ffi::git_config_entry_free(out) };
             (result, Some(fields))
         }
+
         fn walk(&self) -> (Outcome, Pairs) {
             let mut iter = ptr::null_mut();
             // SAFETY: a live config and a writable slot.
@@ -1327,12 +1357,14 @@ mod custom_backends {
             unsafe { ffi::git_config_iterator_free(iter) };
             (result, pairs)
         }
+
         fn set(&self, key: &CStr, value: &CStr) -> Outcome {
             // SAFETY: a live config and strings.
             outcome(unsafe {
                 ffi::git_config_set_string(self.config, key.as_ptr(), value.as_ptr())
             })
         }
+
         fn set_multivar(&self, key: &CStr, regexp: &CStr, value: &CStr) -> Outcome {
             // SAFETY: a live config and strings.
             outcome(unsafe {
@@ -1344,16 +1376,19 @@ mod custom_backends {
                 )
             })
         }
+
         fn delete(&self, key: &CStr) -> Outcome {
             // SAFETY: a live config and key.
             outcome(unsafe { ffi::git_config_delete_entry(self.config, key.as_ptr()) })
         }
+
         fn delete_multivar(&self, key: &CStr, regexp: &CStr) -> Outcome {
             // SAFETY: a live config and strings.
             outcome(unsafe {
                 ffi::git_config_delete_multivar(self.config, key.as_ptr(), regexp.as_ptr())
             })
         }
+
         /// Locks, writes `key` inside the transaction, and commits or rolls back.
         fn transaction(&self, key: &CStr, commit: bool) -> (Outcome, Outcome, Outcome) {
             let mut tx = ptr::null_mut();
@@ -1372,6 +1407,7 @@ mod custom_backends {
             unsafe { ffi::git_transaction_free(tx) };
             (locked, set, nested)
         }
+
         fn snapshot_string(&self, key: &CStr) -> (Outcome, Option<CString>) {
             let mut snapshot = ptr::null_mut();
             // SAFETY: a live config and a writable slot.

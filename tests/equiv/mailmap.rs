@@ -14,20 +14,18 @@
 //!
 //! Two documented divergences, both in [`Mailmap::from_buffer`]:
 //!
-//! - a buffer with a NUL byte fails on both sides, but libgit2 sets no error, while the
-//!   wrapper reports `GIT_ERROR_INVALID`, "mailmap buffer contains a NUL byte";
-//! - a line whose replaced email is empty (`Name <>`) makes libgit2 fail the whole
-//!   buffer with a failed argument assertion and leak the entry it began; the wrapper
-//!   skips the line, as libgit2 skips every other line that is not an entry. C is not
-//!   run on such lines here (the leak fails LeakSanitizer); the Rust result is compared
-//!   with C's on the same buffer without them, and the classification itself with C's
-//!   refusals in the crate's unit tests.
+//! - a buffer with a NUL byte fails on both sides, but libgit2 sets no error, while the wrapper
+//!   reports `GIT_ERROR_INVALID`, "mailmap buffer contains a NUL byte";
+//! - a line whose replaced email is empty (`Name <>`) makes libgit2 fail the whole buffer with a
+//!   failed argument assertion and leak the entry it began; the wrapper skips the line, as libgit2
+//!   skips every other line that is not an entry. C is not run on such lines here (the leak fails
+//!   LeakSanitizer); the Rust result is compared with C's on the same buffer without them, and the
+//!   classification itself with C's refusals in the crate's unit tests.
 
 use std::ffi::{CStr, CString, c_char, c_int};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::ptr;
+use std::{fs, ptr};
 
 use libgit2::ffi;
 use libgit2::libgit2::object::mailmap::{Mailmap, MailmapBox};
@@ -223,7 +221,7 @@ fn generated_buffers() -> Vec<Vec<u8>> {
             }
         }
     }
-    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
     let mut next = move |n: usize| {
         seed ^= seed << 13;
         seed ^= seed >> 7;

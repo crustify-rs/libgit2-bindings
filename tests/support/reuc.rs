@@ -2,12 +2,13 @@
 //! resolve-undo records: the safe way to build them before a safe add exists.
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
-use libgit2::libgit2::index::index::{Index, IndexBox};
-use libgit2::libgit2::index::sys::index::ReucEntryRef;
-use libgit2::libgit2::oid::oid::OidType;
 use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use libgit2::libgit2::index::index::{Index, IndexBox};
+use libgit2::libgit2::index::sys::index::ReucEntryRef;
+use libgit2::libgit2::oid::oid::OidType;
 
 /// One record as written: its path, three modes (0 for an absent side), and the ids,
 /// of which only those with a non-zero mode reach the file.

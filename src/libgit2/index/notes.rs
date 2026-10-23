@@ -5,18 +5,18 @@
 //! the iterator, its tree references, path buffers and traversal stack. It borrows
 //! the repository without counting a reference; `'r` keeps that repository alive.
 
+use core::ffi::CStr;
+use core::marker::PhantomData;
+use core::ptr::{self, NonNull};
+use std::ffi::CString;
+
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CZeroable};
+
 use crate::ffi;
 use crate::libgit2::object::commit::{Commit, CommitRef};
 use crate::libgit2::oid::oid::Oid;
 use crate::libgit2::repository::repository::{RepositoryError, RepositoryRef};
 use crate::libgit2::util::errors::ErrorCode;
-use core::{
-    ffi::CStr,
-    marker::PhantomData,
-    ptr::{self, NonNull},
-};
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CZeroable};
-use std::ffi::CString;
 
 /// An opaque note iterator. Construct with [`new`](Self::new) or
 /// [`from_commit`](Self::from_commit), never as an inline value.
@@ -67,12 +67,12 @@ pub struct NoteIteratorMut<'a, 'r>(
 // or inline opaque value is ever constructed.
 unsafe impl<'r> CCell for NoteIterator<'r> {
     type C = ffi::git_note_iterator;
-    type Ref<'a>
-        = NoteIteratorRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = NoteIteratorMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = NoteIteratorRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -230,11 +230,12 @@ impl<'r> NoteIterator<'r> {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::path::Path;
+
     use super::*;
     use crate::libgit2::object::blob;
     use crate::libgit2::oid::oid::OidType;
     use crate::libgit2::repository::repository::Repository;
-    use std::path::Path;
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let path =

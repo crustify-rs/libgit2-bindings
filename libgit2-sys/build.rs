@@ -3,12 +3,11 @@
 //!
 //! - `CRUSTIFY_BUILD_VARIANT`: a `variants` key of `crustify/artifacts/build.json` (`plain`,
 //!   `coverage`, `asan-ubsan`, `tsan`, `bsan`); default `plain`.
-//! - `CRUSTIFY_LIBGIT2_BUILD_DIR`: an explicit libgit2 build directory, for a private
-//!   build; overrides the variant's directory.
+//! - `CRUSTIFY_LIBGIT2_BUILD_DIR`: an explicit libgit2 build directory, for a private build;
+//!   overrides the variant's directory.
 
-use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 fn allowlist(dir: &Path, kind: &str) -> Vec<String> {
     let path = dir.join(format!("{kind}.txt"));
@@ -61,7 +60,8 @@ fn main() {
         .warnings(true);
     match variant.as_str() {
         "asan-ubsan" => {
-            cc.flag("-fsanitize=address,undefined").flag("-fno-omit-frame-pointer");
+            cc.flag("-fsanitize=address,undefined")
+                .flag("-fno-omit-frame-pointer");
         }
         "tsan" => {
             cc.flag("-fsanitize=thread");

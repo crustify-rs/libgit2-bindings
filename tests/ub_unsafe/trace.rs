@@ -12,7 +12,8 @@
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::process::Command;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 
 use libgit2::ffi;
@@ -317,7 +318,8 @@ fn from_fn_installed_function_outlives_every_callback_value() {
 mod config {
     use std::ffi::CStr;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::thread;
 
     use libgit2::ffi;

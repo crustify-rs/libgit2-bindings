@@ -3,9 +3,9 @@
 //! safe `Refdb::open` it is compared with.
 //!
 //! `new` is called within its contract: a live backend of the repository, which the
-//! refdb borrows (the fixture's borrow supplies `'r`) on one thread. Both reference storage formats are covered. Every refdb built is
-//! freed once with its backend (ASan, LSan), and the backend reaches the repository
-//! only while it is live (a compaction through each refdb runs the backend's
+//! refdb borrows (the fixture's borrow supplies `'r`) on one thread. Both reference storage formats
+//! are covered. Every refdb built is freed once with its backend (ASan, LSan), and the backend
+//! reaches the repository only while it is live (a compaction through each refdb runs the backend's
 //! repository reads). A refused backend stays the caller's, untouched, and is freed
 //! by the caller once (a double free if libgit2 had taken it), or handed to a later
 //! `new` that takes it.

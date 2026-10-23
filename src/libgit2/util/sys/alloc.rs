@@ -84,7 +84,10 @@ define_ctype!(
     ///
     /// Wraps: git_allocator
     #[derive(Clone, Copy)]
-    Allocator, AllocatorRef, AllocatorMut, ffi::git_allocator
+    Allocator,
+    AllocatorRef,
+    AllocatorMut,
+    ffi::git_allocator
 );
 
 // SAFETY: an `Allocator` is three function pointers and nothing else: no interior
@@ -131,6 +134,7 @@ impl Allocator {
     /// ```
     /// use core::ffi::{CStr, c_void};
     /// use core::ptr::NonNull;
+    ///
     /// use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
     ///
     /// unsafe extern "C" {
@@ -149,6 +153,7 @@ impl Allocator {
     ///     fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
     ///         NonNull::new(unsafe { malloc(len) }.cast())
     ///     }
+    ///
     ///     unsafe fn realloc(
     ///         p: Option<NonNull<u8>>,
     ///         len: usize,
@@ -158,6 +163,7 @@ impl Allocator {
     ///         let p = p.map_or(core::ptr::null_mut(), |p| p.as_ptr().cast());
     ///         NonNull::new(unsafe { realloc(p, len) }.cast())
     ///     }
+    ///
     ///     unsafe fn free(p: NonNull<u8>) {
     ///         unsafe { free(p.as_ptr().cast()) }
     ///     }
@@ -255,22 +261,20 @@ impl AllocatorMut<'_> {
 ///
 /// libgit2 trusts these functions as it trusts C's `malloc`, `realloc` and `free`:
 ///
-/// - `malloc(len, ..)` returns `None`, or the start of a fresh allocation of at least
-///   `len` bytes, aligned for any object that fits in `len` bytes as `malloc` aligns
-///   (to `max_align_t`, or the largest power of two not above a smaller `len`),
-///   overlapping no other live allocation of the implementation. `len` may be 0, as
-///   for C's `malloc(0)`: the result is `None` (which libgit2 reads as out of memory)
-///   or an allocation of its own, which `free` releases like any other;
-/// - `realloc(None, len, ..)` behaves as `malloc`. `realloc(Some(ptr), len, ..)`, with
-///   `ptr` a live allocation of the implementation and `len` non-zero, either returns
-///   `None` and leaves `ptr` live and unchanged, or releases `ptr` and returns an
-///   allocation as `malloc` would whose first `min(old, len)` bytes are those `ptr`
-///   held (it may be `ptr` itself). It is never called with `Some(ptr)` and `len == 0`,
-///   which C leaves implementation-defined (see [`ReallocFn`]), so an implementation
-///   need not decide that case;
+/// - `malloc(len, ..)` returns `None`, or the start of a fresh allocation of at least `len` bytes,
+///   aligned for any object that fits in `len` bytes as `malloc` aligns (to `max_align_t`, or the
+///   largest power of two not above a smaller `len`), overlapping no other live allocation of the
+///   implementation. `len` may be 0, as for C's `malloc(0)`: the result is `None` (which libgit2
+///   reads as out of memory) or an allocation of its own, which `free` releases like any other;
+/// - `realloc(None, len, ..)` behaves as `malloc`. `realloc(Some(ptr), len, ..)`, with `ptr` a live
+///   allocation of the implementation and `len` non-zero, either returns `None` and leaves `ptr`
+///   live and unchanged, or releases `ptr` and returns an allocation as `malloc` would whose first
+///   `min(old, len)` bytes are those `ptr` held (it may be `ptr` itself). It is never called with
+///   `Some(ptr)` and `len == 0`, which C leaves implementation-defined (see [`ReallocFn`]), so an
+///   implementation need not decide that case;
 /// - `free(ptr)` releases `ptr`, a live allocation of the implementation;
-/// - all three may run concurrently on any threads, and an allocation may be resized
-///   or released on a thread other than the one that made it.
+/// - all three may run concurrently on any threads, and an allocation may be resized or released on
+///   a thread other than the one that made it.
 ///
 /// None of them may call into libgit2: libgit2 allocates through them, its per-thread
 /// error state included (`threadstate_get`), so a libgit2 call from inside one recurses
@@ -370,10 +374,11 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
     use std::alloc::{Layout, alloc, dealloc, realloc};
     use std::cell::RefCell;
     use std::ffi::CString;
+
+    use super::*;
 
     /// One call that reached an `Alloc` implementation.
     #[derive(Debug, PartialEq, Eq)]
@@ -621,6 +626,7 @@ mod unit_tests {
         fn malloc(len: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
             panic!("refusing {len} bytes");
         }
+
         unsafe fn realloc(
             _: Option<NonNull<u8>>,
             _: usize,
@@ -629,6 +635,7 @@ mod unit_tests {
         ) -> Option<NonNull<u8>> {
             None
         }
+
         unsafe fn free(_: NonNull<u8>) {}
     }
 

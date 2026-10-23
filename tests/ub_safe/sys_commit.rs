@@ -165,7 +165,7 @@ mod creating {
         );
         let tree = empty_tree();
         let mut wide = Oid::zero(OidType::Sha256);
-        wide.as_mut().set_id([0xab; 32]);
+        wide.as_mut().set_id([0xAB; 32]);
         for parents in [
             &[wide.as_ref()][..],
             &[tree.as_ref().as_ref(), wide.as_ref()],

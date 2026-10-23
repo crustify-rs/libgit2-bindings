@@ -464,9 +464,8 @@ mod worktree_box {
 /// accessors run there in the crate's unit tests, on a template built in Rust.
 mod add_options {
     use std::ffi::CString;
-    use std::fs;
     use std::hint::black_box;
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::repository::worktree::{AddOptions, AddOptionsMut, AddOptionsRef};
 
@@ -754,9 +753,8 @@ mod add_options {
 /// `locked` bit between Rust reborrows (BSan). Every test calls libgit2, so none runs
 /// under Miri.
 mod routines {
-    use std::fs;
     use std::sync::Barrier;
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::core::strarray::StrArrayVal;
     use libgit2::libgit2::repository::repository::Repository;
@@ -996,9 +994,8 @@ mod routines {
 /// none runs under Miri.
 mod adding {
     use std::ffi::CString;
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::repository::repository::Repository;
     use libgit2::libgit2::repository::worktree::{AddOptions, Worktree};

@@ -5,8 +5,9 @@
 //! The lifetime/aliasing failures are compile-fail doctests.
 #![forbid(unsafe_code)]
 
-use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
 use std::ffi::CString;
+
+use libgit2::libgit2::config::sys::config::BackendMemoryOptions;
 
 #[test]
 #[cfg_attr(
@@ -15,7 +16,7 @@ use std::ffi::CString;
 )]
 fn memory_options_reborrow_and_replace() {
     let label = CString::new("command line").unwrap();
-    let origin = CString::new(vec![b'/', 0xff, b'x']).unwrap();
+    let origin = CString::new(vec![b'/', 0xFF, b'x']).unwrap();
     let mut options = BackendMemoryOptions::new();
     assert_eq!(options.as_ref().version(), 1);
     assert_eq!(options.as_ref().backend_type(), None);
@@ -49,7 +50,7 @@ fn memory_options_reborrow_and_replace() {
     assert_eq!(clone.as_ref().backend_type(), Some(label.as_c_str()));
     assert_eq!(clone.as_ref().origin_path(), Some(origin.as_c_str()));
     assert_eq!(label.as_bytes(), b"command line");
-    assert_eq!(origin.as_bytes(), &[b'/', 0xff, b'x']);
+    assert_eq!(origin.as_bytes(), &[b'/', 0xFF, b'x']);
     let defaults = BackendMemoryOptions::default();
     assert_eq!(defaults.as_ref().version(), 1);
     assert_eq!(defaults.as_ref().backend_type(), None);
@@ -99,9 +100,10 @@ fn memory_options_cross_threads() {
 }
 
 mod backend_entries {
+    use std::ffi::CString;
+
     use libgit2::libgit2::config::config::Config;
     use libgit2::libgit2::config::sys::config::{BackendEntry, BackendEntryArc};
-    use std::ffi::CString;
 
     #[test]
     #[cfg_attr(miri, ignore = "acquisition and release call libgit2")]
@@ -136,7 +138,7 @@ mod backend_entries {
         assert_eq!(empty.as_ref().entry().value(), Some(c""));
         assert_eq!(nested.as_ref().entry().include_depth(), 1);
         // An entry owner does not borrow its config: refreshing cannot invalidate it.
-        let bytes = CString::new([b'x', 0xff]).unwrap();
+        let bytes = CString::new([b'x', 0xFF]).unwrap();
         config.as_mut().set_string(c"test.value", &bytes).unwrap();
         let changed = BackendEntry::from_entry(config.as_ref().entry(c"test.value").unwrap());
         assert_eq!(first.as_ref().entry().value(), Some(c"first"));
@@ -150,7 +152,7 @@ mod backend_entries {
         // No parent or input string remains: backing storage owns the copies.
         assert_eq!(
             changed.as_ref().entry().value().unwrap().to_bytes(),
-            &[b'x', 0xff]
+            &[b'x', 0xFF]
         );
         policy.release(first);
         assert_eq!(second.as_ref().entry().value(), Some(c"first"));
@@ -204,9 +206,10 @@ mod backend_entries {
 }
 
 mod iterators {
+    use std::ffi::CString;
+
     use libgit2::libgit2::config::config::{Config, ConfigLevel};
     use libgit2::libgit2::config::sys::config::IteratorNext;
-    use std::ffi::CString;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -461,6 +464,11 @@ mod custom_backends {
     //! through the config and the backend handles, lookups that outlive their config
     //! and snapshot, reentry through a config the store keeps, failing walks, and
     //! threads that each drive their own.
+    use std::cell::{Cell, RefCell};
+    use std::ffi::{CStr, CString};
+    use std::ops::ControlFlow;
+    use std::rc::Rc;
+
     use libgit2::libgit2::config::config::{
         Config, ConfigArc, ConfigError, ConfigLevel, EntryRef, ForeachCallback,
     };
@@ -470,10 +478,6 @@ mod custom_backends {
     use libgit2::libgit2::core::types::Signature;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryRef};
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
-    use std::cell::{Cell, RefCell};
-    use std::ffi::{CStr, CString};
-    use std::ops::ControlFlow;
-    use std::rc::Rc;
 
     /// The calls a store saw, and its releases, shared with the test.
     #[derive(Default)]
@@ -588,6 +592,7 @@ mod custom_backends {
             }
             Ok(())
         }
+
         fn get(&mut self, key: &CStr) -> Option<BackendEntryArc> {
             self.record(format!("get {}", key.to_str().unwrap()));
             self.reach_own();
@@ -599,6 +604,7 @@ mod custom_backends {
                 .find(|(k, _)| k.as_c_str() == key)?;
             Some(Self::entry(k, v))
         }
+
         fn iterator(&mut self) -> Result<Self::Entries, ConfigError> {
             self.record("iterator".to_owned());
             self.reach_own();
@@ -635,6 +641,7 @@ mod custom_backends {
             }
             Ok(entries.into_iter())
         }
+
         fn snapshot(&mut self) -> Result<UnopenedBackend, ConfigError> {
             self.record("snapshot".to_owned());
             let copy = Store {
@@ -646,6 +653,7 @@ mod custom_backends {
             // Writable as built: the snapshot slot marks it read-only.
             Ok(UnopenedBackend::new(copy))
         }
+
         fn set(&mut self, key: &CStr, value: &CStr) -> Result<(), ConfigError> {
             self.record(format!("set {}", key.to_str().unwrap()));
             let values = self.writing();
@@ -662,6 +670,7 @@ mod custom_backends {
                 }
             }
         }
+
         fn set_multivar(
             &mut self,
             key: &CStr,
@@ -684,6 +693,7 @@ mod custom_backends {
             }
             Ok(())
         }
+
         fn delete(&mut self, key: &CStr) -> Result<(), ConfigError> {
             self.record(format!("del {}", key.to_str().unwrap()));
             let values = self.writing();
@@ -696,6 +706,7 @@ mod custom_backends {
                 _ => Err(not_unique()),
             }
         }
+
         fn delete_multivar(&mut self, key: &CStr, regexp: &CStr) -> Result<(), ConfigError> {
             self.record(format!("del_multivar {}", key.to_str().unwrap()));
             let values = self.writing();
@@ -710,11 +721,13 @@ mod custom_backends {
                 Ok(())
             }
         }
+
         fn lock(&mut self) -> Result<(), ConfigError> {
             self.record("lock".to_owned());
             self.staged = Some(self.values.clone());
             Ok(())
         }
+
         fn unlock(&mut self, commit: bool) -> Result<(), ConfigError> {
             self.record(format!("unlock {commit}"));
             let staged = self.staged.take().expect("unlocked without a lock");

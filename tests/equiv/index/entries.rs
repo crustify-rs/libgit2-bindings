@@ -13,8 +13,6 @@
 //! corrected behaviour's regression is a unit test, and only concrete stages compare
 //! here.
 
-use super::*;
-
 use ffibox::CZeroable;
 use libgit2::libgit2::core::types::FileMode;
 use libgit2::libgit2::index::index::{
@@ -25,6 +23,8 @@ use libgit2::libgit2::object::blob;
 use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeBuilder, TreeBuilderBox};
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError, RepositoryRef};
+
+use super::*;
 
 /// A status and the thread's error when it failed.
 type Status = (c_int, Option<(c_int, CString)>);
@@ -150,7 +150,7 @@ fn add_sequences_match() {
         (c"a", 0, 1, 1, 0o100644, 0),
         (c"a", 0, 1, 2, 0o100755, 0),
         (c"b", 0, 1, 3, 0o120000, 0x2000),
-        (c"b", 0, 1, 3, 0o120000, 0xffff),
+        (c"b", 0, 1, 3, 0o120000, 0xFFFF),
         (c"sub", 0, 2, 4, 0o160000, 0),
         (c"a/b", 0, 1, 5, 0o100644, 0),
         (c"a/c", 0, 1, 5, 0o100644, 0),
@@ -170,7 +170,7 @@ fn add_sequences_match() {
         (c"trailing/", 0, 1, 1, 0o100644, 0),
         (c"", 0, 1, 1, 0o100644, 0),
         (&long, 0, 1, 1, 0o100644, 0),
-        (c"\xff\xfe", 1, 3, 0xff, 0o100644, 0),
+        (c"\xff\xfe", 1, 3, 0xFF, 0o100644, 0),
     ];
     for row in rows {
         let entry = row_entry(row);
@@ -686,8 +686,8 @@ fn owned_additions_match() {
         let id = blob::create_from_buffer(repo.repo(), b"present").unwrap();
         present.as_mut().set_id(id.as_ref());
     }
-    let missing = entry(c"p", 0, 1, 0xee, 0o100644, 0);
-    let submodule = entry(c"s", 0, 1, 0xee, 0o160000, 0);
+    let missing = entry(c"p", 0, 1, 0xEE, 0o100644, 0);
+    let submodule = entry(c"s", 0, 1, 0xEE, 0o160000, 0);
     for step in 0..4 {
         let (a, o, t) = match step {
             0 => (Some(present.as_ref()), Some(missing.as_ref()), None),

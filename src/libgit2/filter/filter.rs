@@ -196,12 +196,12 @@ pub struct FilterListMut<'a, 'r>(
 // through its `PhantomData<&'a mut FilterList<'r>>`.
 unsafe impl<'r> CCell for FilterList<'r> {
     type C = ffi::git_filter_list;
-    type Ref<'a>
-        = FilterListRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = FilterListMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = FilterListRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -485,8 +485,8 @@ impl<'r> FilterList<'r> {
         // live repository, whose attribute caches libgit2 fills through this shared
         // handle on this thread only, and which the list keeps for `'r`; `blob` NULL or
         // live for the call, as a `LiveBlob` is, its id read for the filters' checks;
-        // `path` NUL-terminated, copied. The runtime is pinned: the filter registry and its lock exist, and a
-        // failure is reported on live thread-local state.
+        // `path` NUL-terminated, copied. The runtime is pinned: the filter registry and its lock
+        // exist, and a failure is reported on live thread-local state.
         let rc = unsafe { ffi::git_filter_list_load(&mut out, repo, blob, path, mode, flags) };
         // SAFETY: `out` is NULL (no filter applies, or a failure), or a fresh list
         // nothing else references, released by `git_filter_list_free` as
@@ -601,11 +601,12 @@ const _: () =
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
     use core::mem::size_of;
     use std::ffi::CString;
     use std::path::PathBuf;
+
+    use super::*;
+    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 

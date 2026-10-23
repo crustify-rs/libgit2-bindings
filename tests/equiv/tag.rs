@@ -617,20 +617,19 @@ mod repository_tags {
     //!
     //! Documented divergences, outside these comparisons, held by `tag.rs`'s unit tests:
     //!
-    //! - A buffer whose target is the zero id is refused before C, which frees an
-    //!   uninitialised pointer for it; a buffer malformed after the tag's name is
-    //!   refused by a parse that frees what it allocated, where C leaks the name and
-    //!   tagger (with the same error and code). An invalid reference name is refused
-    //!   in Rust too, with C's outcome, but compared with C's (above).
-    //! - A listing that fails is an error (code `-1`, with the error libgit2 set), where
-    //!   C returns 0 and an empty array, leaking the names it collected.
+    //! - A buffer whose target is the zero id is refused before C, which frees an uninitialised
+    //!   pointer for it; a buffer malformed after the tag's name is refused by a parse that frees
+    //!   what it allocated, where C leaks the name and tagger (with the same error and code). An
+    //!   invalid reference name is refused in Rust too, with C's outcome, but compared with C's
+    //!   (above).
+    //! - A listing that fails is an error (code `-1`, with the error libgit2 set), where C returns
+    //!   0 and an empty array, leaking the names it collected.
 
     use std::ffi::{CStr, CString, c_int};
-    use std::path::{Path, PathBuf};
-    use std::ptr;
-
     use std::num::NonZero;
     use std::ops::ControlFlow;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::{SignatureView, Time};

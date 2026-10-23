@@ -6,13 +6,12 @@
 //! honours that contract and checks that the adopted trailer then reads exactly those
 //! strings, and nothing past them (ASan, Miri), up to the end of `'t`:
 //!
-//! - trailers the safe API built and gave back (`MessageTrailer::new` → `into_raw`),
-//!   including empty and long strings, which run under Miri;
-//! - every trailer of an array [`MessageTrailerArray::parse`] fills, each adopted for a
-//!   `'t` that ends before the array is dropped, which frees the strings, across
-//!   messages with no trailers, continuation lines, and one trailer ending the buffer
-//!   (the last string of the block, where a read one byte too far leaves the
-//!   allocation).
+//! - trailers the safe API built and gave back (`MessageTrailer::new` → `into_raw`), including
+//!   empty and long strings, which run under Miri;
+//! - every trailer of an array [`MessageTrailerArray::parse`] fills, each adopted for a `'t` that
+//!   ends before the array is dropped, which frees the strings, across messages with no trailers,
+//!   continuation lines, and one trailer ending the buffer (the last string of the block, where a
+//!   read one byte too far leaves the allocation).
 //!
 //! Adopted trailers are then copied, written through their exclusive handle and read
 //! from several threads (TSan), as any trailer may be.

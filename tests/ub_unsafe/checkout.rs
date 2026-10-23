@@ -18,11 +18,10 @@
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
 use std::sync::OnceLock;
+use std::{fs, ptr};
 
 use libgit2::ffi;
 use libgit2::libgit2::repository::repository::{InitFlag, InitOptions, Repository};

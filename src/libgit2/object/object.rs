@@ -177,12 +177,12 @@ pub struct ObjectMut<'a, 'r>(
 // invariant in the object through its `PhantomData<&'a mut Object<'r>>`.
 unsafe impl<'r> CCell for Object<'r> {
     type C = ffi::git_object;
-    type Ref<'a>
-        = ObjectRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = ObjectMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ObjectRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -790,12 +790,12 @@ pub struct ObjectIdOptionsMut<'a, 'f>(
 // invariant in the options through its `PhantomData<&'a mut ObjectIdOptions<'f>>`.
 unsafe impl<'f> CCell for ObjectIdOptions<'f> {
     type C = ffi::git_object_id_options;
-    type Ref<'a>
-        = ObjectIdOptionsRef<'a, 'f>
-    where
-        Self: 'a;
     type Mut<'a>
         = ObjectIdOptionsMut<'a, 'f>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ObjectIdOptionsRef<'a, 'f>
     where
         Self: 'a;
 }
@@ -1068,11 +1068,26 @@ pub fn type_is_valid(raw: ffi::git_object_t) -> bool {
 /// use libgit2::libgit2::oid::oid::OidType;
 ///
 /// let tag = b"object a65fedf39aefe402d3bb6e24df4d4f5fe4547750\ntype commit\ntag v1\n";
-/// assert_eq!(content_is_valid(tag, ObjectType::Tag, OidType::Sha1), Ok(true));
-/// assert_eq!(content_is_valid(tag, ObjectType::Tag, OidType::Sha256), Ok(false));
-/// assert_eq!(content_is_valid(b"", ObjectType::Commit, OidType::Sha1), Ok(false));
-/// assert_eq!(content_is_valid(b"", ObjectType::Tree, OidType::Sha1), Ok(true));
-/// assert_eq!(content_is_valid(b"\xff", ObjectType::Blob, OidType::Sha1), Ok(true));
+/// assert_eq!(
+///     content_is_valid(tag, ObjectType::Tag, OidType::Sha1),
+///     Ok(true)
+/// );
+/// assert_eq!(
+///     content_is_valid(tag, ObjectType::Tag, OidType::Sha256),
+///     Ok(false)
+/// );
+/// assert_eq!(
+///     content_is_valid(b"", ObjectType::Commit, OidType::Sha1),
+///     Ok(false)
+/// );
+/// assert_eq!(
+///     content_is_valid(b"", ObjectType::Tree, OidType::Sha1),
+///     Ok(true)
+/// );
+/// assert_eq!(
+///     content_is_valid(b"\xff", ObjectType::Blob, OidType::Sha1),
+///     Ok(true)
+/// );
 /// ```
 ///
 /// Wraps: git_object_rawcontent_is_valid
@@ -1134,7 +1149,10 @@ pub fn content_is_valid(
 /// use libgit2::libgit2::oid::oid::OidType;
 ///
 /// let blob = id_from_buffer(b"hello\n", None).unwrap();
-/// assert_eq!(blob.as_ref().to_hex_string().unwrap(), "ce013625030ba8dba906f756967f9e9ca394464a");
+/// assert_eq!(
+///     blob.as_ref().to_hex_string().unwrap(),
+///     "ce013625030ba8dba906f756967f9e9ca394464a"
+/// );
 ///
 /// let mut opts = ObjectIdOptions::new();
 /// opts.as_mut().set_object_type(Some(ObjectType::Tree));
@@ -1219,12 +1237,13 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::CStr;
+    use core::mem::size_of;
+
     use super::*;
     use crate::libgit2::oid::oid::{Oid, OidType};
     use crate::libgit2::repository::repository::{Repository, RepositoryBox};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::CStr;
-    use core::mem::size_of;
 
     /// `testrepo.git`: `HEAD` at commit `a65fedf`, whose tree is `944c0f6`.
     const TESTREPO: &str = concat!(
@@ -1722,12 +1741,14 @@ mod unit_tests {
 
     /// libgit2's allocator for the tests below, which refuse it.
     mod refused {
+        use core::ffi::{c_int, c_void};
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering::SeqCst;
+
         use super::super::*;
         use crate::libgit2::util::errors::ErrorClass;
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use core::ffi::{c_int, c_void};
-        use std::process::Command;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1772,6 +1793,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -1785,6 +1807,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }

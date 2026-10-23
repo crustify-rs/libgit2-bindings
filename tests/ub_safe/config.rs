@@ -172,11 +172,13 @@ fn first_configs_race_to_init() {
 /// inputs, retained error copies, repeated calls and concurrent error reporting.
 #[forbid(unsafe_code)]
 mod parsers {
-    use super::*;
+    use std::ffi::{CStr, CString};
+
     use libgit2::libgit2::config::config::{parse_bool, parse_i32, parse_i64};
     use libgit2::libgit2::util::errors::ErrorClass;
     use libgit2::libgit2::util::sys::errors::{clear, set_str};
-    use std::ffi::{CStr, CString};
+
+    use super::*;
 
     #[test]
     #[cfg_attr(
@@ -236,7 +238,7 @@ mod parsers {
     fn results_outlive_inputs_and_later_calls() {
         let (boolean, small, large, error) = {
             let input = CString::new("-2m").unwrap();
-            let invalid = CString::new([0xff, b'%']).unwrap();
+            let invalid = CString::new([0xFF, b'%']).unwrap();
             (
                 parse_bool(Some(&input)).unwrap(),
                 parse_i32(Some(&input)).unwrap(),
@@ -257,7 +259,7 @@ mod parsers {
                 .message()
                 .to_bytes()
                 .windows(2)
-                .any(|w| w == [0xff, b'%'])
+                .any(|w| w == [0xFF, b'%'])
         );
         // A new mutable use of input storage is safe after each completed call:
         // neither C nor the returned scalar/error retained its earlier borrow.
@@ -356,10 +358,11 @@ fn mapping_modes_are_checked() {
 
 #[forbid(unsafe_code)]
 mod entry_and_map_types {
+    use std::ffi::CString;
+
     use libgit2::libgit2::config::config::{Config, ConfigLevel, ConfigMap, EntryArc, MapMatch};
     use libgit2::libgit2::repository::repository::Repository;
     use libgit2::libgit2::util::errors::ErrorCode;
-    use std::ffi::CString;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -413,7 +416,7 @@ mod entry_and_map_types {
 
     #[test]
     fn maps_preserve_borrows_across_clone_and_mutable_reborrows() {
-        let text = CString::new([b'x', 0xff]).unwrap();
+        let text = CString::new([b'x', 0xFF]).unwrap();
         let cloned = {
             let mut map = ConfigMap::new(MapMatch::String(&text), i32::MIN);
             let cloned = map.clone();
@@ -490,11 +493,12 @@ mod entry_and_map_types {
         assert_eq!(observed, [(0, false), (1, false), (2, true)]);
     }
 
-    /// Regression for `crustify/reviews/.../config/wave-1/batch-0/ub_safe/entry-lookup-forms-member-of-unwritten-backend-entry`:
-    /// a lookup that rereads a file rewritten into something libgit2 cannot parse
-    /// fails with the parse error instead of reaching `get_entry`'s member
-    /// access through the entry pointer the failed backend never wrote (UBSan:
-    /// member access within null pointer); entries acquired before stay valid.
+    /// Regression for
+    /// `crustify/reviews/.../config/wave-1/batch-0/ub_safe/
+    /// entry-lookup-forms-member-of-unwritten-backend-entry`: a lookup that rereads a file
+    /// rewritten into something libgit2 cannot parse fails with the parse error instead of
+    /// reaching `get_entry`'s member access through the entry pointer the failed backend never
+    /// wrote (UBSan: member access within null pointer); entries acquired before stay valid.
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn rewritten_unparsable_file_fails_lookup_cleanly() {
@@ -573,11 +577,13 @@ mod entry_and_map_types {
 
 #[cfg(not(miri))]
 mod file_access {
-    use super::*;
+    use std::ffi::CString;
+
     use libgit2::libgit2::config::config::{
         ConfigLevel, find_global, find_system, find_xdg, parse_path,
     };
-    use std::ffi::CString;
+
+    use super::*;
 
     #[test]
     fn file_api_sequences() {
@@ -909,8 +915,9 @@ fn string_file_config(tag: &str) -> (ConfigBox<'static>, std::ffi::CString) {
 
 #[forbid(unsafe_code)]
 mod writes_and_snapshots {
-    use super::*;
     use std::ffi::CString;
+
+    use super::*;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1081,14 +1088,16 @@ mod writes_and_snapshots {
 
 /// Public-only mapping and callback lifetime/foreign-write regressions.
 mod mapping_callbacks {
-    use super::*;
-    use libgit2::libgit2::config::config::{
-        ConfigMap, EntryRef, ForeachCallback, MapMatch, lookup_map_value,
-    };
     use std::ffi::CString;
     use std::num::NonZero;
     use std::ops::ControlFlow;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use libgit2::libgit2::config::config::{
+        ConfigMap, EntryRef, ForeachCallback, MapMatch, lookup_map_value,
+    };
+
+    use super::*;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -1242,11 +1251,13 @@ mod mapping_callbacks {
 }
 
 mod enumeration {
-    use super::*;
-    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
     use std::num::NonZero;
     use std::ops::ControlFlow;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+
+    use super::*;
 
     fn input(tag: &str) -> (std::ffi::CString, ConfigBox<'static>) {
         let path = scratch(tag);

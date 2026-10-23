@@ -1,6 +1,9 @@
 #[path = "../support/diff.rs"]
 mod support;
-use core::{ffi::CStr, ptr};
+use core::ffi::CStr;
+use core::ptr;
+use std::ffi::CString;
+
 use libgit2::ffi;
 use libgit2::libgit2::core::types::FileMode;
 use libgit2::libgit2::diff::diff::{Diff, DiffBox, DiffError};
@@ -10,7 +13,6 @@ use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeBuilder};
 use libgit2::libgit2::oid::oid::OidType;
 use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::last;
-use std::ffi::CString;
 use support::{DeltaSnapshot, FileSnapshot, PATCH, RENAME, Repo};
 
 struct RawDiff(*mut ffi::git_diff);

@@ -10,12 +10,12 @@
 //! `git_str` (`git_buf_fromstr`), storing the string's allocation size there, and reads it
 //! back when a buffer is passed in again (`git_buf_sanitize`, `git_buf_tostr`):
 //!
-//! - `reserved > 0`: `ptr` is a live buffer of at least `reserved` bytes from libgit2's
-//!   allocator, owned by the struct, with `size < reserved` and `ptr[size] == 0`. libgit2
-//!   reuses it for the next result, reallocating it with `git__realloc` as needed.
-//! - `reserved == 0`: the struct owns nothing. `ptr` is NULL (`GIT_BUF_INIT`) or
-//!   libgit2's static empty string, which an empty result is filled with without
-//!   allocating, and which libgit2 replaces without freeing when the buffer is passed in.
+//! - `reserved > 0`: `ptr` is a live buffer of at least `reserved` bytes from libgit2's allocator,
+//!   owned by the struct, with `size < reserved` and `ptr[size] == 0`. libgit2 reuses it for the
+//!   next result, reallocating it with `git__realloc` as needed.
+//! - `reserved == 0`: the struct owns nothing. `ptr` is NULL (`GIT_BUF_INIT`) or libgit2's static
+//!   empty string, which an empty result is filled with without allocating, and which libgit2
+//!   replaces without freeing when the buffer is passed in.
 //!
 //! Every handle upholds that invariant, which the safe setters keep and a crate-internal
 //! `from_ptr` over a C-owned struct, or [`Buf::from_raw`], must vouch for; libgit2's
@@ -60,7 +60,10 @@ define_ctype!(
     /// its allocation, so a copy is [`BufRef::to_buf`], which allocates.
     ///
     /// Wraps: git_buf
-    Buf, BufRef, BufMut, ffi::git_buf
+    Buf,
+    BufRef,
+    BufMut,
+    ffi::git_buf
 );
 
 // SAFETY: a `Buf` owns its allocation exclusively, or points at nothing it owns (NULL,
@@ -444,14 +447,16 @@ const _: () = assert!(size_of::<c_char>() == size_of::<u8>());
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::{c_int, c_void};
+    use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
     use super::*;
     use crate::libgit2::raw::OdbDataStrFree;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::{c_int, c_void};
-    use core::mem::size_of;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -495,6 +500,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -508,6 +514,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

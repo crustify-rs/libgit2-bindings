@@ -9,10 +9,11 @@ use libgit2::libgit2::index::index::Index;
 use libgit2::libgit2::index::pathspec::{MatchList, MatchListBox, PathspecFlags};
 #[path = "../../support/pathspec_match_list.rs"]
 mod support;
+use std::ffi::CString;
+
 use libgit2::libgit2::object::blob::create_from_buffer;
 use libgit2::libgit2::object::tree::{Tree, TreeBuilder};
 use libgit2::libgit2::repository::repository::Repository;
-use std::ffi::CString;
 use support::patterns;
 
 const PATCH: &[u8] = b"diff --git a/a.txt b/a.txt\nnew file mode 100644\nindex 0000000..7898192\n--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1 @@\n+a\n";

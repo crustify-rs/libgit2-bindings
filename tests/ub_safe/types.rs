@@ -285,7 +285,7 @@ fn types_cross_threads() {
 
 // --- `git_time` ------------------------------------------------------------
 
-const SIGNS: [u8; 6] = [0, b'+', b'-', b'x', 0x80, 0xff];
+const SIGNS: [u8; 6] = [0, b'+', b'-', b'x', 0x80, 0xFF];
 
 fn read(r: TimeRef<'_>) -> (i64, i32, u8) {
     (r.seconds(), r.offset_minutes(), r.sign())
@@ -525,7 +525,8 @@ mod write_streams {
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::thread;
 
     use libgit2::libgit2::core::types::{RustWriteStream, StreamError, StreamWriter, WriteStream};
@@ -722,7 +723,7 @@ mod write_streams {
     fn blob_stream_is_written_and_committed() {
         let repo = TempRepo::new("committed");
         let mut stream = blob_stream(&repo, Some(c"file.txt"));
-        let chunk = vec![0x5a; 65_537];
+        let chunk = vec![0x5A; 65_537];
         let mut total = 0;
         while total <= 2 * 1024 * 1024 {
             stream.as_mut().write(&chunk).unwrap();

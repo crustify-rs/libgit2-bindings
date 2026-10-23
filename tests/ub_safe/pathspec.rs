@@ -1,11 +1,12 @@
 //! Public lifecycle and path-matching boundary: all inputs use safe string-array
 //! constructors.
+use std::ffi::{CStr, CString};
+
 use libgit2::libgit2::core::strarray::{StrArray, StrArrayView};
 use libgit2::libgit2::index::index::Index;
 use libgit2::libgit2::index::pathspec::{
     MatchList, Pathspec, PathspecArc, PathspecFlags, PathspecMut, PathspecRef,
 };
-use std::ffi::{CStr, CString};
 
 fn shared(_: PathspecRef<'_>) {}
 fn exclusive(mut handle: PathspecMut<'_>) {
@@ -23,7 +24,7 @@ fn copied_inputs_and_reborrows() {
             let inputs = [
                 std::ffi::CString::new("src/*.rs").unwrap(),
                 std::ffi::CString::new("!src/skip.rs").unwrap(),
-                std::ffi::CString::new(vec![0xff, b'*']).unwrap(),
+                std::ffi::CString::new(vec![0xFF, b'*']).unwrap(),
             ];
             let view = StrArrayView::new(&inputs);
             Pathspec::new(view.as_ref()).unwrap()

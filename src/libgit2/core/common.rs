@@ -42,10 +42,9 @@
 //! return libgit2's error, copied out, as an [`ErrorBuf`].
 
 use core::ffi::{CStr, c_char, c_int, c_ulong, c_void};
-use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
 use core::ptr::{self, NonNull};
-use core::slice;
+use core::{fmt, slice};
 use std::ffi::CString;
 
 use crate::ffi;
@@ -309,8 +308,8 @@ impl Extend<Feature> for Features {
 }
 
 impl IntoIterator for Features {
-    type Item = Feature;
     type IntoIter = FeaturesIter;
+    type Item = Feature;
 
     fn into_iter(self) -> FeaturesIter {
         self.iter()
@@ -1570,22 +1569,20 @@ pub unsafe fn enable_strict_hash_verification(enabled: bool) {
 ///
 /// # Safety
 ///
-/// - `allocator`'s members must form one allocator family meeting [`Alloc`]'s
-///   contract, as an [`Allocator::new`] value does; an [`Allocator::from_fns`] value
-///   does only if its functions do.
+/// - `allocator`'s members must form one allocator family meeting [`Alloc`]'s contract, as an
+///   [`Allocator::new`] value does; an [`Allocator::from_fns`] value does only if its functions do.
 ///
 /// [`Alloc`]: crate::libgit2::util::sys::alloc::Alloc
 /// [`Allocator::new`]: crate::libgit2::util::sys::alloc::Allocator::new
 /// [`Allocator::from_fns`]: crate::libgit2::util::sys::alloc::Allocator::from_fns
-/// - Every allocation libgit2 holds when this runs must be one the new family can
-///   resize and release, since libgit2 releases it through whichever allocator is
-///   current then: install before libgit2 is initialised (before any call into this
-///   crate that reaches libgit2 — libgit2's global state holds allocations from its
-///   initialisation on), or install a family that shares storage with the one it
-///   replaces (two over libc's `malloc`, say). The same holds for every allocation a
-///   live owner of this crate holds (an `OdbDataBox`, say).
-/// - No other thread may call into libgit2 — through this crate or otherwise — while
-///   this runs: every allocation reads the global without synchronisation.
+/// - Every allocation libgit2 holds when this runs must be one the new family can resize and
+///   release, since libgit2 releases it through whichever allocator is current then: install before
+///   libgit2 is initialised (before any call into this crate that reaches libgit2 — libgit2's
+///   global state holds allocations from its initialisation on), or install a family that shares
+///   storage with the one it replaces (two over libc's `malloc`, say). The same holds for every
+///   allocation a live owner of this crate holds (an `OdbDataBox`, say).
+/// - No other thread may call into libgit2 — through this crate or otherwise — while this runs:
+///   every allocation reads the global without synchronisation.
 ///
 /// Wraps: git_libgit2_opts
 pub unsafe fn set_allocator(allocator: Option<AllocatorRef<'_>>) {
@@ -1938,12 +1935,14 @@ pub unsafe fn set_pack_max_object_size(size: usize) {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::process::Command;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
     use super::*;
     use crate::libgit2::util::errors::ErrorClass;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::set_str;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1989,6 +1988,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -2002,6 +2002,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

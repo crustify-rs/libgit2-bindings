@@ -8,16 +8,14 @@
 //!
 //! Who holds the references decides the owner:
 //!
-//! - A [`ConfigBox`] is the only reference: what `git_config_new` (through
-//!   [`Config::new`]) and the opening routines (`git_config_open_ondisk`,
-//!   `git_config_open_default`, `git_config_open_level`, `git_config_open_global`)
-//!   and snapshots (`git_config_snapshot`, `git_repository_config_snapshot`) hand out.
-//!   It alone reaches the exclusive [`ConfigMut`].
-//! - A [`ConfigArc`] is one of several references: what `git_repository_config`
-//!   hands out, the repository holding another (and writing through it, as
-//!   `git_repository_set_workdir` does), or a box once shared with
-//!   [`From`](ConfigArc::from). It reaches only the shared [`ConfigRef`]. libgit2
-//!   publishes no up-ref, so it does not clone.
+//! - A [`ConfigBox`] is the only reference: what `git_config_new` (through [`Config::new`]) and the
+//!   opening routines (`git_config_open_ondisk`, `git_config_open_default`,
+//!   `git_config_open_level`, `git_config_open_global`) and snapshots (`git_config_snapshot`,
+//!   `git_repository_config_snapshot`) hand out. It alone reaches the exclusive [`ConfigMut`].
+//! - A [`ConfigArc`] is one of several references: what `git_repository_config` hands out, the
+//!   repository holding another (and writing through it, as `git_repository_set_workdir` does), or
+//!   a box once shared with [`From`](ConfigArc::from). It reaches only the shared [`ConfigRef`].
+//!   libgit2 publishes no up-ref, so it does not clone.
 //!
 //! A sole reference stops being one when C takes another: a wrapper of
 //! `git_repository_set_config`, which up-refs the config into the repository, must
@@ -183,12 +181,12 @@ pub struct ConfigMut<'a, 'r>(
 // invariant in the config through its `PhantomData<&'a mut Config<'r>>`.
 unsafe impl<'r> CCell for Config<'r> {
     type C = ffi::git_config;
-    type Ref<'a>
-        = ConfigRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = ConfigMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ConfigRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1108,15 +1106,15 @@ fn integer_parse_error(value: Option<&CStr>) -> CString {
 pub struct ConfigLevel(ffi::git_config_level_t);
 
 impl ConfigLevel {
-    pub const SYSTEM: Self = Self(ffi::GIT_CONFIG_LEVEL_SYSTEM);
-    pub const XDG: Self = Self(ffi::GIT_CONFIG_LEVEL_XDG);
-    pub const GLOBAL: Self = Self(ffi::GIT_CONFIG_LEVEL_GLOBAL);
-    pub const LOCAL: Self = Self(ffi::GIT_CONFIG_LEVEL_LOCAL);
-    pub const WORKTREE: Self = Self(ffi::GIT_CONFIG_LEVEL_WORKTREE);
     /// First application-specific priority; larger priorities are also supported.
     pub const APP: Self = Self(ffi::GIT_CONFIG_LEVEL_APP);
+    pub const GLOBAL: Self = Self(ffi::GIT_CONFIG_LEVEL_GLOBAL);
     /// Select the highest loaded priority when querying, not when adding a backend.
     pub const HIGHEST: Self = Self(ffi::GIT_CONFIG_HIGHEST_LEVEL);
+    pub const LOCAL: Self = Self(ffi::GIT_CONFIG_LEVEL_LOCAL);
+    pub const SYSTEM: Self = Self(ffi::GIT_CONFIG_LEVEL_SYSTEM);
+    pub const WORKTREE: Self = Self(ffi::GIT_CONFIG_LEVEL_WORKTREE);
+    pub const XDG: Self = Self(ffi::GIT_CONFIG_LEVEL_XDG);
 
     /// Preserves an integer supplied by C, including custom priorities.
     pub const fn from_raw(value: ffi::git_config_level_t) -> Self {
@@ -1348,7 +1346,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_config_entry
-    Entry, EntryRef, EntryMut, ffi::git_config_entry
+    Entry,
+    EntryRef,
+    EntryMut,
+    ffi::git_config_entry
 );
 
 /// Calls the entry's backend-provided release callback through C. For built-in
@@ -1934,6 +1935,7 @@ impl<'c> PreparedBackendWalk<'c> {
         unsafe { out.write(addr_of_mut!((*backend.cast::<Self>()).iterator)) };
         0
     }
+
     unsafe extern "C" fn next(
         out: *mut *mut ffi::git_config_backend_entry,
         iterator: *mut ffi::git_config_iterator,
@@ -1973,6 +1975,7 @@ impl<'c> PreparedBackendWalk<'c> {
             }
         }
     }
+
     unsafe extern "C" fn free(_: *mut ffi::git_config_iterator) {
         // C borrows the stack iterator. The enclosing Rust state releases the
         // real owner immediately after C returns (also on callback panic).
@@ -2350,12 +2353,12 @@ pub struct ConfigMapMut<'a, 's>(ConfigMapRef<'a, 's>, PhantomData<&'a mut Config
 // Rust-owned inline storage, never a borrowed C record.
 unsafe impl<'s> CCell for ConfigMap<'s> {
     type C = ffi::git_configmap;
-    type Ref<'a>
-        = ConfigMapRef<'a, 's>
-    where
-        Self: 'a;
     type Mut<'a>
         = ConfigMapMut<'a, 's>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ConfigMapRef<'a, 's>
     where
         Self: 'a;
 }
@@ -2494,6 +2497,7 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
     pub fn as_ref(&self) -> ConfigMapRef<'_, 's> {
         self.0
     }
+
     pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
         ConfigMapMut(self.0, PhantomData)
     }
@@ -2533,13 +2537,15 @@ impl<'a, 's> ConfigMapMut<'a, 's> {
 
 #[cfg(test)]
 pub(crate) mod unit_tests {
-    use super::*;
-    use crate::libgit2::util::errors::ErrorCode;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{CStr, c_int, c_void};
     use core::mem::size_of;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
+    use super::*;
+    use crate::libgit2::util::errors::ErrorCode;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     /// Rust-only fixture for the borrowed callback seam; never adopted as an
     /// owner, since it lacks the enclosing C backend-entry release callback.
@@ -2807,7 +2813,7 @@ pub(crate) mod unit_tests {
         assert_eq!(align_of::<ConfigMap>(), align_of::<ffi::git_configmap>());
         assert_eq!(size_of::<ConfigMapRef>(), size_of::<*const ()>());
         assert_eq!(size_of::<ConfigMapMut>(), size_of::<*mut ()>());
-        let text = CString::new([0xff, b'x']).unwrap();
+        let text = CString::new([0xFF, b'x']).unwrap();
         let mut map = ConfigMap::new(MapMatch::String(&text), i32::MIN);
         let cloned = map.clone();
         let mut m = map.as_mut();
@@ -3107,9 +3113,11 @@ pub(crate) mod unit_tests {
     /// nothing (LSan) and leaves the config usable, until the lookup completes.
     /// The config has no file backend: a file backend's iterator and snapshot
     /// duplicate its entry list, and `git_config_list_dup_entry` corrupts the
-    /// heap when an allocation fails there (`reviews/.../config/wave-1/batch-0/misc/config-list-dup-corrupts-heap-on-allocation-failure`).
-    /// The lookup's second allocation is never refused: C leaks the iterator
-    /// built by the first (`misc/multivar-iterator-leaks-inner-on-allocation-failure`).
+    /// heap when an allocation fails there
+    /// (`reviews/.../config/wave-1/batch-0/misc/
+    /// config-list-dup-corrupts-heap-on-allocation-failure`). The lookup's second allocation is
+    /// never refused: C leaks the iterator built by the first
+    /// (`misc/multivar-iterator-leaks-inner-on-allocation-failure`).
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn entry_allocation_failures_leave_config_usable() {
@@ -3190,6 +3198,7 @@ pub(crate) mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -3203,6 +3212,7 @@ pub(crate) mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }
@@ -3718,9 +3728,10 @@ pub(crate) mod unit_tests {
 
     /// The iterator constructors and `advance_entry`, homed with them here.
     mod iterators {
-        use super::*;
         use std::cell::Cell;
         use std::rc::Rc;
+
+        use super::*;
 
         /// Constructors fail cleanly when libgit2's allocator refuses: the all
         /// iterator's (and glob's) only allocation, and the multivar name copy
@@ -3932,6 +3943,7 @@ pub(crate) mod unit_tests {
                 unsafe { out.write(owner.into_c()) };
                 0
             }
+
             fn new(script: &'static [c_int], releases: Rc<Cell<usize>>) -> Self {
                 Self {
                     base: ffi::git_config_backend {
@@ -3943,6 +3955,7 @@ pub(crate) mod unit_tests {
                     releases,
                 }
             }
+
             fn as_mut(&mut self) -> BackendMut<'_> {
                 // SAFETY: exclusive borrowed initialized backend fixture; this
                 // allocation-compatible iterator needs no separate open, and no

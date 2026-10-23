@@ -10,9 +10,9 @@
 //! a refusing filter (`crustify-refuse`, after `ident`) fails its `check`, so that
 //! libgit2 discards a list it had started (`*.refuse`, after `ident` joined it) or never
 //! starts one (`*.refuse-only`), and a filter whose `initialize` fails does the same for
-//! every load selecting it (`*.uninit`, in [`failing_initialize`]). `HEAD` is a commit whose own `.gitattributes` selects
-//! `ident` for `*.head`, read with `GIT_FILTER_ATTRIBUTES_FROM_HEAD` or, by id,
-//! `GIT_FILTER_ATTRIBUTES_FROM_COMMIT`.
+//! every load selecting it (`*.uninit`, in [`failing_initialize`]). `HEAD` is a commit whose own
+//! `.gitattributes` selects `ident` for `*.head`, read with `GIT_FILTER_ATTRIBUTES_FROM_HEAD` or,
+//! by id, `GIT_FILTER_ATTRIBUTES_FROM_COMMIT`.
 //!
 //! Compared for each case: success or the error (class and message); whether a list was
 //! built; its length and which filters it holds (`git_filter_list_contains`); the ids the
@@ -573,7 +573,7 @@ fn load_ext() {
             ..base
         };
         let mut missing = from_commit;
-        missing.attr_commit_id.id[..2].copy_from_slice(&[0xba, 0xd0]);
+        missing.attr_commit_id.id[..2].copy_from_slice(&[0xBA, 0xD0]);
         let unchecked = ffi::git_filter_options {
             version: 99,
             flags: ffi::GIT_FILTER_ALLOW_UNSAFE,

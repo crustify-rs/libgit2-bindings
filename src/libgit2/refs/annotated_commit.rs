@@ -134,12 +134,12 @@ pub struct AnnotatedCommitMut<'a, 'r>(
 // invariant in the commit through its `PhantomData<&'a mut AnnotatedCommit<'r>>`.
 unsafe impl<'r> CCell for AnnotatedCommit<'r> {
     type C = ffi::git_annotated_commit;
-    type Ref<'a>
-        = AnnotatedCommitRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = AnnotatedCommitMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = AnnotatedCommitRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -451,15 +451,17 @@ impl<'r> AnnotatedCommit<'r> {
 
 #[cfg(test)]
 mod unit_tests {
+    use core::mem::size_of;
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::PathBuf;
+
+    use ffibox::CZeroable;
+
     use super::*;
     use crate::libgit2::oid::oid::{Oid, OidType};
     use crate::libgit2::refs::refs::ReferenceBox;
     use crate::libgit2::repository::repository::RepositoryBox;
-    use core::mem::size_of;
-    use ffibox::CZeroable;
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    use std::path::PathBuf;
 
     #[test]
     fn layout_is_one_pointer() {

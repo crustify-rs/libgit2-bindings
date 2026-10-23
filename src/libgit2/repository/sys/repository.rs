@@ -45,21 +45,19 @@
 //!
 //! Each part's own contract decides how it is passed:
 //!
-//! - a config and an index are shared once installed, so the setters take a
-//!   [`ConfigArc`] / [`IndexArc`] by reference (a sole [`ConfigBox`] or [`IndexBox`]
-//!   converts with `.into()` first). The repository keeps its reference for as long as
-//!   it lives and reparses the config's files through it, so only a config whose
-//!   backends read no repository, a `ConfigArc<'static>`, is installed: one a
-//!   repository lent ([`RepositoryRef::config`]) borrows that repository, which this
-//!   one may outlive;
-//! - an object database reads its owning repository's object cache, so only one no
-//!   repository owns yet, an [`OdbArc<'static>`](OdbArc), is installed, and it is
-//!   consumed: the repository keeps it, and [`RepositoryRef::odb`] lends it back,
-//!   borrowing the repository;
-//! - a reference database points back at the repository it was opened for, which
-//!   libgit2 does not update when another repository installs it, so
-//!   [`set_refdb`](RepositoryRef::set_refdb) is `unsafe`; and a refdb built for the
-//!   repository itself borrows it, so it takes the shared [`RepositoryRef`].
+//! - a config and an index are shared once installed, so the setters take a [`ConfigArc`] /
+//!   [`IndexArc`] by reference (a sole [`ConfigBox`] or [`IndexBox`] converts with `.into()`
+//!   first). The repository keeps its reference for as long as it lives and reparses the config's
+//!   files through it, so only a config whose backends read no repository, a `ConfigArc<'static>`,
+//!   is installed: one a repository lent ([`RepositoryRef::config`]) borrows that repository, which
+//!   this one may outlive;
+//! - an object database reads its owning repository's object cache, so only one no repository owns
+//!   yet, an [`OdbArc<'static>`](OdbArc), is installed, and it is consumed: the repository keeps
+//!   it, and [`RepositoryRef::odb`] lends it back, borrowing the repository;
+//! - a reference database points back at the repository it was opened for, which libgit2 does not
+//!   update when another repository installs it, so [`set_refdb`](RepositoryRef::set_refdb) is
+//!   `unsafe`; and a refdb built for the repository itself borrows it, so it takes the shared
+//!   [`RepositoryRef`].
 //!
 //! # Cleaning up
 //!
@@ -144,7 +142,10 @@ define_ctype!(
     ///
     /// Wraps: git_repository_new_options
     #[derive(Clone, Copy)]
-    NewOptions, NewOptionsRef, NewOptionsMut, ffi::git_repository_new_options
+    NewOptions,
+    NewOptionsRef,
+    NewOptionsMut,
+    ffi::git_repository_new_options
 );
 
 // SAFETY: a `NewOptions` is 8 plain bytes: no pointer, no interior mutability, no
@@ -604,18 +605,17 @@ impl RepositoryRef<'_> {
     ///
     /// # Safety
     ///
-    /// - `refdb` must have been opened for a repository that outlives every reference
-    ///   operation this repository runs through it, and whose object id type is this
-    ///   repository's: this repository itself always qualifies. libgit2 keeps the
-    ///   refdb's pointer to the repository it was opened for, uncounted, and its
-    ///   backends read that repository on every operation; object ids the refdb parses
-    ///   with that repository's type are then looked up in this one, where an id of
-    ///   another type is formatted into a loose object's path of the wrong length.
-    ///   Neither follows from `'r`, which bounds only the arc: the repository keeps its
-    ///   reference until it is freed or given another refdb.
-    /// - No libgit2 routine may be running on this repository, as when this is called
-    ///   from one of its callbacks: such a routine may hold the previous refdb without a
-    ///   reference of its own, which the swap releases.
+    /// - `refdb` must have been opened for a repository that outlives every reference operation
+    ///   this repository runs through it, and whose object id type is this repository's: this
+    ///   repository itself always qualifies. libgit2 keeps the refdb's pointer to the repository it
+    ///   was opened for, uncounted, and its backends read that repository on every operation;
+    ///   object ids the refdb parses with that repository's type are then looked up in this one,
+    ///   where an id of another type is formatted into a loose object's path of the wrong length.
+    ///   Neither follows from `'r`, which bounds only the arc: the repository keeps its reference
+    ///   until it is freed or given another refdb.
+    /// - No libgit2 routine may be running on this repository, as when this is called from one of
+    ///   its callbacks: such a routine may hold the previous refdb without a reference of its own,
+    ///   which the swap releases.
     ///
     /// Wraps: git_repository_set_refdb
     pub unsafe fn set_refdb(&self, refdb: &RefdbArc<'_>) {
@@ -765,11 +765,11 @@ mod unit_tests {
     }
 
     mod submodule_cache {
-        use super::super::*;
         use std::ffi::CString;
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
 
+        use super::super::*;
         use crate::libgit2::repository::repository::Repository;
 
         #[test]
@@ -836,7 +836,8 @@ mod unit_tests {
         use core::ffi::{CStr, c_int, c_void};
         use core::ptr::{self, NonNull};
         use std::process::Command;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering::SeqCst;
 
         use crate::ffi;
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
@@ -882,6 +883,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -895,6 +897,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }
@@ -917,7 +920,6 @@ mod unit_tests {
 
     mod installed_parts {
         use super::super::*;
-
         use crate::libgit2::odb::odb::Odb;
         use crate::libgit2::repository::repository::Repository;
 
@@ -944,8 +946,9 @@ mod unit_tests {
         #[test]
         #[cfg_attr(miri, ignore = "calls libgit2")]
         fn an_unallocatable_scratch_repository_fails_set_odb() {
-            use super::refusing::{REFUSING, install_refusing, isolated};
             use std::sync::atomic::Ordering::SeqCst;
+
+            use super::refusing::{REFUSING, install_refusing, isolated};
             isolated(
                 concat!(
                     module_path!(),

@@ -17,13 +17,12 @@
 //!
 //! - An empty Rust buffer is NULL and never reaches the allocator, where C would call
 //!   `git_odb_backend_data_alloc(backend, 0)`.
-//! - Before `git_libgit2_init`, C gets NULL after `git_error_set_oom` writes through
-//!   a nonexistent TLS key; the strategies pin the runtime first and succeed. The
-//!   corrected behaviour is regression-tested in the module's `unit_tests` and in
-//!   `ub_safe`.
+//! - Before `git_libgit2_init`, C gets NULL after `git_error_set_oom` writes through a nonexistent
+//!   TLS key; the strategies pin the runtime first and succeed. The corrected behaviour is
+//!   regression-tested in the module's `unit_tests` and in `ub_safe`.
 //! - `git_strarray_copy` silently skips NULL elements of its source (`strarray.c`);
-//!   `OdbDataStrVec::from_raw_parts` refuses to adopt an array holding one, which
-//!   `ub_unsafe` covers.
+//!   `OdbDataStrVec::from_raw_parts` refuses to adopt an array holding one, which `ub_unsafe`
+//!   covers.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -79,8 +78,15 @@ unsafe extern "C" {
 
 #[derive(Debug)]
 enum Raw {
-    Alloc { ptr: usize, len: usize, file: String, line: c_int },
-    Free { ptr: usize },
+    Alloc {
+        ptr: usize,
+        len: usize,
+        file: String,
+        line: c_int,
+    },
+    Free {
+        ptr: usize,
+    },
 }
 
 static TRACING: AtomicBool = AtomicBool::new(false);
@@ -115,7 +121,12 @@ unsafe extern "C" fn traced_malloc(len: usize, file: *const c_char, line: c_int)
         // SAFETY: libgit2 passes `__FILE__`, a NUL-terminated literal.
         let file = unsafe { CStr::from_ptr(file) }.to_string_lossy();
         let file = file.rsplit('/').next().unwrap().to_owned();
-        TRACE.lock().unwrap().push(Raw::Alloc { ptr: ptr as usize, len, file, line });
+        TRACE.lock().unwrap().push(Raw::Alloc {
+            ptr: ptr as usize,
+            len,
+            file,
+            line,
+        });
     }
     ptr
 }
@@ -126,7 +137,10 @@ unsafe extern "C" fn traced_realloc(
     _file: *const c_char,
     _line: c_int,
 ) -> *mut c_void {
-    assert!(!TRACING.load(Ordering::SeqCst), "no traced step reallocates");
+    assert!(
+        !TRACING.load(Ordering::SeqCst),
+        "no traced step reallocates"
+    );
     // SAFETY: `ptr` came from `traced_malloc` / `traced_realloc`, i.e. libc.
     unsafe { realloc(ptr, len) }
 }
@@ -149,9 +163,8 @@ fn install_tracing_allocator() {
     };
     // SAFETY: `GIT_OPT_SET_ALLOCATOR` takes a `git_allocator *` with every member set,
     // which it copies; nothing is allocated yet, so no storage changes allocator.
-    let rc = unsafe {
-        ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
-    };
+    let rc =
+        unsafe { ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator) };
     assert_eq!(rc, 0);
     // SAFETY: no arguments; refcounted, never released in this process.
     assert!(unsafe { ffi::git_libgit2_init() } > 0);
@@ -162,9 +175,19 @@ fn install_tracing_allocator() {
 /// One allocator event, with pointers replaced by the index of their allocation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Event {
-    Alloc { len: usize, file: String, line: c_int },
-    AllocFailed { len: usize, file: String, line: c_int },
-    Free { alloc: usize },
+    Alloc {
+        len: usize,
+        file: String,
+        line: c_int,
+    },
+    AllocFailed {
+        len: usize,
+        file: String,
+        line: c_int,
+    },
+    Free {
+        alloc: usize,
+    },
 }
 
 /// Records one sequence of steps, each step's events normalised separately.
@@ -193,14 +216,27 @@ impl Recorder {
         let events = raw
             .into_iter()
             .map(|e| match e {
-                Raw::Alloc { ptr: 0, len, file, line } => Event::AllocFailed { len, file, line },
-                Raw::Alloc { ptr, len, file, line } => {
+                Raw::Alloc {
+                    ptr: 0,
+                    len,
+                    file,
+                    line,
+                } => Event::AllocFailed { len, file, line },
+                Raw::Alloc {
+                    ptr,
+                    len,
+                    file,
+                    line,
+                } => {
                     self.allocs.insert(ptr, self.count);
                     self.count += 1;
                     Event::Alloc { len, file, line }
                 }
                 Raw::Free { ptr } => Event::Free {
-                    alloc: self.allocs.remove(&ptr).expect("freed what the sequence allocated"),
+                    alloc: self
+                        .allocs
+                        .remove(&ptr)
+                        .expect("freed what the sequence allocated"),
                 },
             })
             .collect();
@@ -215,7 +251,10 @@ fn last_error() -> (c_int, String) {
     // libgit2 call on this thread, and is copied out before one.
     unsafe {
         let e = ffi::git_error_last();
-        ((*e).klass, CStr::from_ptr((*e).message).to_string_lossy().into_owned())
+        (
+            (*e).klass,
+            CStr::from_ptr((*e).message).to_string_lossy().into_owned(),
+        )
     }
 }
 
@@ -226,7 +265,10 @@ fn clear_error() {
 
 /// A backend the C side passes; both routines ignore it.
 fn backend() -> ffi::git_odb_backend {
-    ffi::git_odb_backend { version: 1, ..Default::default() }
+    ffi::git_odb_backend {
+        version: 1,
+        ..Default::default()
+    }
 }
 
 fn c_alloc(backend: &mut ffi::git_odb_backend, len: usize) -> *mut u8 {
@@ -253,20 +295,27 @@ fn pattern(len: usize) -> Vec<u8> {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn traced_allocator_sequences() {
-    isolated(concat!(module_path!(), "::traced_allocator_sequences"), || {
-        install_tracing_allocator();
-        for len in [1, 3, 64, 4096] {
-            copy_then_release(len);
-            clone_then_release_source_first(len);
-        }
-        uninit_run_filled_in_place();
-        zeroed_run();
-        zeroed_object();
-        uninit_object_released_unfilled();
-        allocation_failures();
-        empty_runs();
-        assert_eq!(LIVE.load(Ordering::SeqCst), 0, "every traced allocation was released");
-    });
+    isolated(
+        concat!(module_path!(), "::traced_allocator_sequences"),
+        || {
+            install_tracing_allocator();
+            for len in [1, 3, 64, 4096] {
+                copy_then_release(len);
+                clone_then_release_source_first(len);
+            }
+            uninit_run_filled_in_place();
+            zeroed_run();
+            zeroed_object();
+            uninit_object_released_unfilled();
+            allocation_failures();
+            empty_runs();
+            assert_eq!(
+                LIVE.load(Ordering::SeqCst),
+                0,
+                "every traced allocation was released"
+            );
+        },
+    );
 }
 
 /// `memdup` then free: `from_slice` and drop.
@@ -385,9 +434,8 @@ fn zeroed_object() {
     let pair = r.step(|| OdbDataBox::<Pair>::new_zeroed().unwrap());
     assert_eq!(c.steps, r.steps);
     // SAFETY: `pair` holds an initialised `pair_st`, read without forming a reference.
-    let bytes = unsafe {
-        std::slice::from_raw_parts(pair.as_c_ptr().cast::<u8>(), size_of::<pair_st>())
-    };
+    let bytes =
+        unsafe { std::slice::from_raw_parts(pair.as_c_ptr().cast::<u8>(), size_of::<pair_st>()) };
     assert_eq!(c_read(p, size_of::<pair_st>()), bytes);
 
     c.step(|| c_free(&mut b, p));
@@ -432,27 +480,32 @@ fn allocation_failures() {
     fail(&mut || c_alloc(&mut backend(), 32).is_null(), &mut || {
         OdbDataVec::<u8>::from_slice(&src).is_none()
     });
-    fail(&mut || c_alloc(&mut backend(), 7 * 4).is_null(), &mut || {
-        OdbDataArrayFree::new_uninit::<u32>(7).is_none()
-    });
-    fail(&mut || c_alloc(&mut backend(), 2 * 8).is_null(), &mut || {
-        OdbDataArrayFree::new_zeroed::<u64>(2).is_none()
-    });
-    fail(&mut || c_alloc(&mut backend(), size_of::<pair_st>()).is_null(), &mut || {
-        OdbDataBox::<Pair>::new_zeroed().is_none()
-    });
-    fail(&mut || c_alloc(&mut backend(), size_of::<pair_st>()).is_null(), &mut || {
-        OdbDataBox::<Pair>::new_uninit().is_none()
-    });
+    fail(
+        &mut || c_alloc(&mut backend(), 7 * 4).is_null(),
+        &mut || OdbDataArrayFree::new_uninit::<u32>(7).is_none(),
+    );
+    fail(
+        &mut || c_alloc(&mut backend(), 2 * 8).is_null(),
+        &mut || OdbDataArrayFree::new_zeroed::<u64>(2).is_none(),
+    );
+    fail(
+        &mut || c_alloc(&mut backend(), size_of::<pair_st>()).is_null(),
+        &mut || OdbDataBox::<Pair>::new_zeroed().is_none(),
+    );
+    fail(
+        &mut || c_alloc(&mut backend(), size_of::<pair_st>()).is_null(),
+        &mut || OdbDataBox::<Pair>::new_uninit().is_none(),
+    );
 
     // A failed copy leaves the source intact.
     let p = c_alloc(&mut b, src.len());
     // SAFETY: `p` holds `src.len()` writable bytes.
     unsafe { p.copy_from_nonoverlapping(src.as_ptr(), src.len()) };
     let v = OdbDataVec::<u8>::from_slice(&src).unwrap();
-    fail(&mut || c_alloc(&mut backend(), src.len()).is_null(), &mut || {
-        v.try_clone().is_none()
-    });
+    fail(
+        &mut || c_alloc(&mut backend(), src.len()).is_null(),
+        &mut || v.try_clone().is_none(),
+    );
     assert_eq!(c_read(p, src.len()), v.as_slice());
     c_free(&mut b, p);
     drop(v);

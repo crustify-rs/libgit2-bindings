@@ -122,12 +122,12 @@ pub struct OdbMut<'a, 'r>(
 // `PhantomData<&'a mut Odb<'r>>`.
 unsafe impl<'r> CCell for Odb<'r> {
     type C = ffi::git_odb;
-    type Ref<'a>
-        = OdbRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = OdbMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = OdbRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -422,14 +422,16 @@ const _: () = assert!(size_of::<Option<OdbArc<'static>>>() == size_of::<*mut ffi
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use std::process::Command;
+    use std::sync::atomic::AtomicIsize;
+    use std::sync::atomic::Ordering::SeqCst;
+
     use super::*;
     use crate::libgit2::util::errors::ErrorClass;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::set;
-    use core::ffi::c_void;
-    use core::ptr::NonNull;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicIsize, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -607,6 +609,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -620,6 +623,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

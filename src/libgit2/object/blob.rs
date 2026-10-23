@@ -238,7 +238,6 @@ impl FilterFlags {
         }
         bits
     };
-
     /// The flags `GIT_BLOB_FILTER_OPTIONS_INIT` and `git_blob_filter_options_init`
     /// set: [`FilterFlag::CheckForBinary`] alone.
     pub const OPTIONS_DEFAULT: Self = Self(FilterFlag::CheckForBinary.bit());
@@ -355,8 +354,8 @@ impl Extend<FilterFlag> for FilterFlags {
 }
 
 impl IntoIterator for FilterFlags {
-    type Item = FilterFlag;
     type IntoIter = FilterFlagsIter;
+    type Item = FilterFlag;
 
     fn into_iter(self) -> FilterFlagsIter {
         self.iter()
@@ -485,12 +484,12 @@ pub struct BlobMut<'a, 'r>(
 // blob through its `PhantomData<&'a mut Blob<'r>>`.
 unsafe impl<'r> CCell for Blob<'r> {
     type C = ffi::git_blob;
-    type Ref<'a>
-        = BlobRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = BlobMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = BlobRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1003,7 +1002,10 @@ define_ctype!(
     ///
     /// Wraps: git_blob_filter_options
     #[derive(Clone, Copy)]
-    FilterOptions, FilterOptionsRef, FilterOptionsMut, ffi::git_blob_filter_options
+    FilterOptions,
+    FilterOptionsRef,
+    FilterOptionsMut,
+    ffi::git_blob_filter_options
 );
 
 // SAFETY: a `FilterOptions` is a version, flags, an id and the `reserved` pointer,
@@ -1319,11 +1321,11 @@ mod wide {
     /// UTF-16 or UTF-32 (which make the data binary), as `git_str_detect_bom` reads it.
     pub(super) fn bom(data: &[u8]) -> (usize, bool) {
         match data {
-            [0, 0, 0xfe, 0xff, ..] => (4, true),
-            [0xef, 0xbb, 0xbf, ..] => (3, false),
-            [0xfe, 0xff, ..] => (2, true),
-            [0xff, 0xfe, 0, 0, ..] => (4, true),
-            [0xff, 0xfe, ..] => (2, true),
+            [0, 0, 0xFE, 0xFF, ..] => (4, true),
+            [0xEF, 0xBB, 0xBF, ..] => (3, false),
+            [0xFE, 0xFF, ..] => (2, true),
+            [0xFF, 0xFE, 0, 0, ..] => (4, true),
+            [0xFF, 0xFE, ..] => (2, true),
             _ => (0, false),
         }
     }
@@ -1336,11 +1338,11 @@ mod wide {
         }
         let (mut printable, mut nonprintable) = (0usize, 0usize);
         for &c in &data[skip..] {
-            if (c > 0x1f && c != 0x7f) || matches!(c, 0x08 | 0x1b | 0x0c) {
+            if (c > 0x1F && c != 0x7F) || matches!(c, 0x08 | 0x1B | 0x0C) {
                 printable += 1;
             } else if c == 0 {
                 return true;
-            } else if !matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
+            } else if !matches!(c, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r') {
                 nonprintable += 1;
             }
         }
@@ -1378,7 +1380,10 @@ fn filter_path(path: &CStr) -> Result<(), RepositoryError> {
 /// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
 /// let repo = Repository::init(&path, true).unwrap();
 /// let id = create_from_buffer(repo.as_ref(), b"hello\n").unwrap();
-/// assert_eq!(id.as_ref().to_hex_string().unwrap(), "ce013625030ba8dba906f756967f9e9ca394464a");
+/// assert_eq!(
+///     id.as_ref().to_hex_string().unwrap(),
+///     "ce013625030ba8dba906f756967f9e9ca394464a"
+/// );
 /// # drop(repo);
 /// # std::fs::remove_dir_all(&dir).unwrap();
 /// ```
@@ -1591,14 +1596,16 @@ impl fmt::Debug for BlobWriter<'_> {
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::CStr;
+
+    use ffibox::CZeroable;
+
     use super::*;
     use crate::libgit2::object::object::Object;
     use crate::libgit2::oid::oid::{Oid, OidType};
     use crate::libgit2::repository::repository::{Repository, RepositoryBox};
     use crate::libgit2::util::errors::ErrorClass;
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::CStr;
-    use ffibox::CZeroable;
 
     /// The bytes of a `git_oid`'s id.
     const MAX_OID: usize = ffi::GIT_OID_MAX_SIZE as usize;
@@ -1609,7 +1616,7 @@ mod unit_tests {
             u32::MAX,
             u32::MAX - 1,
             0x8000_0000,
-            0x0f,
+            0x0F,
             0x10,
         ])
     }
@@ -1746,7 +1753,7 @@ mod unit_tests {
             ratio.extend(std::iter::repeat_n(0x01, nonprintable));
             inputs.push(ratio);
         }
-        for ws in [b' ', b'\t', b'\n', 0x0b, 0x0c, b'\r', 0x08, 0x1b] {
+        for ws in [b' ', b'\t', b'\n', 0x0B, 0x0C, b'\r', 0x08, 0x1B] {
             let mut run = vec![ws; 128];
             run.push(0x01);
             inputs.push(run);
@@ -1820,12 +1827,12 @@ mod unit_tests {
     fn whitespace_classes() {
         for (ws, binary) in [
             (b' ', false),
-            (0x0c, false),
+            (0x0C, false),
             (0x08, false),
-            (0x1b, false),
+            (0x1B, false),
             (b'\t', true),
             (b'\n', true),
-            (0x0b, true),
+            (0x0B, true),
             (b'\r', true),
         ] {
             let mut run = vec![ws; 128];
@@ -2086,7 +2093,7 @@ mod unit_tests {
         m.set_version(-1);
         m.set_flags(FilterFlags::from_bits_retain(0x8000_0005));
         m.attr_commit_id_mut().set_raw_kind(1);
-        m.attr_commit_id_mut().set_id([0xab; MAX_OID]);
+        m.attr_commit_id_mut().set_id([0xAB; MAX_OID]);
         assert_eq!(m.as_ref().version(), -1);
         assert_eq!(m.as_ref().flags().bits(), 0x8000_0005);
         assert_eq!(m.as_ref().attr_commit_id().raw_kind(), 1);
@@ -2097,17 +2104,17 @@ mod unit_tests {
 
         let mut other = Oid::zeroed();
         other.as_mut().set_raw_kind(2);
-        other.as_mut().set_id([0x5a; MAX_OID]);
+        other.as_mut().set_id([0x5A; MAX_OID]);
         opts.as_mut().set_attr_commit_id(other.as_ref());
         let id = opts.as_ref().attr_commit_id();
-        assert_eq!((id.raw_kind(), id.id()), (2, [0x5a; MAX_OID]));
+        assert_eq!((id.raw_kind(), id.id()), (2, [0x5A; MAX_OID]));
 
         let raw = ffi::git_blob_filter_options::from(opts);
         assert_eq!(raw.version, -1);
         assert_eq!(raw.flags, 0x8000_0005);
         assert!(raw.reserved.is_null());
         assert_eq!(raw.attr_commit_id.type_, 2);
-        assert_eq!(raw.attr_commit_id.id, [0x5a; MAX_OID]);
+        assert_eq!(raw.attr_commit_id.id, [0x5A; MAX_OID]);
         assert_eq!(opts.as_ref().to_options(), opts);
     }
 

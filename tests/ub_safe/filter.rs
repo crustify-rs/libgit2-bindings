@@ -163,7 +163,7 @@ fn constructors_build_lists_freed_once() {
                             .unwrap(),
                     );
                     opts.flags |= ffi::GIT_FILTER_ATTRIBUTES_FROM_COMMIT;
-                    opts.attr_commit_id.id[0] = 0x5a;
+                    opts.attr_commit_id.id[0] = 0x5A;
                     lists.push(
                         FilterList::load_ext(repo, path, mode, Some(&opts))
                             .unwrap()
@@ -482,7 +482,7 @@ mod with_blob {
                         reserved: NonNull::<u64>::dangling().as_ptr().cast(),
                         ..Default::default()
                     };
-                    opts.attr_commit_id.id[..4].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+                    opts.attr_commit_id.id[..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
                     FilterList::load_ext_with_blob(
                         wd.repo(),
                         blob.as_ref(),

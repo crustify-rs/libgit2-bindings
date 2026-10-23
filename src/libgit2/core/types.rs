@@ -73,12 +73,12 @@
 //! A stream is written any number of times, then closed once, then freed:
 //!
 //! - [`WriteStreamMut::write`] calls the `write` member;
-//! - closing ends the stream: libgit2's own streams accept nothing but `free` afterwards
-//!   (a blob stream's next write or commit calls a NULL function, since closing zeroes
-//!   its file buffer; the checkout writer writes to a closed file descriptor), so
-//!   [`WriteStream::close`] consumes the owner;
-//! - the `free` member releases the whole container. [`WriteStreamFree`] calls it, so
-//!   one owner, [`WriteStreamBox`], holds any stream, C's or Rust's.
+//! - closing ends the stream: libgit2's own streams accept nothing but `free` afterwards (a blob
+//!   stream's next write or commit calls a NULL function, since closing zeroes its file buffer; the
+//!   checkout writer writes to a closed file descriptor), so [`WriteStream::close`] consumes the
+//!   owner;
+//! - the `free` member releases the whole container. [`WriteStreamFree`] calls it, so one owner,
+//!   [`WriteStreamBox`], holds any stream, C's or Rust's.
 //!
 //! [`RustWriteStream`] implements a stream in Rust, over a [`StreamWriter`]: its members
 //! are `extern "C"` trampolines into the writer. It lends a [`WriteStreamMut`] to code
@@ -92,14 +92,13 @@
 //! libgit2 hands signatures out in two ways:
 //!
 //! - **Owned.** `git_signature_new`, `git_signature_now`, `git_signature_from_buffer` and
-//!   `git_signature_dup` allocate the struct and copies of both strings from libgit2's
-//!   allocator, and `git_signature_free` releases all three. Rust holds such a signature
-//!   as a [`SignatureBox`] ([`Signature::new`], [`Signature::now`], [`Signature::parse`],
-//!   `Clone`). Its strings move in and out as [`OdbDataStr`]s, which the same `git__free`
-//!   releases.
-//! - **Borrowed.** Commits, tags, notes, reflog entries and blame hunks own the signatures
-//!   they record and lend them as `const git_signature *`, valid while their holder lives:
-//!   a [`SignatureRef`] tied to that holder.
+//!   `git_signature_dup` allocate the struct and copies of both strings from libgit2's allocator,
+//!   and `git_signature_free` releases all three. Rust holds such a signature as a [`SignatureBox`]
+//!   ([`Signature::new`], [`Signature::now`], [`Signature::parse`], `Clone`). Its strings move in
+//!   and out as [`OdbDataStr`]s, which the same `git__free` releases.
+//! - **Borrowed.** Commits, tags, notes, reflog entries and blame hunks own the signatures they
+//!   record and lend them as `const git_signature *`, valid while their holder lives: a
+//!   [`SignatureRef`] tied to that holder.
 //!
 //! Every `const git_signature *` libgit2 takes (commit, tag, note, reflog and stash
 //! creation, rebase commits) is only read, and what libgit2 keeps of it is copied. Rust
@@ -803,7 +802,10 @@ define_ctype!(
     ///
     /// Wraps: git_time
     #[derive(Clone, Copy)]
-    Time, TimeRef, TimeMut, ffi::git_time
+    Time,
+    TimeRef,
+    TimeMut,
+    ffi::git_time
 );
 
 // SAFETY: all zero is the epoch at offset 0 with sign byte 0, the value
@@ -1013,7 +1015,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_signature
-    Signature, SignatureRef, SignatureMut, ffi::git_signature
+    Signature,
+    SignatureRef,
+    SignatureMut,
+    ffi::git_signature
 );
 
 // SAFETY: an owned signature is a struct and its two strings, all allocations of
@@ -1482,7 +1487,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_writestream
-    WriteStream, WriteStreamRef, WriteStreamMut, ffi::git_writestream
+    WriteStream,
+    WriteStreamRef,
+    WriteStreamMut,
+    ffi::git_writestream
 );
 
 impl WriteStream {
@@ -1994,10 +2002,11 @@ impl std::error::Error for StreamError {}
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
     use std::collections::HashSet;
     use std::collections::hash_map::DefaultHasher;
     use std::error::Error;
+
+    use super::*;
 
     const OBJECT_TYPES: [(ffi::git_object_t, ObjectType); 4] = [
         (ffi::GIT_OBJECT_COMMIT, ObjectType::Commit),
@@ -2249,7 +2258,7 @@ mod unit_tests {
         // copied from a malformed zone.
         time.as_mut().set_offset_minutes(0);
         assert_eq!(time.as_ref().sign(), b'-');
-        for sign in [0u8, b'x', 0x7f, 0x80, 0xff] {
+        for sign in [0u8, b'x', 0x7F, 0x80, 0xFF] {
             time.as_mut().set_sign(sign);
             assert_eq!(time.as_ref().sign(), sign);
             assert_eq!(time.as_ref().offset_minutes(), 0);
@@ -2385,10 +2394,11 @@ mod unit_tests {
 
     /// `git_writestream`: `WriteStream`, `RustWriteStream` and their policies.
     mod write_streams {
-        use super::super::*;
         use core::ptr;
         use std::cell::RefCell;
         use std::rc::Rc;
+
+        use super::super::*;
 
         /// What a writer saw, in order.
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2699,6 +2709,7 @@ mod unit_tests {
             fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn realloc(
                 _: Option<NonNull<u8>>,
                 _: usize,
@@ -2707,6 +2718,7 @@ mod unit_tests {
             ) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn free(_: NonNull<u8>) {}
         }
 
@@ -2858,10 +2870,12 @@ mod unit_tests {
     }
 
     mod signatures {
+        use std::sync::atomic::Ordering::SeqCst;
+        use std::sync::atomic::{AtomicBool, AtomicIsize};
+
         use super::super::*;
         use crate::libgit2::raw::{OdbDataBox, OdbDataStrFree};
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -2929,6 +2943,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -2942,6 +2957,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }
@@ -3162,7 +3178,8 @@ mod unit_tests {
                     // A malformed timezone makes the parser set a conversion error of its
                     // own after the lost string, and still succeed: the refusal reports
                     // the allocation failure, not that later, stale error.
-                    for malformed in [c"A U Thor <a@b> 12 +abc", c"A U Thor <a@b> 12 +99999999999"] {
+                    for malformed in [c"A U Thor <a@b> 12 +abc", c"A U Thor <a@b> 12 +99999999999"]
+                    {
                         set(ErrorClass::Invalid, c"primed");
                         GRANTS.store(1, SeqCst);
                         let error = Signature::parse(malformed).unwrap_err();

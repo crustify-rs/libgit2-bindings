@@ -7,9 +7,9 @@
 //! sizes index a `git_oid`'s id, so they must stay within `GIT_OID_MAX_SIZE` and its
 //! hex form. None of them calls libgit2, so they also run under Miri.
 //!
-//! Then the wrapped types: the `Oid` value and its handles, its constructors over `git_oid_from_string` / `git_oid_from_prefix` /
-//! `git_oid_from_raw` and its copy over `git_oid_cpy`, and the `OidShortener` owner
-//! over `git_oid_shorten_new` / `git_oid_shorten_free`.
+//! Then the wrapped types: the `Oid` value and its handles, its constructors over
+//! `git_oid_from_string` / `git_oid_from_prefix` / `git_oid_from_raw` and its copy over
+//! `git_oid_cpy`, and the `OidShortener` owner over `git_oid_shorten_new` / `git_oid_shorten_free`.
 //!
 //! Then the symbols: comparisons (`git_oid_cmp`, `_equal`, `_ncmp`, `_is_zero`,
 //! `_strcmp`, `_streq`), formatters (`git_oid_fmt`, `_nfmt`, `_pathfmt`, `_tostr`,
@@ -19,12 +19,11 @@
 //! Inputs and outputs sit in exact-length heap buffers, so ASan flags any access
 //! libgit2 makes past them.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::hint::black_box;
 use std::thread;
-
-use std::cmp::Ordering;
 
 use ffibox::CZeroable;
 use libgit2::ffi;
@@ -240,11 +239,11 @@ fn views_stay_in_bounds() {
         }
         assert!(!id.set_elem(id.len(), 0));
         let mut sub = id.slice_mut(30..).unwrap();
-        assert!(sub.copy_from_slice(&[0xaa, 0xbb]));
+        assert!(sub.copy_from_slice(&[0xAA, 0xBB]));
         assert!(!sub.copy_from_slice(&[0; 3]));
         assert!(id.slice_mut(33..).is_none());
         // Reborrowed shared while the exclusive run is frozen.
-        assert_eq!(id.as_ref().elem(31), Some(0xbb));
+        assert_eq!(id.as_ref().elem(31), Some(0xBB));
         m.set_raw_kind(2);
         assert_eq!(m.as_ref().raw_kind(), 2);
     }
@@ -256,7 +255,7 @@ fn views_stay_in_bounds() {
     assert!(bytes.slice(..33).is_none());
     let (head, tail) = bytes.split_at(20).unwrap();
     assert_eq!((head.len(), tail.len()), (20, 12));
-    assert_eq!(r.id()[30..], [0xaa, 0xbb]);
+    assert_eq!(r.id()[30..], [0xAA, 0xBB]);
 }
 
 /// Hashing reads the 33 bytes in place, on values and handles alike, so a hashed
@@ -393,7 +392,7 @@ fn sample_oids() -> Vec<Box<Oid>> {
     for raw in [0, 3, u8::MAX] {
         let mut oid = Oid::zeroed();
         oid.as_mut().set_raw_kind(raw);
-        oid.as_mut().set_id([0xc5; 32]);
+        oid.as_mut().set_id([0xC5; 32]);
         v.push(Box::new(oid));
     }
     v.push(Box::new(Oid::zeroed()));
@@ -411,7 +410,7 @@ fn sample_hex() -> Vec<CString> {
     v.push(CString::new(format!("z{}", &SHA1_HEX[1..])).unwrap());
     v.push(CString::new(format!("{}z", &SHA1_HEX[..39])).unwrap());
     v.push(CString::new(format!("\u{e9}{}", &SHA1_HEX[1..])).unwrap());
-    v.push(CString::new([&SHA1_HEX.as_bytes()[..39], &[0xff][..]].concat()).unwrap());
+    v.push(CString::new([&SHA1_HEX.as_bytes()[..39], &[0xFF][..]].concat()).unwrap());
     v
 }
 
@@ -565,7 +564,7 @@ fn random_ids(n: usize, mut seed: u64) -> Vec<Box<str>> {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn add_reads_forty_digits_of_ids_it_keeps() {
-    let mut ids = random_ids(600, 0x9e37_79b9_7f4a_7c15);
+    let mut ids = random_ids(600, 0x9E37_79B9_7F4A_7C15);
     // Shared prefixes of every length, duplicates, and longer ids.
     for k in [1, 4, 20, 38, 39] {
         let mut id = ids[0].to_string();
@@ -620,7 +619,7 @@ fn malformed_ids_leave_the_shortener_untouched() {
     ignore = "tens of thousands of additions stall BorrowSanitizer; the other variants run it"
 )]
 fn a_full_shortener_keeps_failing_safely() {
-    let ids = random_ids(40_000, 0x2545_f491_4f6c_dd1d);
+    let ids = random_ids(40_000, 0x2545_F491_4F6C_DD1D);
     let mut b = OidShortener::new(0).unwrap();
     let mut added = 0;
     let err = loop {

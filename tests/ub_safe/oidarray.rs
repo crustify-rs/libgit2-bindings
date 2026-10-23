@@ -141,9 +141,9 @@ fn views_stay_in_bounds() {
         assert!(run.get_mut(n).is_none());
         // Overwrite every id in place, the last one included.
         for mut id in run.iter_mut() {
-            id.set_id([0xee; 32]);
+            id.set_id([0xEE; 32]);
         }
-        assert!(contents(m.as_ref()).iter().all(|&(_, id)| id == [0xee; 32]));
+        assert!(contents(m.as_ref()).iter().all(|&(_, id)| id == [0xEE; 32]));
         m.truncate(n / 2);
         assert_eq!(m.as_ref().ids().len(), n / 2);
         assert!(m.as_ref().ids().get(n / 2).is_none());
@@ -234,7 +234,7 @@ fn copies_are_independent() {
         .ids_mut()
         .get_mut(4)
         .unwrap()
-        .set_raw_kind(0xff);
+        .set_raw_kind(0xFF);
     let copy_of_copy = copy.as_ref().to_oid_array().unwrap();
     drop(array);
     assert_eq!(contents(copy.as_ref()), expected(&src));

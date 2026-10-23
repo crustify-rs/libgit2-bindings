@@ -14,13 +14,12 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - An empty array (`commits` NULL) never reaches libgit2 in Rust:
-//!   `CommitArrayDispose` skips the C call, which would be `git__free(NULL)` reading
-//!   the allocator unsynchronised against a concurrent first `git_libgit2_init`. Both
-//!   sides end in `{NULL, 0}` either way.
-//! - A handle over an array whose `commits` is NULL with a non-zero `count` (no
-//!   libgit2 path produces one) reads as empty and clears to `{NULL, 0}` in Rust; C's
-//!   dispose would dereference NULL. The module's `unit_tests` cover it.
+//! - An empty array (`commits` NULL) never reaches libgit2 in Rust: `CommitArrayDispose` skips the
+//!   C call, which would be `git__free(NULL)` reading the allocator unsynchronised against a
+//!   concurrent first `git_libgit2_init`. Both sides end in `{NULL, 0}` either way.
+//! - A handle over an array whose `commits` is NULL with a non-zero `count` (no libgit2 path
+//!   produces one) reads as empty and clears to `{NULL, 0}` in Rust; C's dispose would dereference
+//!   NULL. The module's `unit_tests` cover it.
 
 use std::ffi::{CStr, c_int};
 use std::ptr;
@@ -194,11 +193,11 @@ fn filled_arrays_match_through_their_lifecycle() {
 ///
 /// Documented divergences, outside these comparisons:
 ///
-/// - A NULL `field` or `value` is refused by libgit2 (`-1`, `GIT_ERROR_INVALID`); a
-///   [`Header`] has no NULL state, so no Rust input reaches that path.
-/// - An empty Rust run passes a dangling, non-NULL pointer with a length of 0, where
-///   C code passes NULL; libgit2 reads `extra_headers_len` first and never the
-///   pointer, as the first step's comparison shows.
+/// - A NULL `field` or `value` is refused by libgit2 (`-1`, `GIT_ERROR_INVALID`); a [`Header`] has
+///   no NULL state, so no Rust input reaches that path.
+/// - An empty Rust run passes a dangling, non-NULL pointer with a length of 0, where C code passes
+///   NULL; libgit2 reads `extra_headers_len` first and never the pointer, as the first step's
+///   comparison shows.
 mod header {
     use std::ffi::{CStr, CString, c_int};
     use std::path::PathBuf;
@@ -2196,20 +2195,19 @@ mod create_ext_options {
 /// Documented divergences, outside these comparisons:
 ///
 /// - `git_commit_create_options_init` refuses another version than
-///   `GIT_COMMIT_CREATE_OPTIONS_VERSION` (`-1`), which [`CreateOptions::new`] never
-///   passes; and an empty run of headers is stored as NULL with a length of 0, as C code
-///   stores none.
-/// - The creating routines take the parents from `git_repository_commit_parents`, which,
-///   when `MERGE_HEAD` holds a line it cannot parse or that names no commit, frees the
-///   commits it collected while the object cache still holds them (a use after free C
-///   cannot be run into here), and takes `HEAD` at a tag or a tree as a commit, writing
-///   that object as a parent. The wrappers take them from `commit_parents`: they fail
-///   with `-1` and the error, `HEAD` at a tag with `GIT_EMODIFIED` (its commit is not the
-///   tip `HEAD` names), and `HEAD` at a tree with `-1`. `ub_safe::commit` holds them.
-/// - The wrappers refuse, before libgit2 runs, a signature libgit2 cannot write (lost
-///   strings, an `i32::MIN` offset) and a tree of another repository, which C asserts on
-///   only after diffing it (`create_from_tree`) or writes unchecked (`amend_from_tree`);
-///   the unit tests of `commit.rs` hold them.
+///   `GIT_COMMIT_CREATE_OPTIONS_VERSION` (`-1`), which [`CreateOptions::new`] never passes; and an
+///   empty run of headers is stored as NULL with a length of 0, as C code stores none.
+/// - The creating routines take the parents from `git_repository_commit_parents`, which, when
+///   `MERGE_HEAD` holds a line it cannot parse or that names no commit, frees the commits it
+///   collected while the object cache still holds them (a use after free C cannot be run into
+///   here), and takes `HEAD` at a tag or a tree as a commit, writing that object as a parent. The
+///   wrappers take them from `commit_parents`: they fail with `-1` and the error, `HEAD` at a tag
+///   with `GIT_EMODIFIED` (its commit is not the tip `HEAD` names), and `HEAD` at a tree with `-1`.
+///   `ub_safe::commit` holds them.
+/// - The wrappers refuse, before libgit2 runs, a signature libgit2 cannot write (lost strings, an
+///   `i32::MIN` offset) and a tree of another repository, which C asserts on only after diffing it
+///   (`create_from_tree`) or writes unchecked (`amend_from_tree`); the unit tests of `commit.rs`
+///   hold them.
 ///
 /// [`create_from_tree`]: libgit2::libgit2::object::commit::create_from_tree
 /// [`create_from_stage`]: libgit2::libgit2::object::commit::create_from_stage
@@ -3067,8 +3065,8 @@ mod create_options {
 /// line (unparsable, and parsable), a missing tree; then every written commit's
 /// signature extracted under each field (a newline among them, which matches the blank
 /// line before the message), from commits with no, one and two signature headers, from
-/// a blob and from a missing id. After every step the ids, the two buffers, or the codes, error classes
-/// and messages are compared.
+/// a blob and from a missing id. After every step the ids, the two buffers, or the codes, error
+/// classes and messages are compared.
 ///
 /// libgit2 matches the field as a prefix of each header line, so a header whose name
 /// only starts with the field (`gpgsig-sha256` for `gpgsig`), placed before the one
@@ -3376,7 +3374,7 @@ mod signatures {
             id.id[..20].try_into().unwrap()
         };
         written.push(blob);
-        written.push([0xde; 20]);
+        written.push([0xDE; 20]);
         let mut found = 0;
         for &id in &written {
             for field in [

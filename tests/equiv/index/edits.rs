@@ -6,7 +6,6 @@
 //! sequence: status, error, entries, resolve-undo count, version, capabilities, and the
 //! bytes each side wrote.
 
-use super::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use libgit2::libgit2::core::strarray::StrArrayView;
@@ -16,6 +15,8 @@ use libgit2::libgit2::index::index::{
 use libgit2::libgit2::object::blob::create_from_buffer;
 use libgit2::libgit2::oid::oid::Oid;
 use libgit2::libgit2::repository::repository::RepositoryError;
+
+use super::*;
 
 /// A C status and the thread's error when it failed.
 type Status = (c_int, Option<(c_int, CString)>);

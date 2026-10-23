@@ -7,8 +7,7 @@
 
 use std::ffi::{CStr, c_char, c_int};
 use std::mem::size_of;
-use std::ptr;
-use std::thread;
+use std::{ptr, thread};
 
 use libgit2::ffi;
 use libgit2::libgit2::raw::{OdbDataStr, OdbDataStrFree, OdbDataStrVec};

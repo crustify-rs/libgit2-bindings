@@ -22,12 +22,11 @@
 mod init_flags_and_modes {
     use std::collections::BTreeMap;
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::repository::{InitFlag, InitFlags, InitMode};
@@ -481,7 +480,7 @@ mod init_flags_and_modes {
             "has .git, natural workdir, then reinit"
         );
         assert_eq!(rcs("mkpath"), [0, 0, ffi::GIT_EEXISTS]);
-        assert_eq!(flags("bare-group"), [0x9, 0x4_0009, 0x4_000b]);
+        assert_eq!(flags("bare-group"), [0x9, 0x4_0009, 0x4_000B]);
         assert_eq!(rcs("missing-parent"), [-1, -1, -1]);
         for tag in [
             "mkpath-workdir-blocked",
@@ -640,10 +639,9 @@ mod init_flags_and_modes {
 /// batches, so both are called raw on either side.
 mod items_and_open_flags {
     use std::ffi::{CStr, CString, c_char, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::repository::{
@@ -1388,10 +1386,9 @@ mod items_and_open_flags {
 /// [`RepositoryState::from_raw`] refuses it.
 mod state {
     use std::ffi::{CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::repository::RepositoryState;
@@ -1616,19 +1613,17 @@ mod state {
 ///
 /// Documented divergences, outside these comparisons:
 ///
-/// - `git_repository_init` returns 1, and the repository it opened, when a reftable
-///   repository's `reftable` directory cannot be made; `Repository::init` reports
-///   that failure with `GIT_ERROR` and frees the repository (`unit_tests`).
-/// - `git_repository_init` leaves a repository in its out slot on any failure after
-///   its inner open; the wrapper frees it (`unit_tests`, `ub_safe`).
+/// - `git_repository_init` returns 1, and the repository it opened, when a reftable repository's
+///   `reftable` directory cannot be made; `Repository::init` reports that failure with `GIT_ERROR`
+///   and frees the repository (`unit_tests`).
+/// - `git_repository_init` leaves a repository in its out slot on any failure after its inner open;
+///   the wrapper frees it (`unit_tests`, `ub_safe`).
 mod repository_owner {
     use std::ffi::{CStr, CString, c_char, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::ptr;
-    use std::thread;
+    use std::{fs, ptr, thread};
 
     use libgit2::ffi;
     use libgit2::libgit2::oid::oid::OidType;
@@ -2022,12 +2017,11 @@ mod repository_owner {
 mod init_options {
     use std::collections::BTreeMap;
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::oid::oid::OidType;
@@ -2300,7 +2294,7 @@ mod init_options {
             GIT_REPOSITORY_INIT_RELATIVE_GITLINK as RELATIVE,
         };
         macro_rules! change {
-            (|$c:ident, $cs:ident| $cbody:expr, |$r:ident, $rs:ident| $rbody:expr) => {
+            (| $c:ident, $cs:ident | $cbody:expr, | $r:ident, $rs:ident | $rbody:expr) => {
                 Change {
                     c: |$c, $cs| {
                         let _ = (&$c, &$cs);
@@ -2599,8 +2593,8 @@ mod init_options {
                 .starts_with("invalid path for filesystem")
         );
         // The internal bits libgit2 ORed into both sides' flags.
-        assert_eq!(calls[1].1.2 & !0xffff, 1 << 16 | 1 << 17);
-        assert_eq!(calls[2].1.2 & !0xffff, 1 << 16 | 1 << 17 | 1 << 18);
+        assert_eq!(calls[1].1.2 & !0xFFFF, 1 << 16 | 1 << 17);
+        assert_eq!(calls[2].1.2 & !0xFFFF, 1 << 16 | 1 << 17 | 1 << 18);
         let snap = snapshot(&roots[0].0);
         let text = |path: &str| match snap.get(path) {
             Some(Entry::File(_, text)) => text.clone(),
@@ -2826,22 +2820,20 @@ mod init_options {
 /// Rust side through the safe API (the repository or odb constructors, and the routine
 /// under test), under two roots.
 ///
-/// - `workdir` must read the same path (the root masked), or none, for a repository
-///   with a working directory, a bare one, one opened at a linked worktree, and one
-///   without paths.
-/// - A repository over an odb must report the odb's object id type, no git directory or
-///   working directory, and the objects the odb holds (`git_repository_odb`, then
-///   `git_odb_exists`), after the caller's odb reference is gone on both sides.
-/// - Cleaning up the state runs over sequences of marker files and references: after
-///   each step the return, the error, `git_repository_state` and the markers left must
-///   agree. A repository without paths is refused by Rust before C, which would clean
-///   up the process's working directory (a unit test), so it is not compared here.
+/// - `workdir` must read the same path (the root masked), or none, for a repository with a working
+///   directory, a bare one, one opened at a linked worktree, and one without paths.
+/// - A repository over an odb must report the odb's object id type, no git directory or working
+///   directory, and the objects the odb holds (`git_repository_odb`, then `git_odb_exists`), after
+///   the caller's odb reference is gone on both sides.
+/// - Cleaning up the state runs over sequences of marker files and references: after each step the
+///   return, the error, `git_repository_state` and the markers left must agree. A repository
+///   without paths is refused by Rust before C, which would clean up the process's working
+///   directory (a unit test), so it is not compared here.
 mod routines {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::odb::odb::Odb;
@@ -3268,11 +3260,10 @@ mod routines {
 /// the repository's, where libgit2 overflows a buffer.
 mod heads_and_parts {
     use std::ffi::{CStr, CString, c_int, c_void};
-    use std::fs;
     use std::ops::ControlFlow;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::config::config::{Config, ConfigArc};
@@ -4572,21 +4563,20 @@ mod heads_and_parts {
 ///
 /// `git_repository_commit_parents` is run only where it is defined: the steps never
 /// reach the failures after which it frees cached commits, nor a `HEAD` naming
-/// anything but a commit, nor a missing object (where it leaks); and `git_repository_head_detached_for_worktree` only where
-/// its answer is right: on a detached `HEAD`, or a failure. The unit tests cover those
-/// corrections.
+/// anything but a commit, nor a missing object (where it leaks); and
+/// `git_repository_head_detached_for_worktree` only where its answer is right: on a detached
+/// `HEAD`, or a failure. The unit tests cover those corrections.
 mod head_and_lookups {
     use std::cell::RefCell;
     use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
-    use std::fs;
     use std::ops::ControlFlow;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::ptr;
     use std::sync::LazyLock;
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-    use std::thread;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::{fs, ptr, thread};
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::ObjectType;

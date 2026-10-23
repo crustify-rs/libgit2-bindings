@@ -1,15 +1,14 @@
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
-use libgit2::libgit2::core::types::FileMode;
-use libgit2::libgit2::diff::diff::{DiffDeltaRef, DiffFileRef};
-use libgit2::libgit2::object::{
-    blob,
-    tree::{Tree, TreeArc, TreeBuilder},
-};
-use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use libgit2::libgit2::core::types::FileMode;
+use libgit2::libgit2::diff::diff::{DiffDeltaRef, DiffFileRef};
+use libgit2::libgit2::object::blob;
+use libgit2::libgit2::object::tree::{Tree, TreeArc, TreeBuilder};
+use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
 
 pub const PATCH: &[u8] = b"diff --git a/file b/file\nindex 1111111..2222222 100644\n--- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new\n";
 pub const RENAME: &[u8] =
@@ -59,9 +58,11 @@ impl Repo {
             path,
         }
     }
+
     pub fn get(&self) -> &RepositoryBox {
         self.repo.as_ref().unwrap()
     }
+
     pub fn tree(&self, text: &[u8]) -> TreeArc<'_> {
         let repo = self.get().as_ref();
         let oid = blob::create_from_buffer(repo, text).unwrap();

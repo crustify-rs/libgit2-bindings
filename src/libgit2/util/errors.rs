@@ -318,7 +318,10 @@ define_ctype!(
     /// routine takes one. [`ErrorRef::to_error_buf`] copies it.
     ///
     /// Wraps: git_error
-    Error, ErrorRef, ErrorMut, ffi::git_error
+    Error,
+    ErrorRef,
+    ErrorMut,
+    ffi::git_error
 );
 
 impl<'a> ErrorRef<'a> {
@@ -491,11 +494,13 @@ pub fn last() -> ErrorBuf {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ptr::NonNull;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -730,6 +735,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -743,6 +749,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

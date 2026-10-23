@@ -43,8 +43,8 @@ use core::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
 use core::ptr::{self, NonNull};
 
 use ffibox::{
-    CAlloc, CAllocZeroed, CBox, CCell, CDrop, CPlainElem, CStrBox, CVec, CZeroable,
-    impl_cdrop_str, impl_cdupclone_str, impl_clenclone, impl_clendrop,
+    CAlloc, CAllocZeroed, CBox, CCell, CDrop, CPlainElem, CStrBox, CVec, CZeroable, impl_cdrop_str,
+    impl_cdupclone_str, impl_clenclone, impl_clendrop,
 };
 
 use crate::ffi;
@@ -145,7 +145,12 @@ unsafe impl<T> CDrop<T> for OdbDataFree {
 unsafe impl<T: CCell> CAlloc<T> for OdbDataFree {
     #[inline]
     fn c_alloc(&self) -> Option<NonNull<MaybeUninit<T>>> {
-        const { assert!(align_of::<T>() <= DATA_ALIGN, "libgit2's allocator cannot align T") };
+        const {
+            assert!(
+                align_of::<T>() <= DATA_ALIGN,
+                "libgit2's allocator cannot align T"
+            )
+        };
         data_alloc(size_of::<T>()).map(NonNull::cast)
     }
 }
@@ -155,7 +160,12 @@ unsafe impl<T: CCell> CAlloc<T> for OdbDataFree {
 unsafe impl<T: CZeroable> CAllocZeroed<T> for OdbDataFree {
     #[inline]
     fn c_alloc_zeroed(&self) -> Option<NonNull<T>> {
-        const { assert!(align_of::<T>() <= DATA_ALIGN, "libgit2's allocator cannot align T") };
+        const {
+            assert!(
+                align_of::<T>() <= DATA_ALIGN,
+                "libgit2's allocator cannot align T"
+            )
+        };
         let data = data_alloc(size_of::<T>())?;
         // SAFETY: `data` is a fresh allocation of at least `size_of::<T>()` bytes.
         unsafe { data.as_ptr().write_bytes(0, size_of::<T>()) };
@@ -257,7 +267,10 @@ impl OdbDataArrayFree {
     fn alloc_run<T>(len: usize) -> Option<*mut T> {
         const {
             assert!(size_of::<T>() != 0, "zero-sized elements need no storage");
-            assert!(align_of::<T>() <= DATA_ALIGN, "libgit2's allocator cannot align T");
+            assert!(
+                align_of::<T>() <= DATA_ALIGN,
+                "libgit2's allocator cannot align T"
+            );
         }
         if len == 0 {
             return Some(ptr::null_mut());
@@ -556,11 +569,12 @@ impl fmt::Debug for OdbDataStrVec {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
     use std::ffi::{c_char, c_int, c_void};
     use std::process::Command;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::atomic::{AtomicIsize, AtomicUsize};
+
+    use super::*;
 
     #[repr(C)]
     pub struct pair_st {
@@ -574,6 +588,7 @@ mod unit_tests {
             // SAFETY: a read through the shared handle's pointer to a live `pair_st`.
             unsafe { ptr::addr_of!((*self.as_ptr()).a).read() }
         }
+
         fn b(&self) -> u32 {
             // SAFETY: as above.
             unsafe { ptr::addr_of!((*self.as_ptr()).b).read() }
@@ -618,10 +633,19 @@ mod unit_tests {
 
     unsafe extern "C" fn refusing_malloc(n: usize, _: *const c_char, _: c_int) -> *mut c_void {
         // SAFETY: plain libc allocation.
-        if n == REFUSED { ptr::null_mut() } else { unsafe { malloc(n) } }
+        if n == REFUSED {
+            ptr::null_mut()
+        } else {
+            unsafe { malloc(n) }
+        }
     }
 
-    unsafe extern "C" fn libc_realloc(p: *mut c_void, n: usize, _: *const c_char, _: c_int) -> *mut c_void {
+    unsafe extern "C" fn libc_realloc(
+        p: *mut c_void,
+        n: usize,
+        _: *const c_char,
+        _: c_int,
+    ) -> *mut c_void {
         // SAFETY: `p` came from this allocator, i.e. libc, or is NULL.
         unsafe { realloc(p, n) }
     }
@@ -636,27 +660,40 @@ mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn failure_before_init_lands_on_live_thread_state() {
-        isolated(concat!(module_path!(), "::failure_before_init_lands_on_live_thread_state"), || {
-            let mut allocator = ffi::git_allocator {
-                gmalloc: Some(refusing_malloc),
-                grealloc: Some(libc_realloc),
-                gfree: Some(libc_free),
-            };
-            // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
-            // nothing is allocated yet, so no storage changes allocator.
-            let rc = unsafe {
-                ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
-            };
-            assert_eq!(rc, 0);
+        isolated(
+            concat!(
+                module_path!(),
+                "::failure_before_init_lands_on_live_thread_state"
+            ),
+            || {
+                let mut allocator = ffi::git_allocator {
+                    gmalloc: Some(refusing_malloc),
+                    grealloc: Some(libc_realloc),
+                    gfree: Some(libc_free),
+                };
+                // SAFETY: a `git_allocator *` with every member set, which libgit2 copies;
+                // nothing is allocated yet, so no storage changes allocator.
+                let rc = unsafe {
+                    ffi::git_libgit2_opts(ffi::GIT_OPT_SET_ALLOCATOR as c_int, &raw mut allocator)
+                };
+                assert_eq!(rc, 0);
 
-            assert!(OdbDataArrayFree::new_uninit::<u8>(REFUSED).is_none());
-            // SAFETY: `git_error_last` never returns NULL.
-            let klass = unsafe { (*ffi::git_error_last()).klass };
-            assert_eq!(klass, ffi::GIT_ERROR_NOMEMORY as c_int, "reported on this thread's state");
-            // SAFETY: no arguments; the extra reference dies with the process.
-            assert!(unsafe { ffi::git_libgit2_init() } >= 2, "the strategy holds a reference");
-            assert!(OdbDataVec::<u8>::from_slice(b"pinned").is_some());
-        });
+                assert!(OdbDataArrayFree::new_uninit::<u8>(REFUSED).is_none());
+                // SAFETY: `git_error_last` never returns NULL.
+                let klass = unsafe { (*ffi::git_error_last()).klass };
+                assert_eq!(
+                    klass,
+                    ffi::GIT_ERROR_NOMEMORY as c_int,
+                    "reported on this thread's state"
+                );
+                // SAFETY: no arguments; the extra reference dies with the process.
+                assert!(
+                    unsafe { ffi::git_libgit2_init() } >= 2,
+                    "the strategy holds a reference"
+                );
+                assert!(OdbDataVec::<u8>::from_slice(b"pinned").is_some());
+            },
+        );
     }
 
     #[test]
@@ -738,13 +775,19 @@ mod unit_tests {
         let copy = unsafe { data_dup_len(src.as_mut_ptr(), src.len()) };
         assert!(!copy.is_null() && copy != src.as_mut_ptr());
         // SAFETY: `copy` holds `src.len()` bytes copied from `src`.
-        assert_eq!(unsafe { core::slice::from_raw_parts(copy, src.len()) }, &src);
+        assert_eq!(
+            unsafe { core::slice::from_raw_parts(copy, src.len()) },
+            &src
+        );
         // SAFETY: `copy` is a live allocation owned here.
         unsafe { data_free(copy) };
 
         // SAFETY: zero bytes are trivially readable.
         let empty = unsafe { data_dup_len(src.as_mut_ptr(), 0) };
-        assert!(!empty.is_null(), "a zero-byte copy is a fresh allocation, not a failure");
+        assert!(
+            !empty.is_null(),
+            "a zero-byte copy is a fresh allocation, not a failure"
+        );
         // SAFETY: as above.
         unsafe { data_free(empty) };
     }
@@ -770,12 +813,18 @@ mod unit_tests {
         // Both policies carry no state, so an owner is pointer-sized (plus length)
         // and the policy can be named, copied and printed freely.
         assert_eq!(size_of::<OdbDataBox<Pair>>(), size_of::<*mut pair_st>());
-        assert_eq!(size_of::<Option<OdbDataBox<Pair>>>(), size_of::<*mut pair_st>());
+        assert_eq!(
+            size_of::<Option<OdbDataBox<Pair>>>(),
+            size_of::<*mut pair_st>()
+        );
         assert_eq!(size_of::<OdbDataVec<u8>>(), 2 * size_of::<usize>());
         let (one, run) = (OdbDataFree, OdbDataArrayFree);
         let (copy_one, copy_run) = (one, run);
         assert_eq!(format!("{one:?}{copy_one:?}"), "OdbDataFreeOdbDataFree");
-        assert_eq!(format!("{run:?}{copy_run:?}"), "OdbDataArrayFreeOdbDataArrayFree");
+        assert_eq!(
+            format!("{run:?}{copy_run:?}"),
+            "OdbDataArrayFreeOdbDataArrayFree"
+        );
         let v = OdbDataVec::<u16>::default();
         assert!(v.is_empty() && v.as_ptr().is_null());
         assert_eq!(format!("{v:?}"), "CVec { ptr: 0x0, len: 0 }");

@@ -228,12 +228,12 @@ pub struct MessageTrailerMut<'a, 't>(
 // invariant in the trailer through its `PhantomData<&'a mut MessageTrailer<'t>>`.
 unsafe impl<'t> CCell for MessageTrailer<'t> {
     type C = ffi::git_message_trailer;
-    type Ref<'a>
-        = MessageTrailerRef<'a, 't>
-    where
-        Self: 'a;
     type Mut<'a>
         = MessageTrailerMut<'a, 't>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = MessageTrailerRef<'a, 't>
     where
         Self: 'a;
 }
@@ -442,7 +442,10 @@ define_ctype!(
     /// let trailers = array.as_ref().trailers();
     /// assert_eq!(trailers.len(), 1);
     /// let first = trailers.get(0).unwrap();
-    /// assert_eq!((first.key(), first.value()), (c"Signed-off-by", c"A U Thor <a@example.com>"));
+    /// assert_eq!(
+    ///     (first.key(), first.value()),
+    ///     (c"Signed-off-by", c"A U Thor <a@example.com>")
+    /// );
     /// ```
     ///
     /// The trailers' strings live in the array's block, so neither a trailer nor a
@@ -491,7 +494,9 @@ define_ctype!(
     /// [module docs](self#trailer-arrays)).
     ///
     /// Wraps: git_message_trailer_array
-    MessageTrailerArray, MessageTrailerArrayRef, MessageTrailerArrayMut,
+    MessageTrailerArray,
+    MessageTrailerArrayRef,
+    MessageTrailerArrayMut,
     ffi::git_message_trailer_array
 );
 
@@ -745,12 +750,12 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
     use core::mem::{MaybeUninit, size_of};
     use core::ptr;
     use std::ffi::CString;
     use std::thread;
 
+    use super::*;
     use crate::libgit2::util::sys::errors::runtime_pinned;
 
     const MESSAGE: &CStr = c"Subject\n\nBody.\n\nSigned-off-by: A U Thor <a@example.com>\nCo-authored-by : C O Mitter\n  continued\n";
@@ -1046,9 +1051,10 @@ mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn prettify_without_runtime_fails_cleanly() {
+        use core::ffi::c_int;
+
         use crate::libgit2::util::errors::ErrorClass;
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use core::ffi::c_int;
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
         const NAME: &str =
@@ -1063,6 +1069,7 @@ mod unit_tests {
             fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn realloc(
                 _: Option<NonNull<u8>>,
                 _: usize,
@@ -1071,6 +1078,7 @@ mod unit_tests {
             ) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn free(_: NonNull<u8>) {}
         }
 

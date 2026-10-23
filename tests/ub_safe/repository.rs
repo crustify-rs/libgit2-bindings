@@ -38,7 +38,7 @@ mod init_flags_and_modes {
     fn bit_patterns() -> impl Iterator<Item = u32> {
         (0..32)
             .flat_map(|k| [1 << k, !(1 << k)])
-            .chain([0, u32::MAX, 0x7_007b, 0x7_0000])
+            .chain([0, u32::MAX, 0x7_007B, 0x7_0000])
     }
 
     #[test]
@@ -173,7 +173,7 @@ mod items_and_open_flags {
     fn bit_patterns() -> impl Iterator<Item = u32> {
         (0..32)
             .flat_map(|k| [1 << k, !(1 << k)])
-            .chain([0, u32::MAX, 0x1f, !0x1f])
+            .chain([0, u32::MAX, 0x1F, !0x1F])
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod items_and_open_flags {
                 })
                 .collect();
             for (item, h) in Item::ALL.iter().zip(handles) {
-                assert_eq!(h.join().unwrap(), (item.raw(), 0x1f));
+                assert_eq!(h.join().unwrap(), (item.raw(), 0x1F));
             }
         });
     }
@@ -359,11 +359,10 @@ mod state {
 /// `Repository`. Every constructor calls libgit2, so nothing here runs under Miri.
 mod repository_owner {
     use std::ffi::CString;
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
     use std::sync::Barrier;
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::repository::repository::{
@@ -647,11 +646,10 @@ mod repository_owner {
 /// them; the inline unit tests run the accessors under Miri over a Rust-built value.
 mod init_options {
     use std::ffi::{CStr, CString};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::{Barrier, Mutex};
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::oid::oid::OidType;
     use libgit2::libgit2::refs::refdb::RefdbType;
@@ -1225,12 +1223,11 @@ mod routines {
 /// repository lives (TSan). Every test calls libgit2, so nothing here runs under Miri.
 mod heads_and_parts {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::ops::ControlFlow;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::thread;
+    use std::{fs, thread};
 
     use libgit2::libgit2::config::config::{Config, ConfigArc};
     use libgit2::libgit2::index::index::{Index, IndexArc};

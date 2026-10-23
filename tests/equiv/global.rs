@@ -139,6 +139,7 @@ unsafe impl Alloc for Refusing {
     fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
         None
     }
+
     unsafe fn realloc(
         _: Option<NonNull<u8>>,
         _: usize,
@@ -147,6 +148,7 @@ unsafe impl Alloc for Refusing {
     ) -> Option<NonNull<u8>> {
         None
     }
+
     unsafe fn free(_: NonNull<u8>) {}
 }
 

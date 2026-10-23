@@ -15,6 +15,13 @@
 //! no public delta constructor, disposer or cloner. Never free a delta separately.
 //! File views are the minimal dependency needed to project those embedded records.
 
+use core::ffi::CStr;
+use core::marker::PhantomData;
+use core::ptr::{self, NonNull, addr_of};
+use std::ffi::CString;
+
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype};
+
 use crate::ffi;
 use crate::libgit2::core::strarray::StrArrayRef;
 use crate::libgit2::index::index::IndexRef;
@@ -24,11 +31,6 @@ use crate::libgit2::oid::oid::{OidRef, OidType};
 use crate::libgit2::repository::repository::RepositoryRef;
 use crate::libgit2::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last};
 use crate::libgit2::util::sys::errors::{runtime_pinned, set};
-use core::ffi::CStr;
-use core::marker::PhantomData;
-use core::ptr::{self, NonNull, addr_of};
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype};
-use std::ffi::CString;
 
 /// The exact nonzero C result and a snapshot of its thread-local error.
 /// Positive progress-callback cancellation codes are preserved, not normalized.
@@ -44,21 +46,27 @@ impl DiffError {
             error: last(),
         }
     }
+
     pub fn raw_code(&self) -> i32 {
         self.code
     }
+
     pub fn code(&self) -> Option<ErrorCode> {
         ErrorCode::from_raw(self.code)
     }
+
     pub fn error(&self) -> &ErrorBuf {
         &self.error
     }
+
     pub fn class(&self) -> Option<ErrorClass> {
         self.error.class()
     }
+
     pub fn raw_class(&self) -> i32 {
         self.error.raw_class()
     }
+
     pub fn message(&self) -> &CStr {
         self.error.message()
     }
@@ -106,12 +114,12 @@ pub struct DiffMut<'a, 'r>(DiffRef<'a, 'r>, PhantomData<&'a mut Diff<'r>>);
 // and CBorrowedPtr respectively, have no Drop, and Mut is invariant in Diff.
 unsafe impl<'r> CCell for Diff<'r> {
     type C = ffi::git_diff;
-    type Ref<'a>
-        = DiffRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = DiffMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = DiffRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -128,6 +136,7 @@ impl<'a, 'r> DiffRef<'a, 'r> {
             Self(unsafe { CBorrowedPtr::new(p.cast()) })
         })
     }
+
     pub(crate) fn as_ptr(&self) -> *const ffi::git_diff {
         self.0.as_non_null().as_ptr().cast()
     }
@@ -138,6 +147,7 @@ impl<'a, 'r> DiffRef<'a, 'r> {
         // SAFETY: the handle keeps an initialized, unmodified diff alive.
         unsafe { ffi::git_diff_num_deltas(self.as_ptr()) }
     }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -160,13 +170,16 @@ impl<'a, 'r> DiffMut<'a, 'r> {
         // SAFETY: the caller promises validity and exclusivity.
         unsafe { DiffRef::from_ptr(p) }.map(|p| Self(p, PhantomData))
     }
+
     #[allow(dead_code)]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_diff {
         self.0.as_ptr().cast_mut()
     }
+
     pub fn as_ref(&self) -> DiffRef<'_, 'r> {
         self.0
     }
+
     pub fn as_mut(&mut self) -> DiffMut<'_, 'r> {
         DiffMut(self.0, PhantomData)
     }
@@ -427,7 +440,10 @@ define_ctype!(
     /// A read-only delta borrowed from a diff, patch, or callback. All fields are
     /// initialized, but flags identify which id/size values C actually knows.
     /// Wraps: git_diff_delta
-    DiffDelta, DiffDeltaRef, DiffDeltaMut, ffi::git_diff_delta
+    DiffDelta,
+    DiffDeltaRef,
+    DiffDeltaMut,
+    ffi::git_diff_delta
 );
 
 impl<'a> DiffDeltaRef<'a> {
@@ -436,21 +452,25 @@ impl<'a> DiffDeltaRef<'a> {
         // SAFETY: initialized scalar projected from a live, unmodified delta.
         unsafe { addr_of!((*self.as_ptr()).status).read() }
     }
+
     /// Field: git_diff_delta.flags
     pub fn flags(&self) -> u32 {
         // SAFETY: initialized scalar projected from a live, unmodified delta.
         unsafe { addr_of!((*self.as_ptr()).flags).read() }
     }
+
     /// Field: git_diff_delta.similarity
     pub fn similarity(&self) -> u16 {
         // SAFETY: initialized scalar projected from a live, unmodified delta.
         unsafe { addr_of!((*self.as_ptr()).similarity).read() }
     }
+
     /// Field: git_diff_delta.nfiles
     pub fn nfiles(&self) -> u16 {
         // SAFETY: initialized scalar projected from a live, unmodified delta.
         unsafe { addr_of!((*self.as_ptr()).nfiles).read() }
     }
+
     /// Shared projection of the embedded file, kept alive by the delta borrow.
     /// Field: git_diff_delta.old_file
     pub fn old_file(&self) -> DiffFileRef<'a> {
@@ -459,6 +479,7 @@ impl<'a> DiffDeltaRef<'a> {
         unsafe { DiffFileRef::from_ptr(addr_of!((*self.as_ptr()).old_file).cast_mut()) }
             .expect("an embedded field is non-null")
     }
+
     /// Shared projection of the embedded file, kept alive by the delta borrow.
     /// Field: git_diff_delta.new_file
     pub fn new_file(&self) -> DiffFileRef<'a> {
@@ -474,7 +495,10 @@ impl<'a> DiffDeltaRef<'a> {
 define_ctype!(
     /// One embedded side of a delta. Borrowed from its parent, never freed alone.
     /// Wraps: git_diff_file
-    DiffFile, DiffFileRef, DiffFileMut, ffi::git_diff_file
+    DiffFile,
+    DiffFileRef,
+    DiffFileMut,
+    ffi::git_diff_file
 );
 impl<'a> DiffFileRef<'a> {
     /// The path, if present. It belongs to the parent's pool/patch, not this field.
@@ -491,27 +515,32 @@ impl<'a> DiffFileRef<'a> {
             }
         }
     }
+
     /// Field: git_diff_file.id
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: initialized inline oid, live and unwritten for the parent's borrow.
         unsafe { OidRef::from_ptr(addr_of!((*self.as_ptr()).id).cast_mut()) }
             .expect("an embedded field is non-null")
     }
+
     /// Field: git_diff_file.size
     pub fn size(&self) -> u64 {
         // SAFETY: initialized scalar projected from a live, unmodified file.
         unsafe { addr_of!((*self.as_ptr()).size).read() }
     }
+
     /// Field: git_diff_file.flags
     pub fn flags(&self) -> u32 {
         // SAFETY: initialized scalar projected from a live, unmodified file.
         unsafe { addr_of!((*self.as_ptr()).flags).read() }
     }
+
     /// Field: git_diff_file.mode
     pub fn mode(&self) -> u16 {
         // SAFETY: initialized scalar projected from a live, unmodified file.
         unsafe { addr_of!((*self.as_ptr()).mode).read() }
     }
+
     /// Field: git_diff_file.id_abbrev
     pub fn id_abbrev(&self) -> u16 {
         // SAFETY: initialized scalar projected from a live, unmodified file.
@@ -770,6 +799,7 @@ mod unit_tests {
             fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn realloc(
                 _: Option<NonNull<u8>>,
                 _: usize,
@@ -778,6 +808,7 @@ mod unit_tests {
             ) -> Option<NonNull<u8>> {
                 None
             }
+
             unsafe fn free(_: NonNull<u8>) {}
         }
         let allocator = Allocator::new::<Refusing>();

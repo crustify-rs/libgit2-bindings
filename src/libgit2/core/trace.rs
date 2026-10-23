@@ -176,6 +176,7 @@ pub trait Tracer {
 ///
 /// ```
 /// use std::ffi::CStr;
+///
 /// use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel, Tracer};
 ///
 /// struct Stderr;
@@ -379,10 +380,11 @@ mod unit_tests {
     }
 
     mod callback {
-        use super::super::*;
-        use super::LEVELS;
         use std::cell::RefCell;
         use std::ffi::CString;
+
+        use super::super::*;
+        use super::LEVELS;
 
         thread_local! {
             static SEEN: RefCell<Vec<(TraceLevel, CString)>> = const { RefCell::new(Vec::new()) };

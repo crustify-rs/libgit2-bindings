@@ -265,11 +265,10 @@ fn options_on_threads_while_libgit2_initialises() {
 #[allow(unsafe_code)]
 mod repo {
     use std::ffi::CString;
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
-    use std::ptr;
     use std::sync::OnceLock;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::index::index::{IndexArc, IndexBox};

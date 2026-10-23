@@ -100,7 +100,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_index
-    Index, IndexRef, IndexMut, ffi::git_index
+    Index,
+    IndexRef,
+    IndexMut,
+    ffi::git_index
 );
 
 /// Releases one counted reference to an index through `git_index_free`, which frees the
@@ -249,7 +252,10 @@ define_ctype!(
     ///
     /// Wraps: git_index_options
     #[derive(Clone, Copy)]
-    IndexOptions, IndexOptionsRef, IndexOptionsMut, ffi::git_index_options
+    IndexOptions,
+    IndexOptionsRef,
+    IndexOptionsMut,
+    ffi::git_index_options
 );
 
 // SAFETY: `IndexOptions` is two integers: no pointer, no interior mutability, no thread
@@ -922,14 +928,14 @@ impl IndexMut<'_> {
 pub struct AddFlags(ffi::git_index_add_option_t);
 
 impl AddFlags {
-    /// Normal addition, without any flags.
-    pub const DEFAULT: Self = Self(ffi::GIT_INDEX_ADD_DEFAULT);
-    /// Request adding ignored files.
-    pub const FORCE: Self = Self(ffi::GIT_INDEX_ADD_FORCE);
-    /// Request literal pathspec matching instead of wildcard matching.
-    pub const DISABLE_PATHSPEC_MATCH: Self = Self(ffi::GIT_INDEX_ADD_DISABLE_PATHSPEC_MATCH);
     /// Check for explicitly named ignored files, unless `FORCE` is also set.
     pub const CHECK_PATHSPEC: Self = Self(ffi::GIT_INDEX_ADD_CHECK_PATHSPEC);
+    /// Normal addition, without any flags.
+    pub const DEFAULT: Self = Self(ffi::GIT_INDEX_ADD_DEFAULT);
+    /// Request literal pathspec matching instead of wildcard matching.
+    pub const DISABLE_PATHSPEC_MATCH: Self = Self(ffi::GIT_INDEX_ADD_DISABLE_PATHSPEC_MATCH);
+    /// Request adding ignored files.
+    pub const FORCE: Self = Self(ffi::GIT_INDEX_ADD_FORCE);
 
     /// An empty flag set, equivalent to `DEFAULT`.
     pub const fn empty() -> Self {
@@ -992,12 +998,11 @@ pub struct Capabilities(ffi::git_index_capability_t);
 impl Capabilities {
     /// Match index paths case-insensitively.
     pub const IGNORE_CASE: Self = Self(ffi::GIT_INDEX_CAPABILITY_IGNORE_CASE);
+    const KNOWN: c_int = Self::IGNORE_CASE.0 | Self::NO_FILEMODE.0 | Self::NO_SYMLINKS.0;
     /// Do not trust filesystem executable-mode bits.
     pub const NO_FILEMODE: Self = Self(ffi::GIT_INDEX_CAPABILITY_NO_FILEMODE);
     /// The filesystem does not support symbolic links.
     pub const NO_SYMLINKS: Self = Self(ffi::GIT_INDEX_CAPABILITY_NO_SYMLINKS);
-
-    const KNOWN: c_int = Self::IGNORE_CASE.0 | Self::NO_FILEMODE.0 | Self::NO_SYMLINKS.0;
 
     /// No capability overrides.
     pub const fn empty() -> Self {
@@ -1097,12 +1102,12 @@ impl From<Capabilities> for CapabilitySetting {
 pub struct MatchedPathResult(c_int);
 
 impl MatchedPathResult {
+    /// Abort with libgit2's user-callback error (`GIT_EUSER`).
+    pub const ABORT: Self = Self(ffi::GIT_EUSER);
     /// Apply the requested add, remove, or update to this path.
     pub const APPLY: Self = Self(0);
     /// Leave this path alone, and continue scanning.
     pub const SKIP: Self = Self(1);
-    /// Abort with libgit2's user-callback error (`GIT_EUSER`).
-    pub const ABORT: Self = Self(ffi::GIT_EUSER);
 
     /// Preserve an arbitrary C callback result without restricting its magnitude.
     pub const fn from_code(code: c_int) -> Self {
@@ -2216,7 +2221,10 @@ define_ctype!(
     /// index can still be accessed by other C owners without a common lock.
     ///
     /// Wraps: git_index_iterator
-    IndexIterator, IndexIteratorRef, IndexIteratorMut, ffi::git_index_iterator
+    IndexIterator,
+    IndexIteratorRef,
+    IndexIteratorMut,
+    ffi::git_index_iterator
 );
 
 /// Releases the snapshot vector, its counted index reference, and the iterator.
@@ -2414,12 +2422,12 @@ pub struct ConflictIteratorMut<'a, 'index>(
 // to foreign storage is formed. Index's marker withholds Send and Sync.
 unsafe impl<'index> ffibox::CCell for ConflictIterator<'index> {
     type C = ffi::git_index_conflict_iterator;
-    type Ref<'a>
-        = ConflictIteratorRef<'a, 'index>
-    where
-        Self: 'a;
     type Mut<'a>
         = ConflictIteratorMut<'a, 'index>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = ConflictIteratorRef<'a, 'index>
     where
         Self: 'a;
 }
@@ -2571,9 +2579,9 @@ pub struct EntryExtendedFlags(ffi::git_index_entry_extended_flag_t);
 impl EntryExtendedFlags {
     pub const EMPTY: Self = Self(0);
     pub const INTENT_TO_ADD: Self = Self(ffi::GIT_INDEX_ENTRY_INTENT_TO_ADD);
-    pub const SKIP_WORKTREE: Self = Self(ffi::GIT_INDEX_ENTRY_SKIP_WORKTREE);
     /// The union of flags serialized to disk (not a third independent bit).
     pub const ON_DISK: Self = Self(ffi::GIT_INDEX_ENTRY_EXTENDED_FLAGS);
+    pub const SKIP_WORKTREE: Self = Self(ffi::GIT_INDEX_ENTRY_SKIP_WORKTREE);
     pub const UP_TO_DATE: Self = Self(ffi::GIT_INDEX_ENTRY_UPTODATE);
 
     pub const fn from_bits_retain(bits: u32) -> Self {
@@ -2600,6 +2608,7 @@ impl EntryExtendedFlags {
 
 impl core::ops::BitOr for EntryExtendedFlags {
     type Output = Self;
+
     fn bitor(self, rhs: Self) -> Self {
         Self(self.0 | rhs.0)
     }
@@ -2607,6 +2616,7 @@ impl core::ops::BitOr for EntryExtendedFlags {
 
 impl core::ops::BitAnd for EntryExtendedFlags {
     type Output = Self;
+
     fn bitand(self, rhs: Self) -> Self {
         Self(self.0 & rhs.0)
     }
@@ -2636,7 +2646,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_index_time
-    IndexTime, IndexTimeRef, IndexTimeMut, ffi::git_index_time
+    IndexTime,
+    IndexTimeRef,
+    IndexTimeMut,
+    ffi::git_index_time
 );
 
 // SAFETY: both fields are integers accepting all bit patterns; zero has no resources
@@ -2712,10 +2725,10 @@ impl IndexTimeMut<'_> {
 /// all, and keep nothing:
 ///
 /// ```
+/// use ffibox::CZeroable;
 /// use libgit2::libgit2::core::types::FileMode;
 /// use libgit2::libgit2::index::index::{EntryExtendedFlags, IndexEntry, IndexTime, Stage};
 /// use libgit2::libgit2::oid::oid::Oid;
-/// use ffibox::CZeroable;
 ///
 /// let mut entry = IndexEntry::new(c"src/lib.rs", Oid::zeroed().as_ref(), FileMode::Blob);
 /// assert_eq!(entry.as_ref().path(), c"src/lib.rs");
@@ -2723,7 +2736,9 @@ impl IndexTimeMut<'_> {
 /// let mut handle = entry.as_mut();
 /// handle.set_file_size(42);
 /// handle.set_mtime(IndexTime::new(1_700_000_000, 5).as_ref());
-/// handle.set_flags_extended(EntryExtendedFlags::INTENT_TO_ADD).unwrap();
+/// handle
+///     .set_flags_extended(EntryExtendedFlags::INTENT_TO_ADD)
+///     .unwrap();
 /// handle.set_stage(Stage::Ours).unwrap();
 /// assert_eq!(entry.as_ref().mtime().seconds(), 1_700_000_000);
 /// assert_eq!(entry.as_ref().stage(), Stage::Ours);
@@ -2859,12 +2874,12 @@ pub struct IndexEntryMut<'a, 'p>(
 // `PhantomData<&'a mut IndexEntry<'p>>`.
 unsafe impl<'p> CCell for IndexEntry<'p> {
     type C = ffi::git_index_entry;
-    type Ref<'a>
-        = IndexEntryRef<'a, 'p>
-    where
-        Self: 'a;
     type Mut<'a>
         = IndexEntryMut<'a, 'p>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = IndexEntryRef<'a, 'p>
     where
         Self: 'a;
 }
@@ -3377,17 +3392,20 @@ impl fmt::Debug for IndexEntryMut<'_, '_> {
 /// index it was lent from, or is added back to it:
 ///
 /// ```
+/// use ffibox::CZeroable;
 /// use libgit2::libgit2::core::types::FileMode;
 /// use libgit2::libgit2::index::index::{Index, IndexEntry, Stage};
 /// use libgit2::libgit2::oid::oid::Oid;
-/// use ffibox::CZeroable;
 ///
 /// # if cfg!(miri) { return; }
 /// let mut index = Index::new().unwrap();
 /// let entry = IndexEntry::new(c"a", Oid::zeroed().as_ref(), FileMode::Blob);
 /// index.as_mut().add(entry.as_ref()).unwrap();
 /// let copy = index.as_mut().entry(0).unwrap().to_entry_buf();
-/// index.as_mut().add_conflict(None, Some(copy.as_ref()), None).unwrap();
+/// index
+///     .as_mut()
+///     .add_conflict(None, Some(copy.as_ref()), None)
+///     .unwrap();
 /// assert_eq!(index.as_mut().entry(0).unwrap().stage(), Stage::Ours);
 /// assert_eq!(copy.as_ref().path(), c"a");
 /// ```
@@ -3477,12 +3495,14 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use std::ffi::CString;
+    use std::process::Command;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicBool, AtomicIsize};
+
     use super::*;
     use crate::libgit2::oid::oid::Oid;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-    use std::ffi::CString;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
 
     #[test]
     fn stage_values_are_checked() {
@@ -3523,7 +3543,7 @@ mod unit_tests {
         assert!(!EntryFlags::EXTENDED.contains(flags));
         let mut flags = flags;
         flags |= EntryFlags::from_bits_retain(0x8000_1234);
-        assert_eq!(flags.bits(), 0x8000_d234);
+        assert_eq!(flags.bits(), 0x8000_D234);
         flags.remove(EntryFlags::EXTENDED | EntryFlags::VALID);
         assert_eq!(flags.bits(), 0x8000_1234);
         let copy = flags;
@@ -3730,9 +3750,10 @@ mod unit_tests {
     /// pieces they share, their refusals before libgit2 sees an entry, and their
     /// deliberate divergences.
     mod entries {
+        use std::path::PathBuf;
+
         use super::*;
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
-        use std::path::PathBuf;
 
         /// An entry of mode `mode` at `path` and `stage`, of id type `kind` (any byte,
         /// named or not) with first id byte `byte`.
@@ -4456,6 +4477,7 @@ mod unit_tests {
             }
             block
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -4474,6 +4496,7 @@ mod unit_tests {
             }
             block
         }
+
         unsafe fn free(p: NonNull<u8>) {
             LIVE.fetch_sub(1, SeqCst);
             // SAFETY: `p` is a live libc block the caller gives up.
@@ -4822,9 +4845,10 @@ mod unit_tests {
     }
 
     mod matched_path {
-        use super::*;
         use std::ffi::CString;
         use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use super::*;
 
         #[test]
         fn stopped_trampoline_is_not_reentered_and_scan_resets() {
@@ -4941,8 +4965,9 @@ mod unit_tests {
                     "::workdir_scan_skip_abort_and_removed_paths"
                 ),
                 || {
-                    use crate::libgit2::repository::repository::Repository;
                     use std::cell::Cell;
+
+                    use crate::libgit2::repository::repository::Repository;
                     let dir = std::env::temp_dir()
                         .join(format!("crustify-matched-workdir-{}", std::process::id()));
                     let _ = std::fs::remove_dir_all(&dir);
@@ -5079,13 +5104,13 @@ mod unit_tests {
             uid: 3,
             gid: 4,
             file_size: 5,
-            flags: 0x3fff,
+            flags: 0x3FFF,
             flags_extended: u16::MAX,
             path: path.as_ptr(),
             ..Default::default()
         };
         raw.id.type_ = 7;
-        raw.id.id[31] = 0xab;
+        raw.id.id[31] = 0xAB;
         let mut copy = {
             // SAFETY: `raw` is initialised, outlives the handle and is not written while
             // it lives; its path is a live NUL-terminated string that outlives `copy`.
@@ -5110,8 +5135,8 @@ mod unit_tests {
                 (1, 2, 3, 4, 5)
             );
             assert_eq!((entry.mode(), entry.filemode()), (0o100664, None));
-            assert_eq!((entry.id().raw_kind(), entry.id().id()[31]), (7, 0xab));
-            assert_eq!(entry.flags().bits(), 0x3fff);
+            assert_eq!((entry.id().raw_kind(), entry.id().id()[31]), (7, 0xAB));
+            assert_eq!(entry.flags().bits(), 0x3FFF);
             assert_eq!(entry.flags_extended().bits(), u32::from(u16::MAX));
             assert_eq!(entry.path(), path.as_c_str());
             assert!(format!("{entry:?}").contains("mode: 100664"));
@@ -5129,7 +5154,7 @@ mod unit_tests {
         let mut entry = IndexEntry::new(c"f", Oid::zeroed().as_ref(), FileMode::Blob);
         let mut handle = entry.as_mut();
         handle
-            .set_flags(EntryFlags::from_bits_retain(0xffff))
+            .set_flags(EntryFlags::from_bits_retain(0xFFFF))
             .unwrap();
         handle
             .set_flags_extended(EntryExtendedFlags::from_bits_retain(0x8001))
@@ -5146,10 +5171,10 @@ mod unit_tests {
                     .is_err()
             );
         }
-        assert_eq!(handle.as_ref().flags().bits(), 0xffff);
+        assert_eq!(handle.as_ref().flags().bits(), 0xFFFF);
         assert_eq!(handle.as_ref().flags_extended().bits(), 0x8001);
         let raw = entry.into_raw();
-        assert_eq!((raw.flags, raw.flags_extended), (0xffff, 0x8001));
+        assert_eq!((raw.flags, raw.flags_extended), (0xFFFF, 0x8001));
     }
 
     /// `set_stage` refuses the wildcard in Rust, before the macro would store stage 3,
@@ -5158,14 +5183,14 @@ mod unit_tests {
     fn entry_stage_setter_refuses_the_wildcard() {
         let mut entry = IndexEntry::new(c"s", Oid::zeroed().as_ref(), FileMode::Blob);
         let mut handle = entry.as_mut();
-        for bits in [0, 0x1fff, 0xcfff, 0xffff] {
+        for bits in [0, 0x1FFF, 0xCFFF, 0xFFFF] {
             handle
                 .set_flags(EntryFlags::from_bits_retain(bits))
                 .unwrap();
             assert_eq!(handle.set_stage(Stage::Any), Err(AnyStageError));
             assert_eq!(handle.as_ref().flags().bits(), bits);
         }
-        assert_eq!(entry.into_raw().flags, 0xffff);
+        assert_eq!(entry.into_raw().flags, 0xFFFF);
         let error: &dyn std::error::Error = &AnyStageError;
         assert_eq!(
             error.to_string(),
@@ -5182,10 +5207,10 @@ mod unit_tests {
         let path = CString::new("lent").unwrap();
         for (flags, stage) in [
             (0x0000, Stage::Normal),
-            (0xcfff, Stage::Normal),
+            (0xCFFF, Stage::Normal),
             (0x1000, Stage::Ancestor),
-            (0x2abc, Stage::Ours),
-            (0xffff, Stage::Theirs),
+            (0x2ABC, Stage::Ours),
+            (0xFFFF, Stage::Theirs),
         ] {
             let raw = ffi::git_index_entry {
                 flags,
@@ -5272,10 +5297,11 @@ mod unit_tests {
     /// divergence from C's `git_index_add_all` without a repository, and allocation
     /// failures.
     mod symbols {
+        use std::path::PathBuf;
+
         use super::*;
         use crate::libgit2::core::strarray::StrArrayView;
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
-        use std::path::PathBuf;
 
         /// A fresh repository with a working directory under the temporary directory,
         /// removed with it.
@@ -5646,8 +5672,9 @@ mod unit_tests {
             isolated(
                 concat!(module_path!(), "::entry_getters_read_what_libgit2_stores"),
                 || {
-                    use crate::libgit2::object::tree::Tree;
                     use std::os::unix::fs::MetadataExt;
+
+                    use crate::libgit2::object::tree::Tree;
 
                     let scratch = Scratch::new("stored");
                     let file = scratch.dir.join("file");

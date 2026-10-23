@@ -227,7 +227,7 @@ fn failures_leave_nothing_behind() {
 
     // Ids of another type, at every length, never reach C.
     let mut wide = Oid::from_raw(&id(COMMIT).as_ref().id(), OidType::Sha256).unwrap();
-    for kind in [2, 0, 3, 0x7f, u8::MAX] {
+    for kind in [2, 0, 3, 0x7F, u8::MAX] {
         wide.as_mut().set_raw_kind(kind);
         assert_failed(
             Object::lookup(r, wide.as_ref(), None),
@@ -260,9 +260,9 @@ fn prefix_lengths_from_four_to_past_the_end() {
         if len < 40 {
             // Garbage past the prefix: it must be ignored.
             let mut bytes = probe.as_ref().id();
-            bytes[len.div_ceil(2)..20].fill(0x5a);
+            bytes[len.div_ceil(2)..20].fill(0x5A);
             if len % 2 == 1 {
-                bytes[len / 2] |= 0x0f;
+                bytes[len / 2] |= 0x0F;
             }
             probe = Oid::from_raw(&bytes[..20], OidType::Sha1).unwrap();
         }
@@ -286,7 +286,7 @@ fn lookups_retain_no_id() {
             Object::lookup_prefix(repo.as_ref(), probe.as_ref().as_ref(), 10, None)
         }
         .unwrap();
-        probe.as_mut().as_mut().set_id([0xee; 32]);
+        probe.as_mut().as_mut().set_id([0xEE; 32]);
         drop(probe);
         held.push((hex_id, object));
     }
@@ -896,7 +896,7 @@ mod kinds_short_ids_and_contents {
         let mut tree = Vec::new();
         for i in 0..2000 {
             tree.extend_from_slice(format!("100644 file-{i:04}\0").as_bytes());
-            tree.extend_from_slice(&[0x5a; 20]);
+            tree.extend_from_slice(&[0x5A; 20]);
         }
         contents.push((tree, ObjectType::Tree, OidType::Sha1));
         contents
@@ -1021,7 +1021,7 @@ fn ids_and_owners_borrow_from_their_object() {
     ] {
         let mut probe = id(hex_id);
         let object = Object::lookup(repo.as_ref(), probe.as_ref(), Some(kind)).unwrap();
-        probe.as_mut().set_id([0x5a; 32]);
+        probe.as_mut().set_id([0x5A; 32]);
         let clone = object.clone();
         let handle = clone.as_ref();
         let object_id = handle.id();

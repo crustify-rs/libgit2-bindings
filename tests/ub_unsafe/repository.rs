@@ -55,8 +55,7 @@ fn copy_dir(from: &Path, to: &Path) {
 
 /// A writable copy of libgit2's bare `testrepo.git`, at `scratch/name`.
 fn testrepo(scratch: &Scratch, name: &str) -> RepositoryBox {
-    let source =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("c/tests/resources/testrepo.git");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("c/tests/resources/testrepo.git");
     let path = scratch.0.join(name);
     copy_dir(&source, &path);
     Repository::open(&CString::new(path.as_os_str().as_bytes()).unwrap()).unwrap()

@@ -76,7 +76,7 @@ mod filesystem {
 
     #[test]
     fn every_raw_value_converts_to_a_variant_or_none() {
-        let edges = [u32::MAX, u32::MAX - 1, 0x8000_0000, 0x7fff_ffff];
+        let edges = [u32::MAX, u32::MAX - 1, 0x8000_0000, 0x7FFF_FFFF];
         for raw in (0..=300).chain(edges) {
             match Filesystem::from_raw(raw) {
                 Some(fs) => {

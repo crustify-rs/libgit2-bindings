@@ -49,7 +49,7 @@ const KINDS: [u8; 5] = [
     ffi::GIT_OID_SHA1 as u8,
     ffi::GIT_OID_SHA256 as u8,
     3,
-    0xff,
+    0xFF,
 ];
 
 /// Both object id types a repository can have.
@@ -85,7 +85,7 @@ mod lookup {
             }
             assert_eq!(held.len(), 2);
             let mut missing = oid(&repo.first);
-            missing.as_mut().set_id([0xa5; 32]);
+            missing.as_mut().set_id([0xA5; 32]);
             let e = AnnotatedCommit::lookup(repo.repo(), missing.as_ref()).unwrap_err();
             assert_eq!(e.class(), Some(ErrorClass::Odb));
             let zero = Oid::zeroed();

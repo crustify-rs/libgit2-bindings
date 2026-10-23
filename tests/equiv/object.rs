@@ -646,8 +646,6 @@ mod peel_and_bypath {
 
 /// `git_object_id_options`: [`ObjectIdOptions`] against the struct C code builds.
 mod id_options {
-    use super::{c_last, init};
-
     use std::ffi::{CStr, CString, c_int};
     use std::ptr;
 
@@ -657,6 +655,8 @@ mod id_options {
     use libgit2::libgit2::object::object::{ObjectIdOptions, id_from_buffer, id_from_file};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryError};
+
+    use super::{c_last, init};
 
     const CHILD: &str = "CRUSTIFY_EQUIV_CHILD";
 
@@ -1161,10 +1161,10 @@ mod types_and_contents {
     /// A commit, a tree and a tag whose ids are of `kind`.
     fn samples(kind: OidType) -> Vec<Vec<u8>> {
         let (hex, raw) = match kind {
-            OidType::Sha1 => ("a65fedf39aefe402d3bb6e24df4d4f5fe4547750", vec![0xa6; 20]),
+            OidType::Sha1 => ("a65fedf39aefe402d3bb6e24df4d4f5fe4547750", vec![0xA6; 20]),
             _ => (
                 "f2a108f86a3b4fd9ad75ed55e9cb3cb46e348fca3b9dba3db64f7c9f64b8a736",
-                vec![0xf2; 32],
+                vec![0xF2; 32],
             ),
         };
         let commit = format!(

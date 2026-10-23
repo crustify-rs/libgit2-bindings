@@ -3,12 +3,13 @@
 #[path = "../support/reuc.rs"]
 mod reuc;
 
+use std::ffi::{CStr, CString, c_int};
+use std::ptr;
+
 use libgit2::ffi;
 use libgit2::libgit2::index::index::{Index, IndexBox};
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use reuc::{IndexFile, Record, Snapshot, snapshot, sorted};
-use std::ffi::{CStr, CString, c_int};
-use std::ptr;
 
 mod reuc_edits;
 

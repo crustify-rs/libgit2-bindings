@@ -1,5 +1,6 @@
 //! Independent C/Rust note iterators, compared through multi-step C traversal.
 use core::ptr;
+
 use libgit2::ffi;
 use libgit2::libgit2::index::notes::{NoteIterator, NoteIteratorBox};
 use libgit2::libgit2::object::commit::Commit;

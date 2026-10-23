@@ -32,7 +32,10 @@ define_ctype!(
     /// for internal FFI interoperability, not independently constructed owners.
     ///
     /// Wraps: git_index_name_entry
-    NameEntry, NameEntryRef, NameEntryMut, ffi::git_index_name_entry
+    NameEntry,
+    NameEntryRef,
+    NameEntryMut,
+    ffi::git_index_name_entry
 );
 
 impl<'a> NameEntryRef<'a> {
@@ -108,7 +111,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_index_reuc_entry
-    ReucEntry, ReucEntryRef, ReucEntryMut, ffi::git_index_reuc_entry
+    ReucEntry,
+    ReucEntryRef,
+    ReucEntryMut,
+    ffi::git_index_reuc_entry
 );
 
 /// One side of a resolved conflict as a REUC record keeps it.
@@ -474,8 +480,9 @@ impl IndexMut<'_> {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
     use ffibox::CZeroable;
+
+    use super::*;
 
     #[test]
     fn layout_and_nullable_projection() {

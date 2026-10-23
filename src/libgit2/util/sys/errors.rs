@@ -25,8 +25,7 @@
 //! which `git_error_last` reports as a raw class; the setters here only take named ones.
 
 use core::ffi::CStr;
-use core::fmt;
-use core::ptr;
+use core::{fmt, ptr};
 use std::io;
 use std::sync::OnceLock;
 
@@ -180,12 +179,14 @@ impl std::error::Error for MessageNotStored {}
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{c_int, c_void};
     use core::ptr::NonNull;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -311,6 +312,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -324,6 +326,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

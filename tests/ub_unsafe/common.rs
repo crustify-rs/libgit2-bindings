@@ -12,7 +12,8 @@
 use std::ffi::{CStr, CString, c_int, c_void};
 use std::process::Command;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 
 use libgit2::libgit2::core::common::{self, SearchPathLevel};
@@ -520,6 +521,7 @@ unsafe impl Alloc for Counted {
         // SAFETY: plain libc allocation.
         NonNull::new(unsafe { malloc(len) }.cast())
     }
+
     unsafe fn realloc(
         p: Option<NonNull<u8>>,
         len: usize,
@@ -531,6 +533,7 @@ unsafe impl Alloc for Counted {
         // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
         NonNull::new(unsafe { realloc(p, len) }.cast())
     }
+
     unsafe fn free(p: NonNull<u8>) {
         CALLS.fetch_add(1, SeqCst);
         // SAFETY: `p` is a live libc block the caller gives up.
@@ -593,6 +596,7 @@ unsafe impl Alloc for Refusable {
         // SAFETY: plain libc allocation.
         NonNull::new(unsafe { malloc(len) }.cast())
     }
+
     unsafe fn realloc(
         p: Option<NonNull<u8>>,
         len: usize,
@@ -606,6 +610,7 @@ unsafe impl Alloc for Refusable {
         // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
         NonNull::new(unsafe { realloc(p, len) }.cast())
     }
+
     unsafe fn free(p: NonNull<u8>) {
         // SAFETY: `p` is a live libc block the caller gives up.
         unsafe { free(p.as_ptr().cast()) }
@@ -615,50 +620,52 @@ unsafe impl Alloc for Refusable {
 static REFUSABLE: Allocator = Allocator::new::<Refusable>();
 
 isolated_test!(
-/// Every option that allocates fails with libgit2's out-of-memory error while nothing
-/// can be allocated, leaking nothing (LSan) and leaving each setting usable: a string
-/// whose copy failed reads as its default.
-allocation_failures_report_errors, {
-    // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
-    unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
-    // SAFETY: as above.
-    unsafe {
-        common::set_user_agent(Some(c"before")).unwrap();
-        common::set_user_agent_product(Some(c"before")).unwrap();
-        // Allocates the thread's error state, so failures below need no allocation.
-        assert!(common::set_server_timeout(-1).is_err());
+    /// Every option that allocates fails with libgit2's out-of-memory error while nothing
+    /// can be allocated, leaking nothing (LSan) and leaving each setting usable: a string
+    /// whose copy failed reads as its default.
+    allocation_failures_report_errors,
+    {
+        // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
+        unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
+        // SAFETY: as above.
+        unsafe {
+            common::set_user_agent(Some(c"before")).unwrap();
+            common::set_user_agent_product(Some(c"before")).unwrap();
+            // Allocates the thread's error state, so failures below need no allocation.
+            assert!(common::set_server_timeout(-1).is_err());
+        }
+        let oom = |e: libgit2::libgit2::util::errors::ErrorBuf| {
+            assert_eq!(e.class(), Some(ErrorClass::NoMemory), "{e:?}");
+        };
+        REFUSE.store(true, SeqCst);
+        oom(common::search_path(SearchPathLevel::Global).unwrap_err());
+        oom(common::template_path().unwrap_err());
+        oom(common::homedir().unwrap_err());
+        oom(common::user_agent().unwrap_err());
+        oom(common::user_agent_product().unwrap_err());
+        oom(common::extensions().unwrap_err());
+        // SAFETY: as above.
+        unsafe {
+            oom(common::set_user_agent(Some(c"refused")).unwrap_err());
+            oom(common::set_user_agent_product(Some(c"refused")).unwrap_err());
+            oom(common::set_ssl_ciphers(c"HIGH").unwrap_err());
+            oom(common::set_extensions(&[c"refused"]).unwrap_err());
+        }
+        REFUSE.store(false, SeqCst);
+        assert_eq!(common::user_agent().unwrap(), c"libgit2 1.9.0".to_owned());
+        assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
+        assert!(
+            common::extensions()
+                .unwrap()
+                .as_ref()
+                .iter()
+                .all(|e| e != c"refused")
+        );
+        // SAFETY: as above.
+        unsafe { common::set_user_agent(Some(c"after")).unwrap() };
+        assert_eq!(common::user_agent().unwrap(), c"after".to_owned());
     }
-    let oom = |e: libgit2::libgit2::util::errors::ErrorBuf| {
-        assert_eq!(e.class(), Some(ErrorClass::NoMemory), "{e:?}");
-    };
-    REFUSE.store(true, SeqCst);
-    oom(common::search_path(SearchPathLevel::Global).unwrap_err());
-    oom(common::template_path().unwrap_err());
-    oom(common::homedir().unwrap_err());
-    oom(common::user_agent().unwrap_err());
-    oom(common::user_agent_product().unwrap_err());
-    oom(common::extensions().unwrap_err());
-    // SAFETY: as above.
-    unsafe {
-        oom(common::set_user_agent(Some(c"refused")).unwrap_err());
-        oom(common::set_user_agent_product(Some(c"refused")).unwrap_err());
-        oom(common::set_ssl_ciphers(c"HIGH").unwrap_err());
-        oom(common::set_extensions(&[c"refused"]).unwrap_err());
-    }
-    REFUSE.store(false, SeqCst);
-    assert_eq!(common::user_agent().unwrap(), c"libgit2 1.9.0".to_owned());
-    assert_eq!(common::user_agent_product().unwrap(), c"git/2.0".to_owned());
-    assert!(
-        common::extensions()
-            .unwrap()
-            .as_ref()
-            .iter()
-            .all(|e| e != c"refused")
-    );
-    // SAFETY: as above.
-    unsafe { common::set_user_agent(Some(c"after")).unwrap() };
-    assert_eq!(common::user_agent().unwrap(), c"after".to_owned());
-});
+);
 
 /// A copy into a system directory that fails for want of memory leaves the directory
 /// empty and readable, and a later copy fills it again. Without the wrappers' repair
@@ -709,76 +716,80 @@ fn failed_copy_empties(
 }
 
 isolated_test!(
-/// Every system directory setter, after a copy that failed for want of memory.
-failed_sysdir_copies_leave_empty_readable_directories, {
-    // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
-    unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
-    // Allocates the thread's error state, so failures below read as out of memory.
-    // SAFETY: as above.
-    assert!(unsafe { common::set_server_timeout(-1) }.is_err());
-    for level in [
-        SearchPathLevel::System,
-        SearchPathLevel::Xdg,
-        SearchPathLevel::Global,
-    ] {
+    /// Every system directory setter, after a copy that failed for want of memory.
+    failed_sysdir_copies_leave_empty_readable_directories,
+    {
+        // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
+        unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
+        // Allocates the thread's error state, so failures below read as out of memory.
+        // SAFETY: as above.
+        assert!(unsafe { common::set_server_timeout(-1) }.is_err());
+        for level in [
+            SearchPathLevel::System,
+            SearchPathLevel::Xdg,
+            SearchPathLevel::Global,
+        ] {
+            failed_copy_empties(
+                // SAFETY: this child runs no other thread while setting.
+                |path| unsafe { common::set_search_path(level, path) },
+                || common::search_path(level),
+            );
+        }
         failed_copy_empties(
-            // SAFETY: this child runs no other thread while setting.
-            |path| unsafe { common::set_search_path(level, path) },
-            || common::search_path(level),
+            // SAFETY: as above.
+            |path| unsafe { common::set_template_path(path) },
+            common::template_path,
+        );
+        failed_copy_empties(
+            // SAFETY: as above.
+            |path| unsafe { common::set_homedir(path) },
+            common::homedir,
         );
     }
-    failed_copy_empties(
-        // SAFETY: as above.
-        |path| unsafe { common::set_template_path(path) },
-        common::template_path,
-    );
-    failed_copy_empties(
-        // SAFETY: as above.
-        |path| unsafe { common::set_homedir(path) },
-        common::homedir,
-    );
-});
+);
 
 isolated_test!(
-/// When libgit2 cannot be initialised, every option that needs it fails without
-/// calling it, with the error `git_error_last` reports before initialisation.
-without_a_runtime_pinned_options_fail, {
-    REFUSE.store(true, SeqCst);
-    // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
-    unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
-    let uninit = |e: libgit2::libgit2::util::errors::ErrorBuf| {
-        assert_eq!(e.class(), Some(ErrorClass::Invalid), "{e:?}");
-        assert_eq!(e.message(), c"library has not been initialized");
-    };
-    uninit(common::search_path(SearchPathLevel::System).unwrap_err());
-    uninit(common::template_path().unwrap_err());
-    uninit(common::homedir().unwrap_err());
-    uninit(common::user_agent().unwrap_err());
-    uninit(common::user_agent_product().unwrap_err());
-    uninit(common::extensions().unwrap_err());
-    // SAFETY: as above; `cert` is a live libcrypto `X509`, freed after.
-    unsafe {
-        uninit(common::set_search_path(SearchPathLevel::Xdg, Some(c"/x")).unwrap_err());
-        uninit(common::set_template_path(None).unwrap_err());
-        uninit(common::set_homedir(None).unwrap_err());
-        uninit(common::set_user_agent(None).unwrap_err());
-        uninit(common::set_user_agent_product(None).unwrap_err());
-        uninit(common::set_ssl_ciphers(c"HIGH").unwrap_err());
-        uninit(common::set_ssl_cert_locations(None, None).unwrap_err());
-        let cert = x509();
-        uninit(common::add_ssl_x509_cert(cert).unwrap_err());
-        X509_free(cert.as_ptr());
-        uninit(common::set_extensions::<&CStr>(&[]).unwrap_err());
-        uninit(common::set_server_timeout(1).unwrap_err());
-        uninit(common::set_server_connect_timeout(1).unwrap_err());
+    /// When libgit2 cannot be initialised, every option that needs it fails without
+    /// calling it, with the error `git_error_last` reports before initialisation.
+    without_a_runtime_pinned_options_fail,
+    {
+        REFUSE.store(true, SeqCst);
+        // SAFETY: nothing has initialised libgit2 in this child; no other thread runs.
+        unsafe { common::set_allocator(Some(REFUSABLE.as_ref())) };
+        let uninit = |e: libgit2::libgit2::util::errors::ErrorBuf| {
+            assert_eq!(e.class(), Some(ErrorClass::Invalid), "{e:?}");
+            assert_eq!(e.message(), c"library has not been initialized");
+        };
+        uninit(common::search_path(SearchPathLevel::System).unwrap_err());
+        uninit(common::template_path().unwrap_err());
+        uninit(common::homedir().unwrap_err());
+        uninit(common::user_agent().unwrap_err());
+        uninit(common::user_agent_product().unwrap_err());
+        uninit(common::extensions().unwrap_err());
+        // SAFETY: as above; `cert` is a live libcrypto `X509`, freed after.
+        unsafe {
+            uninit(common::set_search_path(SearchPathLevel::Xdg, Some(c"/x")).unwrap_err());
+            uninit(common::set_template_path(None).unwrap_err());
+            uninit(common::set_homedir(None).unwrap_err());
+            uninit(common::set_user_agent(None).unwrap_err());
+            uninit(common::set_user_agent_product(None).unwrap_err());
+            uninit(common::set_ssl_ciphers(c"HIGH").unwrap_err());
+            uninit(common::set_ssl_cert_locations(None, None).unwrap_err());
+            let cert = x509();
+            uninit(common::add_ssl_x509_cert(cert).unwrap_err());
+            X509_free(cert.as_ptr());
+            uninit(common::set_extensions::<&CStr>(&[]).unwrap_err());
+            uninit(common::set_server_timeout(1).unwrap_err());
+            uninit(common::set_server_connect_timeout(1).unwrap_err());
+        }
+        REFUSE.store(false, SeqCst);
+        // The plain options need no runtime.
+        // SAFETY: as above.
+        unsafe { common::set_mwindow_size(1 << 20) };
+        assert_eq!(common::mwindow_size(), 1 << 20);
+        assert!(
+            common::user_agent().is_err(),
+            "a refused initialisation is final"
+        );
     }
-    REFUSE.store(false, SeqCst);
-    // The plain options need no runtime.
-    // SAFETY: as above.
-    unsafe { common::set_mwindow_size(1 << 20) };
-    assert_eq!(common::mwindow_size(), 1 << 20);
-    assert!(
-        common::user_agent().is_err(),
-        "a refused initialisation is final"
-    );
-});
+);

@@ -455,7 +455,7 @@ mod owner {
 
         // Ids of another type, at every length, never reach C.
         let mut wide = Oid::from_raw(&id(README).as_ref().id(), OidType::Sha256).unwrap();
-        for kind in [2, 0, 3, 0x7f, u8::MAX] {
+        for kind in [2, 0, 3, 0x7F, u8::MAX] {
             wide.as_mut().set_raw_kind(kind);
             assert_failed(Blob::lookup(r, wide.as_ref()), -1, ErrorClass::Invalid);
             for len in [0, 4, 7, 39, 40, 41, 64, 65, usize::MAX] {
@@ -487,7 +487,7 @@ mod owner {
                 Blob::lookup_prefix(repo.as_ref(), probe.as_ref().as_ref(), 10)
             }
             .unwrap();
-            probe.as_mut().as_mut().set_id([0xee; 32]);
+            probe.as_mut().as_mut().set_id([0xEE; 32]);
             drop(probe);
             held.push((data, blob));
         }
@@ -625,7 +625,7 @@ mod filter_options {
             again.set_flags(FilterFlags::from_bits_retain(u32::MAX));
             let mut oid = again.attr_commit_id_mut();
             oid.set_raw_kind(u8::MAX);
-            oid.set_id([0xff; 32]);
+            oid.set_id([0xFF; 32]);
             assert!(m.as_ref().has_reserved());
             m.clear_reserved();
             let r = m.as_ref();
@@ -646,7 +646,7 @@ mod filter_options {
             owned.as_mut().set_raw_kind(id.raw_kind());
             owned.as_mut().set_id(id.id());
         }
-        assert_eq!(owned.as_ref().id(), [0xff; 32]);
+        assert_eq!(owned.as_ref().id(), [0xFF; 32]);
         assert_eq!(owned.as_ref().raw_kind(), u8::MAX);
         let back: ffi::git_blob_filter_options = copy.into();
         assert_eq!(back.version, 1);
@@ -743,7 +743,7 @@ mod filter_options {
         );
         opts.as_mut()
             .set_flags(FilterFlag::NoSystemAttributes | FilterFlag::AttributesFromCommit);
-        opts.as_mut().attr_commit_id_mut().set_id([0xee; 32]);
+        opts.as_mut().attr_commit_id_mut().set_id([0xEE; 32]);
         let mut fresh = FilterOptions::new();
         fresh.as_mut().set_flags(FilterFlags::empty());
         assert_eq!(
@@ -894,7 +894,7 @@ mod writing {
             let mut data: Box<[u8]> = (0..len).map(|i| (i % 253) as u8).collect();
             let id = create_from_buffer(repo, &data).unwrap();
             let again = create_from_buffer(repo, &data.clone()).unwrap();
-            data.fill(0xa5);
+            data.fill(0xA5);
             drop(data);
             assert_eq!(id, again, "{len}");
         }

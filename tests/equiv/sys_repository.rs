@@ -250,10 +250,9 @@ mod new_options {
 /// of `repository/sys/repository.rs` cover them), so loads here start without a cache.
 mod submodule_cache {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};

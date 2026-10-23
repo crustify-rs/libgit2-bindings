@@ -159,9 +159,8 @@ mod callback {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::process::Command;
-    use std::ptr;
     use std::sync::Mutex;
-    use std::thread;
+    use std::{ptr, thread};
 
     use libgit2::ffi;
     use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel, Tracer};

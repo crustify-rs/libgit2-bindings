@@ -30,8 +30,7 @@
 
 use core::any::Any;
 use core::ffi::{CStr, c_void};
-use core::fmt;
-use core::ptr;
+use core::{fmt, ptr};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use ffibox::CZeroable;
@@ -67,9 +66,8 @@ type ParentFn<'f> = dyn FnMut(usize) -> Option<Oid> + 'f;
 /// use libgit2::libgit2::oid::oid::{Oid, OidType};
 ///
 /// # if cfg!(miri) { return; } // Miri cannot call libgit2.
-/// let parents = [
-///     Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap(),
-/// ];
+/// let parents =
+///     [Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap()];
 /// let mut next = |i: usize| parents.get(i).map(|id| id.as_ref().to_oid());
 /// let mut callback = ParentCallback::new(&mut next);
 /// assert_eq!(callback.call(0), Some(parents[0].as_ref()));
@@ -338,11 +336,12 @@ pub fn create_from_ids(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::{CStr, c_int};
+    use std::process::Command;
+
     use super::*;
     use crate::libgit2::util::errors::{ErrorBuf, last};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::{CStr, c_int};
-    use std::process::Command;
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 

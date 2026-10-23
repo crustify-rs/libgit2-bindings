@@ -185,8 +185,8 @@ fn constructors_copy_their_arguments() {
     .unwrap();
     name[..4].fill(b'X');
     target[..4].fill(b'Y');
-    id.as_mut().set_id([0xee; 32]);
-    peel.as_mut().set_id([0xee; 32]);
+    id.as_mut().set_id([0xEE; 32]);
+    peel.as_mut().set_id([0xEE; 32]);
     drop((name, target));
 
     let d = view_unattached(&direct);
@@ -217,7 +217,7 @@ fn names_of_every_length_stay_in_bounds() {
         assert_eq!(view_unattached(&symbolic).symbolic, Some(target));
     }
     // Bytes that are no UTF-8 are names too.
-    let name = CString::new(vec![0xff, 0x80, b'/', 0xc3]).unwrap();
+    let name = CString::new(vec![0xFF, 0x80, b'/', 0xC3]).unwrap();
     let symbolic = UnattachedReference::symbolic(&name, &name).unwrap();
     assert_eq!(view_unattached(&symbolic).name, name);
 }

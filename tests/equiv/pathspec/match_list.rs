@@ -2,6 +2,7 @@
 //! bounds, repeated observations and release ordering on independent inputs.
 
 use core::ptr;
+
 use libgit2::ffi;
 use libgit2::libgit2::core::types::FileMode;
 use libgit2::libgit2::diff::diff::{Diff, DiffBox};
@@ -9,10 +10,11 @@ use libgit2::libgit2::index::index::{Index, IndexBox};
 use libgit2::libgit2::index::pathspec::{MatchList, MatchListRef, PathspecFlags};
 #[path = "../../support/pathspec_match_list.rs"]
 mod support;
+use std::ffi::{CStr, CString};
+
 use libgit2::libgit2::object::blob::create_from_buffer;
 use libgit2::libgit2::object::tree::{Tree, TreeBuilder};
 use libgit2::libgit2::repository::repository::{Repository, RepositoryError};
-use std::ffi::{CStr, CString};
 use support::patterns;
 
 fn index(paths: &[&CStr]) -> IndexBox {

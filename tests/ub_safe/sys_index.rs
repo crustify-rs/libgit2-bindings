@@ -5,12 +5,14 @@
 #[path = "../support/reuc.rs"]
 mod reuc;
 
-use crate::fixture::index::{add_reuc, clear_reuc, remove_reuc, set_ignore_case};
+use std::ffi::CString;
+
 use libgit2::libgit2::index::index::Index;
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::util::errors::ErrorClass;
 use reuc::{IndexFile, Record, extension_bytes, snapshot, sorted};
-use std::ffi::CString;
+
+use crate::fixture::index::{add_reuc, clear_reuc, remove_reuc, set_ignore_case};
 
 mod reuc_edits;
 
@@ -24,7 +26,7 @@ fn names_survive_inputs_and_reborrow_before_clear() {
             let inputs = [
                 CString::new(format!("ancestor-{i:02}")).unwrap(),
                 CString::new(format!("ours-{i:02}")).unwrap(),
-                CString::new([b't', 0xff, i + 1]).unwrap(),
+                CString::new([b't', 0xFF, i + 1]).unwrap(),
             ];
             index
                 .as_mut()
@@ -295,7 +297,7 @@ fn fields(parts: &[&str]) -> Vec<u8> {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn reuc_malformed_extensions_refused() {
-    let id = [0x5a; 20];
+    let id = [0x5A; 20];
     let good = [fields(&["a", "100644", "0", "0"]), id.to_vec()].concat();
     let cases: [(&str, Vec<u8>); 6] = [
         ("unterminated path", b"path".to_vec()),

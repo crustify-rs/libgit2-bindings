@@ -3,6 +3,7 @@
 //! pathspec. List matching lives in `match_list`.
 use core::ffi::CStr;
 use core::ptr;
+
 use libgit2::libgit2::core::strarray::StrArrayView;
 use libgit2::libgit2::index::index::Index;
 use libgit2::libgit2::index::pathspec::{MatchList, Pathspec, PathspecArc, PathspecFlags};

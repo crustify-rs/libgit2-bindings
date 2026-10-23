@@ -41,7 +41,10 @@ define_ctype!(
     /// A compiled, C-owned pathspec, reached only through owners and handles.
     ///
     /// Wraps: git_pathspec
-    Pathspec, PathspecRef, PathspecMut, ffi::git_pathspec
+    Pathspec,
+    PathspecRef,
+    PathspecMut,
+    ffi::git_pathspec
 );
 
 /// Releases one counted reference, freeing the patterns, prefix, pool and object
@@ -190,18 +193,18 @@ pub struct PathspecFlags(u32);
 impl PathspecFlags {
     /// Default matching, with no flags enabled.
     pub const DEFAULT: Self = Self(ffi::GIT_PATHSPEC_DEFAULT);
+    /// Do not keep matching filenames; test for matches or collect failures only.
+    pub const FAILURES_ONLY: Self = Self(ffi::GIT_PATHSPEC_FAILURES_ONLY);
+    /// Record the patterns that had no matches.
+    pub const FIND_FAILURES: Self = Self(ffi::GIT_PATHSPEC_FIND_FAILURES);
     /// Force case-insensitive matching.
     pub const IGNORE_CASE: Self = Self(ffi::GIT_PATHSPEC_IGNORE_CASE);
-    /// Force case-sensitive matching where the operation supports it.
-    pub const USE_CASE: Self = Self(ffi::GIT_PATHSPEC_USE_CASE);
     /// Disable glob matching (literal directory-prefix matching still applies).
     pub const NO_GLOB: Self = Self(ffi::GIT_PATHSPEC_NO_GLOB);
     /// Report no matches as `GIT_ENOTFOUND` in list-producing operations.
     pub const NO_MATCH_ERROR: Self = Self(ffi::GIT_PATHSPEC_NO_MATCH_ERROR);
-    /// Record the patterns that had no matches.
-    pub const FIND_FAILURES: Self = Self(ffi::GIT_PATHSPEC_FIND_FAILURES);
-    /// Do not keep matching filenames; test for matches or collect failures only.
-    pub const FAILURES_ONLY: Self = Self(ffi::GIT_PATHSPEC_FAILURES_ONLY);
+    /// Force case-sensitive matching where the operation supports it.
+    pub const USE_CASE: Self = Self(ffi::GIT_PATHSPEC_USE_CASE);
 
     /// Preserve every supplied bit, including bits unknown to this C version.
     pub const fn from_bits_retain(bits: u32) -> Self {
@@ -226,6 +229,7 @@ impl PathspecFlags {
 
 impl BitOr for PathspecFlags {
     type Output = Self;
+
     fn bitor(self, rhs: Self) -> Self {
         Self(self.0 | rhs.0)
     }
@@ -237,6 +241,7 @@ impl BitOrAssign for PathspecFlags {
 }
 impl BitAnd for PathspecFlags {
     type Output = Self;
+
     fn bitand(self, rhs: Self) -> Self {
         Self(self.0 & rhs.0)
     }
@@ -319,12 +324,12 @@ pub struct MatchListMut<'a, 'diff>(
 // MatchList, shared handles only read, and neither handle references C storage.
 unsafe impl<'diff> CCell for MatchList<'diff> {
     type C = ffi::git_pathspec_match_list;
-    type Ref<'a>
-        = MatchListRef<'a, 'diff>
-    where
-        Self: 'a;
     type Mut<'a>
         = MatchListMut<'a, 'diff>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = MatchListRef<'a, 'diff>
     where
         Self: 'a;
 }
@@ -414,6 +419,7 @@ impl<'diff> MatchListMut<'_, 'diff> {
     pub fn as_ref(&self) -> MatchListRef<'_, 'diff> {
         self.0
     }
+
     pub fn as_mut(&mut self) -> MatchListMut<'_, 'diff> {
         MatchListMut(self.0, PhantomData)
     }
@@ -665,11 +671,13 @@ mod unit_tests {
     // Allocation fault injection lives in a fresh process: no other Rust test can
     // observe or race the process-global C allocator replacement.
     mod failures {
-        use super::*;
-        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
         use core::ffi::{CStr, c_int};
         use core::ptr::NonNull;
-        use std::sync::atomic::{AtomicIsize, Ordering::SeqCst};
+        use std::sync::atomic::AtomicIsize;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        use super::*;
+        use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
         static FAIL_AT: AtomicIsize = AtomicIsize::new(-1);
         static LIVE: AtomicIsize = AtomicIsize::new(0);
@@ -689,6 +697,7 @@ mod unit_tests {
                 }
                 p
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 n: usize,
@@ -707,6 +716,7 @@ mod unit_tests {
                 }
                 result
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 LIVE.fetch_sub(1, SeqCst);
                 // SAFETY: caller surrenders one live block of this allocator.

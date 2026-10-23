@@ -414,7 +414,7 @@ mod tag_object {
 
         // Ids of another type, at every length, never reach C.
         let mut wide = Oid::from_raw(&id(TAGS[0]).as_ref().id(), OidType::Sha256).unwrap();
-        for kind in [2, 0, 3, 0x7f, u8::MAX] {
+        for kind in [2, 0, 3, 0x7F, u8::MAX] {
             wide.as_mut().set_raw_kind(kind);
             assert_failed(Tag::lookup(r, wide.as_ref()), -1, ErrorClass::Invalid);
             for len in [0, 4, 7, 39, 40, 41, 64, 65, usize::MAX] {
@@ -502,7 +502,7 @@ mod tag_object {
                 Tag::lookup_prefix(repo.as_ref(), probe.as_ref().as_ref(), 10)
             }
             .unwrap();
-            probe.as_mut().as_mut().set_id([0xee; 32]);
+            probe.as_mut().as_mut().set_id([0xEE; 32]);
             drop(probe);
             held.push((hex_id, tag));
         }

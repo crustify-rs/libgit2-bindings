@@ -14,10 +14,9 @@
 //! shared handle next to an exclusive one) are in `compile_fail/`.
 
 use std::ffi::CString;
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::thread;
+use std::{fs, thread};
 
 use libgit2::libgit2::object::mailmap::{Mailmap, MailmapBox, MailmapRef};
 use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};

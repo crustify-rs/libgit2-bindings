@@ -4,12 +4,11 @@
 //! Two sources of buffers, each produced twice, independently, one copy per side:
 //!
 //! - libgit2's own results: `GIT_OPT_GET_USER_AGENT` (an owned string) and an empty
-//!   `GIT_OPT_GET_TEMPLATE_PATH` (the unallocated static empty string), filled into a
-//!   fresh buffer and into one that already owns an allocation, which libgit2 reuses or
-//!   reallocates. The Rust side adopts its copy as libgit2 leaves it, as the wrappers of
-//!   those routines will.
-//! - buffers built the way libgit2 hands one out, a `git__malloc`'d copy NUL-terminated
-//!   at `size` with `reserved` its allocation size, against [`Buf::from_bytes`].
+//!   `GIT_OPT_GET_TEMPLATE_PATH` (the unallocated static empty string), filled into a fresh buffer
+//!   and into one that already owns an allocation, which libgit2 reuses or reallocates. The Rust
+//!   side adopts its copy as libgit2 leaves it, as the wrappers of those routines will.
+//! - buffers built the way libgit2 hands one out, a `git__malloc`'d copy NUL-terminated at `size`
+//!   with `reserved` its allocation size, against [`Buf::from_bytes`].
 //!
 //! The C side then runs C code over the raw struct: reads of `ptr` / `size` /
 //! `reserved`, an in-place `git_buf_set` (hidden in libgit2.so under
@@ -21,19 +20,19 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - `free(NULL)` is not recorded: disposing a buffer that owns nothing in Rust never
-//!   calls libgit2 (`BufDispose` skips `reserved == 0`, where `git_buf_dispose` would
-//!   pass a NULL `ptr` to `git__free`, reading the allocator unsynchronised against a
-//!   concurrent first `git_libgit2_init`).
-//! - A disposed or taken Rust buffer is `GIT_BUF_INIT` (`ptr` NULL); `git_buf_dispose`
-//!   points `ptr` at libgit2's static empty string instead. Both own nothing and read
-//!   as empty, and libgit2 treats both alike when they are passed in again.
-//! - Growing a buffer: `git_buf_set` reallocates with `git__realloc`, which libgit2
-//!   does not export; `BufMut::set_bytes` allocates afresh and releases the old
-//!   allocation. Contents and capacity are compared, not the events.
-//! - A handle over a buffer with `reserved == 0` and a non-zero `size` (no public
-//!   libgit2 path produces one) reads as empty in Rust; C code would read `size` bytes.
-//!   The module's `unit_tests` cover it.
+//! - `free(NULL)` is not recorded: disposing a buffer that owns nothing in Rust never calls libgit2
+//!   (`BufDispose` skips `reserved == 0`, where `git_buf_dispose` would pass a NULL `ptr` to
+//!   `git__free`, reading the allocator unsynchronised against a concurrent first
+//!   `git_libgit2_init`).
+//! - A disposed or taken Rust buffer is `GIT_BUF_INIT` (`ptr` NULL); `git_buf_dispose` points `ptr`
+//!   at libgit2's static empty string instead. Both own nothing and read as empty, and libgit2
+//!   treats both alike when they are passed in again.
+//! - Growing a buffer: `git_buf_set` reallocates with `git__realloc`, which libgit2 does not
+//!   export; `BufMut::set_bytes` allocates afresh and releases the old allocation. Contents and
+//!   capacity are compared, not the events.
+//! - A handle over a buffer with `reserved == 0` and a non-zero `size` (no public libgit2 path
+//!   produces one) reads as empty in Rust; C code would read `size` bytes. The module's
+//!   `unit_tests` cover it.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_int, c_void};

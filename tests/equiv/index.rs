@@ -335,7 +335,7 @@ fn open_matches_git_index_open() {
     let body = bytes.len() - 20;
     for at in (0..body).step_by(stride) {
         let mut corrupt = bytes.clone();
-        corrupt[at] ^= 0xff;
+        corrupt[at] ^= 0xFF;
         std::fs::write(&file, &corrupt).unwrap();
         assert_same_open(&c_file, &format!("byte {at} flipped"));
         corrupt[body..].fill(0);
@@ -410,7 +410,7 @@ fn open_matches_on_long_paths() {
     let scratch = Scratch::new("long-paths");
     let file = scratch.file("index");
     let c_file = c_path(&file);
-    for (version, len, built) in [(2, 0xfff, true), (2, 4200, true), (4, 4200, false)] {
+    for (version, len, built) in [(2, 0xFFF, true), (2, 4200, true), (4, 4200, false)] {
         let _ = std::fs::remove_file(&file);
         let (_, index) = c_open(Some(&c_file));
         let index = index.unwrap();
@@ -437,7 +437,7 @@ fn sweep(scratch: &Scratch, bytes: &[u8]) {
         assert_same_open(&c_file, &format!("truncated to {len}"));
     }
     for at in (0..bytes.len() - 20).step_by(stride) {
-        for flip in [0x01, 0x30, 0xff] {
+        for flip in [0x01, 0x30, 0xFF] {
             let mut corrupt = bytes.to_vec();
             corrupt[at] ^= flip;
             std::fs::write(&file, &corrupt).unwrap();
@@ -651,8 +651,9 @@ fn shared_index_lifecycle_matches_git_index_free() {
 /// `Index::with_oid_type` / `Index::open_with_oid_type` against `git_index_new_ext` /
 /// `git_index_open_ext` (repository wave 0 type review).
 mod oid_types {
-    use super::*;
     use libgit2::libgit2::oid::oid::OidType;
+
+    use super::*;
 
     const TYPES: [OidType; 2] = [OidType::Sha1, OidType::Sha256];
 
@@ -711,7 +712,7 @@ mod oid_types {
             path: path.as_ptr(),
             ..Default::default()
         };
-        entry.id.id = [0x5a; 32];
+        entry.id.id = [0x5A; 32];
         entry.id.type_ = oid_type.raw() as _;
         // SAFETY: a live index; `entry` and its path are read and copied for the call.
         let rc = unsafe { ffi::git_index_add(index, &entry) };
@@ -974,9 +975,11 @@ mod edits;
 mod entries;
 
 mod matched_path_callback {
-    use super::*;
-    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
     use std::ffi::{c_char, c_void};
+
+    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
+
+    use super::*;
 
     #[derive(Default, Debug, PartialEq)]
     struct Recorder {
@@ -1129,7 +1132,7 @@ fn stage_values_match_c() {
             continue;
         }
         let raw = ffi::git_index_entry {
-            flags: ((stage.raw() as u16) << 12) | 0xcfff,
+            flags: ((stage.raw() as u16) << 12) | 0xCFFF,
             ..Default::default()
         };
         // SAFETY: initialized local entry; entry_stage reads only its flags.
@@ -1243,8 +1246,9 @@ fn entry_flags_match_c_enum_and_preserve_other_fields() {
 }
 
 mod conflict_cursor {
-    use super::*;
     use libgit2::libgit2::index::index::{ConflictIterator, EntryExtendedFlags as F};
+
+    use super::*;
 
     /// No entry constructor is available yet; C copies these stack entries and
     /// static paths into the safely constructed index during each add call.
@@ -1464,13 +1468,14 @@ mod entry_and_options {
     //! same struct (by [`into_raw`](IndexEntry::into_raw)); and libgit2 treats them the
     //! same when they are handed to independently owned indexes, step after step.
 
-    use super::*;
     use ffibox::CZeroable;
     use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::index::index::{
         EntryExtendedFlags, EntryFlags, IndexEntry, IndexOptions, IndexTime,
     };
     use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    use super::*;
 
     /// One entry's inputs.
     #[derive(Clone, Copy)]
@@ -1633,14 +1638,14 @@ mod entry_and_options {
                 ..base
             },
             Spec {
-                flags: 3 << 12 | 0x0fff,
+                flags: 3 << 12 | 0x0FFF,
                 byte: 6,
                 ..base
             },
             // Flag bits C keeps or recomputes, and in-memory extended flags.
             Spec {
                 path: c"flags",
-                flags: 0xc000,
+                flags: 0xC000,
                 flags_extended: u16::MAX,
                 ..base
             },
@@ -1652,7 +1657,7 @@ mod entry_and_options {
             Spec {
                 path: c"sha256",
                 kind: OidType::Sha256,
-                byte: 0xff,
+                byte: 0xFF,
                 ..base
             },
             // Refused: an unnamed mode, a tree, and a path under `.git`.
@@ -1795,11 +1800,12 @@ mod entry_and_options {
 /// `git_index_entry_stage`, on independently owned entries, step after step; and against
 /// what libgit2 makes of the entries each side staged.
 mod entry_stage {
-    use super::*;
     use ffibox::CZeroable;
     use libgit2::libgit2::core::types::FileMode;
     use libgit2::libgit2::index::index::{AnyStageError, EntryFlags, IndexEntry, Stage};
     use libgit2::libgit2::oid::oid::{Oid, OidType};
+
+    use super::*;
 
     const STAGES: [Stage; 4] = [Stage::Normal, Stage::Ancestor, Stage::Ours, Stage::Theirs];
 
@@ -1861,7 +1867,7 @@ mod entry_stage {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn the_wildcard_is_refused_where_the_macro_stores_stage_3() {
         let id = Oid::zeroed();
-        for flags in [0, 0x0fff, 0x1000, 0x2abc, 0xcfff, 0xffff] {
+        for flags in [0, 0x0FFF, 0x1000, 0x2ABC, 0xCFFF, 0xFFFF] {
             let mut c = ffi::git_index_entry {
                 flags,
                 ..Default::default()
@@ -1929,14 +1935,14 @@ mod entry_stage {
         init();
         let steps: [(&CStr, u16, Stage, u8); 9] = [
             (c"a", 0, Stage::Normal, 1),
-            (c"b", 0x0fff, Stage::Ancestor, 2),
+            (c"b", 0x0FFF, Stage::Ancestor, 2),
             (c"b", 0, Stage::Ours, 3),
             (c"b", 0x8000, Stage::Theirs, 4),
             (c"a", 0x3000, Stage::Normal, 5),
             (c"c", 0x2000, Stage::Ancestor, 6),
             (c"c", 0x1000, Stage::Ancestor, 7),
             (c"b", 0x3000, Stage::Ours, 8),
-            (c"d", 0xffff, Stage::Theirs, 9),
+            (c"d", 0xFFFF, Stage::Theirs, 9),
         ];
         let paths = [c"a", c"b", c"c", c"d"];
         let (left, right) = (Index::new().unwrap(), Index::new().unwrap());
@@ -1984,13 +1990,15 @@ mod entry_stage {
 /// built alike, compared on results, errors, callbacks and the state the index then
 /// reports through C, after every step of a sequence.
 mod routines {
-    use super::*;
+    use std::cell::RefCell;
+    use std::ffi::{c_char, c_void};
+
     use libgit2::libgit2::core::strarray::StrArrayView;
     use libgit2::libgit2::index::index::{AddFlags, MatchedPathCallback, MatchedPathResult};
     use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError};
     use libgit2::libgit2::util::errors::{ErrorBuf, ErrorCode};
-    use std::cell::RefCell;
-    use std::ffi::{c_char, c_void};
+
+    use super::*;
 
     /// Runs `body` alone in a child process, so no other test shares libgit2's globals.
     fn isolated(test: &str, body: fn()) {
@@ -2319,7 +2327,7 @@ mod routines {
             Op::Set(3, b"mandatory".to_vec()),
             Op::Remove(3),
             Op::Set(4, b"not the tree cache".to_vec()),
-            Op::Set(5, vec![0xff; 3000]),
+            Op::Set(5, vec![0xFF; 3000]),
         ];
         ops.extend((6..signatures.len()).map(|i| Op::Set(i, vec![i as u8; i])));
         ops.extend([Op::Remove(4), Op::Remove(9), Op::Set(9, b"back".to_vec())]);

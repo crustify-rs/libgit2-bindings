@@ -15,9 +15,8 @@
 //! first in both.
 
 use std::ffi::{CStr, CString, c_int};
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::ptr;
+use std::{fs, ptr};
 
 use libgit2::ffi;
 use libgit2::libgit2::odb::odb::{Odb, OdbArc};

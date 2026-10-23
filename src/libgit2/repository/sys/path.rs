@@ -180,9 +180,21 @@ impl std::error::Error for UnnamedFilesystem {}
 /// # if cfg!(miri) { return; }
 /// use libgit2::libgit2::repository::sys::path::{Filesystem, GitFile, is_gitfile};
 ///
-/// assert!(is_gitfile(c"GITMOD~1", GitFile::Gitmodules, Filesystem::Ntfs));
-/// assert!(!is_gitfile(c"GITMOD~1", GitFile::Gitmodules, Filesystem::Hfs));
-/// assert!(is_gitfile(c".gitignore", GitFile::Gitignore, Filesystem::Generic));
+/// assert!(is_gitfile(
+///     c"GITMOD~1",
+///     GitFile::Gitmodules,
+///     Filesystem::Ntfs
+/// ));
+/// assert!(!is_gitfile(
+///     c"GITMOD~1",
+///     GitFile::Gitmodules,
+///     Filesystem::Hfs
+/// ));
+/// assert!(is_gitfile(
+///     c".gitignore",
+///     GitFile::Gitignore,
+///     Filesystem::Generic
+/// ));
 /// ```
 ///
 /// Wraps: git_path_is_gitfile
@@ -223,7 +235,7 @@ mod unit_tests {
 
     #[test]
     fn unnamed_values_are_refused() {
-        for raw in [3, 4, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+        for raw in [3, 4, 0x7FFF_FFFF, 0x8000_0000, u32::MAX] {
             assert_eq!(GitFile::from_raw(raw), None);
             let err = GitFile::try_from(raw).unwrap_err();
             assert_eq!(err.raw(), raw);

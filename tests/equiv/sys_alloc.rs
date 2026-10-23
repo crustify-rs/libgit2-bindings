@@ -1,11 +1,11 @@
 //! Equivalence of `git2/sys/alloc.h`'s `Allocator` with a raw `git_allocator`.
 //!
-//! - Values: the same member writes on an `Allocator` and on a raw `git_allocator`
-//!   leave the same members, step by step.
-//! - Behaviour: libgit2 runs one workload on a raw allocator of C-shaped functions and
-//!   on `Allocator::new` over an `Alloc` implementation that does the same; every call
-//!   either receives is traced, with pointers replaced by allocation numbers, and the
-//!   traces, return values and error states are compared after each step.
+//! - Values: the same member writes on an `Allocator` and on a raw `git_allocator` leave the same
+//!   members, step by step.
+//! - Behaviour: libgit2 runs one workload on a raw allocator of C-shaped functions and on
+//!   `Allocator::new` over an `Alloc` implementation that does the same; every call either receives
+//!   is traced, with pointers replaced by allocation numbers, and the traces, return values and
+//!   error states are compared after each step.
 //!
 //! libgit2's allocator is process-global, so the behavioural test reruns alone in a
 //! child process. Both allocators forward to libc, so switching between them while
@@ -19,7 +19,8 @@ use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::process::Command;
 use std::ptr::{self, NonNull};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 
 use libgit2::ffi;
 use libgit2::libgit2::raw::OdbDataStrFree;

@@ -260,7 +260,7 @@ fn open_survives_truncated_and_corrupted_files() {
     // the parser's verdict rather than the checksum's.
     let body = bytes.len() - 20;
     for at in (0..body).step_by(stride) {
-        for flip in [0x01, 0x80, 0xff] {
+        for flip in [0x01, 0x80, 0xFF] {
             let mut corrupt = bytes.clone();
             corrupt[at] ^= flip;
             corrupt[body..].fill(0);
@@ -320,7 +320,7 @@ fn sweep(scratch: &Scratch, bytes: &[u8]) {
         assert!(Index::open(&c_file).is_err(), "truncated to {len}");
     }
     for at in (0..bytes.len() - 20).step_by(stride) {
-        for flip in [0x01, 0x30, 0x80, 0xff] {
+        for flip in [0x01, 0x30, 0x80, 0xFF] {
             let mut corrupt = bytes.to_vec();
             corrupt[at] ^= flip;
             std::fs::write(&file, &corrupt).unwrap();
@@ -545,9 +545,10 @@ fn scalar_options_threads() {
 }
 
 mod matched_path_callback {
-    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
     use std::ffi::{CStr, CString};
     use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use libgit2::libgit2::index::index::{MatchedPathCallback, MatchedPathResult};
 
     #[test]
     fn borrowed_strings_payload_reborrows_and_nested_callbacks() {
@@ -560,7 +561,7 @@ mod matched_path_callback {
         let mut outer_fn = |path: &CStr, pattern: Option<&CStr>| inner.call(path, pattern);
         let mut outer = MatchedPathCallback::new(&mut outer_fn);
         for i in 0..32 {
-            let path = CString::new(vec![b'a', 0xff, b'0' + i % 10]).unwrap();
+            let path = CString::new(vec![b'a', 0xFF, b'0' + i % 10]).unwrap();
             let pattern = CString::new(b"*\xfe".to_vec()).unwrap();
             assert_eq!(outer.call(&path, Some(&pattern)), MatchedPathResult::SKIP);
             assert_eq!(outer.call(c"", None), MatchedPathResult::SKIP);
@@ -766,7 +767,7 @@ mod entry_value {
         let first = CString::new("dir/first").unwrap();
         let second = CString::new("second").unwrap();
         let mut entry = IndexEntry::new(&first, Oid::zeroed().as_ref(), FileMode::Blob);
-        for (step, value) in [0, 1, 0x7fff_ffff, u32::MAX].into_iter().enumerate() {
+        for (step, value) in [0, 1, 0x7FFF_FFFF, u32::MAX].into_iter().enumerate() {
             let mut handle: IndexEntryMut<'_, '_> = entry.as_mut();
             {
                 let mut inner = handle.as_mut();
@@ -783,7 +784,7 @@ mod entry_value {
             handle.mtime_mut().set_nanoseconds(!value);
             handle.set_id(id(OidType::Sha256, step as u8).as_ref());
             handle
-                .set_flags(EntryFlags::from_bits_retain(value & 0xffff))
+                .set_flags(EntryFlags::from_bits_retain(value & 0xFFFF))
                 .unwrap();
             handle
                 .set_flags_extended(EntryExtendedFlags::from_bits_retain(value >> 16))
@@ -803,7 +804,7 @@ mod entry_value {
             assert_eq!(shared.mtime().nanoseconds(), !value);
             assert_eq!(shared.id().kind(), Some(OidType::Sha256));
             assert_eq!(shared.id().id(), [step as u8; 32]);
-            assert_eq!(shared.flags().bits(), value & 0xffff);
+            assert_eq!(shared.flags().bits(), value & 0xFFFF);
             assert_eq!(shared.flags_extended().bits(), value >> 16);
             let copy = shared.to_index_entry();
             handle.set_dev(!value);
@@ -839,7 +840,7 @@ mod entry_value {
             let mut oid = handle.id_mut();
             oid.set_kind(OidType::Sha256);
             let mut bytes = oid.as_ref().id();
-            bytes[31] = 0xee;
+            bytes[31] = 0xEE;
             oid.set_id(bytes);
         }
         {
@@ -859,7 +860,7 @@ mod entry_value {
         let ctime = shared.ctime();
         assert_eq!(
             (id.kind(), id.id()[0], id.id()[31]),
-            (Some(OidType::Sha256), 1, 0xee)
+            (Some(OidType::Sha256), 1, 0xEE)
         );
         assert_eq!(
             (ctime.seconds(), ctime.nanoseconds()),
@@ -1076,9 +1077,9 @@ mod routines {
     use libgit2::libgit2::util::errors::{ErrorClass, ErrorCode};
 
     use super::{Scratch, all_extensions, c_path, index_bytes};
-    use crate::fixture::index::isolated_tolerating_leaks;
     use crate::fixture::index::{
-        add, add_staged_id, repository_index, repository_index_box, write,
+        add, add_staged_id, isolated_tolerating_leaks, repository_index, repository_index_box,
+        write,
     };
     use crate::fixture::object_and_tree_entry::repository;
     use crate::fixture::{TempRepo, isolated};

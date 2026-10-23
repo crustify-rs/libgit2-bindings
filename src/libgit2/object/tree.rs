@@ -94,17 +94,16 @@
 //! of the object it names. It is opaque: libgit2 publishes no field. An entry comes in
 //! two forms.
 //!
-//! - **Owned.** `git_tree_entry_dup` and `git_tree_entry_bypath` hand the caller an
-//!   entry of its own: one block of libgit2's allocator holding the struct and, right
-//!   past it, its NUL-terminated name, which `git_tree_entry_free` releases at once.
-//!   It holds nothing else, no tree and no repository, so it may outlive both. Rust
-//!   owns one through a [`TreeEntryBox`], whose `Clone` is `git_tree_entry_dup` and
-//!   which [`TreeEntry::bypath`] builds from a tree object and a path.
-//! - **Borrowed.** An entry of a tree (`git_tree_entry_byindex`, `_byname`, `_byid`)
-//!   is an element of the tree's entries, its name pointing into the tree's raw data;
-//!   an entry of a tree builder (`git_treebuilder_get`) is the builder's. Either lives
-//!   as long as its parent does, and is never freed on its own: it is a
-//!   [`TreeEntryRef`] borrowing the parent, which
+//! - **Owned.** `git_tree_entry_dup` and `git_tree_entry_bypath` hand the caller an entry of its
+//!   own: one block of libgit2's allocator holding the struct and, right past it, its
+//!   NUL-terminated name, which `git_tree_entry_free` releases at once. It holds nothing else, no
+//!   tree and no repository, so it may outlive both. Rust owns one through a [`TreeEntryBox`],
+//!   whose `Clone` is `git_tree_entry_dup` and which [`TreeEntry::bypath`] builds from a tree
+//!   object and a path.
+//! - **Borrowed.** An entry of a tree (`git_tree_entry_byindex`, `_byname`, `_byid`) is an element
+//!   of the tree's entries, its name pointing into the tree's raw data; an entry of a tree builder
+//!   (`git_treebuilder_get`) is the builder's. Either lives as long as its parent does, and is
+//!   never freed on its own: it is a [`TreeEntryRef`] borrowing the parent, which
 //!   [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies into an owned one.
 //!
 //! No routine writes an entry through a `const git_tree_entry *`, so a shared handle
@@ -274,11 +273,11 @@ type WalkFn<'f> = dyn FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f;
 /// Built over a closure with [`new`](Self::new). Its `extern "C"` trampoline lends the
 /// closure, for the call only:
 ///
-/// - `root`, the path from the walked tree to the tree holding the entry, each subtree's
-///   name followed by `/`: empty for the walked tree's own entries, `dir/sub/` for the
-///   entries of `dir/sub`. Names are bytes, as git stores them, not necessarily UTF-8.
-/// - the entry, a [`TreeEntryRef`]: libgit2 frees a subtree, with its entries, once it
-///   has walked it. [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies one to keep.
+/// - `root`, the path from the walked tree to the tree holding the entry, each subtree's name
+///   followed by `/`: empty for the walked tree's own entries, `dir/sub/` for the entries of
+///   `dir/sub`. Names are bytes, as git stores them, not necessarily UTF-8.
+/// - the entry, a [`TreeEntryRef`]: libgit2 frees a subtree, with its entries, once it has walked
+///   it. [`to_tree_entry`](TreeEntryRef::to_tree_entry) copies one to keep.
 ///
 /// and returns the closure's [`WalkAction`]. A panic in the closure does not cross into
 /// C: the trampoline stops the walk with `GIT_EUSER`, and the panic resumes once control
@@ -286,6 +285,7 @@ type WalkFn<'f> = dyn FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f;
 ///
 /// ```
 /// use core::ffi::CStr;
+///
 /// use libgit2::libgit2::core::types::FileMode;
 /// use libgit2::libgit2::object::tree::{TreeBuilder, TreeEntryRef, WalkAction, WalkCallback};
 /// use libgit2::libgit2::oid::oid::{Oid, OidType};
@@ -296,7 +296,10 @@ type WalkFn<'f> = dyn FnMut(&CStr, TreeEntryRef<'_>) -> WalkAction + 'f;
 /// let repo = Repository::new().unwrap();
 /// let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
 /// let id = Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap();
-/// builder.as_mut().insert(c"sub", id.as_ref(), FileMode::Commit).unwrap();
+/// builder
+///     .as_mut()
+///     .insert(c"sub", id.as_ref(), FileMode::Commit)
+///     .unwrap();
 ///
 /// let mut seen = Vec::new();
 /// let mut collect = |root: &CStr, _: TreeEntryRef<'_>| {
@@ -645,12 +648,12 @@ pub struct TreeUpdateMut<'a, 'p>(
 // `PhantomData<&'a mut TreeUpdate<'p>>`.
 unsafe impl<'p> CCell for TreeUpdate<'p> {
     type C = ffi::git_tree_update;
-    type Ref<'a>
-        = TreeUpdateRef<'a, 'p>
-    where
-        Self: 'a;
     type Mut<'a>
         = TreeUpdateMut<'a, 'p>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = TreeUpdateRef<'a, 'p>
     where
         Self: 'a;
 }
@@ -996,12 +999,12 @@ pub struct TreeMut<'a, 'r>(
 // through its `PhantomData<&'a mut Tree<'r>>`.
 unsafe impl<'r> CCell for Tree<'r> {
     type C = ffi::git_tree;
-    type Ref<'a>
-        = TreeRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = TreeMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = TreeRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1530,9 +1533,8 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// # if cfg!(miri) { return; } // Miri cannot call libgit2.
     /// use core::ffi::CStr;
     /// use std::ops::ControlFlow;
-    /// use libgit2::libgit2::object::tree::{
-    ///     Tree, TreeEntryRef, WalkAction, WalkCallback, WalkMode,
-    /// };
+    ///
+    /// use libgit2::libgit2::object::tree::{Tree, TreeEntryRef, WalkAction, WalkCallback, WalkMode};
     /// use libgit2::libgit2::oid::oid::{Oid, OidType};
     /// use libgit2::libgit2::repository::repository::Repository;
     ///
@@ -1579,8 +1581,8 @@ impl<'a, 'r> TreeRef<'a, 'r> {
 }
 
 impl<'a, 'r> IntoIterator for TreeRef<'a, 'r> {
-    type Item = TreeEntryRef<'a>;
     type IntoIter = TreeEntries<'a, 'r>;
+    type Item = TreeEntryRef<'a>;
 
     fn into_iter(self) -> TreeEntries<'a, 'r> {
         self.iter()
@@ -1726,12 +1728,12 @@ pub struct TreeBuilderMut<'a, 'r>(
 // `PhantomData<&'a mut TreeBuilder<'r>>`.
 unsafe impl<'r> CCell for TreeBuilder<'r> {
     type C = ffi::git_treebuilder;
-    type Ref<'a>
-        = TreeBuilderRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = TreeBuilderMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = TreeBuilderRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1986,16 +1988,15 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// `name`:
     ///
     /// - a `mode` that is not one a tree stores: [`FileMode::Unreadable`];
-    /// - a `name` that cannot name an entry: empty, `.`, `..`, holding a `/`, or a
-    ///   `.git` (and, as the repository's `core.protectNTFS` / `core.protectHFS` ask, the
-    ///   names those file systems read as `.git`);
+    /// - a `name` that cannot name an entry: empty, `.`, `..`, holding a `/`, or a `.git` (and, as
+    ///   the repository's `core.protectNTFS` / `core.protectHFS` ask, the names those file systems
+    ///   read as `.git`);
     /// - the zero id;
-    /// - an object the repository's object database lacks, or holds with another type
-    ///   than `mode` names (a tree for [`FileMode::Tree`], a blob for the others); the
-    ///   database is loaded on first use. A [`FileMode::Commit`] entry names a
-    ///   submodule's commit, never looked up; the library option
-    ///   `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`, when turned off, skips the lookup for
-    ///   every mode.
+    /// - an object the repository's object database lacks, or holds with another type than `mode`
+    ///   names (a tree for [`FileMode::Tree`], a blob for the others); the database is loaded on
+    ///   first use. A [`FileMode::Commit`] entry names a submodule's commit, never looked up; the
+    ///   library option `GIT_OPT_ENABLE_STRICT_OBJECT_CREATION`, when turned off, skips the lookup
+    ///   for every mode.
     ///
     /// An id of another type than the repository's is refused before libgit2 looks it
     /// up, with code `-1` and libgit2's `GIT_ERROR_INVALID` error "specified object ID
@@ -2163,10 +2164,15 @@ impl<'a, 'r> TreeBuilderMut<'a, 'r> {
     /// let mut builder = TreeBuilder::new(repo.as_ref()).unwrap();
     /// let id = Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap();
     /// for name in [c"keep", c"drop.tmp", c"also.tmp"] {
-    ///     builder.as_mut().insert(name, id.as_ref(), FileMode::Commit).unwrap();
+    ///     builder
+    ///         .as_mut()
+    ///         .insert(name, id.as_ref(), FileMode::Commit)
+    ///         .unwrap();
     /// }
     /// let mut temporary = |entry: TreeEntryRef<'_>| entry.name().to_bytes().ends_with(b".tmp");
-    /// builder.as_mut().remove_if(&mut TreeBuilderFilter::new(&mut temporary));
+    /// builder
+    ///     .as_mut()
+    ///     .remove_if(&mut TreeBuilderFilter::new(&mut temporary));
     /// assert_eq!(builder.as_ref().len(), 1);
     /// assert!(builder.as_ref().get(c"keep").is_some());
     /// ```
@@ -2650,7 +2656,7 @@ mod unit_tests {
             assert_eq!(UpdateAction::from_raw(raw), Some(action));
             assert_eq!(UpdateAction::try_from(raw), Ok(action));
         }
-        for raw in [2, 3, 0x7fff_ffff, u32::MAX] {
+        for raw in [2, 3, 0x7FFF_FFFF, u32::MAX] {
             assert_eq!(UpdateAction::from_raw(raw), None);
             let err = UpdateAction::try_from(raw).unwrap_err();
             assert_eq!(err.raw(), raw);
@@ -2773,12 +2779,14 @@ mod unit_tests {
     /// `git_tree_update`'s value, handles and accessors. Nothing calls libgit2, so Miri
     /// runs them all.
     mod tree_update {
+        use core::ffi::CStr;
+        use std::ffi::CString;
+
+        use ffibox::CZeroable;
+
         use crate::libgit2::core::types::FileMode;
         use crate::libgit2::object::tree::*;
         use crate::libgit2::oid::oid::{Oid, OidType};
-        use core::ffi::CStr;
-        use ffibox::CZeroable;
-        use std::ffi::CString;
 
         /// A SHA1 id of `byte` repeated, built without libgit2.
         fn sha1(byte: u8) -> Oid {
@@ -2829,7 +2837,7 @@ mod unit_tests {
         /// back.
         #[test]
         fn constructors_fill_every_field() {
-            let id = sha1(0xab);
+            let id = sha1(0xAB);
             let path = CString::new("dir/sub/file.txt").unwrap();
             let up = TreeUpdate::upsert(&path, id.as_ref(), FileMode::BlobExecutable);
             let c = raw(&up);
@@ -2889,12 +2897,12 @@ mod unit_tests {
                 let mut m = update.as_mut();
                 let mut id = m.id_mut();
                 id.set_kind(OidType::Sha256);
-                assert!(id.id_mut().set_elem(31, 0xff));
+                assert!(id.id_mut().set_elem(31, 0xFF));
             }
             let c = raw(&update);
             assert_eq!(c.id.type_, OidType::Sha256.raw() as u8);
             assert_eq!(c.id.id[..20], [2; 20]);
-            assert_eq!(c.id.id[31], 0xff);
+            assert_eq!(c.id.id[31], 0xFF);
             assert_eq!(update.as_ref().id().kind(), Some(OidType::Sha256));
 
             update.as_mut().set_action(UpdateAction::Upsert);
@@ -2968,7 +2976,7 @@ mod unit_tests {
             assert_eq!(format!("{:?}", update.as_ref()), expected);
             assert_eq!(format!("{:?}", update.as_mut()), expected);
             let path: &CStr = c"a/b";
-            let up = TreeUpdate::upsert(path, sha1(0x0f).as_ref(), FileMode::Commit);
+            let up = TreeUpdate::upsert(path, sha1(0x0F).as_ref(), FileMode::Commit);
             let shown = format!("{up:?}");
             assert!(
                 shown.starts_with("TreeUpdate { action: Upsert, id: Oid { kind: Sha1, id: 0f0f")
@@ -2979,6 +2987,11 @@ mod unit_tests {
 
     /// `git_tree`'s owner, handles, lifecycle policy and conversions.
     mod tree_object {
+        use core::ffi::CStr;
+        use core::mem::size_of;
+
+        use ffibox::{CDrop, CRefClone};
+
         use crate::ffi;
         use crate::libgit2::core::types::ObjectType;
         use crate::libgit2::object::object::{Object, ObjectArc, ObjectRef};
@@ -2986,9 +2999,6 @@ mod unit_tests {
         use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
-        use core::ffi::CStr;
-        use core::mem::size_of;
-        use ffibox::{CDrop, CRefClone};
 
         /// `testrepo.git`: commit `763d71a`, whose tree `ae90f12` holds `README`.
         const TESTREPO: &str = concat!(
@@ -3211,16 +3221,19 @@ mod unit_tests {
     /// `git_tree_entry`'s owner, handles, getters and lifecycle policy, and the
     /// builder filter's callback.
     mod tree_entry {
+        use core::ffi::{CStr, c_char, c_int, c_void};
+        use core::mem::size_of;
+        use std::process::Command;
+        use std::sync::atomic::Ordering::SeqCst;
+        use std::sync::atomic::{AtomicBool, AtomicIsize};
+
+        use ffibox::CDrop;
+
         use crate::libgit2::object::tree::*;
         use crate::libgit2::oid::oid::{Oid, OidRef, OidType};
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use core::ffi::{CStr, c_char, c_int, c_void};
-        use core::mem::size_of;
-        use ffibox::CDrop;
-        use std::process::Command;
-        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -3310,6 +3323,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -3323,6 +3337,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }
@@ -3781,7 +3796,7 @@ mod unit_tests {
             let id = Oid::from_string(NESTED, OidType::Sha1).unwrap();
 
             let mut missing = entry_of(c"sub", 0o160000, raw_id(&Oid::zero(OidType::Sha1)));
-            missing.oid.id[..20].fill(0xde);
+            missing.oid.id[..20].fill(0xDE);
             let e = handle(&mut missing).to_object(repo.as_ref()).unwrap_err();
             assert_eq!(e.code(), Some(ErrorCode::NotFound));
 
@@ -3938,6 +3953,13 @@ mod unit_tests {
 
     /// The builder's entry routines and the walk callback's trampoline.
     mod builder_routines {
+        use core::ffi::{CStr, c_char, c_int, c_void};
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::panic::{self, AssertUnwindSafe};
+        use std::path::PathBuf;
+        use std::ptr;
+
         use crate::libgit2::core::types::FileMode;
         use crate::libgit2::object::object::Object;
         use crate::libgit2::object::tree::*;
@@ -3945,12 +3967,6 @@ mod unit_tests {
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::{ErrorClass, ErrorCode, last};
         use crate::libgit2::util::sys::errors::runtime_pinned;
-        use core::ffi::{CStr, c_char, c_int, c_void};
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
-        use std::panic::{self, AssertUnwindSafe};
-        use std::path::PathBuf;
-        use std::ptr;
 
         /// A fresh bare repository in a temporary directory, removed on drop after the
         /// repository it holds.

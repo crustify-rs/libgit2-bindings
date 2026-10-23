@@ -70,7 +70,7 @@ mod git_file {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn variants_are_what_git_path_is_gitfile_accepts() {
         init();
-        let probes = (0..=64).chain([0x7fff_ffff, 0x8000_0000, u32::MAX - 1, u32::MAX]);
+        let probes = (0..=64).chain([0x7FFF_FFFF, 0x8000_0000, u32::MAX - 1, u32::MAX]);
         for raw in probes {
             let c = is_gitfile(c".gitmodules", raw);
             match GitFile::from_raw(raw) {
@@ -112,11 +112,11 @@ mod filesystem {
     //!
     //! [`Filesystem::from_raw`] must accept exactly the values the routine accepts: every
     //! other value fails with `GIT_ERROR_OS`, "invalid filesystem for path validation: "
-    //! (and `errno`'s text, cleared here), for every git file. Each variant must apply the rules its documentation names, on
-    //! names that tell them apart: [`Filesystem::Ntfs`] matches 8.3 short names and
-    //! trailing dots and spaces, [`Filesystem::Hfs`] skips ignorable code points, both
-    //! fold ASCII case, and [`Filesystem::Generic`] matches what either one matches. The
-    //! git file is a [`GitFile`].
+    //! (and `errno`'s text, cleared here), for every git file. Each variant must apply the rules
+    //! its documentation names, on names that tell them apart: [`Filesystem::Ntfs`] matches 8.3
+    //! short names and trailing dots and spaces, [`Filesystem::Hfs`] skips ignorable code
+    //! points, both fold ASCII case, and [`Filesystem::Generic`] matches what either one
+    //! matches. The git file is a [`GitFile`].
 
     use std::ffi::{CStr, CString, c_int};
 
@@ -199,7 +199,7 @@ mod filesystem {
             ffi::GIT_ERROR_OS as c_int,
             "invalid filesystem for path validation: ".to_owned(),
         );
-        let probes = (0..=16).chain([0x7fff_ffff, 0x8000_0000, u32::MAX - 1, u32::MAX]);
+        let probes = (0..=16).chain([0x7FFF_FFFF, 0x8000_0000, u32::MAX - 1, u32::MAX]);
         for raw in probes {
             for gitfile in [
                 GitFile::Gitignore,
@@ -310,7 +310,7 @@ mod is_gitfile {
         ] {
             out.push(other.as_bytes().to_vec());
         }
-        out.push(vec![0xff; 3]);
+        out.push(vec![0xFF; 3]);
         out.push(vec![b'a'; 4096]);
         out.into_iter().map(|b| CString::new(b).unwrap()).collect()
     }
@@ -330,7 +330,7 @@ mod is_gitfile {
     fn seeded_short_names_match_c() {
         const ALPHABET: &[u8] = b".~ :\\/gitGITmodulesattr1249aAeEbB\xc2\xa0\xe2\x80\x8c";
         let rounds = if cfg!(bsan) { 4_000 / 97 } else { 4_000 };
-        let mut seed: u64 = 0x5eed_1e55;
+        let mut seed: u64 = 0x5EED_1E55;
         for _ in 0..rounds {
             seed ^= seed << 13;
             seed ^= seed >> 7;

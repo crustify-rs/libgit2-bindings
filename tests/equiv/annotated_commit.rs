@@ -17,31 +17,28 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - The Rust constructors return libgit2's error as an [`ErrorBuf`], without the
-//!   return code (`GIT_ENOTFOUND` and `-1` read the same); the class and message are
-//!   compared.
-//! - libgit2 leaves the built commit in `out` when copying a reference name or remote
-//!   URL runs out of memory while returning `-1`; the Rust side frees it. Only an
-//!   allocation failure reaches it, which `tests/ub_unsafe/annotated_commit.rs`
-//!   exercises against the Rust side alone (the C side leaks).
-//! - The Rust constructors refuse an object id whose type is not the repository's
-//!   before the call, where libgit2 formats it into an object path sized for the
-//!   repository's type: a SHA256 id overflows a SHA1 repository's buffer (an ASan
-//!   heap-buffer-overflow in `git_oid_pathfmt`), a SHA1 id leaves the tail of a SHA256
-//!   repository's path unwritten, and an unknown type leaves all of it unwritten. The
-//!   C side of those steps is not run; the record it is compared with is the
-//!   `GIT_ERROR_INVALID` error libgit2 sets for a mismatched object id type elsewhere
+//! - The Rust constructors return libgit2's error as an [`ErrorBuf`], without the return code
+//!   (`GIT_ENOTFOUND` and `-1` read the same); the class and message are compared.
+//! - libgit2 leaves the built commit in `out` when copying a reference name or remote URL runs out
+//!   of memory while returning `-1`; the Rust side frees it. Only an allocation failure reaches it,
+//!   which `tests/ub_unsafe/annotated_commit.rs` exercises against the Rust side alone (the C side
+//!   leaks).
+//! - The Rust constructors refuse an object id whose type is not the repository's before the call,
+//!   where libgit2 formats it into an object path sized for the repository's type: a SHA256 id
+//!   overflows a SHA1 repository's buffer (an ASan heap-buffer-overflow in `git_oid_pathfmt`), a
+//!   SHA1 id leaves the tail of a SHA256 repository's path unwritten, and an unknown type leaves
+//!   all of it unwritten. The C side of those steps is not run; the record it is compared with is
+//!   the `GIT_ERROR_INVALID` error libgit2 sets for a mismatched object id type elsewhere
 //!   (`diff_generate.c`), which the Rust side must report and leave.
-//! - An annotated commit cannot outlive its repository in Rust (its owner borrows the
-//!   repository), where libgit2 frees one safely afterwards; only C does that here.
-//! - Error messages naming the repository's path are compared with the path replaced,
-//!   since each side has its own.
+//! - An annotated commit cannot outlive its repository in Rust (its owner borrows the repository),
+//!   where libgit2 frees one safely afterwards; only C does that here.
+//! - Error messages naming the repository's path are compared with the path replaced, since each
+//!   side has its own.
 
 use std::ffi::{CStr, CString, c_int};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
+use std::{fs, ptr};
 
 use ffibox::CZeroable;
 use libgit2::ffi;
@@ -304,7 +301,7 @@ fn steps(ids: &Ids) -> Vec<Step> {
         lookup((own, [0; 32])),
         lookup((other, first)),
         lookup((0, first)),
-        lookup((0xff, first)),
+        lookup((0xFF, first)),
         Step::FromRef(c"HEAD"),
         Step::FromRef(c"refs/heads/main"),
         Step::FromRef(c"refs/heads/feature"),

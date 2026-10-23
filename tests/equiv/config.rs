@@ -18,8 +18,9 @@
 //! One documented divergence: C lets the caller's reference to a repository's config
 //! outlive the repository (a read that does not reparse the file goes through; one
 //! that does reads the freed repository, see
-//! `crustify/reviews/.../wave-1/batch-1/ub_safe/repository-config-keeps-freed-repository-for-includeif`),
-//! where a [`ConfigArc<'r>`] borrows the repository and is released first.
+//! `crustify/reviews/.../wave-1/batch-1/ub_safe/
+//! repository-config-keeps-freed-repository-for-includeif`), where a [`ConfigArc<'r>`] borrows the
+//! repository and is released first.
 
 use std::ffi::{CStr, CString, c_int};
 use std::path::{Path, PathBuf};
@@ -278,11 +279,11 @@ fn repository_configs_match() {
 /// libgit2 leaves silent (text after a size suffix) itself.
 #[cfg(not(miri))]
 mod parsers {
-    use super::*;
     use libgit2::libgit2::config::config::{parse_bool, parse_i32, parse_i64};
-    use libgit2::libgit2::util::errors::ErrorBuf;
-    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::errors::{ErrorBuf, ErrorClass};
     use libgit2::libgit2::util::sys::errors::{clear, set_str};
+
+    use super::*;
 
     type Observation<T> = (c_int, Option<T>, Option<(c_int, Vec<u8>)>, (c_int, Vec<u8>));
 
@@ -396,7 +397,7 @@ mod parsers {
         ] {
             values.push(Some(CString::new(value).unwrap()));
         }
-        values.push(Some(CString::new([0xff, b'1']).unwrap()));
+        values.push(Some(CString::new([0xFF, b'1']).unwrap()));
         values.push(Some(CString::new("9".repeat(4096)).unwrap()));
         values
     }
@@ -440,7 +441,8 @@ mod parsers {
 
     /// C is replayed with its error cleared before each call, as `parse_i64` clears it,
     /// and its silent failures are given the error C sets for every other one: the
-    /// documented correction (`config.rs::unit_tests::parse_i64_suffix_tail_reports_its_own_error`).
+    /// documented correction
+    /// (`config.rs::unit_tests::parse_i64_suffix_tail_reports_its_own_error`).
     #[test]
     fn parse_i64_sequences_match_c() {
         clear();
@@ -553,12 +555,14 @@ fn mapping_mode_values_match_c_behavior() {
 }
 
 mod entry_and_map_types {
-    use super::*;
     use core::ptr::addr_of;
+
     use libgit2::libgit2::config::config::{
         ConfigLevel, ConfigMap, ConfigRef, MapMatch, lookup_map_value,
     };
     use libgit2::libgit2::repository::repository::Repository;
+
+    use super::*;
 
     fn bytes(p: *const core::ffi::c_char) -> Option<Vec<u8>> {
         if p.is_null() {
@@ -1110,12 +1114,13 @@ mod entry_and_map_types {
 
 #[cfg(not(miri))]
 mod file_access {
-    use super::*;
     use libgit2::libgit2::config::config::{
         ConfigError, ConfigLevel, find_global, find_system, find_xdg, parse_path,
     };
     use libgit2::libgit2::core::buffer::BufVal;
     use libgit2::libgit2::util::sys::errors::clear;
+
+    use super::*;
 
     type Failure = (i32, i32, Vec<u8>);
     fn safe<T>(r: Result<T, ConfigError>) -> Result<T, Failure> {
@@ -1143,6 +1148,7 @@ mod file_access {
             );
             Self(out)
         }
+
         fn level(&self, level: ConfigLevel, global: bool) -> Result<Self, Failure> {
             let mut out = ptr::null_mut();
             // SAFETY: live parent and writable slot. Success returns a fresh
@@ -1792,9 +1798,10 @@ mod file_access {
 }
 
 mod writes_and_snapshots {
-    use super::*;
     use libgit2::libgit2::config::config::{ConfigBox, ConfigError, ConfigLevel};
     use libgit2::libgit2::util::errors::ErrorCode;
+
+    use super::*;
 
     fn raw_config() -> ConfigBox<'static> {
         let _pin = Config::new().unwrap();
@@ -2041,15 +2048,17 @@ mod writes_and_snapshots {
 }
 
 mod mapping_callbacks {
-    use super::*;
+    use std::ffi::c_void;
+    use std::num::NonZero;
+    use std::ops::ControlFlow;
+
     use libgit2::libgit2::config::config::{
         ConfigMap, EntryRef, ForeachCallback, MapMatch, lookup_map_value,
     };
     use libgit2::libgit2::util::errors::ErrorClass;
     use libgit2::libgit2::util::sys::errors::{clear, set};
-    use std::ffi::c_void;
-    use std::num::NonZero;
-    use std::ops::ControlFlow;
+
+    use super::*;
 
     /// Includes last-error state even on successful speculative mapping.
     fn observe(result: Result<i32, ConfigError>) -> (Record, (c_int, Vec<u8>)) {
@@ -2477,13 +2486,15 @@ mod mapping_callbacks {
 }
 
 mod enumeration {
-    use super::*;
-    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
-    use libgit2::libgit2::util::errors::ErrorClass;
-    use libgit2::libgit2::util::sys::errors::{clear, set};
     use std::ffi::c_void;
     use std::num::NonZero;
     use std::ops::ControlFlow;
+
+    use libgit2::libgit2::config::config::{EntryRef, ForeachCallback};
+    use libgit2::libgit2::util::errors::ErrorClass;
+    use libgit2::libgit2::util::sys::errors::{clear, set};
+
+    use super::*;
 
     #[derive(Debug, PartialEq)]
     struct Fields {
@@ -2925,10 +2936,11 @@ mod enumeration {
 }
 
 mod iterator_entries {
-    use super::*;
     use libgit2::libgit2::config::config::EntryRef;
     use libgit2::libgit2::config::sys::config::IteratorBox;
     use libgit2::libgit2::repository::repository::Repository;
+
+    use super::*;
 
     type Row = (
         Option<CString>,

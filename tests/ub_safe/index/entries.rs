@@ -222,12 +222,12 @@ fn additions_free_what_they_replace_once() {
         assert_eq!(handle.as_ref().entry_count(), 4);
         handle.remove_conflict(c"a").unwrap();
         // Paths past the name-length mask, and past a tree name's limit.
-        for len in [0xffe, 0xfff, 0x1000, 70_000] {
+        for len in [0xFFE, 0xFFF, 0x1000, 70_000] {
             let path = CString::new(vec![b'p'; len]).unwrap();
             handle.add(blob(&path, 1).as_ref()).unwrap();
             let lent = handle.entry_by_path(&path, Stage::Normal).unwrap();
             assert_eq!(lent.path().to_bytes().len(), len);
-            assert_eq!(lent.flags().bits() & 0xfff, len.min(0xfff) as u32);
+            assert_eq!(lent.flags().bits() & 0xFFF, len.min(0xFFF) as u32);
         }
         // Refusals free the copy they made.
         for mode in [FileMode::Tree, FileMode::Unreadable] {
@@ -269,7 +269,7 @@ fn owned_index_additions_fail_and_resolve_without_leaks() {
     let mut handle = index.as_mut();
     let mut ancestor = blob(c"f", 0);
     ancestor.as_mut().set_id(present.as_ref());
-    let missing = blob(c"f", 0xee);
+    let missing = blob(c"f", 0xEE);
     let error = handle.add_conflict(
         Some(ancestor.as_ref()),
         Some(missing.as_ref()),
@@ -535,11 +535,11 @@ fn snapshot_copies_outlive_index_changes_and_the_index() {
     let mut steps = iterator.as_mut();
     let first: IndexEntryBuf = steps.next().unwrap();
     // Replaced in place, behind the snapshot.
-    add_staged(&index, c"b", 0, 1, 0x7f, 0o100755);
+    add_staged(&index, c"b", 0, 1, 0x7F, 0o100755);
     add_staged(&index, c"new", 0, 1, 1, 0o100644);
     let second = steps.next().unwrap();
     assert_eq!(second.as_ref().path(), c"b");
-    assert_eq!(second.as_ref().id().id()[0], 0x7f);
+    assert_eq!(second.as_ref().id().id()[0], 0x7F);
     drop(index);
     let rest: Vec<_> = iterator.as_mut().collect();
     assert_eq!(rest.len(), 1);

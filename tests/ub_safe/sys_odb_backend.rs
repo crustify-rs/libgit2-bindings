@@ -29,9 +29,12 @@ fn vec_copies_slices_of_every_size() {
         assert_eq!(v.as_slice(), &src[..]);
         // First and last bytes are in bounds; ASan flags any overrun.
         let s = v.as_mut_slice();
-        s[0] ^= 0xff;
-        s[len - 1] ^= 0xff;
-        assert_eq!(v.as_slice()[len - 1], src[len - 1] ^ if len == 1 { 0 } else { 0xff });
+        s[0] ^= 0xFF;
+        s[len - 1] ^= 0xFF;
+        assert_eq!(
+            v.as_slice()[len - 1],
+            src[len - 1] ^ if len == 1 { 0 } else { 0xFF }
+        );
     }
 }
 
@@ -152,7 +155,9 @@ fn owners_cross_threads() {
         }
     });
     // Allocated here, freed on another thread.
-    thread::spawn(move || assert_eq!(v.as_slice(), &src[..])).join().unwrap();
+    thread::spawn(move || assert_eq!(v.as_slice(), &src[..]))
+        .join()
+        .unwrap();
 
     let handles: Vec<_> = (0..4u32)
         .map(|i| {
@@ -172,36 +177,45 @@ fn owners_cross_threads() {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn owners_work_before_any_init() {
-    isolated(concat!(module_path!(), "::owners_work_before_any_init"), || {
-        // Nothing has initialised libgit2: an unpinned allocation would fail through
-        // libgit2's `failalloc` and write the OOM through a nonexistent TLS key.
-        let v = OdbDataVec::<u8>::from_slice(b"first").unwrap();
-        let w = v.clone();
-        drop(v);
-        assert_eq!(w.as_slice(), b"first");
-        let z = OdbDataArrayFree::new_zeroed::<u32>(8).unwrap();
-        assert_eq!(z.as_slice(), &[0; 8]);
-        let pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
-        assert_eq!(pair.as_ref().a(), 0);
-    });
+    isolated(
+        concat!(module_path!(), "::owners_work_before_any_init"),
+        || {
+            // Nothing has initialised libgit2: an unpinned allocation would fail through
+            // libgit2's `failalloc` and write the OOM through a nonexistent TLS key.
+            let v = OdbDataVec::<u8>::from_slice(b"first").unwrap();
+            let w = v.clone();
+            drop(v);
+            assert_eq!(w.as_slice(), b"first");
+            let z = OdbDataArrayFree::new_zeroed::<u32>(8).unwrap();
+            assert_eq!(z.as_slice(), &[0; 8]);
+            let pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
+            assert_eq!(pair.as_ref().a(), 0);
+        },
+    );
 }
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn first_allocations_race_to_pin_the_runtime() {
-    isolated(concat!(module_path!(), "::first_allocations_race_to_pin_the_runtime"), || {
-        let barrier = std::sync::Barrier::new(8);
-        thread::scope(|s| {
-            for i in 0..8u8 {
-                let barrier = &barrier;
-                s.spawn(move || {
-                    barrier.wait();
-                    let v = OdbDataVec::<u8>::from_slice(&[i; 32]).unwrap();
-                    assert_eq!(v.clone().as_slice(), &[i; 32]);
-                });
-            }
-        });
-    });
+    isolated(
+        concat!(
+            module_path!(),
+            "::first_allocations_race_to_pin_the_runtime"
+        ),
+        || {
+            let barrier = std::sync::Barrier::new(8);
+            thread::scope(|s| {
+                for i in 0..8u8 {
+                    let barrier = &barrier;
+                    s.spawn(move || {
+                        barrier.wait();
+                        let v = OdbDataVec::<u8>::from_slice(&[i; 32]).unwrap();
+                        assert_eq!(v.clone().as_slice(), &[i; 32]);
+                    });
+                }
+            });
+        },
+    );
 }
 
 // --- strings --------------------------------------------------------------------

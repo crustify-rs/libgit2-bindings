@@ -222,7 +222,7 @@ fn classifies_what_libgit2_reports() {
 
             // An unknown option key: GIT_ERROR, class GIT_ERROR_INVALID.
             // SAFETY: an unknown key reads no variadic argument.
-            let ret = unsafe { ffi::git_libgit2_opts(0x7fff) };
+            let ret = unsafe { ffi::git_libgit2_opts(0x7FFF) };
             assert_classified(
                 ret,
                 ErrorCode::Generic,
@@ -453,7 +453,7 @@ fn take(step: &Step) {
         Step::Oom => unsafe { ffi::git_error_set_oom() },
         Step::Fail => {
             // SAFETY: an unknown key reads no variadic argument.
-            assert_eq!(unsafe { ffi::git_libgit2_opts(0x7fff) }, -1);
+            assert_eq!(unsafe { ffi::git_libgit2_opts(0x7FFF) }, -1);
         }
         Step::Succeed => {
             let mut size = 0usize;

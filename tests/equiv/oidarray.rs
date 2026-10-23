@@ -3,11 +3,11 @@
 //!
 //! Two sources of arrays, each produced twice, independently, one copy per side:
 //!
-//! - libgit2's own results: `git_merge_bases` on the `testrepo.git` fixture, whose
-//!   `ids` is a `git_array` grown with `git__reallocarray`. The Rust side adopts its
-//!   copy's buffer as libgit2 hands it over, as the `git_merge_bases` wrapper will.
-//! - arrays built the way `git_smart__shallow_roots` builds a transport's result, a
-//!   `git__malloc`'d copy (NULL when empty), against [`OidArray::from_slice`].
+//! - libgit2's own results: `git_merge_bases` on the `testrepo.git` fixture, whose `ids` is a
+//!   `git_array` grown with `git__reallocarray`. The Rust side adopts its copy's buffer as libgit2
+//!   hands it over, as the `git_merge_bases` wrapper will.
+//! - arrays built the way `git_smart__shallow_roots` builds a transport's result, a `git__malloc`'d
+//!   copy (NULL when empty), against [`OidArray::from_slice`].
 //!
 //! The C side then runs C code over the raw struct: indexed reads, the in-place
 //! reversal of `git_oidarray__reverse` (hidden in libgit2.so), a lowered `count`,
@@ -19,13 +19,13 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - `free(NULL)` is not recorded: replacing or disposing an empty array in Rust never
-//!   calls libgit2 (`OidArrayDispose` skips a NULL `ids`, which would otherwise read
-//!   the allocator unsynchronised against a concurrent first `git_libgit2_init`),
-//!   where C code passes NULL to `git__free`, a no-op the allocator still sees.
-//! - A handle over an array whose `ids` is NULL with a non-zero `count` (no libgit2
-//!   path produces one) reads as empty in Rust; C code would dereference NULL. The
-//!   module's `unit_tests` cover it.
+//! - `free(NULL)` is not recorded: replacing or disposing an empty array in Rust never calls
+//!   libgit2 (`OidArrayDispose` skips a NULL `ids`, which would otherwise read the allocator
+//!   unsynchronised against a concurrent first `git_libgit2_init`), where C code passes NULL to
+//!   `git__free`, a no-op the allocator still sees.
+//! - A handle over an array whose `ids` is NULL with a non-zero `count` (no libgit2 path produces
+//!   one) reads as empty in Rust; C code would dereference NULL. The module's `unit_tests` cover
+//!   it.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_int, c_void};
@@ -382,7 +382,7 @@ fn merge_base_results_read_edit_and_release_alike() {
             compare(&c, &rust);
             // Reversed, the fixture's bases are 9fd738e then c47800c.
             let first = &c.steps[1].0[0].1;
-            assert_eq!(first[..4], [0x9f, 0xd7, 0x38, 0xe8]);
+            assert_eq!(first[..4], [0x9F, 0xD7, 0x38, 0xE8]);
             assert_eq!(c.steps[3].1, [Event::Free { alloc: Some(0) }]);
             // SAFETY: `repo` is open and released once.
             unsafe { ffi::git_repository_free(repo) };

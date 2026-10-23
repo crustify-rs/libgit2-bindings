@@ -74,12 +74,12 @@ pub struct TransactionMut<'a, 'r>(TransactionRef<'a, 'r>, PhantomData<&'a mut Tr
 // No Rust reference covers C memory. The mutable handle is invariant in Transaction.
 unsafe impl<'r> CCell for Transaction<'r> {
     type C = ffi::git_transaction;
-    type Ref<'a>
-        = TransactionRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = TransactionMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = TransactionRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -348,14 +348,16 @@ mod unit_tests {
     }
 
     mod out_of_memory {
+        use core::ffi::{CStr, c_int, c_void};
+        use std::process::Command;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering::SeqCst;
+
         use super::*;
         use crate::libgit2::config::config::Config;
         use crate::libgit2::repository::repository::Repository;
         use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
         use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
-        use core::ffi::{CStr, c_int, c_void};
-        use std::process::Command;
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
         const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -398,6 +400,7 @@ mod unit_tests {
                 // SAFETY: plain libc allocation.
                 NonNull::new(unsafe { malloc(len) }.cast())
             }
+
             unsafe fn realloc(
                 p: Option<NonNull<u8>>,
                 len: usize,
@@ -411,6 +414,7 @@ mod unit_tests {
                 // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
                 NonNull::new(unsafe { realloc(p, len) }.cast())
             }
+
             unsafe fn free(p: NonNull<u8>) {
                 // SAFETY: `p` is a live libc block the caller gives up.
                 unsafe { free(p.as_ptr().cast()) }

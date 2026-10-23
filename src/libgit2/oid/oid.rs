@@ -175,7 +175,10 @@ define_ctype!(
     ///
     /// Wraps: git_oid
     #[derive(Clone, Copy)]
-    Oid, OidRef, OidMut, ffi::git_oid
+    Oid,
+    OidRef,
+    OidMut,
+    ffi::git_oid
 );
 
 // SAFETY: all zero is libgit2's `GIT_OID_NONE`: type 0, which every `oid.c` routine
@@ -766,12 +769,12 @@ pub struct OidShortenerMut<'a, 's>(
 // shortener through its `PhantomData<&'a mut OidShortener<'s>>`.
 unsafe impl<'s> CCell for OidShortener<'s> {
     type C = ffi::git_oid_shorten;
-    type Ref<'a>
-        = OidShortenerRef<'a, 's>
-    where
-        Self: 'a;
     type Mut<'a>
         = OidShortenerMut<'a, 's>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = OidShortenerRef<'a, 's>
     where
         Self: 'a;
 }
@@ -820,13 +823,13 @@ impl<'a, 's> OidShortenerMut<'a, 's> {
     ///
     /// Fails, with libgit2's error:
     ///
-    /// - when `id` does not start with 40 hex digits. C validates only the digits it
-    ///   walks before finding a free slot, and keeps the rest for a later addition to
-    ///   index its trie with, writing outside a node for a non-hex one; such an `id` is
-    ///   refused here before the call instead, with the `GIT_ERROR_INVALID` "unable to
-    ///   shorten OID - invalid hex value" error C sets for a non-hex digit it walks;
-    /// - once the trie is full (`SHRT_MAX` nodes, some 20,000 to 30,000 ids), with
-    ///   "unable to shorten OID - OID set full"; every later addition fails the same way.
+    /// - when `id` does not start with 40 hex digits. C validates only the digits it walks before
+    ///   finding a free slot, and keeps the rest for a later addition to index its trie with,
+    ///   writing outside a node for a non-hex one; such an `id` is refused here before the call
+    ///   instead, with the `GIT_ERROR_INVALID` "unable to shorten OID - invalid hex value" error C
+    ///   sets for a non-hex digit it walks;
+    /// - once the trie is full (`SHRT_MAX` nodes, some 20,000 to 30,000 ids), with "unable to
+    ///   shorten OID - OID set full"; every later addition fails the same way.
     ///
     /// # Aborts
     ///
@@ -945,8 +948,8 @@ impl<'s> OidShortener<'s> {
             return Err(last());
         }
         // SAFETY: `min_length` round-trips through an `int`, as libgit2 asserts; the
-        // result is NULL or a fresh shortener the caller owns. The runtime is pinned, so a failure is
-        // reported on live thread-local state.
+        // result is NULL or a fresh shortener the caller owns. The runtime is pinned, so a failure
+        // is reported on live thread-local state.
         let shortener = unsafe { ffi::git_oid_shorten_new(min_length) };
         // SAFETY: NULL, or a fresh shortener nothing else references, released by
         // `git_oid_shorten_free` as `OidShortenerFree` does. It holds no text id yet,
@@ -963,12 +966,14 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::mem::size_of;
     use std::ffi::CString;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1014,6 +1019,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -1027,6 +1033,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }
@@ -1049,8 +1056,8 @@ mod unit_tests {
 
     const SHA1_HEX: &CStr = c"a94a8fe5ccb19ba61c4c0873d391e987982fbbd3";
     const SHA1_RAW: [u8; 20] = [
-        0xa9, 0x4a, 0x8f, 0xe5, 0xcc, 0xb1, 0x9b, 0xa6, 0x1c, 0x4c, 0x08, 0x73, 0xd3, 0x91, 0xe9,
-        0x87, 0x98, 0x2f, 0xbb, 0xd3,
+        0xA9, 0x4A, 0x8F, 0xE5, 0xCC, 0xB1, 0x9B, 0xA6, 0x1C, 0x4C, 0x08, 0x73, 0xD3, 0x91, 0xE9,
+        0x87, 0x98, 0x2F, 0xBB, 0xD3,
     ];
 
     fn padded(raw: &[u8]) -> [u8; MAX_SIZE] {
@@ -1094,9 +1101,9 @@ mod unit_tests {
         {
             let mut id = m.id_mut();
             assert_eq!(id.len(), MAX_SIZE);
-            assert!(id.set_elem(31, 0xee));
-            assert!(!id.set_elem(32, 0xee));
-            assert_eq!(id.elem(0), Some(0xa9));
+            assert!(id.set_elem(31, 0xEE));
+            assert!(!id.set_elem(32, 0xEE));
+            assert_eq!(id.elem(0), Some(0xA9));
             assert_eq!(id.elem(32), None);
         }
         let bytes = oid.as_ref().id_bytes();
@@ -1104,7 +1111,7 @@ mod unit_tests {
         let mut copy = [0; MAX_SIZE];
         assert!(bytes.copy_to_slice(&mut copy));
         let mut expected = padded(&SHA1_RAW);
-        expected[31] = 0xee;
+        expected[31] = 0xEE;
         assert_eq!(copy, expected);
         assert_eq!(oid.as_ref().id(), expected);
 
@@ -1145,16 +1152,16 @@ mod unit_tests {
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn copy_from_and_to_oid_copy_every_byte() {
         let mut src = Oid::zeroed();
-        src.as_mut().set_raw_kind(0xab);
+        src.as_mut().set_raw_kind(0xAB);
         src.as_mut().set_id(core::array::from_fn(|i| i as u8));
         let mut dst = Oid::zeroed();
-        dst.as_mut().set_id([0xff; MAX_SIZE]);
+        dst.as_mut().set_id([0xFF; MAX_SIZE]);
         dst.as_mut().copy_from(src.as_ref());
-        assert_eq!(dst.as_ref().raw_kind(), 0xab);
+        assert_eq!(dst.as_ref().raw_kind(), 0xAB);
         assert_eq!(dst.as_ref().id(), src.as_ref().id());
 
         let copy = src.as_ref().to_oid();
-        assert_eq!(copy.as_ref().raw_kind(), 0xab);
+        assert_eq!(copy.as_ref().raw_kind(), 0xAB);
         assert_eq!(copy.as_ref().id(), src.as_ref().id());
     }
 
@@ -1185,13 +1192,13 @@ mod unit_tests {
         assert_eq!(oid.as_ref().id(), padded(&SHA1_RAW));
 
         let oid = Oid::from_prefix(b"a94", OidType::Sha1).unwrap();
-        assert_eq!(oid.as_ref().id(), padded(&[0xa9, 0x40]));
+        assert_eq!(oid.as_ref().id(), padded(&[0xA9, 0x40]));
 
         let oid = Oid::from_raw(&SHA1_RAW, OidType::Sha1).unwrap();
         assert_eq!(oid.as_ref().id(), padded(&SHA1_RAW));
-        let oid = Oid::from_raw(&[0x5a; 32], OidType::Sha256).unwrap();
+        let oid = Oid::from_raw(&[0x5A; 32], OidType::Sha256).unwrap();
         assert_eq!(oid.as_ref().raw_kind(), 2);
-        assert_eq!(oid.as_ref().id(), [0x5a; 32]);
+        assert_eq!(oid.as_ref().id(), [0x5A; 32]);
     }
 
     #[test]
@@ -1393,7 +1400,7 @@ mod unit_tests {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn oid_values_order_like_their_handles() {
-        let mut oids: Vec<Oid> = [(2, 0x00), (1, 0xff), (1, 0x10), (0, 0x99), (1, 0x10)]
+        let mut oids: Vec<Oid> = [(2, 0x00), (1, 0xFF), (1, 0x10), (0, 0x99), (1, 0x10)]
             .into_iter()
             .map(|(kind, first)| {
                 let mut oid = Oid::zeroed();
@@ -1416,7 +1423,7 @@ mod unit_tests {
             .collect();
         assert_eq!(
             order,
-            [(0, 0x99), (1, 0x10), (1, 0x10), (1, 0xff), (2, 0x00)]
+            [(0, 0x99), (1, 0x10), (1, 0x10), (1, 0xFF), (2, 0x00)]
         );
         // Handles of different lifetimes compare.
         let long = oids[1];

@@ -72,31 +72,28 @@
 //!
 //! The wrappers keep five libgit2 defects from reaching Rust callers:
 //!
-//! - `git_worktree_lookup` passes the repository's common directory to `strlen`
-//!   unchecked, which is NULL for a repository without paths (`git_repository_new`,
-//!   `git_repository_wrap_odb`): [`Worktree::lookup`] refuses such a repository with
-//!   `GIT_ENOTFOUND`, as libgit2 refuses other paths it has none for, as does
-//!   [`Worktree::add`] (`git_worktree_add` would create `worktrees/` in the process's
-//!   working directory before tripping over the same NULL), and [`list`]
-//!   reports that it has no worktrees, where `git_worktree_list` would list the
-//!   `worktrees/` directory of the process's working directory.
-//! - `git_worktree_list` removes the entries that are not worktrees while iterating
-//!   over them, so the entry after each removed one escapes the check: [`list`] drops
-//!   those too.
-//! - `git_worktree_prune` takes an error from `git_worktree_is_prunable` (such as an
-//!   unreadable `locked` file) for "prunable" and deletes the worktree:
-//!   [`WorktreeRef::prune`] asks first, and reports that error instead.
+//! - `git_worktree_lookup` passes the repository's common directory to `strlen` unchecked, which is
+//!   NULL for a repository without paths (`git_repository_new`, `git_repository_wrap_odb`):
+//!   [`Worktree::lookup`] refuses such a repository with `GIT_ENOTFOUND`, as libgit2 refuses other
+//!   paths it has none for, as does [`Worktree::add`] (`git_worktree_add` would create `worktrees/`
+//!   in the process's working directory before tripping over the same NULL), and [`list`] reports
+//!   that it has no worktrees, where `git_worktree_list` would list the `worktrees/` directory of
+//!   the process's working directory.
+//! - `git_worktree_list` removes the entries that are not worktrees while iterating over them, so
+//!   the entry after each removed one escapes the check: [`list`] drops those too.
+//! - `git_worktree_prune` takes an error from `git_worktree_is_prunable` (such as an unreadable
+//!   `locked` file) for "prunable" and deletes the worktree: [`WorktreeRef::prune`] asks first, and
+//!   reports that error instead.
 //! - Several routines fail without setting an error of their own (`GIT_ELOCKED` from
-//!   `git_worktree_lock`, a lock file `git_worktree_unlock` cannot remove, a missing
-//!   or malformed worktree in `git_worktree_lookup`), leaving whatever an earlier call
-//!   set as the thread's last error: each wrapper clears the error first, and gives
-//!   such a failure an error that describes it.
-//! - `git_worktree_add` refuses a branch "already checked out" by asking the
-//!   repository the given reference was read through, not the repository the worktree
-//!   is added to: a reference of another repository (which only lends its name) lets
-//!   a branch be checked out in two of the repository's working trees.
-//!   [`Worktree::add`] passes libgit2 the repository's own reference of that name
-//!   instead, when it has one.
+//!   `git_worktree_lock`, a lock file `git_worktree_unlock` cannot remove, a missing or malformed
+//!   worktree in `git_worktree_lookup`), leaving whatever an earlier call set as the thread's last
+//!   error: each wrapper clears the error first, and gives such a failure an error that describes
+//!   it.
+//! - `git_worktree_add` refuses a branch "already checked out" by asking the repository the given
+//!   reference was read through, not the repository the worktree is added to: a reference of
+//!   another repository (which only lends its name) lets a branch be checked out in two of the
+//!   repository's working trees. [`Worktree::add`] passes libgit2 the repository's own reference of
+//!   that name instead, when it has one.
 
 use core::ffi::{CStr, c_int};
 use core::fmt;
@@ -342,8 +339,8 @@ impl Extend<PruneFlag> for PruneFlags {
 }
 
 impl IntoIterator for PruneFlags {
-    type Item = PruneFlag;
     type IntoIter = PruneFlagsIter;
+    type Item = PruneFlag;
 
     fn into_iter(self) -> PruneFlagsIter {
         self.iter()
@@ -411,7 +408,8 @@ define_ctype!(
     /// use libgit2::libgit2::repository::worktree::{PruneFlag, PruneOptions};
     ///
     /// let mut opts = PruneOptions::new();
-    /// opts.as_mut().set_flags(PruneFlag::Valid | PruneFlag::WorkingTree);
+    /// opts.as_mut()
+    ///     .set_flags(PruneFlag::Valid | PruneFlag::WorkingTree);
     /// assert_eq!(opts.as_ref().version(), PruneOptions::VERSION);
     /// assert!(opts.as_ref().flags().contains(PruneFlag::Valid));
     /// ```
@@ -451,7 +449,10 @@ define_ctype!(
     ///
     /// Wraps: git_worktree_prune_options
     #[derive(Clone, Copy)]
-    PruneOptions, PruneOptionsRef, PruneOptionsMut, ffi::git_worktree_prune_options
+    PruneOptions,
+    PruneOptionsRef,
+    PruneOptionsMut,
+    ffi::git_worktree_prune_options
 );
 
 // SAFETY: a `PruneOptions` is 8 plain bytes: no pointer, no interior mutability, no
@@ -645,7 +646,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_worktree
-    Worktree, WorktreeRef, WorktreeMut, ffi::git_worktree
+    Worktree,
+    WorktreeRef,
+    WorktreeMut,
+    ffi::git_worktree
 );
 
 // SAFETY: a worktree is a struct and six strings, all allocations of libgit2's
@@ -859,12 +863,12 @@ pub struct AddOptionsMut<'a, 'o>(
 // through its `PhantomData<&'a mut AddOptions<'o>>`.
 unsafe impl<'o> CCell for AddOptions<'o> {
     type C = ffi::git_worktree_add_options;
-    type Ref<'a>
-        = AddOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = AddOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = AddOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -1842,13 +1846,13 @@ mod unit_tests {
         fn options_convert_by_value_both_ways() {
             let raw = ffi::git_worktree_prune_options {
                 version: 7,
-                flags: 0xffff_0001,
+                flags: 0xFFFF_0001,
             };
             let opts = PruneOptions::from(raw);
             assert_eq!(opts.as_ref().version(), 7);
-            assert_eq!(opts.as_ref().flags().bits(), 0xffff_0001);
+            assert_eq!(opts.as_ref().flags().bits(), 0xFFFF_0001);
             let back = ffi::git_worktree_prune_options::from(opts.as_ref().to_options());
-            assert_eq!((back.version, back.flags), (7, 0xffff_0001));
+            assert_eq!((back.version, back.flags), (7, 0xFFFF_0001));
         }
 
         #[test]
@@ -1862,13 +1866,13 @@ mod unit_tests {
     }
 
     mod worktree {
-        use super::super::*;
         use core::ptr;
         use std::ffi::{CStr, CString};
         use std::fs;
         use std::os::unix::ffi::OsStrExt;
         use std::path::PathBuf;
 
+        use super::super::*;
         use crate::libgit2::util::sys::errors::runtime_pinned;
 
         /// A non-bare repository with a linked worktree `wt` laid out on disk, as
@@ -2021,11 +2025,12 @@ mod unit_tests {
     }
 
     mod add_options {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
         use super::super::*;
         use crate::libgit2::refs::refs::ReferenceBox;
         use crate::libgit2::util::sys::errors::runtime_pinned;
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
 
         /// `GIT_WORKTREE_ADD_OPTIONS_INIT`, built in Rust so Miri can run the accessors;
         /// `new_matches_the_template` ties it to `git_worktree_add_options_init`.
@@ -2228,11 +2233,11 @@ mod unit_tests {
     }
 
     mod routines {
-        use super::super::*;
         use std::ffi::CString;
         use std::fs;
         use std::path::PathBuf;
 
+        use super::super::*;
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::sys::errors::set_str;
 
@@ -2486,12 +2491,12 @@ mod unit_tests {
     }
 
     mod adding {
-        use super::super::*;
         use std::ffi::CString;
         use std::fs;
         use std::path::PathBuf;
         use std::process::Command;
 
+        use super::super::*;
         use crate::libgit2::refs::refs::ReferenceBox;
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
 

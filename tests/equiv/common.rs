@@ -631,9 +631,9 @@ fn call(opt: LibraryOption) -> Reported {
             O::SetSslCiphers => ffi::git_libgit2_opts(key, c"DEFAULT".as_ptr()),
             O::GetWindowsShareMode => {
                 // Outside Windows libgit2 leaves the value unwritten.
-                let mut out: c_ulong = 0x5a5a;
+                let mut out: c_ulong = 0x5A5A;
                 let rc = ffi::git_libgit2_opts(key, &raw mut out);
-                assert_eq!(out, 0x5a5a);
+                assert_eq!(out, 0x5A5A);
                 rc
             }
             O::SetWindowsShareMode => ffi::git_libgit2_opts(key, 0 as c_ulong),
@@ -1269,7 +1269,7 @@ mod options {
                     unsafe {
                         ffi::git_libgit2_opts(ffi::GIT_OPT_SET_WINDOWS_SHAREMODE as c_int, mode)
                     };
-                    let mut c: c_ulong = 0xdead;
+                    let mut c: c_ulong = 0xDEAD;
                     // SAFETY: off Windows the key writes nothing through the live local.
                     unsafe {
                         ffi::git_libgit2_opts(
@@ -1277,7 +1277,7 @@ mod options {
                             &raw mut c,
                         )
                     };
-                    assert_eq!(c, 0xdead, "untouched");
+                    assert_eq!(c, 0xDEAD, "untouched");
                     assert_eq!(common::windows_sharemode(), None);
                     // SAFETY: this child runs one thread.
                     unsafe { common::set_windows_sharemode(mode) };

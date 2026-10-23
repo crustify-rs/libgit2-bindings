@@ -27,8 +27,8 @@
 //! tree as a [`TreeRef`], from the [`TreeArc`](crate::libgit2::object::tree::TreeArc)
 //! holding it. The pointers whose types this crate does not wrap yet stay raw seams,
 //! with `unsafe` setters whose callers vouch for what the borrow checker cannot: the
-//! notification, progress and performance callbacks with their payloads. The flags fields take the raw bits of
-//! `git_checkout_strategy_t` and `git_checkout_notify_t` until those are wrapped.
+//! notification, progress and performance callbacks with their payloads. The flags fields take the
+//! raw bits of `git_checkout_strategy_t` and `git_checkout_notify_t` until those are wrapped.
 //!
 //! `git_rebase_init` and `git_rebase_open` are the one exception to "read during the
 //! call": the rebase keeps a copy of the options, duplicating the strings and the
@@ -132,12 +132,12 @@ pub struct CheckoutOptionsMut<'a, 'o>(
 // invariant in the options through its `PhantomData<&'a mut CheckoutOptions<'o>>`.
 unsafe impl<'o> CCell for CheckoutOptions<'o> {
     type C = ffi::git_checkout_options;
-    type Ref<'a>
-        = CheckoutOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = CheckoutOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = CheckoutOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -793,11 +793,12 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::c_char;
+    use std::ffi::CString;
+
     use super::*;
     use crate::libgit2::core::strarray::{StrArray, StrArrayView};
     use crate::libgit2::index::index::{Index, IndexArc};
-    use core::ffi::c_char;
-    use std::ffi::CString;
 
     /// `GIT_CHECKOUT_OPTIONS_INIT`, built in Rust so Miri can run the accessors;
     /// `new_matches_the_template` ties it to `git_checkout_options_init`.

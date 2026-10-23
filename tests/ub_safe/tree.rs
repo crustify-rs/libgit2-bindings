@@ -516,7 +516,9 @@ mod routines {
     //! libgit2, so Miri skips them all.
 
     use std::ffi::{CStr, CString, c_int};
+    use std::os::unix::ffi::OsStrExt;
     use std::panic::{self, AssertUnwindSafe};
+    use std::path::PathBuf;
     use std::thread;
 
     use libgit2::libgit2::core::types::FileMode;
@@ -526,13 +528,8 @@ mod routines {
         WalkCallback,
     };
     use libgit2::libgit2::oid::oid::{Oid, OidType};
-    use libgit2::libgit2::repository::repository::Repository;
+    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
     use libgit2::libgit2::util::errors::{ErrorBuf, ErrorClass};
-
-    use std::os::unix::ffi::OsStrExt;
-    use std::path::PathBuf;
-
-    use libgit2::libgit2::repository::repository::RepositoryBox;
 
     use crate::fixture::init;
     use crate::fixture::object_and_tree_entry::{entry_view, object_view, write_blob};
@@ -753,7 +750,7 @@ mod routines {
             .as_mut()
             .insert(c"kept", blob.as_ref(), FileMode::Blob)
             .unwrap();
-        let wide = Oid::from_raw(&[0xab; 32], OidType::Sha256).unwrap();
+        let wide = Oid::from_raw(&[0xAB; 32], OidType::Sha256).unwrap();
         let looked_up = [
             FileMode::Blob,
             FileMode::BlobExecutable,
@@ -1360,7 +1357,7 @@ mod tree_entry {
         let mut raw = b"100644 leaf\0".to_vec();
         raw.extend(&blob.as_ref().id()[..20]);
         raw.extend(b"40000 sub\0");
-        raw.extend([0xde; 20]);
+        raw.extend([0xDE; 20]);
         let id = write_raw(&repo, &raw, ffi::GIT_OBJECT_TREE);
         let tree = Tree::lookup(repository(&repo), id.as_ref()).unwrap();
         // The entry itself, with or without a trailing `/`, needs no subtree.
@@ -2013,7 +2010,7 @@ mod tree_object {
 
         // Ids of another type, at every length, never reach C.
         let mut wide = Oid::from_raw(&id(NESTED).as_ref().id(), OidType::Sha256).unwrap();
-        for kind in [2, 0, 3, 0x7f, u8::MAX] {
+        for kind in [2, 0, 3, 0x7F, u8::MAX] {
             wide.as_mut().set_raw_kind(kind);
             assert_failed(Tree::lookup(r, wide.as_ref()), -1, ErrorClass::Invalid);
             for len in [0, 4, 7, 39, 40, 41, 64, 65, usize::MAX] {
@@ -2090,7 +2087,7 @@ mod tree_object {
                 Tree::lookup_prefix(repo.as_ref(), probe.as_ref().as_ref(), 10)
             }
             .unwrap();
-            probe.as_mut().as_mut().set_id([0xee; 32]);
+            probe.as_mut().as_mut().set_id([0xEE; 32]);
             drop(probe);
             held.push((hex_id, tree));
         }
@@ -2407,7 +2404,7 @@ mod tree_reads {
             probe.as_mut().set_id(tail);
             assert!(t.get_by_id(probe.as_ref()).is_none());
             probe.as_mut().set_id(raw);
-            for kind in [0u8, 2, 3, 0x7f, u8::MAX] {
+            for kind in [0u8, 2, 3, 0x7F, u8::MAX] {
                 probe.as_mut().set_raw_kind(kind);
                 assert!(t.get_by_id(probe.as_ref()).is_none(), "{kind}");
             }
@@ -2417,7 +2414,7 @@ mod tree_reads {
         for probe in [
             Oid::zero(OidType::Sha1),
             Oid::zero(OidType::Sha256),
-            id(0xee),
+            id(0xEE),
         ] {
             assert!(t.get_by_id(probe.as_ref()).is_none());
         }

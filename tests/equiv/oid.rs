@@ -29,38 +29,34 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - `OidRef::format_cstr` returns libgit2's error where `git_oid_tostr` returns an
-//!   empty string and leaves that error on the thread (an unknown type); the
-//!   comparison maps the error to the empty string and checks it is the thread's.
-//! - `OidRef::to_hex_string` refuses an unknown type before the call, where C returns
-//!   its per-thread string unwritten (uninitialised on the thread's first call); the
-//!   C side records the error it leaves instead of reading that string.
-//! - `OidShortenerMut::add` refuses an id that does not start with 40 hex digits,
-//!   where C walks it only to the first free slot and keeps the rest for a later
-//!   addition to index its trie with; only ids whose bad digit C walks are compared.
-//!   It aborts where C loses its trie to an allocation failure (`unit_tests`).
-//! - `Oid::from_raw` refuses a slice whose length is not the type's size before the
-//!   call, where C would read past a shorter buffer; the module's `unit_tests` cover
-//!   it.
-//! - `OidShortener::new` refuses a `min_length` that does not survive C's round trip
-//!   through an `int` before the call, with the error a release build of libgit2
-//!   sets; a debug build's C assertion aborts instead, so the C side of those
-//!   comparisons is skipped under the `coverage` variant, the one debug build.
-//! - Both pin libgit2's runtime first, where C called before `git_libgit2_init`
-//!   corrupts foreign thread-local state; every comparison here runs initialised.
+//! - `OidRef::format_cstr` returns libgit2's error where `git_oid_tostr` returns an empty string
+//!   and leaves that error on the thread (an unknown type); the comparison maps the error to the
+//!   empty string and checks it is the thread's.
+//! - `OidRef::to_hex_string` refuses an unknown type before the call, where C returns its
+//!   per-thread string unwritten (uninitialised on the thread's first call); the C side records the
+//!   error it leaves instead of reading that string.
+//! - `OidShortenerMut::add` refuses an id that does not start with 40 hex digits, where C walks it
+//!   only to the first free slot and keeps the rest for a later addition to index its trie with;
+//!   only ids whose bad digit C walks are compared. It aborts where C loses its trie to an
+//!   allocation failure (`unit_tests`).
+//! - `Oid::from_raw` refuses a slice whose length is not the type's size before the call, where C
+//!   would read past a shorter buffer; the module's `unit_tests` cover it.
+//! - `OidShortener::new` refuses a `min_length` that does not survive C's round trip through an
+//!   `int` before the call, with the error a release build of libgit2 sets; a debug build's C
+//!   assertion aborts instead, so the C side of those comparisons is skipped under the `coverage`
+//!   variant, the one debug build.
+//! - Both pin libgit2's runtime first, where C called before `git_libgit2_init` corrupts foreign
+//!   thread-local state; every comparison here runs initialised.
 
+use std::cmp::Ordering;
 use std::ffi::{CStr, CString, c_char, c_int};
-use std::fs;
+use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
-use std::thread;
+use std::{fs, ptr, thread};
 
 use ffibox::CZeroable;
 use libgit2::ffi;
-use std::cmp::Ordering;
-use std::fmt::Debug;
-
 use libgit2::libgit2::oid::oid::{Oid, OidRef, OidShortener, OidType, UnnamedOidType};
 use libgit2::libgit2::util::errors::ErrorBuf;
 
@@ -71,7 +67,7 @@ const TYPES: [(ffi::git_oid_t, OidType); 2] = [
 ];
 
 /// Raw id bytes no parse of either type reads past: `GIT_OID_MAX_SIZE` of them.
-const RAW: [u8; 32] = [0xa5; 32];
+const RAW: [u8; 32] = [0xA5; 32];
 
 /// More hex digits than any type takes, NUL-terminated.
 const HEX: &CStr = c"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0";
@@ -586,7 +582,7 @@ fn from_prefix_parses_as_c() {
 fn from_raw_parses_as_c() {
     // Only inputs C can read: as long as the type needs.
     let mut steps: Vec<(Vec<u8>, OidType)> = Vec::new();
-    for seed in [0u8, 1, 0x7f, 0xff] {
+    for seed in [0u8, 1, 0x7F, 0xFF] {
         let bytes: Vec<u8> = (0..32)
             .map(|i| seed.wrapping_mul(31).wrapping_add(i))
             .collect();
@@ -625,8 +621,8 @@ fn field_writes_and_copies_match_c() {
     r_a.as_mut().set_kind(OidType::Sha1);
     check(&c_a, &c_b, &r_a, &r_b, 1);
 
-    c_a.id = id(0x5a);
-    r_a.as_mut().set_id(id(0x5a));
+    c_a.id = id(0x5A);
+    r_a.as_mut().set_id(id(0x5A));
     check(&c_a, &c_b, &r_a, &r_b, 2);
 
     // SAFETY: two distinct live `git_oid`s.
@@ -634,18 +630,18 @@ fn field_writes_and_copies_match_c() {
     r_b.as_mut().copy_from(r_a.as_ref());
     check(&c_a, &c_b, &r_a, &r_b, 3);
 
-    c_a.id[7] = 0xee;
+    c_a.id[7] = 0xEE;
     c_a.id[31] = 0x01;
     {
         let mut m = r_a.as_mut();
         let mut run = m.id_mut();
-        assert!(run.set_elem(7, 0xee));
+        assert!(run.set_elem(7, 0xEE));
         assert!(run.set_elem(31, 0x01));
     }
     check(&c_a, &c_b, &r_a, &r_b, 4);
 
-    c_b.type_ = 0xfe;
-    r_b.as_mut().set_raw_kind(0xfe);
+    c_b.type_ = 0xFE;
+    r_b.as_mut().set_raw_kind(0xFE);
     check(&c_a, &c_b, &r_a, &r_b, 5);
 
     // SAFETY: two distinct live `git_oid`s.
@@ -791,7 +787,7 @@ fn oid_bytes() -> Vec<Bytes> {
         (0, [0; 32]),
         (0, s1),
         (3, s1),
-        (u8::MAX, [0xff; 32]),
+        (u8::MAX, [0xFF; 32]),
     ]
 }
 
@@ -968,7 +964,7 @@ fn comparisons_follow_edits_like_c() {
     let edits: [(Option<u8>, usize, u8); 9] = [
         (Some(1), 0, base.1[0]),
         (None, 1, base.1[1]),
-        (None, 2, base.1[2] & 0xf0),
+        (None, 2, base.1[2] & 0xF0),
         (None, 2, base.1[2]),
         (None, 19, base.1[19] - 1),
         (Some(2), 19, base.1[19]),
@@ -1228,7 +1224,7 @@ fn random_hex_ids(n: usize, mut seed: u64) -> Vec<String> {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn shortener_adds_match_c() {
-    let mut ids = random_hex_ids(300, 0x1234_5678_9abc_def1);
+    let mut ids = random_hex_ids(300, 0x1234_5678_9ABC_DEF1);
     ids.insert(0, SHA1_HEX.to_owned());
     // Prefixes shared to every depth, a duplicate, other cases, a longer id.
     for k in [1, 3, 7, 20, 38, 39] {
@@ -1291,7 +1287,7 @@ impl Seeded {
     }
 
     fn byte(&mut self) -> u8 {
-        u8::try_from(self.next() & 0xff).unwrap()
+        u8::try_from(self.next() & 0xFF).unwrap()
     }
 }
 
@@ -1340,7 +1336,7 @@ fn seeded_hex(rng: &mut Seeded) -> Vec<u8> {
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn seeded_random_inputs_match_c() {
-    let mut rng = Seeded(0x2545_f491_4f6c_dd1d);
+    let mut rng = Seeded(0x2545_F491_4F6C_DD1D);
     // Fewer rounds under BorrowSanitizer, which instruments every call.
     let rounds = if cfg!(bsan) { 100 } else { 400 };
     let mut fmt_steps: Vec<(Bytes, Fmt)> = vec![((1, [0; 32]), Fmt::ThreadStr)];

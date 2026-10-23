@@ -3,14 +3,16 @@
 //! clear_reuc}` and `IndexRef::reuc_entry_count` against their `git_index_reuc_*`
 //! routines, on two file-backed indexes whose written files are compared too.
 
-use super::*;
+use std::ffi::c_int;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
+
 use libgit2::libgit2::core::types::FileMode;
 use libgit2::libgit2::index::index::{Capabilities, CapabilitySetting};
 use libgit2::libgit2::index::sys::index::ReucSide;
 use libgit2::libgit2::oid::oid::{Oid, OidType};
-use std::ffi::c_int;
-use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+
+use super::*;
 
 /// Two index files in a scratch directory, removed on drop.
 struct Files(PathBuf);

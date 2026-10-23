@@ -98,9 +98,10 @@ const TREE_ITERATOR_SIZE: usize = 336;
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
 fn iterator_allocation_failure_releases_the_tree() {
+    use libgit2::libgit2::util::errors::ErrorClass;
+
     use crate::fixture::annotated_commit::{refuse, refused};
     use crate::fixture::isolated;
-    use libgit2::libgit2::util::errors::ErrorClass;
     isolated(
         concat!(
             module_path!(),

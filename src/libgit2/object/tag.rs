@@ -58,22 +58,20 @@
 //!
 //! Two C defects shape the wrappers:
 //!
-//! - `git_tag_create_from_buffer` reads the tag's target with `git_odb_read`, which
-//!   returns early for the zero id without writing its out-parameter, and then frees
-//!   that uninitialised pointer (a use after free under ASan, once the stack slot
-//!   holds a stale pointer). It also leaks the tag name and tagger it parsed when a
-//!   later part of the buffer is malformed, and the reference name it built when
-//!   looking the reference up fails other than as not found. [`create_from_buffer`]
-//!   parses the buffer first ([`content_is_valid`]), whose parse frees what it
-//!   allocated, refuses a zero target with the error `git_odb_read` sets for it, and
-//!   answers an invalid reference name as libgit2 does, before libgit2 runs. A
-//!   reference that is valid but cannot be read (a corrupt loose reference file) still
-//!   leaks the name inside libgit2.
-//! - `git_tag_list_match` (and `git_tag_list`) drops its partial list on failure, leaking
-//!   the names collected so far, and returns 0 with an empty, NULL array; only the
-//!   thread's last error tells the failure apart. [`list_match`] reports it as an error
-//!   (code `-1`, with that last error), such as a symbolic reference under `refs/tags/`
-//!   whose target is missing; the leak stays libgit2's.
+//! - `git_tag_create_from_buffer` reads the tag's target with `git_odb_read`, which returns early
+//!   for the zero id without writing its out-parameter, and then frees that uninitialised pointer
+//!   (a use after free under ASan, once the stack slot holds a stale pointer). It also leaks the
+//!   tag name and tagger it parsed when a later part of the buffer is malformed, and the reference
+//!   name it built when looking the reference up fails other than as not found.
+//!   [`create_from_buffer`] parses the buffer first ([`content_is_valid`]), whose parse frees what
+//!   it allocated, refuses a zero target with the error `git_odb_read` sets for it, and answers an
+//!   invalid reference name as libgit2 does, before libgit2 runs. A reference that is valid but
+//!   cannot be read (a corrupt loose reference file) still leaks the name inside libgit2.
+//! - `git_tag_list_match` (and `git_tag_list`) drops its partial list on failure, leaking the names
+//!   collected so far, and returns 0 with an empty, NULL array; only the thread's last error tells
+//!   the failure apart. [`list_match`] reports it as an error (code `-1`, with that last error),
+//!   such as a symbolic reference under `refs/tags/` whose target is missing; the leak stays
+//!   libgit2's.
 
 use core::any::Any;
 use core::ffi::{CStr, c_char, c_int, c_void};
@@ -209,12 +207,12 @@ pub struct TagMut<'a, 'r>(
 // its `PhantomData<&'a mut Tag<'r>>`.
 unsafe impl<'r> CCell for Tag<'r> {
     type C = ffi::git_tag;
-    type Ref<'a>
-        = TagRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = TagMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = TagRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1116,6 +1114,7 @@ type ForeachFn<'f> = dyn FnMut(&CStr, OidRef<'_>) -> ControlFlow<NonZero<c_int>>
 ///
 /// ```
 /// use std::ops::ControlFlow;
+///
 /// use libgit2::libgit2::object::tag::ForeachCallback;
 /// use libgit2::libgit2::oid::oid::{Oid, OidRef, OidType};
 ///
@@ -1127,7 +1126,10 @@ type ForeachFn<'f> = dyn FnMut(&CStr, OidRef<'_>) -> ControlFlow<NonZero<c_int>>
 /// };
 /// let mut callback = ForeachCallback::new(&mut collect);
 /// let id = Oid::from_string(c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750", OidType::Sha1).unwrap();
-/// assert_eq!(callback.call(c"refs/tags/v1", id.as_ref()), ControlFlow::Continue(()));
+/// assert_eq!(
+///     callback.call(c"refs/tags/v1", id.as_ref()),
+///     ControlFlow::Continue(())
+/// );
 /// drop(callback);
 /// assert_eq!(seen, [(c"refs/tags/v1".to_owned(), id)]);
 /// ```
@@ -1289,11 +1291,13 @@ unsafe extern "C" fn foreach_with(
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ptr::NonNull;
     use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicBool, AtomicIsize};
+
+    use super::*;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -1355,6 +1359,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -1368,6 +1373,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }
@@ -2030,6 +2036,12 @@ mod unit_tests {
 
     /// `git_tag`'s owner, handles, lifecycle policy and conversions.
     mod tag_object {
+        use core::ffi::CStr;
+        use core::mem::size_of;
+        use core::ptr::{self, NonNull};
+
+        use ffibox::{CDrop, CRefClone};
+
         use crate::ffi;
         use crate::libgit2::core::types::ObjectType;
         use crate::libgit2::object::object::{Object, ObjectArc, ObjectRef};
@@ -2038,10 +2050,6 @@ mod unit_tests {
         use crate::libgit2::repository::repository::{Repository, RepositoryBox};
         use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
         use crate::libgit2::util::sys::errors::runtime_pinned;
-        use core::ffi::CStr;
-        use core::mem::size_of;
-        use core::ptr::{self, NonNull};
-        use ffibox::{CDrop, CRefClone};
 
         /// `testrepo.git`: tag `b25fa35` (`test`) of tag `7b43849`, of commit `e90810b`.
         const TESTREPO: &str = concat!(

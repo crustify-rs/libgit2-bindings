@@ -4,8 +4,8 @@
 //!
 //! A [`Commit`] is a `git_commit`: a parsed commit object, whose first member is the
 //! `git_object` every object starts with, of type `GIT_OBJECT_COMMIT`. It is opaque:
-//! libgit2 publishes no field. It is counted and shared as every [`Object`](super::object::Object) is (see the
-//! [`object` module](super::object#ownership)): the repository's object cache holds a
+//! libgit2 publishes no field. It is counted and shared as every [`Object`](super::object::Object)
+//! is (see the [`object` module](super::object#ownership)): the repository's object cache holds a
 //! reference of its own and hands the same commit, one more reference counted on it, to
 //! every lookup of its id; `git_commit_free` gives one reference back (it is
 //! `git_object_free`) and `git_commit_dup` takes another, on the same pointer. So the
@@ -287,12 +287,12 @@ pub struct CommitMut<'a, 'r>(
 // invariant in the commit through its `PhantomData<&'a mut Commit<'r>>`.
 unsafe impl<'r> CCell for Commit<'r> {
     type C = ffi::git_commit;
-    type Ref<'a>
-        = CommitRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = CommitMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = CommitRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1173,12 +1173,12 @@ pub struct CommitArrayMut<'a, 'r>(
 // through its `PhantomData<&'a mut CommitArray<'r>>`.
 unsafe impl<'r> CCell for CommitArray<'r> {
     type C = ffi::git_commitarray;
-    type Ref<'a>
-        = CommitArrayRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = CommitArrayMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = CommitArrayRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -1582,7 +1582,10 @@ define_ctype!(
     /// ```
     ///
     /// Wraps: git_commitbuilder
-    CommitBuilder, CommitBuilderRef, CommitBuilderMut, ffi::git_commitbuilder
+    CommitBuilder,
+    CommitBuilderRef,
+    CommitBuilderMut,
+    ffi::git_commitbuilder
 );
 
 impl fmt::Debug for CommitBuilderRef<'_> {
@@ -2009,12 +2012,23 @@ fn creatable(
 /// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
 /// let repo = Repository::init(&path, true).unwrap();
 /// // The empty tree, which libgit2 knows without storing it.
-/// let tree_id = Oid::from_string(c"4b825dc642cb6eb9a060e54bf8d69288fbee4904", OidType::Sha1).unwrap();
+/// let tree_id =
+///     Oid::from_string(c"4b825dc642cb6eb9a060e54bf8d69288fbee4904", OidType::Sha1).unwrap();
 /// let tree = Tree::lookup(repo.as_ref(), tree_id.as_ref()).unwrap();
-/// let me = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(1_700_000_000, 60));
+/// let me = SignatureView::new(
+///     c"A U Thor",
+///     c"author@example.com",
+///     Time::new(1_700_000_000, 60),
+/// );
 /// let id = create(
-///     repo.as_ref(), Some(c"HEAD"), me.as_ref(), me.as_ref(), None, c"Initial\n",
-///     tree.as_ref(), &[],
+///     repo.as_ref(),
+///     Some(c"HEAD"),
+///     me.as_ref(),
+///     me.as_ref(),
+///     None,
+///     c"Initial\n",
+///     tree.as_ref(),
+///     &[],
 /// )
 /// .unwrap();
 /// let commit = Commit::lookup(repo.as_ref(), id.as_ref()).unwrap();
@@ -2485,7 +2499,11 @@ fn commit_on_head<'r>(
 /// let dir = std::env::temp_dir().join(format!("commit-stage-doc-{}", std::process::id()));
 /// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
 /// let repo = Repository::init(&path, true).unwrap();
-/// let me = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(1_700_000_000, 60));
+/// let me = SignatureView::new(
+///     c"A U Thor",
+///     c"author@example.com",
+///     Time::new(1_700_000_000, 60),
+/// );
 /// let mut options = CreateOptions::new();
 /// options.as_mut().set_author(Some(me.as_ref()));
 /// options.as_mut().set_committer(Some(me.as_ref()));
@@ -2693,7 +2711,9 @@ pub fn amend_from_stage(
 /// ```
 /// # if cfg!(miri) { return; }
 /// use libgit2::libgit2::core::types::{SignatureView, Time};
-/// use libgit2::libgit2::object::commit::{Commit, CreateOptions, amend_from_tree, create_from_tree};
+/// use libgit2::libgit2::object::commit::{
+///     Commit, CreateOptions, amend_from_tree, create_from_tree,
+/// };
 /// use libgit2::libgit2::object::tree::Tree;
 /// use libgit2::libgit2::oid::oid::{Oid, OidType};
 /// use libgit2::libgit2::repository::repository::Repository;
@@ -2701,16 +2721,27 @@ pub fn amend_from_stage(
 /// let dir = std::env::temp_dir().join(format!("commit-amend-doc-{}", std::process::id()));
 /// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
 /// let repo = Repository::init(&path, true).unwrap();
-/// let tree_id = Oid::from_string(c"4b825dc642cb6eb9a060e54bf8d69288fbee4904", OidType::Sha1).unwrap();
+/// let tree_id =
+///     Oid::from_string(c"4b825dc642cb6eb9a060e54bf8d69288fbee4904", OidType::Sha1).unwrap();
 /// let tree = Tree::lookup(repo.as_ref(), tree_id.as_ref()).unwrap();
-/// let me = SignatureView::new(c"A U Thor", c"author@example.com", Time::new(1_700_000_000, 60));
+/// let me = SignatureView::new(
+///     c"A U Thor",
+///     c"author@example.com",
+///     Time::new(1_700_000_000, 60),
+/// );
 /// let mut options = CreateOptions::new();
 /// let mut m = options.as_mut();
 /// m.set_allow_empty_commit(true);
 /// m.set_author(Some(me.as_ref()));
 /// m.set_committer(Some(me.as_ref()));
 /// m.set_message_encoding(Some(c"ISO-8859-1"));
-/// create_from_tree(repo.as_ref(), tree.as_ref(), c"Initial\n", Some(options.as_mut())).unwrap();
+/// create_from_tree(
+///     repo.as_ref(),
+///     tree.as_ref(),
+///     c"Initial\n",
+///     Some(options.as_mut()),
+/// )
+/// .unwrap();
 /// // The amended commit's message and encoding, the options' author.
 /// let mut options = CreateOptions::new();
 /// options.as_mut().set_committer(Some(me.as_ref()));
@@ -2756,14 +2787,14 @@ type CreateFn<'f> = dyn for<'c> FnMut(
 /// committer, the message encoding (`None` for UTF-8), the message, the tree and the
 /// parents for the call only, and returns:
 ///
-/// - `Ok(Some(id))`: it wrote the commit, whose id the routine goes on with. The id must
-///   be of the tree's repository's id type, which the routine looks it up in: another
-///   is refused, failing the routine with `GIT_ERROR_INVALID`, "specified object ID
-///   type does not match repository object ID type".
-/// - `Ok(None)`: it wrote nothing (`GIT_PASSTHROUGH`), and the routine writes the
-///   commit itself, as [`create`] does.
-/// - `Err(error)`: the routine stops and fails with the error's code, class and
-///   message. An error whose code is [`ErrorCode::Passthrough`] reads as `Ok(None)`.
+/// - `Ok(Some(id))`: it wrote the commit, whose id the routine goes on with. The id must be of the
+///   tree's repository's id type, which the routine looks it up in: another is refused, failing the
+///   routine with `GIT_ERROR_INVALID`, "specified object ID type does not match repository object
+///   ID type".
+/// - `Ok(None)`: it wrote nothing (`GIT_PASSTHROUGH`), and the routine writes the commit itself, as
+///   [`create`] does.
+/// - `Err(error)`: the routine stops and fails with the error's code, class and message. An error
+///   whose code is [`ErrorCode::Passthrough`] reads as `Ok(None)`.
 ///
 /// A panic in the closure does not cross into C: the trampoline stops the routine with
 /// `GIT_EUSER`, refuses every later call, and the panic resumes once control is back in
@@ -2777,8 +2808,12 @@ type CreateFn<'f> = dyn for<'c> FnMut(
 /// use libgit2::libgit2::oid::oid::Oid;
 ///
 /// let mut seen = 0;
-/// let mut f = |_: SignatureRef<'_>, _: SignatureRef<'_>, _: Option<&core::ffi::CStr>,
-///              _: &core::ffi::CStr, _: TreeRef<'_, '_>, parents: &[CommitRef<'_, '_>]| {
+/// let mut f = |_: SignatureRef<'_>,
+///              _: SignatureRef<'_>,
+///              _: Option<&core::ffi::CStr>,
+///              _: &core::ffi::CStr,
+///              _: TreeRef<'_, '_>,
+///              parents: &[CommitRef<'_, '_>]| {
 ///     seen += parents.len();
 ///     Ok::<Option<Oid>, StreamError>(None)
 /// };
@@ -3105,12 +3140,12 @@ pub struct HeaderMut<'a, 'h>(
 // invariant in the header through its `PhantomData<&'a mut Header<'h>>`.
 unsafe impl<'h> CCell for Header<'h> {
     type C = ffi::git_commit_header;
-    type Ref<'a>
-        = HeaderRef<'a, 'h>
-    where
-        Self: 'a;
     type Mut<'a>
         = HeaderMut<'a, 'h>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = HeaderRef<'a, 'h>
     where
         Self: 'a;
 }
@@ -3371,12 +3406,12 @@ pub struct CreateExtOptionsMut<'a, 'o>(
 // `PhantomData<&'a mut CreateExtOptions<'o>>`.
 unsafe impl<'o> CCell for CreateExtOptions<'o> {
     type C = ffi::git_commit_create_ext_options;
-    type Ref<'a>
-        = CreateExtOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = CreateExtOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = CreateExtOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -3840,12 +3875,12 @@ pub struct CreateOptionsMut<'a, 'o>(
 // options through its `PhantomData<&'a mut CreateOptions<'o>>`.
 unsafe impl<'o> CCell for CreateOptions<'o> {
     type C = ffi::git_commit_create_options;
-    type Ref<'a>
-        = CreateOptionsRef<'a, 'o>
-    where
-        Self: 'a;
     type Mut<'a>
         = CreateOptionsMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = CreateOptionsRef<'a, 'o>
     where
         Self: 'a;
 }
@@ -4255,6 +4290,12 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::{CStr, c_char, c_int, c_void};
+    use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+
     use super::*;
     use crate::libgit2::core::types::{ObjectType, SignatureView, Time};
     use crate::libgit2::object::object::Object;
@@ -4263,10 +4304,6 @@ mod unit_tests {
     use crate::libgit2::util::errors::{ErrorClass, ErrorCode};
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::{CStr, c_char, c_int, c_void};
-    use core::mem::size_of;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 
     /// The fixture repositories: `testrepo.git` (a branch at `a65fedf`), `mergedrepo`
     /// (merging `e280915` into `3a34580`) and `empty_bare.git` (an unborn `HEAD`).
@@ -4392,6 +4429,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -4405,6 +4443,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }
@@ -5719,7 +5758,7 @@ mod unit_tests {
         let mut options = CreateOptions(
             ffi::git_commit_create_options {
                 version: 7,
-                _bitfield_1: ffi::__BindgenBitfieldUnit::new([0xfe]),
+                _bitfield_1: ffi::__BindgenBitfieldUnit::new([0xFE]),
                 ..Default::default()
             },
             PhantomData,
@@ -5727,14 +5766,14 @@ mod unit_tests {
         assert!(!options.as_ref().allow_empty_commit());
         options.as_mut().set_allow_empty_commit(true);
         let raw = create_raw(&options);
-        assert_eq!((raw._bitfield_1.get(0, 8), raw.version), (0xff, 7));
+        assert_eq!((raw._bitfield_1.get(0, 8), raw.version), (0xFF, 7));
         assert_eq!(raw.allow_empty_commit(), 1);
         assert!(options.as_ref().allow_empty_commit());
         options.as_mut().set_allow_empty_commit(false);
         let raw = create_raw(&options);
         assert_eq!(
             (raw._bitfield_1.get(0, 8), raw.allow_empty_commit()),
-            (0xfe, 0)
+            (0xFE, 0)
         );
         assert!(!options.as_ref().allow_empty_commit());
     }
@@ -7463,7 +7502,7 @@ mod unit_tests {
         // `HEAD` at a commit whose tree names a missing subtree: the diff against it
         // fails while descending into it.
         let mut raw = b"40000 sub\0".to_vec();
-        raw.extend_from_slice(&[0xab; 20]);
+        raw.extend_from_slice(&[0xAB; 20]);
         let (mut odb, mut broken) = (ptr::null_mut(), ffi::git_oid::default());
         // SAFETY: writable slots, the live repository and `raw.len()` bytes; the odb
         // reference is released once.

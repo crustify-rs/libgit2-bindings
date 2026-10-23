@@ -187,12 +187,13 @@ impl std::error::Error for ShutdownError {}
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::core::common::set_allocator;
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::CStr;
     use core::ptr::NonNull;
     use std::process::Command;
+
+    use super::*;
+    use crate::libgit2::core::common::set_allocator;
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -225,6 +226,7 @@ mod unit_tests {
         fn malloc(_: usize, _: Option<&CStr>, _: i32) -> Option<NonNull<u8>> {
             None
         }
+
         unsafe fn realloc(
             _: Option<NonNull<u8>>,
             _: usize,
@@ -233,6 +235,7 @@ mod unit_tests {
         ) -> Option<NonNull<u8>> {
             None
         }
+
         unsafe fn free(_: NonNull<u8>) {}
     }
 

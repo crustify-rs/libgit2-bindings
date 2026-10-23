@@ -51,7 +51,10 @@ define_ctype!(
     /// [`OidArrayRef::to_oid_array`], which allocates.
     ///
     /// Wraps: git_oidarray
-    OidArray, OidArrayRef, OidArrayMut, ffi::git_oidarray
+    OidArray,
+    OidArrayRef,
+    OidArrayMut,
+    ffi::git_oidarray
 );
 
 // SAFETY: an `OidArray` is a pointer to a buffer of plain `git_oid` bytes it owns
@@ -319,15 +322,18 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::{CStr, c_int, c_void};
+    use core::mem::size_of;
+    use std::process::Command;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use ffibox::{CDispose, CZeroable};
+
     use super::*;
     use crate::libgit2::oid::oid::{OidRef, OidType};
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::{CStr, c_int, c_void};
-    use core::mem::size_of;
-    use ffibox::{CDispose, CZeroable};
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -371,6 +377,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -384,6 +391,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

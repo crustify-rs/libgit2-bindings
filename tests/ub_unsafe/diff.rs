@@ -1,5 +1,7 @@
 #[path = "../support/diff.rs"]
 mod support;
+use std::ffi::CString;
+
 use libgit2::ffi;
 use libgit2::libgit2::diff::diff::{Diff, DiffInputs};
 use libgit2::libgit2::index::index::Index;
@@ -7,7 +9,6 @@ use libgit2::libgit2::object::tree::Tree;
 use libgit2::libgit2::oid::oid::{Oid, OidType};
 use libgit2::libgit2::repository::repository::Repository;
 use libgit2::libgit2::util::errors::ErrorClass;
-use std::ffi::CString;
 use support::Repo;
 
 /// Suite for Diff::generate_with_options: each generator, empty inputs, callbacks,

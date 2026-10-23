@@ -295,7 +295,7 @@ fn racy_index_file(paths: &[&str]) -> Vec<u8> {
     for path in paths {
         let start = file.len();
         // ctime, mtime (seconds, nanoseconds), dev, ino, mode, uid, gid, size.
-        for field in [0u32, 0, 0x7fff_ffff, 0, 0, 0, 0o100644, 0, 0, 0] {
+        for field in [0u32, 0, 0x7FFF_FFFF, 0, 0, 0, 0o100644, 0, 0, 0] {
             file.extend_from_slice(&field.to_be_bytes());
         }
         file.extend_from_slice(&[0x11; 20]);

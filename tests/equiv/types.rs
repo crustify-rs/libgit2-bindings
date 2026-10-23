@@ -16,14 +16,13 @@
 //!
 //! Documented divergences for object and reference types, outside these comparisons:
 //!
-//! - `git_odb_write` accepts the unnamed type `0`: it hashes the data as a blob but
-//!   stores it under an empty type name, so `git_odb_read_header` cannot read the
-//!   object back, and a later write of the same blob is skipped as already present.
-//!   [`ObjectType`] cannot carry `0`; the C behaviour is pinned here alone.
-//! - `git_reference_type(NULL)` returns `-1` through the unsigned `git_reference_t`
-//!   in a release build, which [`ReferenceType::from_raw`] refuses; a debug build's C
-//!   assertion aborts instead, so that probe is skipped under the `coverage` variant,
-//!   the one debug build.
+//! - `git_odb_write` accepts the unnamed type `0`: it hashes the data as a blob but stores it under
+//!   an empty type name, so `git_odb_read_header` cannot read the object back, and a later write of
+//!   the same blob is skipped as already present. [`ObjectType`] cannot carry `0`; the C behaviour
+//!   is pinned here alone.
+//! - `git_reference_type(NULL)` returns `-1` through the unsigned `git_reference_t` in a release
+//!   build, which [`ReferenceType::from_raw`] refuses; a debug build's C assertion aborts instead,
+//!   so that probe is skipped under the `coverage` variant, the one debug build.
 //!
 //! [`SubmoduleRecurse`] and [`SubmoduleUpdate`] must each name exactly the values of
 //! its C enum, each with its C value, except `GIT_SUBMODULE_UPDATE_DEFAULT`, which
@@ -70,18 +69,16 @@
 //! value. libgit2 observes a mode through its tree API, and each probe predicts the C
 //! result from the Rust conversion alone:
 //!
-//! - `git_treebuilder_insert` accepts exactly the named modes but
-//!   [`FileMode::Unreadable`], and refuses the rest with `GIT_ERROR_TREE` while
-//!   leaving the builder as it was; an accepted entry reads back its mode through
-//!   `git_tree_entry_filemode` and `git_tree_entry_filemode_raw`, in the builder and
-//!   in the tree it writes. One builder takes a sequence of insertions, compared
-//!   after every step. Every accepted mode but [`FileMode::Commit`] must also name an
-//!   object of its kind.
-//! - A parsed tree keeps whatever 16-bit mode its object spells:
-//!   `git_tree_entry_filemode_raw` returns it, which [`FileMode::from_raw`] names
-//!   exactly when the header does, and `git_tree_entry_filemode` normalises it to a
-//!   mode `from_raw` names and the builder accepts; a mode past 16 bits fails the
-//!   parse.
+//! - `git_treebuilder_insert` accepts exactly the named modes but [`FileMode::Unreadable`], and
+//!   refuses the rest with `GIT_ERROR_TREE` while leaving the builder as it was; an accepted entry
+//!   reads back its mode through `git_tree_entry_filemode` and `git_tree_entry_filemode_raw`, in
+//!   the builder and in the tree it writes. One builder takes a sequence of insertions, compared
+//!   after every step. Every accepted mode but [`FileMode::Commit`] must also name an object of its
+//!   kind.
+//! - A parsed tree keeps whatever 16-bit mode its object spells: `git_tree_entry_filemode_raw`
+//!   returns it, which [`FileMode::from_raw`] names exactly when the header does, and
+//!   `git_tree_entry_filemode` normalises it to a mode `from_raw` names and the builder accepts; a
+//!   mode past 16 bits fails the parse.
 //!
 //! Then `git_writestream`, in `write_streams`: C blob streams written through the
 //! wrappers, and Rust streams driven by libgit2, against their C counterparts.
@@ -89,13 +86,13 @@
 //! Then [`SubmoduleIgnore`], against the `git_submodule_ignore_t` values libgit2's
 //! submodule routines produce and consume.
 //!
-//! - Producer: `git_submodule_ignore` over a submodule whose `.gitmodules` entry spells
-//!   each value C's config map accepts. [`SubmoduleIgnore::from_raw`] must name every
-//!   value C returns and convert it back unchanged.
-//! - Consumer: `git_submodule_set_ignore` with each raw value in and around the named
-//!   range, on two independent repositories: C passes the raw value, Rust passes the
-//!   variant's [`raw`](SubmoduleIgnore::raw) or, for a value without one, cannot call C
-//!   at all. Both record the return, the error, `.gitmodules` and the value read back.
+//! - Producer: `git_submodule_ignore` over a submodule whose `.gitmodules` entry spells each value
+//!   C's config map accepts. [`SubmoduleIgnore::from_raw`] must name every value C returns and
+//!   convert it back unchanged.
+//! - Consumer: `git_submodule_set_ignore` with each raw value in and around the named range, on two
+//!   independent repositories: C passes the raw value, Rust passes the variant's
+//!   [`raw`](SubmoduleIgnore::raw) or, for a value without one, cannot call C at all. Both record
+//!   the return, the error, `.gitmodules` and the value read back.
 //!
 //! Documented divergences, outside these comparisons: `git_submodule_set_ignore`
 //! refuses `GIT_SUBMODULE_IGNORE_UNSPECIFIED` like any unnamed value, but `Unspecified`
@@ -122,10 +119,9 @@
 //! and views against the signatures libgit2 builds, copies and writes into commits.
 
 use std::ffi::{CStr, CString, c_char, c_int};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
+use std::{fs, ptr};
 
 use ffibox::CZeroable;
 use libgit2::ffi;
@@ -675,7 +671,7 @@ fn getters_read_what_git_signature_from_buffer_parses() {
         (c"A <a@b> 1234 +0160", 1234, 0, 0),
         // Malformed: offset 0, the first character kept as the sign.
         (c"A <a@b> 1234 x0130", 1234, 0, b'x'),
-        (c"A <a@b> 1234 \xff0130", 1234, 0, 0xff),
+        (c"A <a@b> 1234 \xff0130", 1234, 0, 0xFF),
         // A signed number after the sign: the offset and sign disagree.
         (c"A <a@b> 1234 +-130", 1234, -90, b'+'),
         // No zone at all.
@@ -709,7 +705,7 @@ fn setters_write_what_git_signature_dup_copies() {
         Step::Offset(0),
         Step::Sign(b'x'),
         Step::Sign(0),
-        Step::Sign(0xff),
+        Step::Sign(0xFF),
         Step::Seconds(i64::MAX),
         Step::Offset(i32::MIN),
         Step::Sign(b'+'),
@@ -827,7 +823,7 @@ fn predicted_author_line(time: &Time) -> String {
 fn signature_zones_are_written_from_offset_and_sign() {
     let repo = TreeRepo::new("zones");
     let offsets = [0, 1, -1, 59, 60, -90, 90, 840, -899, 899, 100_000, i32::MAX];
-    let signs = [b'+', b'-', b'x', 0, 0xff];
+    let signs = [b'+', b'-', b'x', 0, 0xFF];
     let seconds = [
         0,
         1,
@@ -1652,27 +1648,25 @@ mod write_streams {
     //! Equivalence of `git2/types.h`'s `git_writestream` wrappers with the C streams and
     //! C callers they stand in for.
     //!
-    //! - C streams: a blob stream (`git_blob_create_from_stream`) written by raw member
-    //!   calls, and one adopted into a `WriteStreamBox` and written through
-    //!   `WriteStreamMut::write`, each on its own repository; the two are compared after
-    //!   every step (the return, the thread's error after a failure, the stream's temporary
-    //!   file), then on how they end: committed (the blob id), freed (`free` / drop), or
-    //!   closed (`close` + `free` / `WriteStream::close`).
-    //! - Rust streams: libgit2 drives a hand-written C-layout stream and a
-    //!   `RustWriteStream` over the same recorder through `git_filter_list_stream_buffer`,
-    //!   bare, behind libgit2's buffered `ident` stream, and behind a filter whose own
-    //!   stream libgit2 frees; each side runs on a thread of its own, and the recorded
-    //!   calls, returns and errors are compared after every call, failures injected.
+    //! - C streams: a blob stream (`git_blob_create_from_stream`) written by raw member calls, and
+    //!   one adopted into a `WriteStreamBox` and written through `WriteStreamMut::write`, each on
+    //!   its own repository; the two are compared after every step (the return, the thread's error
+    //!   after a failure, the stream's temporary file), then on how they end: committed (the blob
+    //!   id), freed (`free` / drop), or closed (`close` + `free` / `WriteStream::close`).
+    //! - Rust streams: libgit2 drives a hand-written C-layout stream and a `RustWriteStream` over
+    //!   the same recorder through `git_filter_list_stream_buffer`, bare, behind libgit2's buffered
+    //!   `ident` stream, and behind a filter whose own stream libgit2 frees; each side runs on a
+    //!   thread of its own, and the recorded calls, returns and errors are compared after every
+    //!   call, failures injected.
     //!
     //! Each side runs on a fresh thread, so the error each reports is its own.
 
     use std::cell::RefCell;
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
     use std::path::PathBuf;
-    use std::ptr;
     use std::rc::Rc;
     use std::sync::OnceLock;
-    use std::thread;
+    use std::{ptr, thread};
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::{
@@ -2728,20 +2722,19 @@ mod signatures {
     //! Equivalence of [`Signature`] and its handles with the `git_signature`s libgit2
     //! builds, copies, and writes into commits.
     //!
-    //! - [`Signature::new`] must succeed exactly where `git_signature_new` does, with the
-    //!   same trimmed strings and time, and fail with its error class and message
-    //!   elsewhere; [`Signature::now`] likewise against `git_signature_now`, whose time
-    //!   is compared to the clock it read.
-    //! - [`Signature::parse`] must match `git_signature_from_buffer` over a corpus of
-    //!   well-formed and malformed lines: outcome, every field, and the error.
-    //! - The setters must leave an owned signature as C code writing the same fields
-    //!   leaves its own: one sequence of writes runs on a `SignatureBox` and on a C
-    //!   signature independently, and after every step the two are compared field by
-    //!   field, through their copies (`Clone` and [`SignatureRef::to_signature`] against
-    //!   `git_signature_dup`), and through the commit `git_commit_create_buffer` writes
-    //!   with each as author and committer, byte for byte.
-    //! - A [`SignatureView`] must read as the stack `git_signature` C code builds over the
-    //!   same strings, and copy and write as it does.
+    //! - [`Signature::new`] must succeed exactly where `git_signature_new` does, with the same
+    //!   trimmed strings and time, and fail with its error class and message elsewhere;
+    //!   [`Signature::now`] likewise against `git_signature_now`, whose time is compared to the
+    //!   clock it read.
+    //! - [`Signature::parse`] must match `git_signature_from_buffer` over a corpus of well-formed
+    //!   and malformed lines: outcome, every field, and the error.
+    //! - The setters must leave an owned signature as C code writing the same fields leaves its
+    //!   own: one sequence of writes runs on a `SignatureBox` and on a C signature independently,
+    //!   and after every step the two are compared field by field, through their copies (`Clone`
+    //!   and [`SignatureRef::to_signature`] against `git_signature_dup`), and through the commit
+    //!   `git_commit_create_buffer` writes with each as author and committer, byte for byte.
+    //! - A [`SignatureView`] must read as the stack `git_signature` C code builds over the same
+    //!   strings, and copy and write as it does.
     //!
     //! Documented divergences, outside these comparisons: the error codes are not
     //! carried (`git_signature_new` fails with -1, `git_signature_from_buffer` with
@@ -2750,9 +2743,10 @@ mod signatures {
     //! allocation failure is refused by [`Signature::parse`] (pinned in the crate's unit
     //! tests, which can make libgit2's allocator fail).
 
-    use super::*;
     use libgit2::libgit2::core::types::{Signature, SignatureBox, SignatureRef, SignatureView};
     use libgit2::libgit2::raw::OdbDataStrFree;
+
+    use super::*;
 
     /// A signature's fields as owned values: name, email, seconds, offset, sign.
     type Fields = (Option<CString>, Option<CString>, i64, i32, u8);

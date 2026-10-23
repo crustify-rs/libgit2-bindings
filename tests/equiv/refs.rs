@@ -23,10 +23,9 @@
 //! crashes. An [`UnattachedReference`] has no copy, so the Rust side cannot reach it.
 
 use std::ffi::{CStr, CString, c_int};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
+use std::{fs, ptr};
 
 use ffibox::CZeroable;
 use libgit2::ffi;
@@ -249,7 +248,7 @@ fn names() -> Vec<CString> {
         CString::new("").unwrap(),
         CString::new("HEAD").unwrap(),
         CString::new("refs/heads/main").unwrap(),
-        CString::new(vec![0xff, b'/', 0x80]).unwrap(),
+        CString::new(vec![0xFF, b'/', 0x80]).unwrap(),
         CString::new(vec![b'n'; 2048]).unwrap(),
     ]
 }

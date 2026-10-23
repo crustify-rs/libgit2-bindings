@@ -4,31 +4,28 @@
 //! A trailer owns nothing and no routine takes one back, so what C observes of it is
 //! its two fields. Two directions are compared:
 //!
-//! - C parses: for each message of a corpus, `git_message_trailers` fills an array; C
-//!   reads each trailer's `key` and `value` (its own `strlen` and bytes), and Rust
-//!   adopts the same trailer with [`MessageTrailer::from_raw`] and reads it through
-//!   its handle. The counts, keys and values are compared, then the array is freed by
-//!   C.
-//! - Rust builds: [`MessageTrailer::new`] and the setters, step by step, and C reads
-//!   the struct [`into_raw`](MessageTrailer::into_raw) gives back after each step:
-//!   the very pointers stored, and the strings through them.
+//! - C parses: for each message of a corpus, `git_message_trailers` fills an array; C reads each
+//!   trailer's `key` and `value` (its own `strlen` and bytes), and Rust adopts the same trailer
+//!   with [`MessageTrailer::from_raw`] and reads it through its handle. The counts, keys and values
+//!   are compared, then the array is freed by C.
+//! - Rust builds: [`MessageTrailer::new`] and the setters, step by step, and C reads the struct
+//!   [`into_raw`](MessageTrailer::into_raw) gives back after each step: the very pointers stored,
+//!   and the strings through them.
 //!
 //! [`MessageTrailerArray`] against the `git_message_trailer_array` C code fills with
 //! `git_message_trailers` and releases with `git_message_trailer_array_free`, each side
 //! parsing its own copy of every message:
 //!
-//! - [`MessageTrailerArray::parse`] against `git_message_trailers` over a corpus: the
-//!   code, the count, the keys and values, and the state the struct is left in (a
-//!   block always, a trailer buffer only with trailers).
-//! - A sequence of parses, replacements, takes and clears against the C code that does
-//!   the same to raw structs (free the old one, copy the struct, zero it), compared after
-//!   every step: each live array's trailers, and the allocator events the step caused,
-//!   pointers numbered by allocation, so that every buffer is freed in the same step on
-//!   both sides. It runs alone in a child process that installs a tracing allocator
-//!   before `git_libgit2_init`.
-//! - A failed allocation of the trailer block, in a child process whose allocator fails
-//!   on demand: the code (or Rust's error), the error class and message, and an array
-//!   left as it was (empty).
+//! - [`MessageTrailerArray::parse`] against `git_message_trailers` over a corpus: the code, the
+//!   count, the keys and values, and the state the struct is left in (a block always, a trailer
+//!   buffer only with trailers).
+//! - A sequence of parses, replacements, takes and clears against the C code that does the same to
+//!   raw structs (free the old one, copy the struct, zero it), compared after every step: each live
+//!   array's trailers, and the allocator events the step caused, pointers numbered by allocation,
+//!   so that every buffer is freed in the same step on both sides. It runs alone in a child process
+//!   that installs a tracing allocator before `git_libgit2_init`.
+//! - A failed allocation of the trailer block, in a child process whose allocator fails on demand:
+//!   the code (or Rust's error), the error class and message, and an array left as it was (empty).
 //!
 //! Documented divergence, outside these comparisons: an empty array is released by
 //! Rust without calling libgit2, where C code hands its NULL buffers to `git__free`, a

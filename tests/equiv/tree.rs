@@ -15,10 +15,9 @@
 
 use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::ptr;
+use std::{fs, ptr};
 
 use libgit2::ffi;
 use libgit2::libgit2::object::tree::{UnnamedWalkMode, WalkMode};
@@ -413,37 +412,35 @@ mod builder {
     //! - Builders: [`TreeBuilder::new`] and [`TreeBuilder::from_tree`] must build what
     //!   `git_treebuilder_new` builds (with a NULL source and with a tree), and
     //!   [`clear`](libgit2::libgit2::object::tree::TreeBuilderMut::clear) must leave what
-    //!   `git_treebuilder_clear` leaves. Each side runs the same steps over a bare
-    //!   repository of its own, built identically, with source trees looked up in a
-    //!   fixture repository it opened itself; after every step the builder's state is
-    //!   recorded (its entry count, the file mode of every name either side ever held, and
-    //!   the id `git_treebuilder_write` gives, or the error it reports) and compared. The
-    //!   C side runs `git_treebuilder_insert`, `_get`, `_write`, `_entrycount` and
-    //!   `git_tree_entry_filemode_raw` raw, the Rust side their wrappers
-    //!   ([`TreeBuilderRef::len`] for the count, `TreeEntryRef::filemode_raw` for an
-    //!   entry's mode). The builder routines' failures and the walk callback are compared
-    //!   in [`routines`].
+    //!   `git_treebuilder_clear` leaves. Each side runs the same steps over a bare repository of
+    //!   its own, built identically, with source trees looked up in a fixture repository it opened
+    //!   itself; after every step the builder's state is recorded (its entry count, the file mode
+    //!   of every name either side ever held, and the id `git_treebuilder_write` gives, or the
+    //!   error it reports) and compared. The C side runs `git_treebuilder_insert`, `_get`,
+    //!   `_write`, `_entrycount` and `git_tree_entry_filemode_raw` raw, the Rust side their
+    //!   wrappers ([`TreeBuilderRef::len`] for the count, `TreeEntryRef::filemode_raw` for an
+    //!   entry's mode). The builder routines' failures and the walk callback are compared in
+    //!   [`routines`].
     //!
     //!   [`TreeBuilderRef::len`]: libgit2::libgit2::object::tree::TreeBuilderRef::len
-    //! - Allocation failures: libgit2's allocator is made to fail its `k`-th allocation
-    //!   inside the constructor, for each `k` until the constructor succeeds; both sides
-    //!   must fail at the same `k` with the same error class and message, and then build
-    //!   the same builder. This runs alone in a child process, since the allocator is
-    //!   process-global.
+    //! - Allocation failures: libgit2's allocator is made to fail its `k`-th allocation inside the
+    //!   constructor, for each `k` until the constructor succeeds; both sides must fail at the same
+    //!   `k` with the same error class and message, and then build the same builder. This runs
+    //!   alone in a child process, since the allocator is process-global.
     //! - Update actions: `git_tree_create_updated` accepts exactly the values
     //!   [`UpdateAction::from_raw`] names, and does with each what its variant says.
-    //! - Updates: a [`TreeUpdate`] holds the fields C code fills in a `git_tree_update`
-    //!   for the same change, and an array of them makes `git_tree_create_updated` write
-    //!   the same trees, or fail with the same errors, step after step.
+    //! - Updates: a [`TreeUpdate`] holds the fields C code fills in a `git_tree_update` for the
+    //!   same change, and an array of them makes `git_tree_create_updated` write the same trees, or
+    //!   fail with the same errors, step after step.
     //!
     //! Documented divergences, outside these comparisons:
     //!
-    //! - The Rust constructors return libgit2's error as an [`ErrorBuf`], without the
-    //!   return code (always `-1`); the class and message are compared.
-    //! - A builder cannot outlive its repository in Rust (its owner borrows the
-    //!   repository), where libgit2 frees one safely afterwards; only C does that here.
-    //! - `git_treebuilder_clear` returns `0` and fails only on a NULL builder, which the
-    //!   Rust handle cannot be; `clear` returns nothing.
+    //! - The Rust constructors return libgit2's error as an [`ErrorBuf`], without the return code
+    //!   (always `-1`); the class and message are compared.
+    //! - A builder cannot outlive its repository in Rust (its owner borrows the repository), where
+    //!   libgit2 frees one safely afterwards; only C does that here.
+    //! - `git_treebuilder_clear` returns `0` and fails only on a NULL builder, which the Rust
+    //!   handle cannot be; `clear` returns nothing.
 
     use std::collections::BTreeSet;
     use std::ffi::{CStr, CString, c_int, c_void};
@@ -451,7 +448,8 @@ mod builder {
     use std::path::PathBuf;
     use std::process::Command;
     use std::ptr::{self, NonNull};
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
 
     use libgit2::ffi;
     use libgit2::libgit2::core::types::FileMode;
@@ -837,52 +835,52 @@ mod builder {
         //! Equivalence of the tree-builder routines' wrappers with libgit2's, and of the
         //! walk callback's answers with a C callback's.
         //!
-        //! - Steps: each side runs the same inserts (wanting the entry back or not),
-        //!   removals and clears over a bare repository of its own holding the same blob
-        //!   and empty tree, the inserts including every kind libgit2 refuses (bad names,
-        //!   the unreadable mode, the zero id, a missing object, an object of the wrong
-        //!   type) and replacements in place. After each step, the step's outcome (the
-        //!   entry handed back, or the error) and the builder's state (its count, every
-        //!   name's file mode through `get`, and the tree `write` gives, or its code and
-        //!   error) are compared.
+        //! - Steps: each side runs the same inserts (wanting the entry back or not), removals and
+        //!   clears over a bare repository of its own holding the same blob and empty tree, the
+        //!   inserts including every kind libgit2 refuses (bad names, the unreadable mode, the zero
+        //!   id, a missing object, an object of the wrong type) and replacements in place. After
+        //!   each step, the step's outcome (the entry handed back, or the error) and the builder's
+        //!   state (its count, every name's file mode through `get`, and the tree `write` gives, or
+        //!   its code and error) are compared.
         //! - Writing and inserting without an object database (a repository without a git
         //!   directory) fail alike, code included.
-        //! - Allocation failures: libgit2's allocator fails its `k`-th allocation inside an
-        //!   insert and a write, for each `k` until they succeed; both sides must fail alike
-        //!   and leave their builders alike. This runs alone in a child process.
-        //! - Walk callbacks: `git_tree_walk` over one nested tree, with a C callback, and
-        //!   with a C callback handing each entry (copied) and root to
-        //!   [`WalkCallback::call`] and returning its answer, visit the same entries under
-        //!   the same roots and return and leave the same, in both orders, for answers that
-        //!   continue, skip and stop with `GIT_EUSER`, and for a subtree the object
-        //!   database lacks. The public walk, `TreeRef::walk`, over a tree of the Rust
-        //!   side's own repository, must do the same as `git_tree_walk` over the C side's,
+        //! - Allocation failures: libgit2's allocator fails its `k`-th allocation inside an insert
+        //!   and a write, for each `k` until they succeed; both sides must fail alike and leave
+        //!   their builders alike. This runs alone in a child process.
+        //! - Walk callbacks: `git_tree_walk` over one nested tree, with a C callback, and with a C
+        //!   callback handing each entry (copied) and root to [`WalkCallback::call`] and returning
+        //!   its answer, visit the same entries under the same roots and return and leave the same,
+        //!   in both orders, for answers that continue, skip and stop with `GIT_EUSER`, and for a
+        //!   subtree the object database lacks. The public walk, `TreeRef::walk`, over a tree of
+        //!   the Rust side's own repository, must do the same as `git_tree_walk` over the C side's,
         //!   its `Ok(Continue)` standing for 0 and `Ok(Break)` for `GIT_EUSER`.
-        //! - Filters: `TreeBuilderMut::remove_if` and `git_treebuilder_filter`, over
-        //!   builders filled alike, lend the same entries in the same order, remove the
-        //!   same ones and leave the same builders, run after run.
+        //! - Filters: `TreeBuilderMut::remove_if` and `git_treebuilder_filter`, over builders
+        //!   filled alike, lend the same entries in the same order, remove the same ones and leave
+        //!   the same builders, run after run.
         //!
         //! Documented divergences, outside these comparisons:
         //!
-        //! - `insert`, `insert_entry` and `remove` return libgit2's error without its code,
-        //!   which is always `-1`; the C side checks that.
-        //! - A name of more than 65535 bytes, which libgit2 inserts while reporting
-        //!   nothing and then writes as a corrupt tree, is refused in Rust (the unit test
+        //! - `insert`, `insert_entry` and `remove` return libgit2's error without its code, which
+        //!   is always `-1`; the C side checks that.
+        //! - A name of more than 65535 bytes, which libgit2 inserts while reporting nothing and
+        //!   then writes as a corrupt tree, is refused in Rust (the unit test
         //!   `overlong_names_are_refused` keeps the corrected behaviour).
-        //! - An id of another type than the repository's, for a mode libgit2 looks up, is
-        //!   refused in Rust (`GIT_ERROR_INVALID`), where libgit2 formats it out of bounds
-        //!   while looking it up (`tests/ub_safe/tree.rs`,
+        //! - An id of another type than the repository's, for a mode libgit2 looks up, is refused
+        //!   in Rust (`GIT_ERROR_INVALID`), where libgit2 formats it out of bounds while looking it
+        //!   up (`tests/ub_safe/tree.rs`,
         //!   `routines::ids_of_another_type_are_refused_before_the_lookup`).
-        //! - A closure stops a walk with `GIT_EUSER` alone, where a C callback may return
-        //!   any negative value.
+        //! - A closure stops a walk with `GIT_EUSER` alone, where a C callback may return any
+        //!   negative value.
 
-        use super::*;
+        use std::ffi::c_char;
+        use std::ops::ControlFlow;
+
         use libgit2::libgit2::object::tree::{
             TreeBuilderFilter, TreeEntryRef, WalkAction, WalkCallback, WalkMode,
         };
         use libgit2::libgit2::util::errors::ErrorCode;
-        use std::ffi::c_char;
-        use std::ops::ControlFlow;
+
+        use super::*;
 
         /// An id each side spells alike: `id(byte)`, the zero id, or an object written
         /// into each side's repository.
@@ -3257,7 +3255,7 @@ mod tree_object {
         let path = std::env::temp_dir().join(format!("crustify-tree-equiv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         let path_str = path.to_str().unwrap().to_owned();
-        let leaf: Vec<u8> = b"100644 leaf\0".iter().copied().chain([0x5a; 20]).collect();
+        let leaf: Vec<u8> = b"100644 leaf\0".iter().copied().chain([0x5A; 20]).collect();
         let objects: Vec<(Vec<u8>, ffi::git_object_t)> = vec![
             (b"100644 one\0short".to_vec(), ffi::GIT_OBJECT_TREE),
             (
@@ -3372,7 +3370,7 @@ mod tree_object {
             id: [0; 32],
         };
         probes.push(missing);
-        missing.id[..20].fill(0xde);
+        missing.id[..20].fill(0xDE);
         probes.push(missing);
         probes
     }

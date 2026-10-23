@@ -359,7 +359,7 @@ mod prettify {
     )]
     fn messages_are_read_during_the_call_only() {
         let comments = if cfg!(bsan) {
-            vec![None, Some(b'#'), Some(0xff)]
+            vec![None, Some(b'#'), Some(0xFF)]
         } else {
             std::iter::once(None)
                 .chain((0..=u8::MAX).map(Some))

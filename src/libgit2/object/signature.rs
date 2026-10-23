@@ -178,17 +178,19 @@ fn adopted(rc: c_int, signature: Option<SignatureBox>) -> Result<SignatureBox, R
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use crate::libgit2::core::common::{SearchPathLevel, set_search_path};
-    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
-    use crate::libgit2::util::errors::{ErrorClass, ErrorCode, last};
-    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use core::ffi::{CStr, c_void};
     use core::ptr::NonNull;
     use std::ffi::CString;
     use std::path::PathBuf;
     use std::process::Command;
-    use std::sync::atomic::{AtomicIsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicIsize;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::libgit2::core::common::{SearchPathLevel, set_search_path};
+    use crate::libgit2::repository::repository::{Repository, RepositoryBox};
+    use crate::libgit2::util::errors::{ErrorClass, ErrorCode, last};
+    use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -248,6 +250,7 @@ mod unit_tests {
             LIVE.fetch_add(isize::from(p.is_some()), SeqCst);
             p
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -261,6 +264,7 @@ mod unit_tests {
             LIVE.fetch_add(isize::from(fresh && q.is_some()), SeqCst);
             q
         }
+
         unsafe fn free(p: NonNull<u8>) {
             LIVE.fetch_sub(1, SeqCst);
             // SAFETY: `p` is a live libc block the caller gives up.

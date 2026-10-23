@@ -3,19 +3,17 @@
 //! A `git_strarray` is `count` NUL-terminated strings, `strings`. libgit2 never
 //! allocates the struct itself, and uses it in two directions under two contracts:
 //!
-//! - **Results.** `git_reference_list`, `git_tag_list`, `git_remote_list`,
-//!   `git_worktree_list`, `GIT_OPT_GET_EXTENSIONS` and the like fill a caller's struct
-//!   with an array and strings from libgit2's allocator (a detached `git_vector` of
-//!   `git__strdup` copies), which the struct then owns: `git_strarray_dispose` frees
-//!   every string, then the array, with `git__free`, and zeroes the struct. Rust holds
-//!   such a struct by value as a [`StrArrayVal`], which disposes it on drop. The strings
-//!   move in and out as an [`OdbDataStrVec`], the counted run of libgit2-allocated
+//! - **Results.** `git_reference_list`, `git_tag_list`, `git_remote_list`, `git_worktree_list`,
+//!   `GIT_OPT_GET_EXTENSIONS` and the like fill a caller's struct with an array and strings from
+//!   libgit2's allocator (a detached `git_vector` of `git__strdup` copies), which the struct then
+//!   owns: `git_strarray_dispose` frees every string, then the array, with `git__free`, and zeroes
+//!   the struct. Rust holds such a struct by value as a [`StrArrayVal`], which disposes it on drop.
+//!   The strings move in and out as an [`OdbDataStrVec`], the counted run of libgit2-allocated
 //!   strings that the same `git__free` releases.
-//! - **Arguments.** `const git_strarray *` parameters (pathspecs, refspecs, custom
-//!   headers) and the by-value `git_strarray` fields of options structs are only read:
-//!   libgit2 copies what it keeps and never writes or frees the caller's array. Rust
-//!   builds one over borrowed strings as a [`StrArrayView`], which allocates nothing
-//!   from libgit2 and hands out only the shared handle.
+//! - **Arguments.** `const git_strarray *` parameters (pathspecs, refspecs, custom headers) and the
+//!   by-value `git_strarray` fields of options structs are only read: libgit2 copies what it keeps
+//!   and never writes or frees the caller's array. Rust builds one over borrowed strings as a
+//!   [`StrArrayView`], which allocates nothing from libgit2 and hands out only the shared handle.
 //!
 //! Both forms reach C, and the getters, through [`StrArrayRef`]; only an owned array
 //! has a [`StrArrayMut`], whose setters free what they replace.
@@ -70,7 +68,10 @@ define_ctype!(
     /// [`StrArrayRef::to_str_array`], which allocates.
     ///
     /// Wraps: git_strarray
-    StrArray, StrArrayRef, StrArrayMut, ffi::git_strarray
+    StrArray,
+    StrArrayRef,
+    StrArrayMut,
+    ffi::git_strarray
 );
 
 // SAFETY: an owned `StrArray` is a pointer to an array of pointers to strings, all of
@@ -251,8 +252,8 @@ impl<'a> StrArrayRef<'a> {
 }
 
 impl<'a> IntoIterator for StrArrayRef<'a> {
-    type Item = &'a CStr;
     type IntoIter = Iter<'a>;
+    type Item = &'a CStr;
 
     fn into_iter(self) -> Iter<'a> {
         self.iter()
@@ -472,16 +473,19 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod unit_tests {
+    use core::ffi::{c_int, c_void};
+    use core::mem::size_of;
+    use std::ffi::CString;
+    use std::process::Command;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use ffibox::CDispose;
+
     use super::*;
     use crate::libgit2::raw::OdbDataStrFree;
     use crate::libgit2::util::sys::alloc::{Alloc, Allocator};
     use crate::libgit2::util::sys::errors::runtime_pinned;
-    use core::ffi::{c_int, c_void};
-    use core::mem::size_of;
-    use ffibox::CDispose;
-    use std::ffi::CString;
-    use std::process::Command;
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
 
@@ -525,6 +529,7 @@ mod unit_tests {
             // SAFETY: plain libc allocation.
             NonNull::new(unsafe { malloc(len) }.cast())
         }
+
         unsafe fn realloc(
             p: Option<NonNull<u8>>,
             len: usize,
@@ -538,6 +543,7 @@ mod unit_tests {
             // SAFETY: `p` is NULL or a live libc block the caller gives up on success.
             NonNull::new(unsafe { realloc(p, len) }.cast())
         }
+
         unsafe fn free(p: NonNull<u8>) {
             // SAFETY: `p` is a live libc block the caller gives up.
             unsafe { free(p.as_ptr().cast()) }

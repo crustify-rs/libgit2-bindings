@@ -66,7 +66,8 @@ mod callback {
     use std::ffi::{CStr, CString};
     use std::process::Command;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::thread;
 
     use libgit2::libgit2::core::trace::{TraceCallback, TraceLevel, Tracer};

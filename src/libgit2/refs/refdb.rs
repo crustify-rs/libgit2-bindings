@@ -13,12 +13,12 @@
 //! takes one of its own. So Rust holds a refdb in one of two owners, both released by
 //! [`RefdbFree`]:
 //!
-//! - [`RefdbBox`], a reference known to be the only one: what [`Refdb::open`] and
-//!   [`Refdb::new`] build. It lends the exclusive [`RefdbMut`] handle.
-//! - [`RefdbArc`], one of several references, the others held by libgit2 (a
-//!   repository's own database). It lends the shared [`RefdbRef`] handle only, and does
-//!   not clone, having no up_ref to call. A [`RefdbBox`] converts into one
-//!   (`RefdbArc::from`) before libgit2 is given a reference of its own.
+//! - [`RefdbBox`], a reference known to be the only one: what [`Refdb::open`] and [`Refdb::new`]
+//!   build. It lends the exclusive [`RefdbMut`] handle.
+//! - [`RefdbArc`], one of several references, the others held by libgit2 (a repository's own
+//!   database). It lends the shared [`RefdbRef`] handle only, and does not clone, having no up_ref
+//!   to call. A [`RefdbBox`] converts into one (`RefdbArc::from`) before libgit2 is given a
+//!   reference of its own.
 //!
 //! # The repository
 //!
@@ -177,12 +177,12 @@ pub struct RefdbMut<'a, 'r>(
 // invariant in the refdb through its `PhantomData<&'a mut Refdb<'r>>`.
 unsafe impl<'r> CCell for Refdb<'r> {
     type C = ffi::git_refdb;
-    type Ref<'a>
-        = RefdbRef<'a, 'r>
-    where
-        Self: 'a;
     type Mut<'a>
         = RefdbMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = RefdbRef<'a, 'r>
     where
         Self: 'a;
 }
@@ -323,8 +323,8 @@ impl<'r> Refdb<'r> {
     /// when the last reference to the refdb is dropped. On failure the caller still
     /// owns it. Fails, with libgit2's error:
     ///
-    /// - when `backend`'s `version` is not one libgit2 knows (`GIT_ERROR_INVALID`,
-    ///   "invalid version `n` on git_refdb_backend");
+    /// - when `backend`'s `version` is not one libgit2 knows (`GIT_ERROR_INVALID`, "invalid version
+    ///   `n` on git_refdb_backend");
     /// - when a member libgit2 requires is unset, or `lock` is set without `unlock`
     ///   (`GIT_EINVALID`, "incomplete refdb backend implementation");
     /// - when libgit2 runs out of memory.
@@ -460,11 +460,10 @@ impl std::error::Error for UnnamedRefdbType {}
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-
     use std::ffi::CString;
     use std::path::PathBuf;
 
+    use super::*;
     use crate::libgit2::repository::repository::RepositoryBox;
     use crate::libgit2::util::errors::ErrorClass;
 

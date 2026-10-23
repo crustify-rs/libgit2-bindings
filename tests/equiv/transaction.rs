@@ -1,11 +1,12 @@
 //! Independently owned C/Rust transaction inputs; compare lifecycle effects after
 //! every lock/write/drop step. Raw manipulation is only for not-yet-wrapped symbols.
 use core::ptr;
+use std::ffi::{CStr, CString};
+
 use libgit2::ffi;
 use libgit2::libgit2::config::config::Config;
 use libgit2::libgit2::refs::transaction::Transaction;
 use libgit2::libgit2::repository::repository::Repository;
-use std::ffi::{CStr, CString};
 
 fn path(tag: &str) -> (std::path::PathBuf, CString) {
     let p = std::env::temp_dir().join(format!("crustify-equiv-tx-{}-{tag}", std::process::id()));
@@ -191,7 +192,8 @@ fn add_file(cfg: *mut ffi::git_config, path: &CStr, level: ffi::git_config_level
     assert_eq!(rc, 0);
 }
 
-/// Regression for `crustify/reviews/.../config/wave-0/batch-0/equiv/config-lock-discards-error-code`:
+/// Regression for
+/// `crustify/reviews/.../config/wave-0/batch-0/equiv/config-lock-discards-error-code`:
 /// the safe lock reports libgit2's code. Each side locks its own config through an
 /// empty config, a held lock file, a free one, then two file backends where the
 /// higher-priority file is the writer, its lock held, then free; every step compares

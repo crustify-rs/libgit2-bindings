@@ -3,14 +3,12 @@
 //!
 //! Three sources of arrays, each produced twice, independently, one copy per side:
 //!
-//! - libgit2's own results: `GIT_OPT_GET_EXTENSIONS`, a detached `git_vector` of
-//!   `git__strdup` copies with spare capacity, and, with every builtin disabled, a
-//!   non-NULL array of no strings. The Rust side adopts its copy as libgit2 hands it
-//!   over, as the producers' wrappers will.
-//! - copies, built as `git_strarray_copy` builds them (hidden in libgit2.so, so rebuilt
-//!   here over the exported allocator, in its order: `git__calloc` the array, then
-//!   `git__strdup` each string), against [`StrArray::from_strs`] and
-//!   [`StrArrayRef::to_str_array`].
+//! - libgit2's own results: `GIT_OPT_GET_EXTENSIONS`, a detached `git_vector` of `git__strdup`
+//!   copies with spare capacity, and, with every builtin disabled, a non-NULL array of no strings.
+//!   The Rust side adopts its copy as libgit2 hands it over, as the producers' wrappers will.
+//! - copies, built as `git_strarray_copy` builds them (hidden in libgit2.so, so rebuilt here over
+//!   the exported allocator, in its order: `git__calloc` the array, then `git__strdup` each
+//!   string), against [`StrArray::from_strs`] and [`StrArrayRef::to_str_array`].
 //! - argument arrays, a `char *` array C code builds over its own strings, against a
 //!   [`StrArrayView`].
 //!
@@ -24,16 +22,15 @@
 //!
 //! Documented divergences, outside these comparisons:
 //!
-//! - `free(NULL)` is not recorded: disposing an array without a buffer in Rust never
-//!   calls libgit2 (`StrArrayDispose` skips a NULL `strings`, which would otherwise read
-//!   the allocator unsynchronised against a concurrent first `git_libgit2_init`), where
-//!   C code passes NULL to `git__free`, a no-op the allocator still sees.
-//! - `git_strarray_copy` silently skips NULL elements of its source; no Rust array can
-//!   hold one (views are built from `&CStr`, owned runs refuse them), and libgit2's
-//!   producers store none.
-//! - A handle over an array whose `strings` is NULL with a non-zero `count` (no libgit2
-//!   path produces one) reads as empty in Rust; C code would dereference NULL. The
-//!   module's `unit_tests` cover it.
+//! - `free(NULL)` is not recorded: disposing an array without a buffer in Rust never calls libgit2
+//!   (`StrArrayDispose` skips a NULL `strings`, which would otherwise read the allocator
+//!   unsynchronised against a concurrent first `git_libgit2_init`), where C code passes NULL to
+//!   `git__free`, a no-op the allocator still sees.
+//! - `git_strarray_copy` silently skips NULL elements of its source; no Rust array can hold one
+//!   (views are built from `&CStr`, owned runs refuse them), and libgit2's producers store none.
+//! - A handle over an array whose `strings` is NULL with a non-zero `count` (no libgit2 path
+//!   produces one) reads as empty in Rust; C code would dereference NULL. The module's `unit_tests`
+//!   cover it.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};

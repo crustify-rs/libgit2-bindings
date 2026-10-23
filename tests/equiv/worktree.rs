@@ -21,10 +21,9 @@
 /// directories exist.
 mod prune_options {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::worktree::{
@@ -76,8 +75,8 @@ mod prune_options {
     /// pattern, and what it left there.
     fn c_init(version: u32) -> (c_int, ffi::git_worktree_prune_options) {
         let mut raw = ffi::git_worktree_prune_options {
-            version: 0xdead_beef,
-            flags: 0xdead_beef,
+            version: 0xDEAD_BEEF,
+            flags: 0xDEAD_BEEF,
         };
         // SAFETY: `raw` is a live struct the call may write; any version is accepted
         // as input (a wrong one is refused with an error).
@@ -144,7 +143,7 @@ mod prune_options {
             assert_eq!(rc, -1, "{version}");
             assert_eq!(
                 (c.version, c.flags),
-                (0xdead_beef, 0xdead_beef),
+                (0xDEAD_BEEF, 0xDEAD_BEEF),
                 "{version}"
             );
             assert_eq!(
@@ -581,12 +580,11 @@ mod prune_options {
 mod worktree_box {
     use std::collections::HashMap;
     use std::ffi::{CStr, CString, c_char, c_int, c_void};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
     use std::process::Command;
-    use std::ptr;
     use std::sync::Mutex;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::worktree::WorktreeBox;
@@ -1061,11 +1059,10 @@ mod worktree_box {
 /// timezone lookup ThreadSanitizer reports against concurrent tests.
 mod add_options {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::mem::MaybeUninit;
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::refs::refs::ReferenceBox;
@@ -1103,7 +1100,7 @@ mod add_options {
         let mut raw = MaybeUninit::<ffi::git_worktree_add_options>::uninit();
         let size = size_of::<ffi::git_worktree_add_options>();
         // SAFETY: `raw` is writable storage of `size` bytes.
-        unsafe { ptr::write_bytes(raw.as_mut_ptr().cast::<u8>(), 0xa5, size) };
+        unsafe { ptr::write_bytes(raw.as_mut_ptr().cast::<u8>(), 0xA5, size) };
         // SAFETY: `raw` is writable storage for the struct; a refused version leaves it
         // untouched.
         let rc = unsafe { ffi::git_worktree_add_options_init(raw.as_mut_ptr(), version) };
@@ -1225,7 +1222,7 @@ mod add_options {
         // The versions Rust offers no constructor for: C refuses each, leaving the
         // struct as it was.
         init();
-        let untouched = vec![0xa5; size_of::<ffi::git_worktree_add_options>()];
+        let untouched = vec![0xA5; size_of::<ffi::git_worktree_add_options>()];
         for version in [0, 2, 3, u32::MAX] {
             assert_eq!(c_init_bytes(version), (-1, untouched.clone()), "{version}");
             assert_eq!(
@@ -2038,10 +2035,9 @@ mod add_options {
 /// that is not a worktree, or none).
 mod routines {
     use std::ffi::{CStr, CString, c_int};
-    use std::fs;
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
-    use std::ptr;
+    use std::{fs, ptr};
 
     use libgit2::ffi;
     use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};

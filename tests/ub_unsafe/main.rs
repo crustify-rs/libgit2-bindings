@@ -15,5 +15,5 @@ mod sys_alloc;
 mod sys_odb_backend;
 mod trace;
 
-mod sys_config;
 mod diff;
+mod sys_config;
