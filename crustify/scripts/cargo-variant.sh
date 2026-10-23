@@ -14,6 +14,8 @@ host=x86_64-unknown-linux-gnu
 export CRUSTIFY_BUILD_VARIANT=$variant
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$here/target/$variant}
 cd "$here"
+# The nightly the workspace pins, for the sanitizers that need it.
+nightly=$(sed -n 's/^nightly = "\(.*\)"$/\1/p' Cargo.toml)
 # Cargo's own flags must come before a `--`, which hands the rest to the test binaries.
 pre=() post=()
 for arg in "$@"; do
@@ -30,12 +32,12 @@ case $variant in
     export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -Zsanitizer=address"
     export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:abort_on_error=1}
     export UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}
-    exec cargo +nightly "${pre[@]}" --target $host "${post[@]}" ;;
+    exec cargo "+$nightly" "${pre[@]}" --target $host "${post[@]}" ;;
   tsan)
     export RUSTFLAGS="${RUSTFLAGS:-} -Zsanitizer=thread"
     export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -Zsanitizer=thread"
     export TSAN_OPTIONS=${TSAN_OPTIONS:-halt_on_error=1}
-    exec cargo +nightly "${pre[@]}" -Zbuild-std --target $host "${post[@]}" ;;
+    exec cargo "+$nightly" "${pre[@]}" -Zbuild-std --target $host "${post[@]}" ;;
   bsan)
     # trybuild's nested cargo build does not finish under BorrowSanitizer, and the
     # compile-fail suite is a compile-time check the plain variant already runs.

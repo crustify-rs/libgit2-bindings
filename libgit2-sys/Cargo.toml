@@ -2,8 +2,10 @@
 name = "libgit2-sys"
 description = "Raw bindgen bindings to libgit2's public API, linked against a crustify prebuild."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 links = "git2"
 build = "build.rs"

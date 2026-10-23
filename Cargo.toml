@@ -2,6 +2,7 @@
 name = "libgit2"
 description = "Safe Rust wrappers over libgit2's public API."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -44,10 +45,14 @@ members = [".", "libgit2-sys"]
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.99"
 version = "0.1.0"
 license = "GPL-2.0-only WITH GCC-exception-2.0"
 repository = "https://github.com/crustify-rs/libgit2-bindings"
 publish = false
+
+[workspace.metadata.crustify]
+nightly = "nightly-2026-10-08"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
