@@ -1,14 +1,15 @@
 {
  "_comment": [
-  "C test baseline of campaign 20261008-170008 at the campaign base revision,",
-  "one record per crustify/build.json variant (version 1), from crustify/tmp/scripts/c-suites.sh (untracked scratch):",
-  "every offline libgit2 clar suite and every util suite run in isolation. Excluded ctest",
-  "targets: invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online,",
-  "online_customcert, proxy, auth_clone, auth_clone_and_push (network, servers or",
-  "invasive filesystem changes). Sanitizer-only nonzero suites are pre-existing C",
-  "findings; post-campaign runs must match this record."
+  "C test baseline at the campaign base revision, one record per crustify/artifacts/build.json variant,",
+  "from crustify/tmp/scripts/c-suites.sh (untracked scratch): every offline libgit2 clar suite and every util suite run",
+  "in isolation. Excluded ctest targets: invasive, gitdaemon, gitdaemon_namespace, gitdaemon_sha256, ssh, online,",
+  "online_customcert, proxy, auth_clone, auth_clone_and_push (network, servers or invasive filesystem changes).",
+  "Sanitizer-only nonzero suites are pre-existing C findings; post-campaign runs must match this record.",
+  "build.json version 3 (2026-10-24): every variant links OpenSSL, PCRE2 and zlib from the side campaigns' installs",
+  "of the same variant; plain, coverage, asan-ubsan and tsan ran again against them and match the version-1 records",
+  "exactly; the bsan record is version 1's until its rerun completes."
  ],
- "build_json_version": 1,
+ "build_json_version": 3,
  "variants": {
   "plain": {
    "passed": 3443,

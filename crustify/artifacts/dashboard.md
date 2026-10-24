@@ -16,7 +16,7 @@ and in Notes.
 - **workload** — max-types `2`, max-syms `25`, max-loc `500`, parallelism `16`
 - **review-workload** — orchestrator's choice: max-types `20`, max-syms `100`
 - **sanitizers** — `asan-ubsan`, `tsan`, `bsan`
-- **target-config** — default, deprecated features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate auth and i18n off, threads on; `build.json` version `2`
+- **target-config** — default, deprecated features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate auth and i18n off, threads on; OpenSSL, PCRE2 and zlib from the side campaigns' installs of each variant; `build.json` version `3`
 
 ## Legend
 
@@ -1247,3 +1247,40 @@ rewritten onto `c/`, keeping every commit; the old hashes map to the new ones in
   dependency was repointed at the root crate.
 - `Module stats` keeps one row per subsystem until the modules' rows can be filled.
   `planners` now holds `planner/run-1`, the former run 0, and the two `Σ` rows include it.
+
+### Lint conformance
+
+On 2026-10-24 the workspace took `specs/rust.md`'s lint table, deny levels included, and
+was brought to build without a warning under it (`d499792e3`), by hand and by scripts
+the orchestrator ran, outside any wave: 801 unsafe blocks held several operations and
+are split to one each, with its own SAFETY comment; 325 fallible and 143 panicking
+public fns gained `# Errors` and `# Panics` (or, for a panic that cannot happen, a local
+`#[expect(clippy::missing_panics_doc)]` naming why); 93 items gained docs; about 450
+lossy or trivial casts became `cast_signed`/`cast_unsigned`, `try_from` or the low byte
+of `to_le_bytes`; and the pedantic lints test scenarios trip on purpose take local
+`#[expect]`s with reasons. No behaviour changed: every suite passes as before. The
+change has no batch row and no agent cost.
+
+### The Rust tree homed per translation unit
+
+Also on 2026-10-24, the tree moved from the old subsystem modules to planner run 2's
+modules, one per TU at its path below the C root (`324180e8f`):
+`libgit2::object::commit` is now `libgit2::src::libgit2::commit`, the typed lookups and
+dups of blob, commit, tag and tree are in `object_api`, `core::common` is `settings` and
+`libgit2`, and so on; the test suites follow, as `tests/<suite>/<TU path>.rs`, a TU's
+`sys/` header tests as its `sys` module. Each item went where the todo waves home it; the
+done waves keep the homes they ran with, so their rows above name the old files.
+
+### Side campaigns set up
+
+The out-of-tree libraries got their wrappers' side campaigns, beside this repository:
+`openssl-bindings` (libcrypto, libssl), `pcre2-bindings` (libpcre2-8) and `zlib-bindings`
+(libz), new, and `glibc-bindings` (libc), continued, with this campaign as its second
+parent. Each new one holds its library at the release libgit2 links under `c/`, the
+settings, a dashboard, its builds (installed once per variant of this campaign, with the
+same instrumentation), its own test suite as baseline and wavefront's CodeQL tables;
+none has a Rust tree yet, nor a pin here, until its first planner run plans it. They
+are not on `crustify-rs` yet. `build.json` version 3 links every variant of libgit2 to
+those installs, libc staying the system's; the C baseline ran again against them, and
+`libgit2-sys` puts the installs on the test binaries' rpath.
+

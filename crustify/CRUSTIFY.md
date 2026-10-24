@@ -97,4 +97,7 @@ phase have been completed. It started in a libgit2 checkout at `/target`, with t
 campaign under `crustify/` and the Rust under `crustify/rust/`, and moved to this
 repository, with the C under `c/` and the Rust at its root, on 2026-10-23. In this
 session we re-plan the whole campaign, the work that has landed included, to observe how
-the current specs would have planned it, and then pause.
+the current specs would have planned it; bring the landed tree to the current specs (the
+lint table, the per-TU homes), leaving the done waves of `schedule.json` as they ran; set
+up the side campaigns of the out-of-tree libraries; ship `crustify/devel` to `main`; and
+then pause.

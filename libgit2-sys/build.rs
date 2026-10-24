@@ -44,6 +44,27 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", build_dir.display());
     println!("cargo:rustc-link-lib=dylib=git2");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
+    // libgit2 links OpenSSL, PCRE2 and zlib from their side campaigns' installs of the same
+    // variant (`crustify/artifacts/dependencies.json`): their library directories go on the
+    // search path, and to dependents (`DEP_GIT2_DEP_LIB_DIRS`) for their rpath, so a test
+    // binary that links one of them directly loads the very library libgit2 was built
+    // against, instrumented as it is.
+    let mut dep_dirs = Vec::new();
+    for wrapper in ["openssl-bindings", "pcre2-bindings", "zlib-bindings"] {
+        let lib = repo
+            .join("..")
+            .join(wrapper)
+            .join("crustify/builds")
+            .join(&variant)
+            .join("install/lib");
+        if lib.is_dir() {
+            println!("cargo:rustc-link-search=native={}", lib.display());
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib.display());
+            dep_dirs.push(lib.display().to_string());
+        }
+    }
+    println!("cargo:dep_lib_dirs={}", dep_dirs.join(":"));
+    println!("cargo:variant={variant}");
     println!("cargo:build_dir={}", build_dir.display());
 
     for f in ["wrapper.h", "shims.h", "shims.c"] {

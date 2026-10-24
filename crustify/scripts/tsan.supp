@@ -1,0 +1,7 @@
+# TSan suppressions for the campaign's tsan variant (crustify/scripts/cargo-variant.sh).
+#
+# glibc's tzset (reached through mktime/localtime from git_signature_now, on every reflog
+# write) updates its timezone state under an internal __libc_lock that ThreadSanitizer
+# cannot see, glibc not being instrumented: two threads writing reflogs are reported as a
+# race on the strings tzset_internal frees and strdups. The state is lock-protected.
+race:tzset_internal

@@ -36,7 +36,8 @@ case $variant in
   tsan)
     export RUSTFLAGS="${RUSTFLAGS:-} -Zsanitizer=thread"
     export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -Zsanitizer=thread"
-    export TSAN_OPTIONS=${TSAN_OPTIONS:-halt_on_error=1}
+    # glibc's tzset locks what TSan cannot see: see tsan.supp.
+    export TSAN_OPTIONS=${TSAN_OPTIONS:-halt_on_error=1:suppressions=$here/crustify/scripts/tsan.supp}
     exec cargo "+$nightly" "${pre[@]}" -Zbuild-std --target $host "${post[@]}" ;;
   bsan)
     # trybuild's nested cargo build does not finish under BorrowSanitizer, and the
