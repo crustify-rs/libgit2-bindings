@@ -1,6 +1,6 @@
 // A handle lent by a `RustWriteStream` cannot outlive it: the stream's box is freed
 // when the owner drops.
-use libgit2::libgit2::core::types::RustWriteStream;
+use libgit2::libgit2::src::libgit2::filter::RustWriteStream;
 
 fn main() {
     let mut stream = RustWriteStream::new(Vec::new());

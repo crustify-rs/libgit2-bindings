@@ -1,5 +1,5 @@
 // A handle borrowed from an `OdbDataBox` cannot outlive the box.
-use libgit2::libgit2::raw::OdbDataBox;
+use libgit2::libgit2::src::libgit2::odb::OdbDataBox;
 
 #[repr(C)]
 pub struct pair_st {

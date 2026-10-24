@@ -1,5 +1,5 @@
 // `add` keeps pointers into the id it is given: the id must outlive the shortener.
-use libgit2::libgit2::oid::oid::OidShortener;
+use libgit2::libgit2::src::libgit2::oid::OidShortener;
 
 fn main() {
     let mut shortener = OidShortener::new(0).unwrap();

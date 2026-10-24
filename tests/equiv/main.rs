@@ -1,43 +1,6 @@
 //! Functional equivalence tests: the raw C implementation and the public Rust API run on
-//! equivalent, independently owned inputs. Each tested TU gets a module here, homed in
-//! `tests/equiv/<tu>.rs`.
+//! equivalent, independently owned inputs. Each tested TU gets a module, homed at
+//! its path below the C root, in `tests/equiv/<TU path>.rs` (`src/libgit2/commit.rs` for
+//! `src/libgit2/commit.c`); the tests of a TU's `sys/` header are its `sys` module.
 
-mod annotated_commit;
-mod blob;
-mod buffer;
-mod checkout;
-mod commit;
-mod common;
-mod config;
-mod diff;
-mod errors;
-mod filter;
-mod global;
-mod index;
-mod mailmap;
-mod message;
-mod notes;
-mod object;
-mod odb;
-mod oid;
-mod oidarray;
-mod pathspec;
-mod refdb;
-mod refs;
-mod repository;
-mod signature;
-mod strarray;
-mod sys_alloc;
-mod sys_commit;
-mod sys_config;
-mod sys_errors;
-mod sys_index;
-mod sys_odb_backend;
-mod sys_path;
-mod sys_repository;
-mod tag;
-mod trace;
-mod transaction;
-mod tree;
-mod types;
-mod worktree;
+mod src;

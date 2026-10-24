@@ -1,8 +1,8 @@
 // The options cannot outlive the tree owner their baseline tree was borrowed from.
-use libgit2::libgit2::object::tree::Tree;
-use libgit2::libgit2::oid::oid::{Oid, OidType};
-use libgit2::libgit2::repository::repository::RepositoryBox;
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::tree::Tree;
+use {libgit2::libgit2::src::libgit2::oid::Oid, libgit2::libgit2::src::libgit2::oid::OidType};
+use libgit2::libgit2::src::libgit2::repository::RepositoryBox;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn escape(repo: RepositoryBox) {
     let id = Oid::zero(OidType::Sha1);

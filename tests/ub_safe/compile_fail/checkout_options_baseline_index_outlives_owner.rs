@@ -1,6 +1,6 @@
 // The options cannot outlive the index owner their baseline index was borrowed from.
-use libgit2::libgit2::index::index::Index;
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::index::Index;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let index = Index::new().unwrap();

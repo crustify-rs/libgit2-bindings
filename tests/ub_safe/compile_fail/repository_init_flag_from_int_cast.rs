@@ -1,6 +1,6 @@
 // An integer cannot be cast into `InitFlag`: `from_raw` is the only way in, and it
 // rejects values without a variant.
-use libgit2::libgit2::repository::repository::InitFlag;
+use libgit2::libgit2::src::libgit2::repository::InitFlag;
 
 fn main() {
     let raw: u32 = 4;

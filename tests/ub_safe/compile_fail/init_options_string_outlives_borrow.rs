@@ -1,7 +1,7 @@
 // The init options cannot outlive a string their setter borrowed.
 use std::ffi::CString;
 
-use libgit2::libgit2::repository::repository::InitOptions;
+use libgit2::libgit2::src::libgit2::repository::InitOptions;
 
 fn main() {
     let mut options = InitOptions::new();

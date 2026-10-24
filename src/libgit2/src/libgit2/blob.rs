@@ -1,0 +1,2336 @@
+//! Safe wrappers over `include/git2/blob.h`.
+//!
+//! # Blobs
+//!
+//! A [`Blob`] is a `git_blob`: the content of a file, as a repository's object
+//! database stores it. libgit2 publishes no field. The struct starts with the
+//! `git_object` every parsed object does, so a blob is an
+//! [`Object`](crate::libgit2::src::libgit2::object::Object) of type blob, and shares its
+//! ownership: one atomic count, which `git_blob_dup` (`git_object_dup`) increments on
+//! the same pointer and `git_blob_free` (`git_object_free`) decrements, freeing the
+//! blob, and the reference it holds to the object database's copy of the content, at
+//! zero. The repository's cache keeps no blob by default, so a lookup usually parses a
+//! fresh one its caller alone holds; with a cache limit set for blobs
+//! (`GIT_OPT_SET_CACHE_OBJECT_LIMIT`) it shares them as it does every other object. So
+//! the Rust owner is a [`BlobArc`], one counted reference that never proves itself the
+//! only one, and lends the shared handle [`BlobRef`] only.
+//!
+//! A blob keeps, uncounted, the repository it was looked up in, which
+//! `git_blob_owner` and `git_blob_filter` reach: it carries the lifetime `'r` of that
+//! repository's borrow, as an object does, and is neither `Send` nor `Sync`.
+//! [`Blob::lookup`] and [`Blob::lookup_prefix`] build one, refusing an id of another
+//! type than the repository's as
+//! [`Object::lookup`](crate::libgit2::src::libgit2::object::Object::lookup)
+//! does; [`Blob::from_object`] and [`BlobRef::from_object`] take an object of type blob
+//! as one, and [`Blob::into_object`] and [`BlobRef::as_object`] give a blob back as an
+//! object.
+//!
+//! A blob holds its content: [`BlobRef::content`] lends it in place, for as long as the
+//! blob is borrowed, and [`BlobRef::id`] and [`BlobRef::owner`] lend its id and its
+//! repository. [`BlobRef::filter`] copies the content out through the filters a
+//! working-directory path selects, which it loads as the [blob
+//! writers](#writing-blobs) do, refusing the paths they refuse.
+//!
+//! # Filter options
+//!
+//! A [`FilterOptions`] is a `git_blob_filter_options`, the options of `git_blob_filter`:
+//! a structure version, the [`FilterFlags`] it applies, a deprecated `reserved`
+//! pointer, and the id of the commit whose `.gitattributes`
+//! [`FilterFlag::AttributesFromCommit`] loads. It is a plain value the caller owns:
+//! libgit2 never allocates or frees one, and `git_blob_filter` refuses a version of 0
+//! or above [`FilterOptions::VERSION`] with `GIT_ERROR_INVALID`, then copies it and
+//! reads its flags and commit id for the call. [`FilterOptions::new`] fills one
+//! through `git_blob_filter_options_init`, as `GIT_BLOB_FILTER_OPTIONS_INIT` does: the
+//! current version, [`FilterFlags::OPTIONS_DEFAULT`], no `reserved` pointer and the
+//! zero id. All-zero is not that default (libgit2 refuses version 0), so there is no
+//! `zeroed`.
+//!
+//! libgit2 is built with `GIT_DEPRECATE_HARD`, under which `reserved` is a `void *`
+//! that no routine reads (without it, the field is the `git_oid *commit_id` that
+//! `git_blob_filter` would read instead of `attr_commit_id`). Rust never reads through
+//! it either, and lets safe code only clear it.
+//!
+//! # Filter flags
+//!
+//! A [`FilterFlag`] is a `git_blob_filter_flag_t`, one bit of the `uint32_t` `flags`
+//! of `git_blob_filter_options`; a [`FilterFlags`] set ORs them. `git_blob_filter`
+//! tests the four bits the header names, one at a time, and ignores every other, so a
+//! set keeps any bit it is given ([`FilterFlags::from_bits_retain`]) and passes it
+//! through unchanged.
+//!
+//! The empty set is [`FilterFlags`]'s `Default`, as for every flag set; the options'
+//! own default (`GIT_BLOB_FILTER_OPTIONS_INIT`, and `git_blob_filter_options_init`) is
+//! [`FilterFlags::OPTIONS_DEFAULT`], which holds [`FilterFlag::CheckForBinary`].
+//!
+//! # Binary content
+//!
+//! [`data_is_binary`] applies the binary-content heuristic `git_blob_is_binary` uses
+//! (core git's) to a byte slice. libgit2 reads the bytes for the call only and touches
+//! neither its allocator nor the thread's error state, so the check needs no
+//! initialised runtime and is safe from any thread.
+//!
+//! # Writing blobs
+//!
+//! Four routines write a blob into a repository's object database and give back its
+//! id, never a `git_blob`: [`create_from_buffer`] from bytes in memory,
+//! [`create_from_workdir`] from a file of the working directory and
+//! [`create_from_disk`] from any file, both through the filters its path selects (CRLF
+//! conversion, `ident`, ...), and [`create_from_stream`] from data written piece by
+//! piece into a [`BlobWriter`], committed with [`BlobWriter::commit`]. Each takes the
+//! repository's shared handle: libgit2 loads its object database, filters and
+//! attributes through it, filling the repository's caches, and keeps nothing of it
+//! but in a writer, which borrows it until it is committed or dropped.
+//!
+//! A filter list is loaded for a path relative to the working directory, and
+//! libgit2 asserts that it is (an absolute path fails a release build with
+//! `GIT_ERROR_INTERNAL` and aborts a debug one), so the wrappers taking a path that
+//! selects filters refuse an absolute one, with the release build's error, before
+//! calling libgit2. Loading a list also initialises the built-in filters the first
+//! time, which these wrappers order with the crate's other loads (see
+//! [`filter`](crate::libgit2::src::libgit2::filter#threads)).
+
+use core::ffi::{CStr, c_int};
+use core::fmt;
+use core::hash::{Hash, Hasher};
+use core::marker::PhantomData;
+use core::mem::MaybeUninit;
+use core::ops::{BitOr, BitOrAssign};
+use core::ptr::{self, NonNull, addr_of_mut};
+use std::io;
+
+use ffibox::{CArc, CBorrowedPtr, CCell, CZeroable, define_ctype};
+
+use crate::ffi;
+use crate::libgit2::src::libgit2::buf::{Buf, BufVal};
+use crate::libgit2::src::libgit2::filter::{
+    StreamError, WriteStreamBox, initialise_builtin_filters, relative,
+};
+use crate::libgit2::src::libgit2::object::{ObjectArc, ObjectRef, ObjectType, id_fits};
+use crate::libgit2::src::libgit2::object_api::BlobFree;
+use crate::libgit2::src::libgit2::oid::{Oid, OidMut, OidRef};
+use crate::libgit2::src::libgit2::repository::{RepositoryError, RepositoryRef};
+use crate::libgit2::src::util::errors::ErrorCode;
+
+/// One option of `git_blob_filter`, a single bit of a [`FilterFlags`] set
+/// (`git_blob_filter_flag_t`).
+///
+/// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
+/// a combination of bits, or a bit this version of libgit2's header does not name.
+///
+/// Wraps: `git_blob_filter_flag_t`
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum FilterFlag {
+    /// Leave a binary blob unfiltered: `git_blob_filter` succeeds without writing its
+    /// output when the blob's content looks binary.
+    CheckForBinary = ffi::GIT_BLOB_FILTER_CHECK_FOR_BINARY,
+    /// Do not load the system-wide `gitattributes` (in `/etc`, or the system's
+    /// equivalent).
+    NoSystemAttributes = ffi::GIT_BLOB_FILTER_NO_SYSTEM_ATTRIBUTES,
+    /// Also load the `.gitattributes` file of the `HEAD` commit.
+    AttributesFromHead = ffi::GIT_BLOB_FILTER_ATTRIBUTES_FROM_HEAD,
+    /// Also load the `.gitattributes` file of the commit the options'
+    /// `attr_commit_id` names.
+    AttributesFromCommit = ffi::GIT_BLOB_FILTER_ATTRIBUTES_FROM_COMMIT,
+}
+
+impl FilterFlag {
+    /// Every variant, in ascending bit order.
+    pub const ALL: [FilterFlag; 4] = [
+        Self::CheckForBinary,
+        Self::NoSystemAttributes,
+        Self::AttributesFromHead,
+        Self::AttributesFromCommit,
+    ];
+
+    /// The variant whose C value is `raw`; `None` for a value this version of
+    /// libgit2's header does not name.
+    #[must_use]
+    pub const fn from_raw(raw: ffi::git_blob_filter_flag_t) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            if Self::ALL[i] as ffi::git_blob_filter_flag_t == raw {
+                return Some(Self::ALL[i]);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// The C value, a single `git_blob_filter_flag_t` bit.
+    #[must_use]
+    pub const fn raw(self) -> ffi::git_blob_filter_flag_t {
+        self as ffi::git_blob_filter_flag_t
+    }
+
+    /// The flag's bit in `git_blob_filter_options.flags`.
+    const fn bit(self) -> u32 {
+        self as u32
+    }
+}
+
+impl TryFrom<ffi::git_blob_filter_flag_t> for FilterFlag {
+    type Error = UnnamedFilterFlag;
+
+    fn try_from(raw: ffi::git_blob_filter_flag_t) -> Result<Self, UnnamedFilterFlag> {
+        Self::from_raw(raw).ok_or(UnnamedFilterFlag(raw))
+    }
+}
+
+impl From<FilterFlag> for ffi::git_blob_filter_flag_t {
+    fn from(value: FilterFlag) -> ffi::git_blob_filter_flag_t {
+        value.raw()
+    }
+}
+
+// A `FilterFlag` passes where C takes a `git_blob_filter_flag_t`.
+const _: () = assert!(
+    size_of::<FilterFlag>() == size_of::<ffi::git_blob_filter_flag_t>()
+        && align_of::<FilterFlag>() == align_of::<ffi::git_blob_filter_flag_t>()
+);
+
+/// A blob filter flag value that this version of libgit2's header does not name: `0`,
+/// a combination of flags, or a later header's bit. [`raw`](Self::raw) has it.
+///
+/// Handwritten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UnnamedFilterFlag(ffi::git_blob_filter_flag_t);
+
+impl UnnamedFilterFlag {
+    /// The value, as it was converted.
+    #[must_use]
+    pub const fn raw(self) -> ffi::git_blob_filter_flag_t {
+        self.0
+    }
+}
+
+impl fmt::Display for UnnamedFilterFlag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "libgit2 blob filter flag {:#x} is not named by git2/blob.h",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnnamedFilterFlag {}
+
+/// A set of [`FilterFlag`]s: the `uint32_t` combination of `GIT_BLOB_FILTER_*` bits
+/// that `git_blob_filter_options.flags` holds. The default is the empty set;
+/// [`OPTIONS_DEFAULT`](Self::OPTIONS_DEFAULT) is the options' default.
+///
+/// It keeps every bit it is given, named or not, as the field does (`git_blob_filter`
+/// ignores the bits it does not name), so [`bits`](Self::bits) returns what was
+/// stored; [`from_bits_truncate`](Self::from_bits_truncate) keeps the named ones only.
+/// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
+/// [`unnamed_bits`](Self::unnamed_bits) the rest.
+///
+/// Wraps: `git_blob_filter_flag_t`
+/// Handwritten
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct FilterFlags(u32);
+
+impl FilterFlags {
+    /// The bits of every [`FilterFlag`].
+    const NAMED: u32 = {
+        let mut bits = 0;
+        let mut i = 0;
+        while i < FilterFlag::ALL.len() {
+            bits |= FilterFlag::ALL[i].bit();
+            i += 1;
+        }
+        bits
+    };
+    /// The flags `GIT_BLOB_FILTER_OPTIONS_INIT` and `git_blob_filter_options_init`
+    /// set: [`FilterFlag::CheckForBinary`] alone.
+    pub const OPTIONS_DEFAULT: Self = Self(FilterFlag::CheckForBinary.bit());
+
+    /// The set with no flag: binary blobs are filtered too, and only the system and
+    /// working-directory attributes are loaded.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    /// The set of every bit of `bits`, as `git_blob_filter_options.flags` holds them;
+    /// bits that no [`FilterFlag`] names are kept.
+    #[must_use]
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The set of the bits of `bits` that a [`FilterFlag`] names; the rest are dropped.
+    #[must_use]
+    pub const fn from_bits_truncate(bits: u32) -> Self {
+        Self(bits & Self::NAMED)
+    }
+
+    /// The bits of the set, as `git_blob_filter_options.flags` holds them.
+    #[must_use]
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// The bits of the set that no [`FilterFlag`] names.
+    #[must_use]
+    pub const fn unnamed_bits(self) -> u32 {
+        self.0 & !Self::NAMED
+    }
+
+    /// Whether the set has no bit, named or not.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether `flag` is in the set.
+    #[must_use]
+    pub const fn contains(self, flag: FilterFlag) -> bool {
+        self.0 & flag.bit() != 0
+    }
+
+    /// Adds `flag` to the set.
+    pub fn insert(&mut self, flag: FilterFlag) {
+        self.0 |= flag.bit();
+    }
+
+    /// Removes `flag` from the set.
+    pub fn remove(&mut self, flag: FilterFlag) {
+        self.0 &= !flag.bit();
+    }
+
+    /// The named flags in the set, in ascending bit order.
+    #[must_use]
+    pub fn iter(self) -> FilterFlagsIter {
+        FilterFlagsIter { set: self, next: 0 }
+    }
+}
+
+impl From<FilterFlag> for FilterFlags {
+    fn from(flag: FilterFlag) -> Self {
+        Self(flag.bit())
+    }
+}
+
+impl BitOr for FilterFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOr<FilterFlag> for FilterFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: FilterFlag) -> Self {
+        self | Self::from(rhs)
+    }
+}
+
+impl BitOr for FilterFlag {
+    type Output = FilterFlags;
+
+    fn bitor(self, rhs: Self) -> FilterFlags {
+        FilterFlags::from(self) | rhs
+    }
+}
+
+impl BitOrAssign for FilterFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl BitOrAssign<FilterFlag> for FilterFlags {
+    fn bitor_assign(&mut self, rhs: FilterFlag) {
+        self.insert(rhs);
+    }
+}
+
+impl FromIterator<FilterFlag> for FilterFlags {
+    fn from_iter<I: IntoIterator<Item = FilterFlag>>(iter: I) -> Self {
+        let mut set = Self::empty();
+        set.extend(iter);
+        set
+    }
+}
+
+impl Extend<FilterFlag> for FilterFlags {
+    fn extend<I: IntoIterator<Item = FilterFlag>>(&mut self, iter: I) {
+        for flag in iter {
+            self.insert(flag);
+        }
+    }
+}
+
+impl IntoIterator for FilterFlags {
+    type IntoIter = FilterFlagsIter;
+    type Item = FilterFlag;
+
+    fn into_iter(self) -> FilterFlagsIter {
+        self.iter()
+    }
+}
+
+/// Lists the named flags, then any unnamed bits in hex:
+/// `{CheckForBinary | AttributesFromHead, 0x80}`.
+impl fmt::Debug for FilterFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FilterFlags {")?;
+        let mut sep = "";
+        for flag in *self {
+            write!(f, "{sep}{flag:?}")?;
+            sep = " | ";
+        }
+        if self.unnamed_bits() != 0 {
+            let sep = if sep.is_empty() { "" } else { ", " };
+            write!(f, "{sep}{:#x}", self.unnamed_bits())?;
+        }
+        f.write_str("}")
+    }
+}
+
+/// The named flags of a [`FilterFlags`] set, in ascending bit order
+/// ([`FilterFlags::iter`]).
+///
+/// Handwritten
+#[derive(Clone, Debug)]
+pub struct FilterFlagsIter {
+    set: FilterFlags,
+    /// The index into [`FilterFlag::ALL`] of the next flag to test.
+    next: usize,
+}
+
+impl Iterator for FilterFlagsIter {
+    type Item = FilterFlag;
+
+    fn next(&mut self) -> Option<FilterFlag> {
+        while let Some(&flag) = FilterFlag::ALL.get(self.next) {
+            self.next += 1;
+            if self.set.contains(flag) {
+                return Some(flag);
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(FilterFlag::ALL.len().saturating_sub(self.next)))
+    }
+}
+
+impl core::iter::FusedIterator for FilterFlagsIter {}
+
+/// The content of a file as a repository stores it (`git_blob`): an
+/// [`Object`](crate::libgit2::src::libgit2::object::Object) of type blob.
+///
+/// libgit2 allocates, counts and frees it, so it is only ever reached through a
+/// [`BlobArc`] and its handles, built by [`lookup`](Self::lookup) and
+/// [`lookup_prefix`](Self::lookup_prefix), or taken from an object of type blob by
+/// [`from_object`](Self::from_object). It is opaque: no field is published.
+///
+/// `'r` is the borrow of the repository the blob was looked up in, which it keeps (see
+/// the [module docs](self#blobs)). The lifetime only shrinks:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::src::libgit2::blob::BlobArc;
+///
+/// fn widen<'r>(blob: BlobArc<'r>) -> BlobArc<'static> {
+///     blob
+/// }
+/// ```
+///
+/// and a blob stays on the thread that looked it up:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::src::libgit2::blob::BlobArc;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(blob: BlobArc<'static>) {
+///     send(blob)
+/// }
+/// ```
+///
+/// Wraps: `git_blob`
+/// Handwritten
+#[repr(transparent)]
+pub struct Blob<'r>(ffi::git_blob, PhantomData<(*const (), &'r ())>);
+
+/// Shared borrow of a [`Blob`]. `Copy`, like `&T`.
+///
+/// It stays on the thread of the blob's repository, as the owner does:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::src::libgit2::blob::BlobRef;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(handle: BlobRef<'static, 'static>) {
+///     send(handle)
+/// }
+/// ```
+///
+/// Handwritten
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct BlobRef<'a, 'r>(CBorrowedPtr<'a, Blob<'r>>);
+
+/// Exclusive borrow of a [`Blob`]. Reaches the shared handle with
+/// [`as_ref`](Self::as_ref).
+///
+/// No owner hands one out: a blob may be shared with its repository's cache.
+///
+/// Handwritten
+#[repr(transparent)]
+pub struct BlobMut<'a, 'r>(
+    BlobRef<'a, 'r>,
+    // Invariant in the blob, and so in `'r`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut Blob<'r>>,
+);
+
+// SAFETY: `Blob` is `#[repr(transparent)]` over `git_blob` with a zero-sized marker;
+// both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, Blob<'r>>` (`BlobMut`
+// through `BlobRef`) with zero-sized markers and no `Drop`, hand out no reference to
+// the C object, and `BlobRef` has no write operation. `BlobMut` is invariant in the
+// blob through its `PhantomData<&'a mut Blob<'r>>`.
+unsafe impl<'r> CCell for Blob<'r> {
+    type C = ffi::git_blob;
+    type Mut<'a>
+        = BlobMut<'a, 'r>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = BlobRef<'a, 'r>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'r> BlobRef<'a, 'r> {
+    /// The pointer the handle keeps, for the routines of other modules that count a
+    /// reference on the blob (`object_api`'s `git_blob_dup`).
+    pub(crate) fn as_non_null(self) -> NonNull<Blob<'r>> {
+        self.0.as_non_null()
+    }
+
+    /// Borrows a raw pointer; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be NULL or address a live blob looked up in a repository that
+    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
+    /// least that long) and which no one writes during `'a`.
+    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_blob) -> Option<Self> {
+        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
+        // live `git_blob` that outlives `'a` and is not written meanwhile.
+        unsafe { <Blob<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
+    }
+
+    /// Read-only pointer to the C blob.
+    pub(crate) fn as_ptr(&self) -> *const ffi::git_blob {
+        self.0.as_non_null().as_ptr().cast()
+    }
+
+    /// The blob `object` is, borrowed as long as `object` is; `None` for an object of
+    /// another type.
+    #[must_use]
+    pub fn from_object(object: ObjectRef<'a, 'r>) -> Option<Self> {
+        if object.kind() != ObjectType::Blob {
+            return None;
+        }
+        let p = object.as_ptr();
+        // SAFETY: an object of type blob was allocated and parsed as a `git_blob`,
+        // whose first member is that `git_object`, so the pointer addresses the whole
+        // blob; the object handle keeps it live and unwritten for `'a`, and its
+        // repository outlives `'r`.
+        unsafe { Self::from_ptr(p.cast()) }
+    }
+
+    /// The object this blob is, borrowed as long as the blob is.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a handle is never NULL"
+    )]
+    pub fn as_object(&self) -> ObjectRef<'a, 'r> {
+        // SAFETY: a `git_blob` starts with its `git_object`, live and unwritten for
+        // `'a` as the blob is, of a repository that outlives `'r`.
+        unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) }.expect("a handle is never NULL")
+    }
+
+    /// The blob's content, as the object database stores it, unfiltered: the
+    /// [`size`](Self::size) bytes libgit2 read, NUL bytes included. Borrowed in place
+    /// for as long as the handle: the blob holds them, and libgit2 never writes them.
+    ///
+    /// The content lives no longer than the blob's borrow:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libgit2::libgit2::src::libgit2::blob::Blob;
+    /// # use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    /// # use libgit2::libgit2::src::libgit2::repository::Repository;
+    /// let repo = Repository::open(c".").unwrap();
+    /// let id = Oid::zero(OidType::Sha1);
+    /// let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+    /// let content = blob.as_ref().content();
+    /// drop(blob);
+    /// let _ = content.len();
+    /// ```
+    ///
+    /// Wraps: `git_blob_rawcontent`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `a blob's content is held in memory, so its size fits a usize`, only if libgit2
+    /// breaks its contract.
+    #[must_use]
+    pub fn content(&self) -> &'a [u8] {
+        let size = usize::try_from(self.size())
+            .expect("a blob's content is held in memory, so its size fits a usize");
+        if size == 0 {
+            return &[];
+        }
+        // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
+        let data = unsafe { ffi::git_blob_rawcontent(self.as_ptr()) };
+        // SAFETY: a blob's content is the `size` bytes of the object-database object it
+        // holds a reference to (or of the buffer it was parsed from), initialised and
+        // never written, which live as long as the blob does, past `'a`; `data` is
+        // non-NULL for a non-NULL blob.
+        unsafe { core::slice::from_raw_parts(data.cast::<u8>(), size) }
+    }
+
+    /// The size of the blob's [`content`](Self::content), in bytes.
+    ///
+    /// Wraps: `git_blob_rawsize`
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
+        unsafe { ffi::git_blob_rawsize(self.as_ptr()) }
+    }
+
+    /// Whether the blob's content is most likely binary, by the heuristic
+    /// [`data_is_binary`] applies, over its first 8000 bytes only (libgit2's
+    /// `GIT_FILTER_BYTES_TO_CHECK_NUL`): a NUL byte or a long run of non-printable
+    /// bytes after them is not seen.
+    ///
+    /// Wraps: `git_blob_is_binary`
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
+        // SAFETY: the handle addresses a live blob for `'a`, whose content libgit2 reads
+        // (at most 8000 bytes of it, so its `int` counters cannot overflow) and never
+        // writes; nothing is allocated and no error is set.
+        unsafe { ffi::git_blob_is_binary(self.as_ptr()) != 0 }
+    }
+
+    /// The blob's content filtered as if it were checked out to the working directory
+    /// at `as_path`, relative to it: through the filters the attributes of that path
+    /// select (CRLF conversion, `ident`, ...), as `opts` (the defaults of
+    /// [`FilterOptions::new`] for `None`) says to load them. The content is copied
+    /// into the result whether or not a filter applies.
+    ///
+    /// With [`FilterFlag::CheckForBinary`] in the options' flags (the default), a blob
+    /// that [`is_binary`](Self::is_binary) is left unfiltered, and the result is
+    /// empty, as libgit2 leaves it.
+    ///
+    /// Wraps: `git_blob_filter`
+    ///
+    /// # Errors
+    ///
+    /// Refuses an absolute `as_path` with libgit2's `GIT_ERROR_INTERNAL` error,
+    /// `unrecoverable internal error: '!((path)[0] == '/')'`, before reading anything
+    /// (see the [module docs](self#writing-blobs)); and, when the options load the
+    /// attributes of a commit ([`FilterFlag::AttributesFromCommit`]) whose id libgit2
+    /// would look up, an id whose type is not the repository's, as
+    /// [`Object::lookup`](crate::libgit2::src::libgit2::object::Object::lookup) refuses it:
+    /// the zero id [`FilterOptions::new`] leaves, of no type, included. Fails with
+    /// `GIT_ERROR_INVALID` for options whose version is 0 or above
+    /// [`FilterOptions::VERSION`]; and with libgit2's error when the attributes or that
+    /// commit cannot be read or a filter fails.
+    pub fn filter(
+        &self,
+        as_path: &CStr,
+        opts: Option<FilterOptionsRef<'_>>,
+    ) -> Result<BufVal, RepositoryError> {
+        filter_path(as_path)?;
+        if let Some(opts) = opts.filter(|o| self.reads_attr_commit_id(*o)) {
+            id_fits(self.owner(), opts.attr_commit_id())?;
+        }
+        initialise_builtin_filters();
+        let mut out = Buf::new();
+        let opts = opts.map_or(ptr::null_mut(), |o| o.as_ptr().cast_mut());
+        // SAFETY: `out` is the fresh buffer above, which libgit2 fills with a copy or leaves
+        // empty; the blob is live and only read, its repository live for `'r` on this
+        // thread, whose caches libgit2 fills through it as `RepositoryRef` allows;
+        // `as_path` is NUL-terminated and relative; `opts` is NULL or live options libgit2
+        // only copies (never reading `reserved`, under `GIT_DEPRECATE_HARD`), whose commit
+        // id, if looked up, is of the repository's type (checked above).
+        let rc = unsafe {
+            ffi::git_blob_filter(
+                out.as_mut().as_mut_ptr(),
+                self.as_ptr().cast_mut(),
+                as_path.as_ptr(),
+                opts,
+            )
+        };
+        if rc < 0 { failed(rc) } else { Ok(out) }
+    }
+
+    /// Whether `git_blob_filter` would look the options' `attr_commit_id` up: it accepts
+    /// their version, does not stop at a binary blob, and loads a commit's attributes.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "callers hold a reference to the value"
+    )]
+    fn reads_attr_commit_id(&self, opts: FilterOptionsRef<'_>) -> bool {
+        let flags = opts.flags();
+        // libgit2 reads the version as an `unsigned int`.
+        let version = opts.version().cast_unsigned();
+        (1..=FilterOptions::VERSION as u32).contains(&version)
+            && flags.contains(FilterFlag::AttributesFromCommit)
+            && !(flags.contains(FilterFlag::CheckForBinary) && self.is_binary())
+    }
+}
+
+impl<'r> BlobMut<'_, 'r> {
+    /// Borrows a raw pointer exclusively; `None` if null.
+    ///
+    /// # Safety
+    ///
+    /// As [`BlobRef::from_ptr`], plus: nothing else reaches the blob while the result
+    /// lives, its repository's cache included.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
+    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_blob) -> Option<Self> {
+        // SAFETY: the caller upholds `BlobRef::from_ptr`'s contract and exclusivity.
+        unsafe { BlobRef::from_ptr(ptr) }.map(|r| BlobMut(r, PhantomData))
+    }
+
+    /// Writable pointer to the C blob.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only the unit tests reach it until a consumer needs it"
+        )
+    )]
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_blob {
+        self.0.0.as_non_null().as_ptr().cast()
+    }
+
+    /// Reborrows shared.
+    #[must_use]
+    pub fn as_ref(&self) -> BlobRef<'_, 'r> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> BlobMut<'_, 'r> {
+        BlobMut(self.0, PhantomData)
+    }
+}
+
+impl fmt::Debug for BlobRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Blob").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for BlobMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// One counted reference to a [`Blob`], given back by `git_blob_free` on drop; `clone`
+/// takes another through `git_blob_dup`, on the same blob.
+///
+/// Its handles borrow it, so none outlives it:
+///
+/// ```compile_fail,E0505
+/// use {libgit2::libgit2::src::libgit2::blob::BlobArc, libgit2::libgit2::src::libgit2::blob::BlobRef};
+///
+/// fn escape<'r>(blob: BlobArc<'r>) -> BlobRef<'static, 'r> {
+///     let r = blob.as_ref();
+///     drop(blob);
+///     r
+/// }
+/// ```
+///
+/// and it lends no exclusive handle, which needs the reference proved sole:
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// # use libgit2::libgit2::src::libgit2::blob::Blob;
+/// # use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+/// # use libgit2::libgit2::src::libgit2::repository::Repository;
+/// # let _init = libgit2::libgit2::src::libgit2::libgit2::init().unwrap();
+/// # let path = concat!(env!("CARGO_MANIFEST_DIR"), "/c/tests/resources/testrepo.git\0");
+/// # let repo = Repository::open(std::ffi::CStr::from_bytes_with_nul(path.as_bytes()).unwrap()).unwrap();
+/// # let id = Oid::from_string(c"a8233120f6ad708f843d861ce2b7228ec4e3dec6", OidType::Sha1).unwrap();
+/// let mut blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+/// assert!(blob.get_mut().is_none());
+/// ```
+pub type BlobArc<'r> = CArc<Blob<'r>, BlobFree>;
+
+impl<'r> Blob<'r> {
+    /// The blob an object of type blob is, owning the reference `object` held; the
+    /// object, untouched, when it is of another type.
+    ///
+    /// # Errors
+    ///
+    /// Gives `object` back, untouched, when it is of another type.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an owner is never NULL"
+    )]
+    pub fn from_object(object: ObjectArc<'r>) -> Result<BlobArc<'r>, ObjectArc<'r>> {
+        if BlobRef::from_object(object.as_ref()).is_none() {
+            return Err(object);
+        }
+        let raw = object.into_c();
+        // SAFETY: the counted reference `object` held, to an object of type blob, which
+        // is a `git_blob` starting with that `git_object`; `git_blob_free` gives it back
+        // as `git_object_free` would. Its repository outlives `'r`.
+        let blob = unsafe { BlobArc::from_c(raw.cast()) };
+        Ok(blob.expect("an owner is never NULL"))
+    }
+
+    /// The object `blob` is, owning the reference `blob` held.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an owner is never NULL"
+    )]
+    pub fn into_object(blob: BlobArc<'r>) -> ObjectArc<'r> {
+        let raw = blob.into_c();
+        // SAFETY: the counted reference `blob` held, to a `git_blob`, which starts with
+        // its `git_object`; `git_object_free` gives it back as `git_blob_free` would.
+        // Its repository outlives `'r`.
+        let object = unsafe { ObjectArc::from_c(raw.cast()) };
+        object.expect("an owner is never NULL")
+    }
+}
+
+define_ctype!(
+    /// The options of `git_blob_filter` (`git_blob_filter_options`): a structure
+    /// version, the [`FilterFlags`] to apply, a deprecated `reserved` pointer, and the
+    /// commit whose `.gitattributes` [`FilterFlag::AttributesFromCommit`] loads.
+    ///
+    /// A plain value (see the [module docs](self#filter-options)): `Copy`, held
+    /// inline, never released. Build one with [`new`](Self::new), the header's
+    /// defaults; read it through [`as_ref`](Self::as_ref) and write it through
+    /// [`as_mut`](Self::as_mut). It compares and hashes field by field, `reserved` by
+    /// whether it is set.
+    ///
+    /// A handle cannot outlive the options:
+    ///
+    /// ```compile_fail,E0597
+    /// use libgit2::libgit2::src::libgit2::blob::FilterOptions;
+    ///
+    /// let handle = {
+    ///     let opts = FilterOptions::new();
+    ///     opts.as_ref()
+    /// };
+    /// let _ = handle.flags();
+    /// ```
+    ///
+    /// nor coexist with an exclusive one:
+    ///
+    /// ```compile_fail,E0502
+    /// use {libgit2::libgit2::src::libgit2::blob::FilterFlags, libgit2::libgit2::src::libgit2::blob::FilterOptions};
+    ///
+    /// let mut opts = FilterOptions::new();
+    /// let mut m = opts.as_mut();
+    /// let r = opts.as_ref();
+    /// m.set_flags(FilterFlags::empty());
+    /// let _ = r.flags();
+    /// ```
+    ///
+    /// and the commit id it lends lives no longer than the handle's borrow:
+    ///
+    /// ```compile_fail,E0502
+    /// use {libgit2::libgit2::src::libgit2::blob::FilterFlags, libgit2::libgit2::src::libgit2::blob::FilterOptions};
+    ///
+    /// let mut opts = FilterOptions::new();
+    /// let id = opts.as_ref().attr_commit_id();
+    /// opts.as_mut().attr_commit_id_mut().set_raw_kind(1);
+    /// let _ = id.raw_kind();
+    /// ```
+    ///
+    /// Wraps: git_blob_filter_options
+    #[derive(Clone, Copy)]
+    FilterOptions,
+    FilterOptionsRef,
+    FilterOptionsMut,
+    ffi::git_blob_filter_options
+);
+
+// SAFETY: a `FilterOptions` is a version, flags, an id and the `reserved` pointer,
+// which nothing dereferences: no libgit2 routine reads it under `GIT_DEPRECATE_HARD`,
+// and Rust only tests it against NULL or clears it. So the value has no interior
+// mutability, no thread affinity and nothing to release, and moving one to another
+// thread moves bytes.
+unsafe impl Send for FilterOptions {}
+
+// SAFETY: `FilterOptionsMut` is an exclusive borrow of such a value, as
+// `&mut FilterOptions`.
+unsafe impl Send for FilterOptionsMut<'_> {}
+
+// SAFETY: shared access only reads the fields (every write goes through
+// `FilterOptionsMut`, which excludes other handles), so concurrent readers race
+// nothing.
+unsafe impl Sync for FilterOptions {}
+
+// SAFETY: as above; `FilterOptionsRef` is a shared borrow, as `&FilterOptions`.
+unsafe impl Send for FilterOptionsRef<'_> {}
+
+// SAFETY: as above.
+unsafe impl Sync for FilterOptionsRef<'_> {}
+
+// SAFETY: `&FilterOptionsMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for FilterOptionsMut<'_> {}
+
+impl FilterOptions {
+    /// The structure version this crate's header declares
+    /// (`GIT_BLOB_FILTER_OPTIONS_VERSION`), the only one libgit2 accepts.
+    pub const VERSION: c_int = ffi::GIT_BLOB_FILTER_OPTIONS_VERSION.cast_signed();
+
+    /// The default options, as `git_blob_filter_options_init` fills them for
+    /// [`VERSION`](Self::VERSION) and `GIT_BLOB_FILTER_OPTIONS_INIT` spells them: the
+    /// current version, [`FilterFlags::OPTIONS_DEFAULT`] (binary blobs are left
+    /// unfiltered), no `reserved` pointer and the zero id, of no type. Needs no
+    /// initialised libgit2.
+    ///
+    /// Wraps: `git_blob_filter_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
+    /// does.
+    #[must_use]
+    pub fn new() -> FilterOptions {
+        let mut raw = MaybeUninit::<ffi::git_blob_filter_options>::uninit();
+        // SAFETY: `raw` is writable storage for one `git_blob_filter_options`. With the
+        // header's own version the routine's version check passes, so it only copies
+        // the `GIT_BLOB_FILTER_OPTIONS_INIT` template over all of `raw`: no allocation
+        // and no error state, so no initialised runtime is needed.
+        let rc = unsafe {
+            ffi::git_blob_filter_options_init(
+                raw.as_mut_ptr(),
+                ffi::GIT_BLOB_FILTER_OPTIONS_VERSION,
+            )
+        };
+        assert_eq!(
+            rc, 0,
+            "git_blob_filter_options_init refused its own version"
+        );
+        // SAFETY: on success the template was copied over the whole struct, padding
+        // aside, so every field is initialised.
+        FilterOptions(unsafe { raw.assume_init() }, PhantomData)
+    }
+}
+
+impl Default for FilterOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The `git_blob_filter_options` value as it is, for code that already holds one by
+/// value. Its `reserved` pointer is kept, and never read.
+impl From<ffi::git_blob_filter_options> for FilterOptions {
+    fn from(raw: ffi::git_blob_filter_options) -> FilterOptions {
+        FilterOptions(raw, PhantomData)
+    }
+}
+
+/// The `git_blob_filter_options` value, for code that passes one by value.
+impl From<FilterOptions> for ffi::git_blob_filter_options {
+    fn from(opts: FilterOptions) -> ffi::git_blob_filter_options {
+        opts.0
+    }
+}
+
+impl<'a> FilterOptionsRef<'a> {
+    /// The structure version. [`FilterOptions::new`] sets [`FilterOptions::VERSION`];
+    /// libgit2 reads the field as an `unsigned int`, and refuses the options with
+    /// `GIT_ERROR_INVALID` if it is 0 or above that, so a negative version is refused
+    /// too.
+    ///
+    /// Field: `git_blob_filter_options.version`
+    #[must_use]
+    pub fn version(&self) -> c_int {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw const (*self.as_ptr()).version };
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `int`.
+        unsafe { version_ptr.read() }
+    }
+
+    /// The filter flags, every stored bit kept.
+    ///
+    /// Field: `git_blob_filter_options.flags`
+    #[must_use]
+    pub fn flags(&self) -> FilterFlags {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw const (*self.as_ptr()).flags };
+        // SAFETY: a read through the shared handle's pointer to live options; any value
+        // is a valid `uint32_t`.
+        let bits = unsafe { flags_ptr.read() };
+        FilterFlags::from_bits_retain(bits)
+    }
+
+    /// Whether the deprecated `reserved` pointer is set. libgit2 never reads it (see
+    /// the [module docs](self#filter-options)); [`FilterOptions::new`] leaves it
+    /// unset, and only a value converted from a raw `git_blob_filter_options` can
+    /// carry one.
+    ///
+    /// Field: `git_blob_filter_options.reserved`
+    #[must_use]
+    pub fn has_reserved(&self) -> bool {
+        // SAFETY: the shared handle's pointer addresses live options; the projection forms no
+        // reference to them.
+        let reserved_ptr = unsafe { &raw const (*self.as_ptr()).reserved };
+        // SAFETY: a read of the pointer itself; it is compared with NULL and never dereferenced.
+        !unsafe { reserved_ptr.read() }.is_null()
+    }
+
+    /// The id of the commit whose `.gitattributes` `git_blob_filter` loads when the
+    /// flags hold [`FilterFlag::AttributesFromCommit`], borrowed in place for as long
+    /// as the options are. [`FilterOptions::new`] leaves the zero id, of no type.
+    ///
+    /// Field: `git_blob_filter_options.attr_commit_id`
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an embedded id is never NULL"
+    )]
+    pub fn attr_commit_id(&self) -> OidRef<'a> {
+        let p = self.as_ptr().cast_mut();
+        // SAFETY: the projection stays inside the live options this handle borrows.
+        let id = unsafe { addr_of_mut!((*p).attr_commit_id) };
+        // SAFETY: an embedded, initialised `git_oid` that lives as long as the options,
+        // which the shared handle keeps borrowed (and so unwritten) for `'a`. The
+        // pointer is not NULL.
+        unsafe { OidRef::from_ptr(id) }.expect("an embedded id is never NULL")
+    }
+
+    /// A copy of the options, as a value of its own.
+    #[must_use]
+    pub fn to_options(&self) -> FilterOptions {
+        // SAFETY: a read of the whole struct through the shared handle's pointer to
+        // live, initialised options; it is plain data (the `reserved` pointer is copied
+        // as a value, not followed).
+        FilterOptions(unsafe { self.as_ptr().read() }, PhantomData)
+    }
+}
+
+impl fmt::Debug for FilterOptionsRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FilterOptions")
+            .field("version", &self.version())
+            .field("flags", &self.flags())
+            .field("has_reserved", &self.has_reserved())
+            .field("attr_commit_id", &self.attr_commit_id())
+            .finish()
+    }
+}
+
+impl fmt::Debug for FilterOptionsMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for FilterOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'b> PartialEq<FilterOptionsRef<'b>> for FilterOptionsRef<'_> {
+    /// Field by field, every flag bit and all 33 bytes of the id included; `reserved`
+    /// by whether it is set.
+    fn eq(&self, other: &FilterOptionsRef<'b>) -> bool {
+        // The id's type byte and raw bytes, as `git_oid_equal` compares them, in Rust.
+        let (id, other_id) = (self.attr_commit_id(), other.attr_commit_id());
+        self.version() == other.version()
+            && self.flags() == other.flags()
+            && self.has_reserved() == other.has_reserved()
+            && id.raw_kind() == other_id.raw_kind()
+            && id.id() == other_id.id()
+    }
+}
+
+impl Eq for FilterOptionsRef<'_> {}
+
+impl Hash for FilterOptionsRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.version().hash(state);
+        self.flags().hash(state);
+        self.has_reserved().hash(state);
+        self.attr_commit_id().hash(state);
+    }
+}
+
+impl PartialEq for FilterOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for FilterOptions {}
+
+impl Hash for FilterOptions {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
+
+impl FilterOptionsMut<'_> {
+    /// Replaces the structure version. Any value is accepted; libgit2 refuses options
+    /// whose version, read as an `unsigned int`, is 0 or above
+    /// [`FilterOptions::VERSION`].
+    ///
+    /// Field: `git_blob_filter_options.version`
+    pub fn set_version(&mut self, version: c_int) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let version_ptr = unsafe { &raw mut (*self.as_mut_ptr()).version };
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is a plain integer.
+        unsafe { version_ptr.write(version) }
+    }
+
+    /// Replaces the filter flags, every bit as given.
+    ///
+    /// Field: `git_blob_filter_options.flags`
+    pub fn set_flags(&mut self, flags: FilterFlags) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let flags_ptr = unsafe { &raw mut (*self.as_mut_ptr()).flags };
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // field is a plain integer.
+        unsafe { flags_ptr.write(flags.bits()) }
+    }
+
+    /// Unsets the deprecated `reserved` pointer, as [`FilterOptions::new`] leaves it.
+    /// Nothing it pointed at is released: the options never own it.
+    ///
+    /// Field: `git_blob_filter_options.reserved`
+    pub fn clear_reserved(&mut self) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
+        // forms no reference to it.
+        let reserved_ptr = unsafe { &raw mut (*self.as_mut_ptr()).reserved };
+        // SAFETY: a write through the exclusive handle's pointer to live options; the
+        // old pointer is not owned, so overwriting it releases nothing.
+        unsafe { reserved_ptr.write(ptr::null_mut()) }
+    }
+
+    /// The commit id, borrowed exclusively in place, for writing it field by field.
+    ///
+    /// Field: `git_blob_filter_options.attr_commit_id`
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: an embedded id is never NULL"
+    )]
+    pub fn attr_commit_id_mut(&mut self) -> OidMut<'_> {
+        let p = self.as_mut_ptr();
+        // SAFETY: the projection stays inside the live options this handle borrows.
+        let id = unsafe { addr_of_mut!((*p).attr_commit_id) };
+        // SAFETY: an embedded, initialised `git_oid` that lives as long as the options,
+        // borrowed exclusively through this handle, frozen while the result lives. The
+        // pointer is not NULL.
+        unsafe { OidMut::from_ptr(id) }.expect("an embedded id is never NULL")
+    }
+
+    /// Replaces the commit id with a copy of `id`, its type included.
+    ///
+    /// Field: `git_blob_filter_options.attr_commit_id`
+    pub fn set_attr_commit_id(&mut self, id: OidRef<'_>) {
+        {
+            // SAFETY: `id` is a shared handle to a live `git_oid`, read whole; it cannot be
+            // this field, which the exclusive handle borrows. The write goes through the
+            // exclusive handle's pointer to live options, over a plain-data field.
+            let id = unsafe { id.as_ptr().read() };
+            // SAFETY: as above.
+            let value2 = unsafe { addr_of_mut!((*self.as_mut_ptr()).attr_commit_id) };
+            // SAFETY: as above.
+            unsafe { value2.write(id) };
+        }
+    }
+}
+
+// A `FilterOptions` is a `git_blob_filter_options`, so C reads a value Rust holds in
+// place.
+const _: () = assert!(
+    size_of::<FilterOptions>() == size_of::<ffi::git_blob_filter_options>()
+        && align_of::<FilterOptions>() == align_of::<ffi::git_blob_filter_options>()
+);
+
+/// Whether `data` is most likely binary, by core git's heuristic: it is binary when it
+/// opens with a UTF-16 or UTF-32 byte-order mark, when it holds a NUL byte, or when
+/// fewer than 128 printable bytes come for each non-printable one. Printable bytes are
+/// those above `0x1f` but DEL (space included), and backspace, escape and form feed;
+/// tab, line feed, vertical tab and carriage return count as neither; every other byte
+/// below `0x20`, and DEL, is non-printable. A UTF-8 byte-order mark is skipped, and
+/// empty data is text.
+///
+/// Unlike `git_blob_is_binary`, it reads the whole slice, not its first 8000 bytes.
+///
+/// libgit2 counts printable and non-printable bytes in C `int`s, which overflow (UB)
+/// once a slice holds more than `INT_MAX` of either. A slice that long never reaches it:
+/// the same heuristic runs in Rust, with counters as wide as the slice's length.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::src::libgit2::blob::data_is_binary;
+///
+/// assert!(!data_is_binary(b"hello, world\n"));
+/// assert!(data_is_binary(b"hello\0world"));
+/// assert!(data_is_binary(b"\xff\xfeh\0i\0"));
+/// assert!(!data_is_binary(b""));
+/// ```
+///
+/// Wraps: `git_blob_data_is_binary`
+#[must_use]
+pub fn data_is_binary(data: &[u8]) -> bool {
+    if !fits_c_counters(data.len()) {
+        return wide::is_binary(data);
+    }
+    // SAFETY: `data` is live for `data.len()` bytes, read for the call only and never
+    // retained or written; with a length of 0 libgit2 does not read the pointer at all.
+    // The length is at most `INT_MAX`, so neither of libgit2's `int` counters, each
+    // bounded by it, overflows. No allocation or error state is touched, so no runtime
+    // pin is needed.
+    let rc = unsafe { ffi::git_blob_data_is_binary(data.as_ptr().cast(), data.len()) };
+    rc != 0
+}
+
+/// Whether libgit2's `int` counters can count a slice of `len` bytes: each counts a
+/// subset of its bytes, so at most `INT_MAX` of them never overflows either.
+fn fits_c_counters(len: usize) -> bool {
+    len <= c_int::MAX as usize
+}
+
+/// `git_str_is_binary` (`src/util/str.c`), over slices longer than its `int` counters
+/// can count.
+mod wide {
+    /// The bytes a byte-order mark at the start of `data` takes, and whether it marks
+    /// UTF-16 or UTF-32 (which make the data binary), as `git_str_detect_bom` reads it.
+    #[expect(clippy::match_same_arms, reason = "each arm names its own case")]
+    pub(super) fn bom(data: &[u8]) -> (usize, bool) {
+        match data {
+            [0, 0, 0xFE, 0xFF, ..] => (4, true),
+            [0xEF, 0xBB, 0xBF, ..] => (3, false),
+            [0xFE, 0xFF, ..] => (2, true),
+            [0xFF, 0xFE, 0, 0, ..] => (4, true),
+            [0xFF, 0xFE, ..] => (2, true),
+            _ => (0, false),
+        }
+    }
+
+    /// [`super::data_is_binary`]'s heuristic, with `usize` counters.
+    pub(super) fn is_binary(data: &[u8]) -> bool {
+        let (skip, wide_bom) = bom(data);
+        if wide_bom {
+            return true;
+        }
+        let (mut printable, mut nonprintable) = (0usize, 0usize);
+        for &c in &data[skip..] {
+            if (c > 0x1F && c != 0x7F) || matches!(c, 0x08 | 0x1B | 0x0C) {
+                printable += 1;
+            } else if c == 0 {
+                return true;
+            } else if !matches!(c, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r') {
+                nonprintable += 1;
+            }
+        }
+        (printable >> 7) < nonprintable
+    }
+}
+
+// --- Writing blobs ---------------------------------------------------------------------
+
+/// The failure of a routine that returned `rc`, with the thread's last error.
+fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
+    Err(RepositoryError::from_libgit2(rc))
+}
+
+/// `Ok` for a path that may select filters (a relative one); for an absolute one, the
+/// error a release build of libgit2 reports from its assertion, set as the thread's.
+fn filter_path(path: &CStr) -> Result<(), RepositoryError> {
+    relative(path).or_else(|_| failed(ErrorCode::Generic.raw()))
+}
+
+/// Writes `data` into `repo`'s object database as a blob, unfiltered, and returns its
+/// id. The bytes are hashed and stored as they are, NUL bytes included, and read for
+/// the call only.
+///
+/// ```
+/// # if cfg!(miri) { return; }
+/// use libgit2::libgit2::src::libgit2::blob::create_from_buffer;
+/// use libgit2::libgit2::src::libgit2::repository::Repository;
+///
+/// let dir = std::env::temp_dir().join(format!("blob-doc-{}", std::process::id()));
+/// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+/// let repo = Repository::init(&path, true).unwrap();
+/// let id = create_from_buffer(repo.as_ref(), b"hello\n").unwrap();
+/// assert_eq!(
+///     id.as_ref().to_hex_string().unwrap(),
+///     "ce013625030ba8dba906f756967f9e9ca394464a"
+/// );
+/// # drop(repo);
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// ```
+///
+/// Wraps: `git_blob_create_from_buffer`
+///
+/// # Errors
+///
+/// Fails with libgit2's error when the object database cannot be loaded (a repository
+/// without paths has none: `GIT_ERROR_INVALID`, "path cannot exist in repository") or
+/// written.
+pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, RepositoryError> {
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository, used on this thread only, whose object database libgit2 loads and
+    // writes through this shared handle, as `RepositoryRef` allows; `data` is live for
+    // `data.len()` bytes, read for the call only (an empty slice's pointer is non-NULL
+    // and never read).
+    let rc = unsafe {
+        ffi::git_blob_create_from_buffer(
+            out,
+            repo.as_ptr().cast_mut(),
+            data.as_ptr().cast(),
+            data.len(),
+        )
+    };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Writes the file at `path`, relative to `repo`'s working directory, into its object
+/// database as a blob, and returns its id. The content goes through the filters the
+/// path selects for the object database (`core.autocrlf`, `.gitattributes`); a
+/// symbolic link is stored as its target.
+///
+/// Wraps: `git_blob_create_from_workdir`
+///
+/// # Errors
+///
+/// Refuses an absolute `path` with libgit2's `GIT_ERROR_INTERNAL` error,
+/// "unrecoverable internal error: '!((path)[0] == '/')'", before reading anything (see
+/// the [module docs](self#writing-blobs)). Fails with `GIT_ERROR_REPOSITORY`, "repository
+/// has no working directory", for a bare repository or one without paths; with
+/// [`ErrorCode::Directory`] for a directory; and with libgit2's error when the file
+/// cannot be read or filtered, or the object database cannot be written.
+pub fn create_from_workdir(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
+    filter_path(path)?;
+    initialise_builtin_filters();
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository on this thread, whose caches libgit2 fills through this shared handle;
+    // `path` is a NUL-terminated relative path, read and copied during the call.
+    let rc =
+        unsafe { ffi::git_blob_create_from_workdir(out, repo.as_ptr().cast_mut(), path.as_ptr()) };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Writes the file at `path`, anywhere on the filesystem (relative paths resolve
+/// against the process's working directory), into `repo`'s object database as a blob,
+/// and returns its id. A file inside the repository's working directory goes through
+/// the filters its path there selects, as with [`create_from_workdir`]; any other is
+/// stored as it is. A symbolic link is resolved, as libgit2 resolves the whole path.
+///
+/// Wraps: `git_blob_create_from_disk`
+///
+/// # Errors
+///
+/// Fails with [`ErrorCode::Directory`] for a directory, and with libgit2's error when
+/// the path cannot be resolved, the file cannot be read or filtered, or the object
+/// database cannot be loaded or written.
+pub fn create_from_disk(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
+    initialise_builtin_filters();
+    let mut id = Oid::zeroed();
+    let out = id.as_mut().as_mut_ptr();
+    // SAFETY: `out` addresses `id`, written only on success; `repo` is a live
+    // repository on this thread, whose caches libgit2 fills through this shared handle;
+    // `path` is NUL-terminated, read and copied during the call. The filter path libgit2
+    // derives is the part of the resolved path after the working directory, which ends
+    // in `/`, so it is relative.
+    let rc =
+        unsafe { ffi::git_blob_create_from_disk(out, repo.as_ptr().cast_mut(), path.as_ptr()) };
+    if rc < 0 { failed(rc) } else { Ok(id) }
+}
+
+/// Opens a [`BlobWriter`] on `repo`: data written into it piece by piece is buffered in
+/// memory, then in a temporary file of the repository's `objects` directory, until
+/// [`commit`](BlobWriter::commit) writes it as a blob. With a `hint_path`, relative to
+/// the working directory, the data goes through the filters that path selects when it
+/// is committed.
+///
+/// Prefer [`create_from_buffer`] for data already in memory.
+///
+/// The writer keeps the repository, which committing reads, so it lives no longer
+/// than this borrow of it:
+///
+/// ```compile_fail,E0505
+/// use libgit2::libgit2::src::libgit2::blob::create_from_stream;
+/// use libgit2::libgit2::src::libgit2::repository::Repository;
+///
+/// let repo = Repository::open(c".").unwrap();
+/// let mut writer = create_from_stream(repo.as_ref(), None).unwrap();
+/// drop(repo);
+/// writer.write(b"data").unwrap();
+/// ```
+///
+/// Wraps: `git_blob_create_from_stream`
+///
+/// # Errors
+///
+/// Refuses an absolute `hint_path` as [`create_from_workdir`] does. Fails with libgit2's
+/// error when the temporary file cannot be created (a repository without paths has no
+/// `objects` directory: [`ErrorCode::NotFound`], "path cannot exist in repository").
+///
+/// # Panics
+///
+/// Panics, with `a stream opened without a stream`, only if libgit2 breaks its contract.
+pub fn create_from_stream<'r>(
+    repo: RepositoryRef<'r>,
+    hint_path: Option<&CStr>,
+) -> Result<BlobWriter<'r>, RepositoryError> {
+    if let Some(path) = hint_path {
+        filter_path(path)?;
+    }
+    let mut out = ptr::null_mut();
+    let hint = hint_path.map_or(ptr::null(), CStr::as_ptr);
+    // SAFETY: `out` is a writable slot, set only on success; `repo` is a live repository
+    // on this thread, which the stream keeps (uncounted) and reads when committed, so the
+    // writer borrows it for `'r`; `hint` is NULL or a NUL-terminated relative path, which
+    // libgit2 copies.
+    let rc =
+        unsafe { ffi::git_blob_create_from_stream(&raw mut out, repo.as_ptr().cast_mut(), hint) };
+    if rc < 0 {
+        return failed(rc);
+    }
+    // SAFETY: on success `out` is a fresh, open blob stream the caller owns alone, whose
+    // `free` member releases it; it is never closed, only written, then committed or
+    // freed (see `BlobWriter`).
+    let stream = unsafe { WriteStreamBox::from_c(out) }.expect("a stream opened without a stream");
+    Ok(BlobWriter {
+        stream,
+        _repo: PhantomData,
+    })
+}
+
+/// A blob being written piece by piece into a repository (`git_blob_create_from_stream`):
+/// written with [`write`](Self::write) (or through [`io::Write`]), then committed into
+/// the object database with [`commit`](Self::commit), which gives its id. Dropping it
+/// discards what was written, temporary file included.
+///
+/// The writer is libgit2's blob stream, a `git_writestream`, but never lent as one: a
+/// blob stream that is closed, as code taking a stream to write into closes it, can no
+/// longer be committed (libgit2 would call a NULL function), so the writer only writes
+/// and commits it.
+///
+/// `'r` is the borrow of the repository it writes to, which committing reads. It stays
+/// on that repository's thread:
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::src::libgit2::blob::BlobWriter;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn move_out(writer: BlobWriter<'static>) {
+///     send(writer)
+/// }
+/// ```
+///
+/// Handwritten
+pub struct BlobWriter<'r> {
+    /// The open blob stream, never closed: committed or freed.
+    stream: WriteStreamBox,
+    /// The repository the stream keeps, which committing reads.
+    _repo: PhantomData<RepositoryRef<'r>>,
+}
+
+impl BlobWriter<'_> {
+    /// Appends `data` to the blob. libgit2 copies it into the writer's buffer, which it
+    /// flushes to the temporary file once full.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the operating system's error when the temporary file cannot be
+    /// written; the writer then refuses every later write and its commit.
+    pub fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
+        self.stream.as_mut().write(data)
+    }
+
+    /// Writes the data into the object database as a blob, through the filters the
+    /// writer's hint path selects, and returns its id. The writer is freed either way,
+    /// its temporary file removed.
+    ///
+    /// Wraps: `git_blob_create_from_stream_commit`
+    ///
+    /// # Errors
+    ///
+    /// Fails with libgit2's error when a write failed, the temporary file cannot be
+    /// flushed or read back, the filters fail, or the object database cannot be written.
+    pub fn commit(self) -> Result<Oid, RepositoryError> {
+        initialise_builtin_filters();
+        let stream = self.stream.into_c();
+        let mut id = Oid::zeroed();
+        let out = id.as_mut().as_mut_ptr();
+        // SAFETY: `out` addresses `id`, written only on success; `stream` is the open
+        // blob stream `git_blob_create_from_stream` made, only ever written (never
+        // closed), whose ownership passes to the call, which frees it on every path. The
+        // repository it keeps is live for `'r`, which the writer carried, and used on this
+        // thread.
+        let rc = unsafe { ffi::git_blob_create_from_stream_commit(out, stream) };
+        if rc < 0 { failed(rc) } else { Ok(id) }
+    }
+}
+
+/// Every write takes the whole buffer; `flush` does nothing, since only
+/// [`commit`](BlobWriter::commit) ends the blob.
+impl io::Write for BlobWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        BlobWriter::write(self, buf).map_err(io::Error::other)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl fmt::Debug for BlobWriter<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlobWriter").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use core::ffi::CStr;
+
+    use ffibox::{CDrop, CRefClone, CZeroable};
+
+    use super::*;
+    use crate::libgit2::src::libgit2::object::Object;
+    use crate::libgit2::src::libgit2::oid::{Oid, OidType};
+    use crate::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
+    use crate::libgit2::src::util::errors::{ErrorClass, runtime_pinned};
+
+    /// The bytes of a `git_oid`'s id.
+    const MAX_OID: usize = ffi::GIT_OID_MAX_SIZE as usize;
+
+    /// Values probed for `from_raw`: zero, each bit, their neighbours and combinations.
+    fn probes() -> impl Iterator<Item = u32> {
+        (0..=64u32).chain((0..32).map(|s| 1u32 << s)).chain([
+            u32::MAX,
+            u32::MAX - 1,
+            0x8000_0000,
+            0x0F,
+            0x10,
+        ])
+    }
+
+    #[test]
+    fn from_raw_round_trips_each_named_flag() {
+        for flag in FilterFlag::ALL {
+            assert_eq!(FilterFlag::from_raw(flag.raw()), Some(flag));
+            assert_eq!(FilterFlag::try_from(flag.raw()), Ok(flag));
+            assert_eq!(ffi::git_blob_filter_flag_t::from(flag), flag.raw());
+            assert_eq!(flag.raw().count_ones(), 1, "{flag:?}");
+        }
+        let named = probes()
+            .filter(|&r| FilterFlag::from_raw(r).is_some())
+            .count();
+        // Each named bit appears twice in `probes`: in the range and as a shift.
+        assert_eq!(named, 2 * FilterFlag::ALL.len());
+    }
+
+    #[test]
+    fn unnamed_values_are_refused_with_their_value() {
+        for raw in probes().filter(|&r| FilterFlag::from_raw(r).is_none()) {
+            let err = FilterFlag::try_from(raw).unwrap_err();
+            assert_eq!(err.raw(), raw);
+            assert_eq!(
+                err.to_string(),
+                format!("libgit2 blob filter flag {raw:#x} is not named by git2/blob.h")
+            );
+        }
+    }
+
+    #[test]
+    fn set_operations() {
+        let mut set = FilterFlags::empty();
+        assert!(set.is_empty() && set == FilterFlags::default());
+        assert_eq!(set.iter().next(), None);
+        set.insert(FilterFlag::AttributesFromHead);
+        set |= FilterFlag::CheckForBinary;
+        assert_eq!(set.bits(), 0b101);
+        assert!(set.contains(FilterFlag::CheckForBinary));
+        assert!(!set.contains(FilterFlag::NoSystemAttributes));
+        assert_eq!(
+            set.iter().collect::<Vec<_>>(),
+            [FilterFlag::CheckForBinary, FilterFlag::AttributesFromHead]
+        );
+        set.remove(FilterFlag::CheckForBinary);
+        set.remove(FilterFlag::CheckForBinary);
+        assert_eq!(set, FilterFlag::AttributesFromHead.into());
+        set |= FilterFlags::from_bits_retain(0x8000_0000);
+        assert_eq!(set.unnamed_bits(), 0x8000_0000);
+        assert!(!set.is_empty());
+        assert_eq!(
+            FilterFlags::from_bits_truncate(set.bits()),
+            FilterFlag::AttributesFromHead.into()
+        );
+        let all: FilterFlags = FilterFlag::ALL.into_iter().collect();
+        assert_eq!(all.bits(), 0b1111);
+        assert_eq!(all, FilterFlags::from_bits_truncate(u32::MAX));
+        assert_eq!(all.unnamed_bits(), 0);
+        assert_eq!(
+            FilterFlag::NoSystemAttributes | FilterFlag::AttributesFromCommit,
+            FilterFlags::from_bits_retain(0b1010)
+        );
+        let mut ext = FilterFlags::from(FilterFlag::CheckForBinary);
+        ext.extend([FilterFlag::AttributesFromCommit]);
+        ext |= FilterFlags::from(FilterFlag::NoSystemAttributes);
+        assert_eq!(ext.into_iter().count(), 3);
+        assert_eq!(
+            FilterFlags::OPTIONS_DEFAULT,
+            FilterFlag::CheckForBinary.into()
+        );
+    }
+
+    #[test]
+    fn iter_is_fused_and_bounded() {
+        let mut it = FilterFlags::from_bits_retain(u32::MAX).iter();
+        assert_eq!(it.size_hint(), (0, Some(4)));
+        assert_eq!(it.by_ref().count(), 4);
+        assert_eq!(it.size_hint(), (0, Some(0)));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.clone().next(), None);
+    }
+
+    #[test]
+    fn debug_lists_named_then_unnamed_bits() {
+        assert_eq!(format!("{:?}", FilterFlags::empty()), "FilterFlags {}");
+        assert_eq!(
+            format!(
+                "{:?}",
+                FilterFlag::CheckForBinary | FilterFlag::AttributesFromHead
+            ),
+            "FilterFlags {CheckForBinary | AttributesFromHead}"
+        );
+        assert_eq!(
+            format!("{:?}", FilterFlags::from_bits_retain(0x81)),
+            "FilterFlags {CheckForBinary, 0x80}"
+        );
+        assert_eq!(
+            format!("{:?}", FilterFlags::from_bits_retain(0x80)),
+            "FilterFlags {0x80}"
+        );
+    }
+
+    /// Inputs around every branch of the heuristic: each byte-order mark and its
+    /// truncations, NULs before and after one, each class of byte alone, and the
+    /// printable-to-non-printable ratio on both sides of 128.
+    fn corpus() -> Vec<Vec<u8>> {
+        let mut inputs: Vec<Vec<u8>> = vec![
+            b"".to_vec(),
+            b"a".to_vec(),
+            b"\0".to_vec(),
+            b"\xef\xbb\xbf".to_vec(),
+            b"\xef\xbb\xbfplain".to_vec(),
+            b"\xef\xbb\xbf\0".to_vec(),
+            b"\xef\xbb".to_vec(),
+            b"\xfe\xff".to_vec(),
+            b"\xfe\xfe".to_vec(),
+            b"\xff\xfe".to_vec(),
+            b"\xff\xfe\0".to_vec(),
+            b"\xff\xfe\0\0".to_vec(),
+            b"\xff\xfe\0a".to_vec(),
+            b"\0\0\xfe\xff".to_vec(),
+            b"\0\0\xfe".to_vec(),
+            b"\0\0\xfe\xfe".to_vec(),
+            b"\xff\xff".to_vec(),
+            b"line\r\n\tindented\x0b\x0c".to_vec(),
+            b"\x08\x1b\x0c".to_vec(),
+            b"\x7f".to_vec(),
+            b"\x01".to_vec(),
+            b"\x80\xff\xa0".to_vec(),
+        ];
+        for (printable, nonprintable) in [(127, 1), (128, 1), (255, 1), (256, 2), (256, 3)] {
+            let mut ratio = vec![b'x'; printable];
+            ratio.extend(std::iter::repeat_n(0x01, nonprintable));
+            inputs.push(ratio);
+        }
+        for ws in [b' ', b'\t', b'\n', 0x0B, 0x0C, b'\r', 0x08, 0x1B] {
+            let mut run = vec![ws; 128];
+            run.push(0x01);
+            inputs.push(run);
+        }
+        inputs.extend((0..=u8::MAX).map(|c| vec![c]));
+        inputs.extend((0..=u8::MAX).map(|c| vec![b'a', c, b'b']));
+        inputs
+    }
+
+    /// `git_blob_data_is_binary` itself, as the C reference.
+    fn c_is_binary(data: &[u8]) -> bool {
+        // SAFETY: `data` is live for `data.len()` bytes, at most `INT_MAX`.
+        unsafe { ffi::git_blob_data_is_binary(data.as_ptr().cast(), data.len()) != 0 }
+    }
+
+    /// The Rust heuristic that stands in for libgit2 on oversized slices agrees with it
+    /// on every input libgit2 can take.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn wide_heuristic_matches_libgit2() {
+        for input in corpus() {
+            assert_eq!(wide::is_binary(&input), c_is_binary(&input), "{input:x?}");
+            assert_eq!(data_is_binary(&input), c_is_binary(&input), "{input:x?}");
+        }
+    }
+
+    /// The byte-order marks `git_str_detect_bom` recognises, and the bytes each takes.
+    #[test]
+    fn byte_order_marks() {
+        assert_eq!(wide::bom(b"\0\0\xfe\xffx"), (4, true));
+        assert_eq!(wide::bom(b"\xef\xbb\xbfx"), (3, false));
+        assert_eq!(wide::bom(b"\xfe\xffx"), (2, true));
+        assert_eq!(wide::bom(b"\xff\xfe\0\0x"), (4, true));
+        assert_eq!(wide::bom(b"\xff\xfe\0x"), (2, true));
+        assert_eq!(wide::bom(b"\xef\xbb"), (0, false));
+        assert_eq!(wide::bom(b"\xff"), (0, false));
+        assert_eq!(wide::bom(b""), (0, false));
+    }
+
+    /// The Rust heuristic's verdicts on each branch, without libgit2, so Miri checks
+    /// its slicing past a byte-order mark too.
+    #[test]
+    fn wide_heuristic_verdicts() {
+        for (data, binary) in [
+            (&b""[..], false),
+            (b"\xef\xbb\xbf", false),
+            (b"\xef\xbb\xbf\0", true),
+            (b"\xff\xfe", true),
+            (b"\0\0\xfe\xff", true),
+            (b"text\r\n\t\x0b\x0c\x08\x1b", false),
+            (b"\x01", true),
+            (b"\x7f", true),
+            (b"\x80\xff", false),
+        ] {
+            assert_eq!(wide::is_binary(data), binary, "{data:x?}");
+        }
+        let mut ratio = vec![b'x'; 256];
+        ratio.push(0x01);
+        assert!(!wide::is_binary(&ratio));
+        ratio.push(0x01);
+        assert!(!wide::is_binary(&ratio));
+        ratio.push(0x01);
+        assert!(wide::is_binary(&ratio));
+    }
+
+    /// Space, form feed, backspace and escape are printable: 128 of them carry one
+    /// control byte. Tab, line feed, vertical tab and carriage return count as neither,
+    /// so the same control byte makes the data binary. The Rust heuristic runs under
+    /// Miri too; the end-to-end check reaches libgit2.
+    #[test]
+    fn whitespace_classes() {
+        for (ws, binary) in [
+            (b' ', false),
+            (0x0C, false),
+            (0x08, false),
+            (0x1B, false),
+            (b'\t', true),
+            (b'\n', true),
+            (0x0B, true),
+            (b'\r', true),
+        ] {
+            let mut run = vec![ws; 128];
+            run.push(0x01);
+            assert_eq!(wide::is_binary(&run), binary, "{ws:#x}");
+            if !cfg!(miri) {
+                assert_eq!(data_is_binary(&run), binary, "{ws:#x}");
+            }
+        }
+    }
+
+    /// Slices up to `INT_MAX` bytes reach libgit2; one byte more takes the Rust
+    /// heuristic.
+    #[test]
+    fn longest_slice_for_libgit2_is_int_max() {
+        assert!(fits_c_counters(0));
+        assert!(fits_c_counters(c_int::MAX as usize));
+        assert!(!fits_c_counters(c_int::MAX as usize + 1));
+        assert!(!fits_c_counters(usize::MAX));
+    }
+
+    /// A slice one byte longer than libgit2's counters can count takes the Rust
+    /// heuristic. The slice is zeroed (never touched by `vec!` past the allocator's
+    /// own zero-filling, and binary at its first byte), so the test costs one
+    /// allocation, not a 2 GiB scan.
+    #[test]
+    #[cfg_attr(miri, ignore = "allocates 2 GiB")]
+    fn oversized_slice_takes_the_rust_heuristic() {
+        let mut data = vec![0u8; c_int::MAX as usize + 1];
+        assert!(data_is_binary(&data));
+        data[..2].copy_from_slice(b"\xff\xfe");
+        assert!(data_is_binary(&data));
+        data[..3].copy_from_slice(b"\xef\xbb\xbf");
+        assert!(data_is_binary(&data));
+    }
+
+    /// End to end, a slice whose printable bytes would overflow libgit2's `int` counter
+    /// (`INT_MAX + 1` of them) is counted in Rust. It scans 2 GiB, which takes minutes
+    /// under the sanitizers: run it with `--ignored`.
+    #[test]
+    #[ignore = "scans 2 GiB; run with --ignored"]
+    fn oversized_slices_are_counted_in_rust() {
+        let mut data = vec![b'a'; c_int::MAX as usize + 2];
+        // One non-printable byte for 2^24 printable ones is still text.
+        data[0] = 0x01;
+        assert!(!data_is_binary(&data));
+    }
+
+    /// `testrepo.git`: commit `a65fedf`, whose tree `944c0f6` names the blob `a823312`
+    /// (`README`, "hey there\n").
+    const TESTREPO: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/c/tests/resources/testrepo.git\0"
+    );
+    const COMMIT: &CStr = c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
+    const README: &CStr = c"a8233120f6ad708f843d861ce2b7228ec4e3dec6";
+
+    fn open() -> RepositoryBox {
+        assert!(runtime_pinned());
+        Repository::open(CStr::from_bytes_with_nul(TESTREPO.as_bytes()).unwrap()).unwrap()
+    }
+
+    fn sha1(hex: &CStr) -> Oid {
+        Oid::from_string(hex, OidType::Sha1).unwrap()
+    }
+
+    /// C's view of a live blob: its type as an object, and its content.
+    fn content(blob: BlobRef<'_, '_>) -> (ffi::git_object_t, Vec<u8>) {
+        let p = blob.as_ptr();
+        {
+            // SAFETY: `p` is a live blob the handle borrows; its content lives as long as
+            // it and is copied at once.
+            let size = unsafe { usize::try_from(ffi::git_blob_rawsize(p)).unwrap() };
+            // SAFETY: as above.
+            let data = unsafe { ffi::git_blob_rawcontent(p).cast::<u8>() };
+            // SAFETY: as above.
+            let object_type = unsafe { ffi::git_object_type(p.cast()) };
+            // SAFETY: as above.
+            unsafe {
+                (
+                    object_type,
+                    core::slice::from_raw_parts(data, size).to_vec(),
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn blob_layout_matches_c() {
+        assert_eq!(size_of::<Blob<'_>>(), size_of::<ffi::git_blob>());
+        assert_eq!(size_of::<BlobArc<'_>>(), size_of::<*mut ffi::git_blob>());
+        assert_eq!(
+            size_of::<Option<BlobArc<'_>>>(),
+            size_of::<*mut ffi::git_blob>()
+        );
+        assert_eq!(
+            size_of::<BlobRef<'_, '_>>(),
+            size_of::<*const ffi::git_blob>()
+        );
+        assert_eq!(
+            size_of::<BlobMut<'_, '_>>(),
+            size_of::<*const ffi::git_blob>()
+        );
+        assert_eq!(size_of::<BlobFree>(), 0);
+        assert_eq!(
+            size_of::<FilterOptions>(),
+            size_of::<ffi::git_blob_filter_options>()
+        );
+    }
+
+    /// The blob handles' seams over a pointer nothing reads, so Miri runs them:
+    /// `git_blob` is opaque, of size zero, so a dangling aligned pointer addresses all
+    /// of it.
+    #[test]
+    fn blob_handles_without_c() {
+        // SAFETY: NULL is refused without being read.
+        assert!(unsafe { BlobRef::from_ptr(ptr::null()) }.is_none());
+        // SAFETY: as above.
+        assert!(unsafe { BlobMut::from_ptr(ptr::null_mut()) }.is_none());
+        let p = NonNull::<ffi::git_blob>::dangling().as_ptr();
+        // SAFETY: a zero-sized blob at an aligned pointer, never read or written, and
+        // reached by this handle alone.
+        let mut m = unsafe { BlobMut::from_ptr(p) }.unwrap();
+        assert_eq!(m.as_mut_ptr(), p);
+        assert_eq!(m.as_mut().as_mut_ptr(), p);
+        let r = m.as_ref();
+        assert_eq!(r.as_ptr(), p.cast_const());
+        assert_eq!(format!("{r:?}"), "Blob { .. }");
+        assert_eq!(format!("{m:?}"), "Blob { .. }");
+    }
+
+    /// An id of another type than the repository's is refused before libgit2 formats
+    /// it out of bounds, at every length; the same bytes typed as the repository's
+    /// find the blob. Corrects `git_blob_lookup` and `git_blob_lookup_prefix`, which
+    /// check nothing.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_ids_of_another_type_are_refused_before_c() {
+        let repo = open();
+        let repo = repo.as_ref();
+        let readme = sha1(README);
+        let mut wide = Oid::from_raw(&readme.as_ref().id(), OidType::Sha256).unwrap();
+        for kind in [u8::try_from(OidType::Sha256.raw()).unwrap(), 0, 9, u8::MAX] {
+            wide.as_mut().set_raw_kind(kind);
+            let e = Blob::lookup(repo, wide.as_ref()).unwrap_err();
+            assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+            assert_eq!(
+                e.message(),
+                c"specified object ID type does not match repository object ID type"
+            );
+            for len in [0, 3, 4, 7, 39, 40, 41, 64, usize::MAX] {
+                let e = Blob::lookup_prefix(repo, wide.as_ref(), len).unwrap_err();
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+            }
+        }
+        wide.as_mut().set_kind(OidType::Sha1);
+        let blob = Blob::lookup(repo, wide.as_ref()).unwrap();
+        assert_eq!(
+            content(blob.as_ref()),
+            (ffi::GIT_OBJECT_BLOB, b"hey there\n".to_vec())
+        );
+        for len in [7, 40, usize::MAX] {
+            let found = Blob::lookup_prefix(repo, wide.as_ref(), len).unwrap();
+            assert_eq!(content(found.as_ref()), content(blob.as_ref()));
+        }
+    }
+
+    /// The policy driven by hand: the up-ref counts one more reference on the same
+    /// pointer, which an adopted owner and the free each settle; `to_blob` takes one
+    /// through a borrowed handle.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn blob_policy_counts_references_on_one_blob() {
+        let repo = open();
+        let blob = Blob::lookup(repo.as_ref(), sha1(README).as_ref()).unwrap();
+        let p = NonNull::new(blob.as_ptr()).unwrap();
+        // SAFETY: `blob` holds a reference to the live blob at `p`.
+        assert!(unsafe { BlobFree.c_up_ref(p) });
+        // SAFETY: the reference just counted, given to the owner.
+        let adopted = unsafe { BlobArc::from_raw(p.as_ptr()) }.unwrap();
+        assert!(BlobArc::ptr_eq(&adopted, &blob));
+        let raw = adopted.into_c();
+        // SAFETY: `raw` is the reference `into_c` gave up, released once here.
+        unsafe { BlobFree.c_drop(NonNull::new(raw).unwrap().cast()) };
+
+        // SAFETY: `blob` keeps the blob alive while the handle lives.
+        let borrowed = unsafe { BlobRef::from_ptr(blob.as_c_ptr()) }.unwrap();
+        let copy = borrowed.to_blob();
+        assert!(BlobArc::ptr_eq(&copy, &blob));
+        drop(blob);
+        assert_eq!(content(copy.as_ref()).1, b"hey there\n");
+        let mut copy = copy;
+        assert!(copy.get_mut().is_none());
+    }
+
+    /// An object converts to a blob only when it is one, in both the borrowed and the
+    /// owned forms; the blob converts back to the same object, and every conversion
+    /// moves its reference rather than counting another.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn objects_convert_to_blobs_only_when_they_are_blobs() {
+        let repo = open();
+        let commit = Object::lookup(repo.as_ref(), sha1(COMMIT).as_ref(), None).unwrap();
+        assert!(BlobRef::from_object(commit.as_ref()).is_none());
+        let commit = Blob::from_object(commit).unwrap_err();
+        let readme = commit.as_ref().lookup_bypath(c"README", None).unwrap();
+        let p = readme.as_c_ptr();
+
+        let borrowed = BlobRef::from_object(readme.as_ref()).unwrap();
+        assert_eq!(borrowed.as_ptr(), p.cast_const().cast());
+        assert_eq!(borrowed.as_object().as_ptr(), p.cast_const());
+        assert_eq!(content(borrowed).1, b"hey there\n");
+
+        let blob = Blob::from_object(readme).unwrap();
+        assert_eq!(blob.as_c_ptr(), p.cast());
+        let clone = blob.clone();
+        let object = Blob::into_object(blob);
+        assert_eq!(object.as_c_ptr(), p);
+        drop(object);
+        assert_eq!(content(clone.as_ref()).1, b"hey there\n");
+        let back = Blob::from_object(Blob::into_object(clone)).unwrap();
+        assert_eq!(back.as_c_ptr(), p.cast());
+    }
+
+    /// Options as C spells them, without libgit2, for Miri.
+    fn raw_options(reserved: *mut core::ffi::c_void) -> ffi::git_blob_filter_options {
+        ffi::git_blob_filter_options {
+            version: 1,
+            flags: ffi::GIT_BLOB_FILTER_CHECK_FOR_BINARY,
+            reserved,
+            attr_commit_id: ffi::git_oid::default(),
+        }
+    }
+
+    /// `new` is `GIT_BLOB_FILTER_OPTIONS_INIT`, field by field.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filter_options_new_is_the_template() {
+        let opts = FilterOptions::new();
+        let r = opts.as_ref();
+        assert_eq!(r.version(), FilterOptions::VERSION);
+        assert_eq!(r.version(), 1);
+        assert_eq!(r.flags(), FilterFlags::OPTIONS_DEFAULT);
+        assert!(!r.has_reserved());
+        assert_eq!(r.attr_commit_id().raw_kind(), 0);
+        assert_eq!(r.attr_commit_id().id(), [0; MAX_OID]);
+        assert_eq!(opts, FilterOptions::default());
+        assert_eq!(opts, FilterOptions::from(raw_options(ptr::null_mut())));
+    }
+
+    /// Every accessor reads back what its setter wrote, through every handle, and the
+    /// raw conversions keep every field, `reserved` included, which only `clear`
+    /// changes. Miri checks each projection.
+    #[test]
+    fn filter_options_accessors_round_trip() {
+        let mut slot = 0u64;
+        let dangling = ptr::from_mut(&mut slot).cast::<core::ffi::c_void>();
+        let mut opts = FilterOptions::from(raw_options(dangling));
+        assert!(opts.as_ref().has_reserved());
+        let copy = opts;
+        assert_eq!(ffi::git_blob_filter_options::from(copy).reserved, dangling);
+
+        let mut m = opts.as_mut();
+        m.set_version(-1);
+        m.set_flags(FilterFlags::from_bits_retain(0x8000_0005));
+        m.attr_commit_id_mut().set_raw_kind(1);
+        m.attr_commit_id_mut().set_id([0xAB; MAX_OID]);
+        assert_eq!(m.as_ref().version(), -1);
+        assert_eq!(m.as_ref().flags().bits(), 0x8000_0005);
+        assert_eq!(m.as_ref().attr_commit_id().raw_kind(), 1);
+        m.clear_reserved();
+        assert!(!m.as_ref().has_reserved());
+        assert_ne!(opts, copy);
+        assert_eq!(slot, 0);
+
+        let mut other = Oid::zeroed();
+        other.as_mut().set_raw_kind(2);
+        other.as_mut().set_id([0x5A; MAX_OID]);
+        opts.as_mut().set_attr_commit_id(other.as_ref());
+        let id = opts.as_ref().attr_commit_id();
+        assert_eq!((id.raw_kind(), id.id()), (2, [0x5A; MAX_OID]));
+
+        let raw = ffi::git_blob_filter_options::from(opts);
+        assert_eq!(raw.version, -1);
+        assert_eq!(raw.flags, 0x8000_0005);
+        assert!(raw.reserved.is_null());
+        assert_eq!(raw.attr_commit_id.type_, 2);
+        assert_eq!(raw.attr_commit_id.id, [0x5A; MAX_OID]);
+        assert_eq!(opts.as_ref().to_options(), opts);
+    }
+
+    /// Equality and hashing go field by field, `reserved` by whether it is set; the
+    /// debug form names each field.
+    #[test]
+    fn filter_options_compare_hash_and_debug() {
+        use std::collections::hash_map::DefaultHasher;
+        fn hash(opts: &FilterOptions) -> u64 {
+            let mut h = DefaultHasher::new();
+            opts.hash(&mut h);
+            h.finish()
+        }
+        let mut slot = 0u8;
+        let base = FilterOptions::from(raw_options(ptr::null_mut()));
+        let other_reserved = FilterOptions::from(raw_options(ptr::from_mut(&mut slot).cast()));
+        assert_ne!(base, other_reserved);
+        let mut variants = vec![other_reserved];
+        let mut v = base;
+        v.as_mut().set_version(2);
+        variants.push(v);
+        let mut v = base;
+        v.as_mut().set_flags(FilterFlags::empty());
+        variants.push(v);
+        let mut v = base;
+        v.as_mut().attr_commit_id_mut().set_raw_kind(1);
+        variants.push(v);
+        for v in &variants {
+            assert_ne!(*v, base, "{v:?}");
+        }
+        let same = base;
+        assert_eq!(same, base);
+        assert_eq!(hash(&same), hash(&base));
+        let mut cleared = other_reserved;
+        cleared.as_mut().clear_reserved();
+        assert_eq!(cleared, base);
+        assert_eq!(hash(&cleared), hash(&base));
+
+        let shown = format!("{base:?}");
+        assert!(
+            shown.starts_with(
+                "FilterOptions { version: 1, flags: FilterFlags {CheckForBinary}, \
+                 has_reserved: false, attr_commit_id: "
+            ),
+            "{shown}"
+        );
+        let mut m = v;
+        assert_eq!(format!("{:?}", m.as_mut()), format!("{v:?}"));
+    }
+
+    /// A fresh bare repository in a temporary directory, removed when dropped.
+    struct Bare {
+        dir: std::path::PathBuf,
+        repo: Option<RepositoryBox>,
+    }
+
+    impl Bare {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("crustify-blob-unit-{}-{tag}", std::process::id()));
+            drop(std::fs::remove_dir_all(&dir));
+            let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+            let repo = Repository::init(&path, true);
+            Self {
+                dir,
+                repo: Some(repo.unwrap()),
+            }
+        }
+
+        fn repo(&self) -> RepositoryRef<'_> {
+            self.repo.as_ref().unwrap().as_ref()
+        }
+    }
+
+    impl Drop for Bare {
+        fn drop(&mut self) {
+            drop(self.repo.take());
+            drop(std::fs::remove_dir_all(&self.dir));
+        }
+    }
+
+    /// An absolute path that would select filters is refused before libgit2 sees it,
+    /// with the error a release build reports from its assertion (a debug build would
+    /// abort): even for a repository without paths, which libgit2 would refuse
+    /// otherwise.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn absolute_filter_paths_are_refused_before_c() {
+        let pathless = Repository::new().unwrap();
+        let bare = Bare::new("absolute");
+        for repo in [pathless.as_ref(), bare.repo()] {
+            let workdir = create_from_workdir(repo, c"/etc/hostname").unwrap_err();
+            let stream = create_from_stream(repo, Some(c"/hint")).unwrap_err();
+            for e in [workdir, stream] {
+                assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Internal)));
+                assert_eq!(
+                    e.message(),
+                    c"unrecoverable internal error: '!((path)[0] == '/')'"
+                );
+            }
+        }
+        // A relative one reaches libgit2, which refuses a repository without a working
+        // directory, or without an `objects` directory, itself.
+        let e = create_from_workdir(pathless.as_ref(), c"file").unwrap_err();
+        assert_eq!(e.message(), c"repository has no working directory");
+        let e = create_from_stream(pathless.as_ref(), Some(c"file")).unwrap_err();
+        assert_eq!(e.code(), Some(ErrorCode::NotFound));
+    }
+
+    /// A writer is an `io::Write` that takes whole buffers and flushes nothing, and
+    /// commits what `io::copy` wrote; its `Debug` names it.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn writer_is_an_io_writer() {
+        use std::io::Write;
+
+        let bare = Bare::new("io");
+        let data: Vec<u8> = (0..70_000u32).map(|i| (i % 251) as u8).collect();
+        let mut writer = create_from_stream(bare.repo(), None).unwrap();
+        assert_eq!(format!("{writer:?}"), "BlobWriter { .. }");
+        assert_eq!(Write::write(&mut writer, &data[..10]).unwrap(), 10);
+        writer.flush().unwrap();
+        io::copy(&mut &data[10..], &mut writer).unwrap();
+        writer.write_all(b"").unwrap();
+        let id = writer.commit().unwrap();
+        assert_eq!(id, create_from_buffer(bare.repo(), &data).unwrap());
+    }
+
+    // --- Reading and filtering blobs -------------------------------------------------
+
+    const CHILD: &str = "CRUSTIFY_UNIT_CHILD";
+
+    /// Runs `body` alone in a child process: libgit2 marks a filter initialised,
+    /// unsynchronised, on the first list load, which another test's raw load may race.
+    fn isolated(test: &str, body: fn()) {
+        let name = test.split_once("::").map_or(test, |(_, rest)| rest);
+        if std::env::var(CHILD).as_deref() == Ok(name) {
+            body();
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1", "--nocapture"])
+            .env(CHILD, name)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "child `{name}` failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The accessors read the blob in place, at the addresses C returns.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn accessors_read_the_blob_in_place() {
+        let repo = open();
+        let id = sha1(README);
+        let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+        let r = blob.as_ref();
+        let p = r.as_ptr();
+        assert_eq!(
+            (r.id().raw_kind(), r.id().id()),
+            (id.as_ref().raw_kind(), id.as_ref().id())
+        );
+        // SAFETY: the live blob the owner holds; the getters only read it.
+        let blob_id = unsafe { ffi::git_blob_id(p) };
+        // SAFETY: as above.
+        let blob_owner = unsafe { ffi::git_blob_owner(p) };
+        // SAFETY: as above.
+        let (c_id, c_owner, c_data) = unsafe { (blob_id, blob_owner, ffi::git_blob_rawcontent(p)) };
+        assert_eq!(r.id().as_ptr(), c_id);
+        assert_eq!(r.owner().as_ptr(), c_owner.cast_const());
+        assert_eq!(r.owner().as_ptr(), repo.as_ref().as_ptr());
+        assert_eq!(r.content().as_ptr(), c_data.cast());
+        assert_eq!(r.content(), b"hey there\n");
+        assert_eq!(r.size(), 10);
+        assert_eq!(content(r).1, r.content());
+        assert!(!r.is_binary());
+    }
+
+    /// An empty blob lends an empty slice, never read through its pointer; the binary
+    /// heuristic stops after 8000 bytes, where [`data_is_binary`] reads on.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn empty_and_late_binary_contents() {
+        let bare = Bare::new("contents");
+        let blob = |data: &[u8]| {
+            let id = create_from_buffer(bare.repo(), data).unwrap();
+            Blob::lookup(bare.repo(), id.as_ref()).unwrap()
+        };
+        let empty = blob(b"");
+        assert_eq!(
+            (empty.as_ref().size(), empty.as_ref().content()),
+            (0, &b""[..])
+        );
+        assert!(!empty.as_ref().is_binary());
+        let mut late = vec![b'a'; 8000];
+        late.push(0);
+        let late_blob = blob(&late);
+        assert_eq!(late_blob.as_ref().content(), &late[..]);
+        assert!(!late_blob.as_ref().is_binary());
+        assert!(data_is_binary(late_blob.as_ref().content()));
+        assert!(blob(b"a\0b").as_ref().is_binary());
+    }
+
+    /// `filter` refuses an absolute path before libgit2 sees it, and an attribute
+    /// commit id of another type than the repository's whenever libgit2 would look it
+    /// up: not when the flag is off, the version is refused first, or a binary blob
+    /// stops the call first.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn filter_refuses_before_c() {
+        isolated(
+            concat!(module_path!(), "::filter_refuses_before_c"),
+            filter_refuses_before_c_body,
+        );
+    }
+
+    fn filter_refuses_before_c_body() {
+        let repo = open();
+        let id = sha1(README);
+        let blob = Blob::lookup(repo.as_ref(), id.as_ref()).unwrap();
+        let r = blob.as_ref();
+        let e = r.filter(c"/README", None).unwrap_err();
+        assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Internal)));
+        assert_eq!(
+            e.message(),
+            c"unrecoverable internal error: '!((path)[0] == '/')'"
+        );
+        let out = r.filter(c"README", None).unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"hey there\n");
+
+        let mismatch = c"specified object ID type does not match repository object ID type";
+        let mut opts = FilterOptions::new();
+        opts.as_mut()
+            .set_flags(FilterFlag::AttributesFromCommit | FilterFlag::NoSystemAttributes);
+        // The zero id `new` leaves is of no type; a SHA-256 one is not the repository's.
+        for wrong in [None, Some(Oid::zero(OidType::Sha256))] {
+            if let Some(wrong) = &wrong {
+                opts.as_mut().set_attr_commit_id(wrong.as_ref());
+            }
+            let e = r.filter(c"README", Some(opts.as_ref())).unwrap_err();
+            assert_eq!((e.raw_code(), e.class()), (-1, Some(ErrorClass::Invalid)));
+            assert_eq!(e.message(), mismatch);
+        }
+        // A refused version stops libgit2 before the id.
+        for version in [0, FilterOptions::VERSION + 1, -1] {
+            opts.as_mut().set_version(version);
+            let e = r.filter(c"README", Some(opts.as_ref())).unwrap_err();
+            assert_eq!(e.class(), Some(ErrorClass::Invalid));
+            assert_ne!(e.message(), mismatch);
+        }
+        opts.as_mut().set_version(FilterOptions::VERSION);
+        // The repository's own type passes, and so does any id with the flag off.
+        opts.as_mut().set_attr_commit_id(sha1(COMMIT).as_ref());
+        let out = r.filter(c"README", Some(opts.as_ref())).unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"hey there\n");
+        opts.as_mut()
+            .set_attr_commit_id(Oid::zero(OidType::Sha256).as_ref());
+        opts.as_mut().set_flags(FilterFlags::empty());
+        assert!(r.filter(c"README", Some(opts.as_ref())).is_ok());
+
+        // A binary blob stops libgit2 before it looks the commit up.
+        let bare = Bare::new("filter-binary");
+        let id = create_from_buffer(bare.repo(), b"\0binary").unwrap();
+        let binary = Blob::lookup(bare.repo(), id.as_ref()).unwrap();
+        opts.as_mut()
+            .set_flags(FilterFlag::CheckForBinary | FilterFlag::AttributesFromCommit);
+        let out = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap();
+        assert!(out.as_ref().is_empty() && out.as_ref().capacity() == 0);
+        opts.as_mut()
+            .set_flags(FilterFlag::AttributesFromCommit.into());
+        let e = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap_err();
+        assert_eq!(e.message(), mismatch);
+        opts.as_mut().set_flags(FilterFlags::empty());
+        let out = binary
+            .as_ref()
+            .filter(c"file", Some(opts.as_ref()))
+            .unwrap();
+        assert_eq!(out.as_ref().as_bytes(), b"\0binary");
+    }
+}

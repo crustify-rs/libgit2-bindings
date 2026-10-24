@@ -1,6 +1,6 @@
 // Replacing the strings frees them, so no borrowed string may be held across it.
-use libgit2::libgit2::core::strarray::StrArray;
-use libgit2::libgit2::raw::OdbDataStrVec;
+use libgit2::libgit2::src::libgit2::strarray::StrArray;
+use libgit2::libgit2::src::libgit2::odb::OdbDataStrVec;
 
 fn main() {
     let mut array = StrArray::new();

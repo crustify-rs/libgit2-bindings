@@ -1,6 +1,6 @@
 // Replacing the name frees the old one, so no borrowed name may be held across it.
-use libgit2::libgit2::core::types::Signature;
-use libgit2::libgit2::raw::OdbDataStrFree;
+use libgit2::libgit2::src::libgit2::signature::Signature;
+use libgit2::libgit2::src::libgit2::odb::OdbDataStrFree;
 
 fn main() {
     let mut sig = Signature::new(c"A", c"a@b", 0, 0).unwrap();

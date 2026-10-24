@@ -1,5 +1,5 @@
 // A handle cannot outlive the box that frees the shortener.
-use libgit2::libgit2::oid::oid::OidShortener;
+use libgit2::libgit2::src::libgit2::oid::OidShortener;
 
 fn main() {
     let handle = {

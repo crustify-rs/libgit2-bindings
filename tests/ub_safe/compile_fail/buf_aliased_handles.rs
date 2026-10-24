@@ -1,5 +1,5 @@
 // Two exclusive handles to one buffer cannot coexist.
-use libgit2::libgit2::core::buffer::Buf;
+use libgit2::libgit2::src::libgit2::buf::Buf;
 
 fn main() {
     let mut buf = Buf::new();

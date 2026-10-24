@@ -1,5 +1,5 @@
 // A handle lent by an `OdbArc` cannot outlive it: dropping the owner may free the odb.
-use libgit2::libgit2::odb::odb::Odb;
+use libgit2::libgit2::src::libgit2::odb::Odb;
 
 fn main() {
     let odb = Odb::new().unwrap();

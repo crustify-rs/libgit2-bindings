@@ -1,7 +1,7 @@
 // The exclusive handle excludes every other: no shared handle, or id handle, may be
 // held across it, and no second exclusive one taken while it lives.
-use libgit2::libgit2::core::types::FileMode;
-use libgit2::libgit2::object::tree::TreeUpdate;
+use libgit2::libgit2::src::libgit2::tree::FileMode;
+use libgit2::libgit2::src::libgit2::tree::TreeUpdate;
 
 fn main() {
     let mut update = TreeUpdate::remove(c"README");

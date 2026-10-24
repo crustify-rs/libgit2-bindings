@@ -1,6 +1,6 @@
 // The exclusive run of id bytes freezes its handle: no write through both.
 use ffibox::CZeroable;
-use libgit2::libgit2::oid::oid::Oid;
+use libgit2::libgit2::src::libgit2::oid::Oid;
 
 fn main() {
     let mut oid = Oid::zeroed();

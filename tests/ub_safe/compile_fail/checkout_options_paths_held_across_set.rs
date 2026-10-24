@@ -1,5 +1,5 @@
 // The paths the getter returns live in the options: no setter while they are held.
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut options = CheckoutOptions::new();

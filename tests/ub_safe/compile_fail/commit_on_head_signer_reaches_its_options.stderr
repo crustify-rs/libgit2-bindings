@@ -1,9 +1,9 @@
 error[E0502]: cannot borrow `options` as mutable because it is also borrowed as immutable
-  --> tests/ub_safe/compile_fail/commit_on_head_signer_reaches_its_options.rs:24:47
+  --> tests/ub_safe/compile_fail/commit_on_head_signer_reaches_its_options.rs:22:47
    |
-23 |     reached.set(Some(&options));
+21 |     reached.set(Some(&options));
    |                      -------- immutable borrow occurs here
-24 |     let _ = amend_from_stage(repo, None, Some(options.as_mut()));
+22 |     let _ = amend_from_stage(repo, None, Some(options.as_mut()));
    |                                               ^^^^^^^^------^^
    |                                               |       |
    |                                               |       immutable borrow later used by call

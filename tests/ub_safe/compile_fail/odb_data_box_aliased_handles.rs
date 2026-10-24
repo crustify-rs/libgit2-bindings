@@ -1,5 +1,5 @@
 // A shared handle cannot coexist with the exclusive one of the same box.
-use libgit2::libgit2::raw::OdbDataBox;
+use libgit2::libgit2::src::libgit2::odb::OdbDataBox;
 
 #[repr(C)]
 pub struct pair_st {

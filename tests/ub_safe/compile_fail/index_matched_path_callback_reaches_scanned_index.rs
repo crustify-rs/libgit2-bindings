@@ -2,8 +2,8 @@
 //! handle for the whole call.
 use std::ffi::CStr;
 
-use libgit2::libgit2::core::strarray::StrArrayView;
-use libgit2::libgit2::index::index::{AddFlags, Index, MatchedPathCallback, MatchedPathResult};
+use libgit2::libgit2::src::libgit2::strarray::StrArrayView;
+use {libgit2::libgit2::src::libgit2::index::AddFlags, libgit2::libgit2::src::libgit2::index::Index, libgit2::libgit2::src::libgit2::index::MatchedPathCallback, libgit2::libgit2::src::libgit2::index::MatchedPathResult};
 
 fn main() {
     let mut index = Index::new().unwrap();

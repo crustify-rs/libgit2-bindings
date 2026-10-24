@@ -1,5 +1,5 @@
 // A shared handle cannot coexist with the exclusive one of the same options.
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut options = CheckoutOptions::new();

@@ -1,5 +1,5 @@
 // The raw seams store pointers the borrow checker cannot follow: each is `unsafe`.
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut options = CheckoutOptions::new();

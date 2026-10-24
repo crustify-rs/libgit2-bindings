@@ -1,6 +1,6 @@
 // A tree builder's handles borrow its owner, so neither outlives it.
-use libgit2::libgit2::object::tree::TreeBuilder;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::tree::TreeBuilder;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::new().unwrap();

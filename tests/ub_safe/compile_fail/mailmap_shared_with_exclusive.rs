@@ -1,5 +1,5 @@
 // A shared mailmap handle cannot be used while an exclusive one lives.
-use libgit2::libgit2::object::mailmap::Mailmap;
+use libgit2::libgit2::src::libgit2::mailmap::Mailmap;
 
 fn main() {
     let mut mailmap = Mailmap::from_buffer(b"Real <r@x> <o@x>").unwrap();

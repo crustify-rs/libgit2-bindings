@@ -9,9 +9,8 @@ use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use libgit2::libgit2::index::index::{Index, IndexBox};
-use libgit2::libgit2::index::sys::index::ReucEntryRef;
-use libgit2::libgit2::oid::oid::OidType;
+use libgit2::libgit2::src::libgit2::index::{Index, IndexBox, ReucEntryRef};
+use libgit2::libgit2::src::libgit2::oid::OidType;
 
 /// One record as written: its path, three modes (0 for an absent side), and the ids,
 /// of which only those with a non-zero mode reach the file.

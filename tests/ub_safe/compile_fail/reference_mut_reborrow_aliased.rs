@@ -1,5 +1,5 @@
 // An exclusive handle is frozen while its reborrow lives.
-use libgit2::libgit2::refs::refs::ReferenceMut;
+use libgit2::libgit2::src::libgit2::refs::ReferenceMut;
 
 fn alias(mut exclusive: ReferenceMut<'_, '_>) {
     let reborrowed = exclusive.as_mut();

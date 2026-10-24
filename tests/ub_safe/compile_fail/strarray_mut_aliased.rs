@@ -1,5 +1,5 @@
 // Two exclusive handles over one array cannot coexist.
-use libgit2::libgit2::core::strarray::StrArray;
+use libgit2::libgit2::src::libgit2::strarray::StrArray;
 
 fn main() {
     let mut array = StrArray::new();

@@ -1,8 +1,8 @@
 // A commit keeps the repository it was looked up in, which its tree and parent lookups
 // read: it, and every further reference to it, borrows that repository.
-use libgit2::libgit2::object::commit::Commit;
-use libgit2::libgit2::oid::oid::{Oid, OidType};
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::commit::Commit;
+use {libgit2::libgit2::src::libgit2::oid::Oid, libgit2::libgit2::src::libgit2::oid::OidType};
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::open(c".").unwrap();

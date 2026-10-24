@@ -1,5 +1,5 @@
 // A handle cannot outlive the box that frees the reference.
-use libgit2::libgit2::refs::refs::UnattachedReference;
+use libgit2::libgit2::src::libgit2::refs::UnattachedReference;
 
 fn main() {
     let handle = {

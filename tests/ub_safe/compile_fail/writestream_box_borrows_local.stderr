@@ -12,7 +12,7 @@ error[E0597]: `out` does not live long enough
   | - `out` dropped here while still borrowed
   |
 note: requirement that the value outlives `'static` introduced here
- --> src/libgit2/core/types.rs
+ --> src/libgit2/src/libgit2/filter.rs
   |
   |         W: 'static,
   |            ^^^^^^^

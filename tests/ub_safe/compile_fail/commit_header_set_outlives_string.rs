@@ -1,6 +1,6 @@
 // A setter stores a borrow for the header's whole lifetime: a shorter-lived string
 // cannot be stored in a header that is used after the string is gone.
-use libgit2::libgit2::object::commit::Header;
+use libgit2::libgit2::src::libgit2::commit::Header;
 use std::ffi::CString;
 
 fn main() {

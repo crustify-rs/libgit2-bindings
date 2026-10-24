@@ -5,7 +5,7 @@ error[E0599]: no method named `set_seconds` found for struct `TimeRef<'a>` in th
   |       ^^^^^^^^^^^
   |
 help: there is a method `seconds` with a similar name, but with different arguments
- --> src/libgit2/core/types.rs
+ --> src/libgit2/src/libgit2/signature.rs
   |
   |     pub fn seconds(&self) -> i64 {
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

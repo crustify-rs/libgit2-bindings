@@ -1,6 +1,6 @@
 // An entry a tree lends, by index, name, id or in order, lives in the tree's storage:
 // none outlives the owner it was borrowed through.
-use libgit2::libgit2::object::tree::TreeArc;
+use libgit2::libgit2::src::libgit2::tree::TreeArc;
 
 fn escape(tree: TreeArc<'_>) {
     let handle = tree.as_ref();

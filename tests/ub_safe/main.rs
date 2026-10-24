@@ -1,5 +1,6 @@
-//! UB tests that target the safe public API. Each tested TU gets a module here,
-//! homed in `tests/ub_safe/<tu>.rs`.
+//! UB tests that target the safe public API. Each tested TU gets a module, homed at
+//! its path below the C root, in `tests/ub_safe/<TU path>.rs` (`src/libgit2/commit.rs` for
+//! `src/libgit2/commit.c`); the tests of a TU's `sys/` header are its `sys` module.
 //!
 //! `unsafe` is confined to [`fixture`], which stands in for safe constructors the
 //! crate does not have yet; the tests themselves deny it. libgit2's state is
@@ -9,45 +10,8 @@
 //! there; the Rust-only paths (empty buffers, rejected sizes) still run.
 #![deny(unsafe_code)]
 
-mod annotated_commit;
-mod blob;
-mod buffer;
-mod checkout;
-mod commit;
-mod common;
-mod config;
-mod errors;
-mod filter;
 mod fixture;
-mod global;
-mod index;
-mod mailmap;
-mod message;
-mod notes;
-mod object;
-mod odb;
-mod oid;
-mod oidarray;
-mod pathspec;
-mod refdb;
-mod refs;
-mod repository;
-mod signature;
-mod strarray;
-mod sys_alloc;
-mod sys_commit;
-mod sys_config;
-mod sys_errors;
-mod sys_index;
-mod sys_odb_backend;
-mod sys_path;
-mod sys_repository;
-mod tag;
-mod trace;
-mod transaction;
-mod tree;
-mod types;
-mod worktree;
+mod src;
 
 /// Illegal safe paths that must fail to compile, one file each under `compile_fail/`.
 #[test]
@@ -56,4 +20,3 @@ fn compile_fail() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ub_safe/compile_fail/*.rs");
 }
-mod diff;

@@ -1,5 +1,5 @@
 // An `OdbDataStrVec`'s shared and mutable views cannot coexist.
-use libgit2::libgit2::raw::{OdbDataStrFree, OdbDataStrVec};
+use {libgit2::libgit2::src::libgit2::odb::OdbDataStrFree, libgit2::libgit2::src::libgit2::odb::OdbDataStrVec};
 
 fn main() {
     let mut v = OdbDataStrVec::dup_all(&[c"a"]).unwrap();

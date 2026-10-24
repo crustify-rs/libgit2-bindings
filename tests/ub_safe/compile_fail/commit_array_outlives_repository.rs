@@ -3,7 +3,7 @@
 // commits of that borrow only is `CommitArrayMut::set_commits`' `compile_fail,E0521`
 // doctest: the note rustc attaches to that error is worded differently across the
 // stable and nightly toolchains the suites run under.)
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::open(c".").unwrap();

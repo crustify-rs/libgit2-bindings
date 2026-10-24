@@ -1,5 +1,5 @@
 // A string's `CStr` view cannot outlive the string it borrows.
-use libgit2::libgit2::raw::OdbDataStrFree;
+use libgit2::libgit2::src::libgit2::odb::OdbDataStrFree;
 
 fn main() {
     let s = OdbDataStrFree::dup(c"odb").unwrap();

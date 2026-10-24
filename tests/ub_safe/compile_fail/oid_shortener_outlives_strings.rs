@@ -2,7 +2,7 @@
 // (what `git_oid_shorten_add` takes) is invariant in the strings' lifetime.
 use std::ffi::{CStr, CString};
 
-use libgit2::libgit2::oid::oid::{OidShortener, OidShortenerMut};
+use {libgit2::libgit2::src::libgit2::oid::OidShortener, libgit2::libgit2::src::libgit2::oid::OidShortenerMut};
 
 fn keep<'s>(_: OidShortenerMut<'_, 's>, _: &'s CStr) {}
 

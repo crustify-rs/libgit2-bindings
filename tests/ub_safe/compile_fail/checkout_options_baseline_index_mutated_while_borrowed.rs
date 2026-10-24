@@ -1,6 +1,6 @@
 // A boxed index lends no exclusive handle while options borrow it as their baseline.
-use libgit2::libgit2::index::index::Index;
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::index::Index;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut index = Index::new().unwrap();

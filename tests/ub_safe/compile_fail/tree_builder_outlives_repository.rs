@@ -1,8 +1,8 @@
 // A tree builder keeps its repository, which inserting and writing reach, so it cannot
 // be dropped after the repository, nor kept while the repository lends an exclusive
 // handle.
-use libgit2::libgit2::object::tree::TreeBuilder;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::tree::TreeBuilder;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::new().unwrap();

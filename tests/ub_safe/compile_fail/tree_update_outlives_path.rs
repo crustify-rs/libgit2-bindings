@@ -1,5 +1,5 @@
 // An update borrows its path: it cannot be read after the path is dropped.
-use libgit2::libgit2::object::tree::TreeUpdate;
+use libgit2::libgit2::src::libgit2::tree::TreeUpdate;
 use std::ffi::CString;
 
 fn main() {

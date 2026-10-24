@@ -1,6 +1,6 @@
 // The writer cannot be borrowed while a handle to its stream is live: the handle's
 // `write` runs the writer through the stream's member.
-use libgit2::libgit2::core::types::RustWriteStream;
+use libgit2::libgit2::src::libgit2::filter::RustWriteStream;
 
 fn main() {
     let mut stream = RustWriteStream::new(Vec::new());

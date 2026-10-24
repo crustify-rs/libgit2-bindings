@@ -1,7 +1,7 @@
 // A handle, and the id handle projected from it, borrow the update they were taken
 // from.
-use libgit2::libgit2::object::tree::{TreeUpdate, TreeUpdateRef};
-use libgit2::libgit2::oid::oid::OidRef;
+use {libgit2::libgit2::src::libgit2::tree::TreeUpdate, libgit2::libgit2::src::libgit2::tree::TreeUpdateRef};
+use libgit2::libgit2::src::libgit2::oid::OidRef;
 
 fn handle<'a>() -> TreeUpdateRef<'a, 'static> {
     let update = TreeUpdate::remove(c"README");

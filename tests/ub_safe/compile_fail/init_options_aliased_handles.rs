@@ -1,5 +1,5 @@
 // A shared handle cannot coexist with the exclusive one of the same init options.
-use libgit2::libgit2::repository::repository::{InitFlags, InitOptions};
+use {libgit2::libgit2::src::libgit2::repository::InitFlags, libgit2::libgit2::src::libgit2::repository::InitOptions};
 
 fn main() {
     let mut options = InitOptions::new();

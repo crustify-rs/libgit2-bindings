@@ -4,7 +4,7 @@ error[E0599]: the method `clone` exists for struct `ffibox::refs::CBox<TreeBuild
 10 |     let _copy = builder.clone();
    |                         ^^^^^ method cannot be called due to unsatisfied trait bounds
    |
-  ::: src/libgit2/object/tree.rs
+  ::: src/libgit2/src/libgit2/tree.rs
    |
    | pub struct TreeBuilderFree;
    | -------------------------- doesn't satisfy `_: CDupClone<TreeBuilder<'_>>`

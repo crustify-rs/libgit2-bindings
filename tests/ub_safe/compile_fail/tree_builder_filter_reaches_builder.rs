@@ -1,6 +1,6 @@
 // A filter's closure runs while the builder is borrowed exclusively: it cannot reach
 // the builder, nor can an entry the builder lent before survive the filter.
-use libgit2::libgit2::object::tree::{TreeBuilderBox, TreeBuilderFilter, TreeEntryRef};
+use {libgit2::libgit2::src::libgit2::tree::TreeBuilderBox, libgit2::libgit2::src::libgit2::tree::TreeBuilderFilter, libgit2::libgit2::src::libgit2::tree::TreeEntryRef};
 
 fn reenter(mut builder: TreeBuilderBox<'_>) {
     let mut f = |_: TreeEntryRef<'_>| builder.as_ref().is_empty();

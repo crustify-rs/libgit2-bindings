@@ -1,6 +1,6 @@
 // The shared handle only reads: setters live on `TimeMut`.
 use ffibox::CZeroable;
-use libgit2::libgit2::core::types::Time;
+use libgit2::libgit2::src::libgit2::signature::Time;
 
 fn main() {
     let time = Time::zeroed();

@@ -1,0 +1,32 @@
+//! The tests of the translation units under `src/libgit2/`.
+
+mod annotated_commit;
+mod blob;
+mod buf;
+mod checkout;
+mod commit;
+mod config;
+mod diff;
+mod filter;
+mod index;
+mod libgit2;
+mod mailmap;
+mod notes;
+mod object;
+mod odb;
+mod oid;
+mod oidarray;
+mod path;
+mod pathspec;
+mod refdb;
+mod refs;
+mod repository;
+mod settings;
+mod signature;
+mod strarray;
+mod tag;
+mod trace;
+mod trailer;
+mod transaction;
+mod tree;
+mod worktree;

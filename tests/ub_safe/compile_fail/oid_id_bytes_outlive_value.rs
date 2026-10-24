@@ -1,6 +1,6 @@
 // The borrowed run of id bytes cannot outlive the `Oid` it projects.
 use ffibox::CZeroable;
-use libgit2::libgit2::oid::oid::Oid;
+use libgit2::libgit2::src::libgit2::oid::Oid;
 
 fn main() {
     let bytes = {

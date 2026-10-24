@@ -1,5 +1,5 @@
-use libgit2::libgit2::refs::transaction::Transaction;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::transaction::Transaction;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 fn main() {
     let repo = Repository::open(c".").unwrap();
     let mut tx = Transaction::new(repo.as_ref()).unwrap();

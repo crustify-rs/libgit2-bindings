@@ -2,7 +2,7 @@
 // callback alone: nothing outside the crate can make a handle to one, and the exclusive
 // handle does not alias. (That neither handle is `Send` is a doctest on `CommitBuilder`:
 // the toolchains word that error differently.)
-use libgit2::libgit2::object::commit::CommitBuilderMut;
+use libgit2::libgit2::src::libgit2::commit::CommitBuilderMut;
 
 fn alias(mut builder: CommitBuilderMut<'_>) {
     let shared = builder.as_ref();

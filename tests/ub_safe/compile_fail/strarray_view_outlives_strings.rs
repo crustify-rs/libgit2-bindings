@@ -1,7 +1,7 @@
 // A view borrows its strings, and cannot outlive them.
 use std::ffi::CString;
 
-use libgit2::libgit2::core::strarray::StrArrayView;
+use libgit2::libgit2::src::libgit2::strarray::StrArrayView;
 
 fn main() {
     let view = {

@@ -1,5 +1,5 @@
 // A borrowed string cannot outlive the array that owns it.
-use libgit2::libgit2::core::strarray::StrArray;
+use libgit2::libgit2::src::libgit2::strarray::StrArray;
 
 fn main() {
     let s = {

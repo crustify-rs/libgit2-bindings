@@ -5,7 +5,7 @@ error[E0599]: no method named `set_value` found for struct `MessageTrailerRef<'a
   |            ^^^^^^^^^
   |
 help: there is a method `value` with a similar name, but with different arguments
- --> src/libgit2/object/message.rs
+ --> src/libgit2/src/libgit2/trailer.rs
   |
   |     pub fn value(&self) -> &'t CStr {
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

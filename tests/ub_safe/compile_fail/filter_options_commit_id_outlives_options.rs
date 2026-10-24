@@ -1,7 +1,7 @@
 // The commit id the options lend is their own field: it cannot outlive them, nor be
 // read while an exclusive handle writes them.
-use libgit2::libgit2::object::blob::FilterOptions;
-use libgit2::libgit2::oid::oid::OidRef;
+use libgit2::libgit2::src::libgit2::blob::FilterOptions;
+use libgit2::libgit2::src::libgit2::oid::OidRef;
 
 fn id<'a>() -> OidRef<'a> {
     let opts = FilterOptions::new();

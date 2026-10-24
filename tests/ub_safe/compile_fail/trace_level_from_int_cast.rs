@@ -1,6 +1,6 @@
 // An integer cannot be cast into `TraceLevel`: `from_raw` is the only way in, and it
 // rejects values without a variant.
-use libgit2::libgit2::core::trace::TraceLevel;
+use libgit2::libgit2::src::libgit2::trace::TraceLevel;
 
 fn main() {
     let raw: u32 = 7;

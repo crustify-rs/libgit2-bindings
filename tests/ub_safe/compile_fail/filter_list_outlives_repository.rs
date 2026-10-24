@@ -2,8 +2,8 @@
 // filters read when it is applied: it cannot be dropped after the repository, whichever
 // constructor built it, nor escape the repository's borrow.
 use libgit2::ffi;
-use libgit2::libgit2::filter::filter::{FilterList, FilterListBox};
-use libgit2::libgit2::repository::repository::Repository;
+use {libgit2::libgit2::src::libgit2::filter::FilterList, libgit2::libgit2::src::libgit2::filter::FilterListBox};
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn escape() -> FilterListBox<'static> {
     let repo = Repository::new().unwrap();

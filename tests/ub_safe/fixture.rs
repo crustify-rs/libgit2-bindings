@@ -9,7 +9,7 @@ use std::ffi::{CStr, c_int, c_void};
 use std::mem::MaybeUninit;
 use std::process::Command;
 
-use libgit2::libgit2::raw::OdbDataVec;
+use libgit2::libgit2::src::libgit2::odb::OdbDataVec;
 
 const CHILD: &str = "CRUSTIFY_UB_SAFE_CHILD";
 
@@ -99,7 +99,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 
 use libgit2::ffi;
-use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
+use libgit2::libgit2::src::util::alloc::{Alloc, Allocator};
 
 unsafe extern "C" {
     fn malloc(n: usize) -> *mut c_void;
@@ -170,7 +170,7 @@ unsafe impl Alloc for Counted {
 pub(crate) unsafe extern "C" fn leave_free(_: *mut c_void) {}
 
 /// Installs `allocator` as libgit2's allocator through the unsafe
-/// [`common::set_allocator`](libgit2::libgit2::core::common::set_allocator), whose
+/// [`common::set_allocator`](libgit2::libgit2::src::libgit2::settings::set_allocator), whose
 /// contract the tests meet as below.
 ///
 /// Callers install a libc-backed family ([`Counted`]) or install before libgit2 has
@@ -179,7 +179,7 @@ pub(crate) fn install(allocator: &Allocator) {
     // SAFETY: `allocator` is a coherent family (an `Allocator::new` value over an
     // `Alloc` implementation); live blocks stay releasable and no other thread calls
     // libgit2 meanwhile, per this function's contract.
-    unsafe { libgit2::libgit2::core::common::set_allocator(Some(allocator.as_ref())) }
+    unsafe { libgit2::libgit2::src::libgit2::settings::set_allocator(Some(allocator.as_ref())) }
 }
 
 // --- `git2/types.h`: `git_writestream` ---------------------------------------------
@@ -188,13 +188,15 @@ use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use libgit2::libgit2::core::types::{RustWriteStream, StreamError, StreamWriter, WriteStreamBox};
-use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
-use libgit2::libgit2::util::errors::{ErrorCode, last};
+use libgit2::libgit2::src::libgit2::filter::{
+    RustWriteStream, StreamError, StreamWriter, WriteStreamBox,
+};
+use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
+use libgit2::libgit2::src::util::errors::{ErrorCode, last};
 
 /// Takes a `git_libgit2_init` reference that is never released.
 pub(crate) fn init() {
-    let _ = core::mem::ManuallyDrop::new(libgit2::libgit2::core::global::init().unwrap());
+    let _ = core::mem::ManuallyDrop::new(libgit2::libgit2::src::libgit2::libgit2::init().unwrap());
 }
 
 /// A fresh bare repository in a temporary directory, freed and removed on drop.
@@ -481,17 +483,17 @@ pub(crate) fn refused_filter() -> *mut ffi::git_filter {
 // --- `git2/strarray.h` -------------------------------------------------------------
 
 /// Sets libgit2's user extensions, which `!name` entries disable, through the unsafe
-/// [`common::set_extensions`](libgit2::libgit2::core::common::set_extensions).
+/// [`common::set_extensions`](libgit2::libgit2::src::libgit2::settings::set_extensions).
 /// Process-global: call it in an isolated child, single-threaded.
 pub(crate) fn set_extensions(names: &[&CStr]) {
     // SAFETY: callers run alone in an isolated child, so no other thread calls into
     // libgit2 while the setting changes.
-    unsafe { libgit2::libgit2::core::common::set_extensions(names) }.unwrap();
+    unsafe { libgit2::libgit2::src::libgit2::settings::set_extensions(names) }.unwrap();
 }
 
 // --- `git2/buffer.h` ---------------------------------------------------------------
 
-use libgit2::libgit2::core::buffer::{Buf, BufVal};
+use libgit2::libgit2::src::libgit2::buf::{Buf, BufVal};
 
 /// Sets a string option of `git_libgit2_opts` (`GIT_OPT_SET_USER_AGENT`,
 /// `GIT_OPT_SET_TEMPLATE_PATH`); NULL restores the default. Stands in for the
@@ -526,7 +528,8 @@ pub(crate) fn fill_from_option(option: u32, buf: &mut BufVal) {
 
 // --- `git2/trace.h` ----------------------------------------------------------------
 
-use libgit2::libgit2::core::trace::{self, TraceCallback, TraceLevel};
+use libgit2::libgit2::src::libgit2::trace;
+use libgit2::libgit2::src::libgit2::trace::{TraceCallback, TraceLevel};
 
 /// Installs `callback` as libgit2's tracer at `level` (`None`: no tracer), through
 /// `trace::set` / `trace::clear`, which stay `unsafe`: libgit2 keeps the trace state in
@@ -602,9 +605,9 @@ pub(crate) fn connect(url: &CStr) -> c_int {
 
 // --- `git2/repository.h`: `git_repository_item_t` -----------------------------------
 
-use libgit2::libgit2::repository::repository::Item;
+use libgit2::libgit2::src::libgit2::repository::Item;
 
-/// [`RepositoryRef::item_path`](libgit2::libgit2::repository::repository::RepositoryRef::item_path)
+/// [`RepositoryRef::item_path`](libgit2::libgit2::src::libgit2::repository::RepositoryRef::item_path)
 /// as a string: the path, or the return.
 pub(crate) fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
     match repo.repo.as_ref().unwrap().as_ref().item_path(item) {
@@ -618,9 +621,9 @@ pub(crate) fn item_path(repo: &TempRepo, item: Item) -> Result<String, c_int> {
 /// Fixtures over the repositories that hand out commit arrays and configs, through the
 /// safe wrappers.
 pub(crate) mod commit_and_config {
-    use libgit2::libgit2::config::config::ConfigArc;
-    use libgit2::libgit2::object::commit::CommitArrayVal;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::commit::CommitArrayVal;
+    use libgit2::libgit2::src::libgit2::config::ConfigArc;
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
 
     /// A fixture repository opened read-only, freed on drop.
     pub(crate) struct OpenRepo(RepositoryBox);
@@ -664,10 +667,10 @@ pub(crate) mod create_ext {
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::{SignatureView, Time};
-    use libgit2::libgit2::object::commit::{CreateExtOptions, create_ext};
-    use libgit2::libgit2::object::tree::Tree;
-    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::commit::{CreateExtOptions, create_ext};
+    use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::signature::{SignatureView, Time};
+    use libgit2::libgit2::src::libgit2::tree::Tree;
 
     use super::TempRepo;
 
@@ -749,9 +752,9 @@ pub(crate) mod stage {
     use std::ffi::CStr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::index::index::IndexArc;
-    use libgit2::libgit2::object::tree::TreeArc;
-    use libgit2::libgit2::oid::oid::Oid;
+    use libgit2::libgit2::src::libgit2::index::IndexArc;
+    use libgit2::libgit2::src::libgit2::oid::Oid;
+    use libgit2::libgit2::src::libgit2::tree::TreeArc;
 
     /// Reads `tree` into `index`, then adds a blob entry for each `(path, id)`.
     pub(crate) fn stage(index: &IndexArc, tree: &TreeArc<'_>, entries: &[(&CStr, &Oid)]) {
@@ -778,7 +781,7 @@ pub(crate) mod stage {
 
 // --- `git2/refdb.h`: `git_refdb` ---------------------------------------------------
 
-use libgit2::libgit2::refs::refdb::{Refdb, RefdbBox};
+use libgit2::libgit2::src::libgit2::refdb::{Refdb, RefdbBox};
 
 impl TempRepo {
     /// A refdb of this repository, through [`Refdb::open`]. The borrow of the fixture is
@@ -795,8 +798,8 @@ pub(crate) mod odb {
     //! their wrappers replace; each reaches the odb through its owner's raw seam.
 
     use libgit2::ffi;
-    use libgit2::libgit2::odb::odb::OdbArc;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::odb::OdbArc;
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
 
     /// `git_odb_write` of a blob; the id, or the error code.
     pub(crate) fn write_blob(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
@@ -857,7 +860,7 @@ pub(crate) mod odb {
     /// for the `git_repository_odb` wrapper, which lends the odb back, borrowing the
     /// repository.
     ///
-    /// [`Repository::wrap_odb`]: libgit2::libgit2::repository::repository::Repository::wrap_odb
+    /// [`Repository::wrap_odb`]: libgit2::libgit2::src::libgit2::repository::Repository::wrap_odb
     pub(crate) struct Repo(RepositoryBox);
 
     impl Repo {
@@ -884,8 +887,8 @@ pub(crate) mod refs {
     use std::path::PathBuf;
 
     use libgit2::ffi;
-    use libgit2::libgit2::refs::refs::{ReferenceBox, UnattachedReferenceBox};
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::refs::{ReferenceBox, UnattachedReferenceBox};
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
 
     /// A fresh bare repository in a temporary directory, freed and removed on drop.
     ///
@@ -1032,13 +1035,13 @@ pub(crate) mod index {
 
     use ffibox::CZeroable;
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::FileMode;
-    use libgit2::libgit2::index::index::{
+    use libgit2::libgit2::src::libgit2::index::{
         Capabilities, EntryExtendedFlags, EntryFlags, IndexArc, IndexBox, IndexEntry, IndexRef,
+        ReucSide,
     };
-    use libgit2::libgit2::index::sys::index::ReucSide;
-    use libgit2::libgit2::oid::oid::{Oid, OidType};
-    use libgit2::libgit2::repository::repository::{RepositoryBox, RepositoryError};
+    use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::repository::{RepositoryBox, RepositoryError};
+    use libgit2::libgit2::src::libgit2::tree::FileMode;
 
     use super::{CHILD, TempRepo};
 
@@ -1264,8 +1267,8 @@ pub(crate) mod worktree {
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
 
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
-    use libgit2::libgit2::repository::worktree::{Worktree, WorktreeBox};
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::src::libgit2::worktree::{Worktree, WorktreeBox};
 
     /// A non-bare repository in a temporary directory, to which [`add`](Self::add) lays
     /// out linked worktrees on disk as `git_worktree_add` would; freed and removed on
@@ -1354,13 +1357,13 @@ pub(crate) mod annotated_commit {
     use std::sync::atomic::{AtomicPtr, AtomicUsize};
 
     use libgit2::ffi;
-    use libgit2::libgit2::oid::oid::OidType;
-    use libgit2::libgit2::refs::annotated_commit::AnnotatedCommitBox;
-    use libgit2::libgit2::refs::refs::ReferenceBox;
-    use libgit2::libgit2::repository::repository::{
+    use libgit2::libgit2::src::libgit2::annotated_commit::AnnotatedCommitBox;
+    use libgit2::libgit2::src::libgit2::oid::OidType;
+    use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
+    use libgit2::libgit2::src::libgit2::repository::{
         InitFlag, InitOptions, Repository, RepositoryBox, RepositoryRef,
     };
-    use libgit2::libgit2::util::sys::alloc::{Alloc, Allocator};
+    use libgit2::libgit2::src::util::alloc::{Alloc, Allocator};
 
     /// A branch name 99 bytes long, a length no other allocation of these tests asks
     /// for (100 bytes with its NUL).
@@ -1597,9 +1600,9 @@ pub(crate) mod worktree_add {
     use std::ptr;
 
     use libgit2::ffi;
-    use libgit2::libgit2::refs::refs::ReferenceBox;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
-    use libgit2::libgit2::repository::worktree::{AddOptions, Worktree, WorktreeBox};
+    use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::worktree::{AddOptions, Worktree, WorktreeBox};
 
     /// A fresh non-bare repository at `<base>/repo` whose `HEAD` is `main`, a commit of
     /// the empty tree (so a checkout loads no filter), with the branches `feature` and
@@ -1722,7 +1725,7 @@ pub(crate) mod submodule {
     use std::path::PathBuf;
 
     use libgit2::ffi;
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
 
     /// A non-bare repository whose `.gitmodules` configures the submodule `sub`;
     /// removed on drop.
@@ -1805,7 +1808,7 @@ pub(crate) mod head_and_lookups {
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
 
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox};
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
 
     const RESOURCES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/c/tests/resources");
 
@@ -1879,8 +1882,8 @@ pub(crate) mod tree {
     use std::ffi::{CStr, CString};
 
     use libgit2::ffi;
-    use libgit2::libgit2::object::tree::{TreeArc, TreeBuilderBox};
-    use libgit2::libgit2::oid::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::tree::{TreeArc, TreeBuilderBox};
 
     /// Each entry's name and raw file mode, of `tree`, through the safe getters.
     pub(crate) fn entries(tree: &TreeArc<'_>) -> Vec<(CString, ffi::git_filemode_t)> {
@@ -1920,12 +1923,11 @@ pub(crate) mod object_and_tree_entry {
     use std::ffi::CString;
 
     use libgit2::ffi;
-    use libgit2::libgit2::core::types::{FileMode, ObjectType};
-    use libgit2::libgit2::object::blob::create_from_buffer;
-    use libgit2::libgit2::object::object::{Object, ObjectArc};
-    use libgit2::libgit2::object::tree::{TreeBuilder, TreeEntryBox};
-    use libgit2::libgit2::oid::oid::{Oid, OidType};
-    use libgit2::libgit2::repository::repository::{Repository, RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::src::libgit2::blob::create_from_buffer;
+    use libgit2::libgit2::src::libgit2::object::{Object, ObjectArc, ObjectType};
+    use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox, RepositoryRef};
+    use libgit2::libgit2::src::libgit2::tree::{FileMode, TreeBuilder, TreeEntryBox};
 
     use super::TempRepo;
 
@@ -2017,20 +2019,20 @@ pub(crate) mod object_and_tree_entry {
     /// Sets libgit2's object cache limit, in a child process that runs nothing else.
     pub(crate) fn set_cache_max_size(bytes: isize) {
         // SAFETY: the isolated children that call it run one thread meanwhile.
-        unsafe { libgit2::libgit2::core::common::set_cache_max_size(bytes) }
+        unsafe { libgit2::libgit2::src::libgit2::settings::set_cache_max_size(bytes) }
     }
 
     /// Enables or disables libgit2's object caches, in a child process that runs
     /// nothing else.
     pub(crate) fn enable_caching(enabled: bool) {
         // SAFETY: as above.
-        unsafe { libgit2::libgit2::core::common::enable_caching(enabled) }
+        unsafe { libgit2::libgit2::src::libgit2::settings::enable_caching(enabled) }
     }
 }
 
 // --- `git2/filter.h`: `git_filter_list` ---------------------------------------------
 
-use libgit2::libgit2::filter::filter::FilterListBox;
+use libgit2::libgit2::src::libgit2::filter::FilterListBox;
 
 /// `git_filter_list_apply_to_buffer(out, list, data)`, standing in for the filter
 /// list's apply wrapper (a later run), which replaces it: the filtered bytes, or the
@@ -2154,13 +2156,18 @@ pub(crate) mod filter_probe {
 
 /// The blob cache limit, a global option the blob tests set in isolated children.
 pub(crate) mod blob {
-    use libgit2::libgit2::core::types::ObjectType;
+    use libgit2::libgit2::src::libgit2::object::ObjectType;
 
     /// Lets the object cache keep blobs of up to `bytes`, in a child process that runs
     /// nothing else.
     pub(crate) fn set_blob_cache_limit(bytes: usize) {
         // SAFETY: the isolated children that call it run one thread meanwhile.
-        unsafe { libgit2::libgit2::core::common::set_cache_object_limit(ObjectType::Blob, bytes) }
+        unsafe {
+            libgit2::libgit2::src::libgit2::settings::set_cache_object_limit(
+                ObjectType::Blob,
+                bytes,
+            );
+        }
     }
 }
 
@@ -2170,7 +2177,7 @@ pub(crate) mod signature {
     use std::ffi::CString;
     use std::path::Path;
 
-    use libgit2::libgit2::core::common::{SearchPathLevel, set_search_path};
+    use libgit2::libgit2::src::libgit2::settings::{SearchPathLevel, set_search_path};
 
     /// Points the system, global and XDG configuration levels at `dir`, so that only a
     /// repository's own configuration names an identity. Stands in for a scoped
@@ -2190,8 +2197,8 @@ pub(crate) mod signature {
 
 /// An index holding a regular-file entry at each of `paths`, added through
 /// `IndexMut::add`.
-pub(crate) fn match_list_index(paths: &[&CStr]) -> libgit2::libgit2::index::index::IndexBox {
-    let mut index = libgit2::libgit2::index::index::Index::new().unwrap();
+pub(crate) fn match_list_index(paths: &[&CStr]) -> libgit2::libgit2::src::libgit2::index::IndexBox {
+    let mut index = libgit2::libgit2::src::libgit2::index::Index::new().unwrap();
     for path in paths {
         assert_eq!(index::add(&mut index, path), 0);
     }

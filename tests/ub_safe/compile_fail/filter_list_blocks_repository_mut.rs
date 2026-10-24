@@ -2,8 +2,8 @@
 // so nothing may reach the repository exclusively (replacing its namespace, identity
 // or working directory) meanwhile.
 use libgit2::ffi;
-use libgit2::libgit2::filter::filter::FilterList;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::filter::FilterList;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let mut repo = Repository::open(c".").unwrap();

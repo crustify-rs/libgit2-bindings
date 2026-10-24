@@ -1,6 +1,6 @@
 // The name and id an entry lends live inside its block, which the box frees.
-use libgit2::libgit2::object::tree::TreeEntryBox;
-use libgit2::libgit2::oid::oid::OidRef;
+use libgit2::libgit2::src::libgit2::tree::TreeEntryBox;
+use libgit2::libgit2::src::libgit2::oid::OidRef;
 use std::ffi::CStr;
 
 fn name(entry: TreeEntryBox) -> &'static CStr {

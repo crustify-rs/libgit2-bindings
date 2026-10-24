@@ -1,6 +1,6 @@
 // The shortener reads the ids it keeps on later additions: an id cannot be written
 // while the shortener lives.
-use libgit2::libgit2::oid::oid::OidShortener;
+use libgit2::libgit2::src::libgit2::oid::OidShortener;
 
 fn main() {
     let mut id = String::from("a94a8fe5ccb19ba61c4c0873d391e987982fbbd3");

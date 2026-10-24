@@ -1,6 +1,6 @@
 // The exclusive handle excludes every other: no shared handle may be held across it,
 // and no second exclusive one taken while it lives.
-use libgit2::libgit2::object::commit::Header;
+use libgit2::libgit2::src::libgit2::commit::Header;
 
 fn main() {
     let mut header = Header::new(c"field", c"value");

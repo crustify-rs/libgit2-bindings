@@ -1,6 +1,6 @@
 // An integer cannot be cast into `SubmoduleRecurse` or `SubmoduleUpdate`: `from_raw`
 // is the only way in, and it rejects values without a variant.
-use libgit2::libgit2::core::types::{SubmoduleRecurse, SubmoduleUpdate};
+use {libgit2::libgit2::src::libgit2::submodule::SubmoduleRecurse, libgit2::libgit2::src::libgit2::submodule::SubmoduleUpdate};
 
 fn main() {
     let raw: u32 = 0;

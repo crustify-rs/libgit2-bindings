@@ -1,7 +1,7 @@
 // A config a repository handed out borrows that repository: its file backends keep the
 // repository for their `includeIf` conditions, evaluated on every reparse, so it cannot
 // be dropped after the repository, nor installed in a repository that may outlive it.
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::open(c".").unwrap();

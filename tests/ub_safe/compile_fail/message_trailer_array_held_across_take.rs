@@ -1,5 +1,5 @@
 // An array's trailers cannot be held while its exclusive handle takes them out.
-use libgit2::libgit2::object::message::MessageTrailerArray;
+use libgit2::libgit2::src::libgit2::trailer::MessageTrailerArray;
 
 fn main() {
     let mut array = MessageTrailerArray::parse(c"Subject\n\nKey: value\n").unwrap();

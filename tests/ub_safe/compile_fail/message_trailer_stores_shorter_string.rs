@@ -1,6 +1,6 @@
 // An exclusive handle of a `'static` trailer stores only `'static` strings: it is
 // invariant in the strings' lifetime, so a shorter-lived one does not fit.
-use libgit2::libgit2::object::message::MessageTrailer;
+use libgit2::libgit2::src::libgit2::trailer::MessageTrailer;
 use std::ffi::CString;
 
 fn main() {

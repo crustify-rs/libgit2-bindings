@@ -1,8 +1,8 @@
 // A filter list lent to id options cannot be reached exclusively meanwhile.
 use libgit2::ffi;
-use libgit2::libgit2::filter::filter::FilterList;
-use libgit2::libgit2::object::object::ObjectIdOptions;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::filter::FilterList;
+use libgit2::libgit2::src::libgit2::object::ObjectIdOptions;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::new().unwrap();

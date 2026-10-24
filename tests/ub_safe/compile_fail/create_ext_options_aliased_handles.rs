@@ -1,6 +1,6 @@
 // A shared handle cannot coexist with the exclusive one of the same options, nor a
 // run of headers it lent with a change of the headers.
-use libgit2::libgit2::object::commit::{CreateExtOptions, Header};
+use {libgit2::libgit2::src::libgit2::commit::CreateExtOptions, libgit2::libgit2::src::libgit2::commit::Header};
 
 fn main() {
     let mut options = CreateExtOptions::new();

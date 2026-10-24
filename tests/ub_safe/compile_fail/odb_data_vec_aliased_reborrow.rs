@@ -1,5 +1,5 @@
 // A shared view cannot coexist with the exclusive one.
-use libgit2::libgit2::raw::OdbDataVec;
+use libgit2::libgit2::src::libgit2::odb::OdbDataVec;
 
 fn main() {
     let mut v = OdbDataVec::<u8>::from_slice(b"odb").unwrap();

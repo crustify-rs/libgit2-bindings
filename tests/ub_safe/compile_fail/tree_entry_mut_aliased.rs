@@ -1,6 +1,6 @@
 // Two exclusive handles to one entry cannot coexist, nor a shared one beside an
 // exclusive one.
-use libgit2::libgit2::object::tree::TreeEntryBox;
+use libgit2::libgit2::src::libgit2::tree::TreeEntryBox;
 
 fn alias(mut entry: TreeEntryBox) {
     let a = entry.as_mut();

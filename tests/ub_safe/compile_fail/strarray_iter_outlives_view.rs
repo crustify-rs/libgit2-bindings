@@ -1,5 +1,5 @@
 // A view's iterator borrows the view, and cannot outlive it.
-use libgit2::libgit2::core::strarray::StrArrayView;
+use libgit2::libgit2::src::libgit2::strarray::StrArrayView;
 
 fn main() {
     let names = [c"a", c"b"];

@@ -1,7 +1,7 @@
 // A formatter's result borrows its buffer: the buffer cannot be written while it
 // lives.
 use ffibox::CZeroable;
-use libgit2::libgit2::oid::oid::Oid;
+use libgit2::libgit2::src::libgit2::oid::Oid;
 
 fn main() {
     let oid = Oid::zeroed();

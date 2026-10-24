@@ -1,6 +1,6 @@
 // An integer cannot be cast into `LibraryOption`: `from_raw` and `from_key` are the
 // only ways in, and they reject values without a variant.
-use libgit2::libgit2::core::common::LibraryOption;
+use libgit2::libgit2::src::libgit2::settings::LibraryOption;
 
 fn main() {
     let key: i32 = -1;

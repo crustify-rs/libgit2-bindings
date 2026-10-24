@@ -4,7 +4,7 @@ error[E0599]: the method `clone` exists for struct `ffibox::refs::CBox<Mailmap, 
 6 |     let _copy = mailmap.clone();
   |                         ^^^^^ method cannot be called on `ffibox::refs::CBox<Mailmap, MailmapFree>` due to unsatisfied trait bounds
   |
- ::: src/libgit2/object/mailmap.rs
+ ::: src/libgit2/src/libgit2/mailmap.rs
   |
   | pub struct MailmapFree;
   | ---------------------- doesn't satisfy `MailmapFree: ffibox::traits::CDupClone<Mailmap>`

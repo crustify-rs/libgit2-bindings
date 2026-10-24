@@ -1,6 +1,6 @@
 // The options borrow their strings and headers for `'o`: none may go first, and the
 // headers' strings are borrowed for as long.
-use libgit2::libgit2::object::commit::{CreateExtOptions, Header};
+use {libgit2::libgit2::src::libgit2::commit::CreateExtOptions, libgit2::libgit2::src::libgit2::commit::Header};
 use std::ffi::CString;
 
 fn main() {

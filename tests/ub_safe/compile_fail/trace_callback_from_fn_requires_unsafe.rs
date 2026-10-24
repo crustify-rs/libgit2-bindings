@@ -3,7 +3,7 @@
 use std::ffi::c_char;
 
 use libgit2::ffi;
-use libgit2::libgit2::core::trace::TraceCallback;
+use libgit2::libgit2::src::libgit2::trace::TraceCallback;
 
 unsafe extern "C" fn c_tracer(_: ffi::git_trace_level_t, _: *const c_char) {}
 

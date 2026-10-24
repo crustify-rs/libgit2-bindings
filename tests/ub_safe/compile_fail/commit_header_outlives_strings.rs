@@ -1,5 +1,5 @@
 // A header borrows its strings: it cannot be read after one is dropped.
-use libgit2::libgit2::object::commit::Header;
+use libgit2::libgit2::src::libgit2::commit::Header;
 use std::ffi::CString;
 
 fn main() {

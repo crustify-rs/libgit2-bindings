@@ -1,6 +1,6 @@
 // An owned path array cannot be changed (its strings freed) while options borrow it.
-use libgit2::libgit2::core::strarray::StrArray;
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::strarray::StrArray;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut owned = StrArray::from_strs(&[c"a.txt"]).unwrap();

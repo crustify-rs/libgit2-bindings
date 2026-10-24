@@ -1,7 +1,7 @@
 // An object reads the repository it was looked up in: it cannot outlive it.
-use libgit2::libgit2::object::object::Object;
-use libgit2::libgit2::oid::oid::{Oid, OidType};
-use libgit2::libgit2::repository::repository::RepositoryBox;
+use libgit2::libgit2::src::libgit2::object::Object;
+use {libgit2::libgit2::src::libgit2::oid::Oid, libgit2::libgit2::src::libgit2::oid::OidType};
+use libgit2::libgit2::src::libgit2::repository::RepositoryBox;
 
 fn escape(repo: RepositoryBox) {
     let id = Oid::zero(OidType::Sha1);

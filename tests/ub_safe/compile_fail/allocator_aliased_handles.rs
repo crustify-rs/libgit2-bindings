@@ -1,5 +1,5 @@
 // A shared handle cannot coexist with the exclusive one of the same `Allocator`.
-use libgit2::libgit2::util::sys::alloc::{Allocator, FreeFn};
+use {libgit2::libgit2::src::util::alloc::Allocator, libgit2::libgit2::src::util::alloc::FreeFn};
 
 fn replace_free(allocator: &mut Allocator, free: FreeFn) {
     let shared = allocator.as_ref();

@@ -2,9 +2,9 @@
 // closure cannot take the repository's exclusive handle.
 use std::ffi::CStr;
 
-use libgit2::libgit2::object::tree::{Tree, TreeEntryRef, WalkAction, WalkCallback, WalkMode};
-use libgit2::libgit2::oid::oid::{Oid, OidType};
-use libgit2::libgit2::repository::repository::RepositoryBox;
+use {libgit2::libgit2::src::libgit2::tree::Tree, libgit2::libgit2::src::libgit2::tree::TreeEntryRef, libgit2::libgit2::src::libgit2::tree::WalkAction, libgit2::libgit2::src::libgit2::tree::WalkCallback, libgit2::libgit2::src::libgit2::tree::WalkMode};
+use {libgit2::libgit2::src::libgit2::oid::Oid, libgit2::libgit2::src::libgit2::oid::OidType};
+use libgit2::libgit2::src::libgit2::repository::RepositoryBox;
 
 fn walk(mut repo: RepositoryBox) {
     let id = Oid::zero(OidType::Sha1);

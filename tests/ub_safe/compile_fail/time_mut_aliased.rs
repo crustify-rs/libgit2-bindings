@@ -1,6 +1,6 @@
 // Two exclusive handles to one `Time` cannot coexist, nor a shared one beside them.
 use ffibox::CZeroable;
-use libgit2::libgit2::core::types::Time;
+use libgit2::libgit2::src::libgit2::signature::Time;
 
 fn main() {
     let mut time = Time::zeroed();

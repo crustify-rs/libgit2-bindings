@@ -1,5 +1,5 @@
 // A tree's id lives inside the tree: it does not outlive the owner it was read through.
-use libgit2::libgit2::object::tree::TreeArc;
+use libgit2::libgit2::src::libgit2::tree::TreeArc;
 
 fn escape(tree: TreeArc<'_>) {
     let handle = tree.as_ref();

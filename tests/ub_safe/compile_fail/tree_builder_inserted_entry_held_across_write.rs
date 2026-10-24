@@ -1,8 +1,8 @@
 // The entry `insert_entry` lends keeps the exclusive handle borrowed: no other change,
 // write or lookup through it while the entry lives.
-use libgit2::libgit2::core::types::FileMode;
-use libgit2::libgit2::object::tree::TreeBuilderMut;
-use libgit2::libgit2::oid::oid::OidRef;
+use libgit2::libgit2::src::libgit2::tree::FileMode;
+use libgit2::libgit2::src::libgit2::tree::TreeBuilderMut;
+use libgit2::libgit2::src::libgit2::oid::OidRef;
 
 fn stale(mut builder: TreeBuilderMut<'_, '_>, id: OidRef<'_>) {
     let entry = builder.insert_entry(c"a", id, FileMode::Commit).unwrap();

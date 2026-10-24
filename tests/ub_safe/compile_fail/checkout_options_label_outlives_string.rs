@@ -1,7 +1,7 @@
 // The options cannot outlive a string their setter borrowed.
 use std::ffi::CString;
 
-use libgit2::libgit2::workdir::checkout::CheckoutOptions;
+use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut options = CheckoutOptions::new();

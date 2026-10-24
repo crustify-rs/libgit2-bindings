@@ -1,6 +1,6 @@
 // A tree builder lends one exclusive handle at a time, and no shared handle beside it.
-use libgit2::libgit2::object::tree::TreeBuilder;
-use libgit2::libgit2::repository::repository::Repository;
+use libgit2::libgit2::src::libgit2::tree::TreeBuilder;
+use libgit2::libgit2::src::libgit2::repository::Repository;
 
 fn main() {
     let repo = Repository::new().unwrap();

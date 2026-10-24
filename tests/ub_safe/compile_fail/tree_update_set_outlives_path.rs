@@ -1,6 +1,6 @@
 // A setter stores a borrow for the update's whole lifetime: a shorter-lived path
 // cannot be stored in an update that is used after the path is gone.
-use libgit2::libgit2::object::tree::TreeUpdate;
+use libgit2::libgit2::src::libgit2::tree::TreeUpdate;
 use std::ffi::CString;
 
 fn main() {

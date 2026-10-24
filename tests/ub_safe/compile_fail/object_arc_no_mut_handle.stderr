@@ -1,4 +1,4 @@
-error[E0599]: the method `as_mut` exists for mutable reference `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::object::Object<'static>, ObjectFree>`, but its trait bounds were not satisfied
+error[E0599]: the method `as_mut` exists for mutable reference `&'a mut ffibox::shared::CArc<libgit2::libgit2::src::libgit2::object::Object<'static>, ObjectFree>`, but its trait bounds were not satisfied
  --> tests/ub_safe/compile_fail/object_arc_no_mut_handle.rs:6:12
   |
 6 |     object.as_mut()
@@ -10,5 +10,5 @@ error[E0599]: the method `as_mut` exists for mutable reference `&'a mut ffibox::
   | ------------------------------- doesn't satisfy `_: AsMut<_>`
   |
   = note: the following trait bounds were not satisfied:
-          `ffibox::shared::CArc<libgit2::libgit2::object::object::Object<'static>, ObjectFree>: AsMut<_>`
-          which is required by `&'a mut ffibox::shared::CArc<libgit2::libgit2::object::object::Object<'static>, ObjectFree>: AsMut<_>`
+          `ffibox::shared::CArc<libgit2::libgit2::src::libgit2::object::Object<'static>, ObjectFree>: AsMut<_>`
+          which is required by `&'a mut ffibox::shared::CArc<libgit2::libgit2::src::libgit2::object::Object<'static>, ObjectFree>: AsMut<_>`

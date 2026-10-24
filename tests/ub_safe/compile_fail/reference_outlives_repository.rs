@@ -1,7 +1,7 @@
 // A reference cannot outlive the repository borrow it was read through: its owner
 // carries the borrow's lifetime, which its drop still needs. `read` has the shape of
 // a lookup wrapper.
-use libgit2::libgit2::refs::refs::ReferenceBox;
+use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
 
 struct Repository;
 

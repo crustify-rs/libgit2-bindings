@@ -1,7 +1,7 @@
 // A view borrows its strings, so it cannot outlive them.
 use std::ffi::CString;
 
-use libgit2::libgit2::core::types::{SignatureView, Time};
+use {libgit2::libgit2::src::libgit2::signature::SignatureView, libgit2::libgit2::src::libgit2::signature::Time};
 
 fn main() {
     let view = {

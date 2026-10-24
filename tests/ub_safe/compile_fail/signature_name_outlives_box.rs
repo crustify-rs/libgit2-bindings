@@ -1,5 +1,5 @@
 // A borrowed name cannot outlive the signature that owns it.
-use libgit2::libgit2::core::types::Signature;
+use libgit2::libgit2::src::libgit2::signature::Signature;
 
 fn main() {
     let name = {

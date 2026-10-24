@@ -1,6 +1,6 @@
 // The init options' reference storage is typed: a raw value libgit2 does not name
 // cannot be stored.
-use libgit2::libgit2::repository::repository::InitOptions;
+use libgit2::libgit2::src::libgit2::repository::InitOptions;
 
 fn main() {
     let mut options = InitOptions::new();

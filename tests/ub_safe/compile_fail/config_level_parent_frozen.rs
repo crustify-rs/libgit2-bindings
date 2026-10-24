@@ -1,4 +1,4 @@
-use libgit2::libgit2::config::config::{Config, ConfigLevel};
+use {libgit2::libgit2::src::libgit2::config::Config, libgit2::libgit2::src::libgit2::config::ConfigLevel};
 fn main() {
     let mut cfg = Config::open(c"config").unwrap();
     let mut parent = cfg.as_mut();

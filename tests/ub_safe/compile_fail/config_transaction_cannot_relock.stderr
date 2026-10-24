@@ -4,7 +4,7 @@ error[E0624]: method `config_mut` is private
 5 |     let nested = tx.config_mut().lock();
   |                     ^^^^^^^^^^ private method
   |
- ::: src/libgit2/refs/transaction.rs
+ ::: src/libgit2/src/libgit2/transaction.rs
   |
   |     pub(crate) fn config_mut(&mut self) -> ConfigMut<'_, 'r> {
   |     -------------------------------------------------------- private method defined here

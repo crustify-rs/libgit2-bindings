@@ -5,7 +5,7 @@ error[E0599]: no method named `set_name` found for struct `SignatureRef<'a>` in 
   |                   ^^^^^^^^
   |
 help: there is a method `name` with a similar name, but with different arguments
- --> src/libgit2/core/types.rs
+ --> src/libgit2/src/libgit2/signature.rs
   |
   |     pub fn name(&self) -> Option<&'a CStr> {
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
