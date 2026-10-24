@@ -6,8 +6,8 @@
   "online_customcert, proxy, auth_clone, auth_clone_and_push (network, servers or invasive filesystem changes).",
   "Sanitizer-only nonzero suites are pre-existing C findings; post-campaign runs must match this record.",
   "build.json version 3 (2026-10-24): every variant links OpenSSL, PCRE2 and zlib from the side campaigns' installs",
-  "of the same variant; plain, coverage, asan-ubsan and tsan ran again against them and match the version-1 records",
-  "exactly; the bsan record is version 1's until its rerun completes."
+  "of the same variant; every variant ran again against them and matches its version-1 record exactly. Under bsan the",
+  "wrappers are built uninstrumented; blame::simple, merge::trees::renames and perf::merge timed out under load in its rerun and pass alone."
  ],
  "build_json_version": 3,
  "variants": {

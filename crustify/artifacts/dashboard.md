@@ -1278,9 +1278,11 @@ The out-of-tree libraries got their wrappers' side campaigns, beside this reposi
 (libz), new, and `glibc-bindings` (libc), continued, with this campaign as its second
 parent. Each new one holds its library at the release libgit2 links under `c/`, the
 settings, a dashboard, its builds (installed once per variant of this campaign, with the
-same instrumentation), its own test suite as baseline and wavefront's CodeQL tables;
+same instrumentation but under `bsan`, where they are built uninstrumented: BorrowSanitizer
+reports false positives inside OpenSSL and PCRE2, so `bsan` instruments libgit2 alone), its own test suite as baseline and wavefront's CodeQL tables;
 none has a Rust tree yet, nor a pin here, until its first planner run plans it. They
 are not on `crustify-rs` yet. `build.json` version 3 links every variant of libgit2 to
-those installs, libc staying the system's; the C baseline ran again against them, and
-`libgit2-sys` puts the installs on the test binaries' rpath.
+those installs, libc staying the system's; the C baseline ran again against them and
+matches its version-1 record in every variant, and `libgit2-sys` puts the installs on the
+test binaries' rpath.
 
