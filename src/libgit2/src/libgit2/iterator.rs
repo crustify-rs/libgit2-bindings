@@ -1,9 +1,6 @@
-//! Safe wrappers over `include/git2/notes.h`.
-//!
-//! Only the note-iterator alias of the internal `git_iterator` is public. Its
-//! private fields and other iterator kinds are deliberately not exposed. C owns
-//! the iterator, its tree references, path buffers and traversal stack. It borrows
-//! the repository without counting a reference; `'r` keeps that repository alive.
+//! The iterator type of `src/libgit2/iterator.c` as `include/git2/notes.h` publishes it
+//! (`git_note_iterator` is a `git_iterator`): [`NoteIterator`] and its handles. Opening
+//! and advancing one is [`notes`](super::notes)'s.
 
 use core::marker::PhantomData;
 

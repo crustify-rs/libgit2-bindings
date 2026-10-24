@@ -1,21 +1,7 @@
-//! Safe wrappers over `include/git2/sys/config.h`.
-//!
-//! Memory backend options are caller-owned values. Their nullable strings are
-//! borrowed, never freed by C. There is no C allocation, destruction or cloning
-//! primitive for the options themselves. A Rust clone simply shares the immutable string borrows,
-//! and the options cross threads as the borrows they hold do.
-//!
-//! Backend entries retain immutable storage via an allocation-specific callback.
-//! Acquired references use [`BackendEntryArc`]; borrowed handles never release
-//! storage. [`BackendEntry::from_entry`] safely exposes the full backend layout
-//! of the public entry owner's already-required enclosing allocation.
-//!
-//! A backend is an interface its author implements: `git_config_init_backend`
-//! initialises the base, the author fills the callback slots, and the config the
-//! backend is added to calls its `free` slot. A [`CustomBackend`] is that author in
-//! Rust: [`UnopenedBackend::new`] boxes it behind the base with trampolines in every
-//! slot, and [`ConfigMut::add_backend`] hands it over. Its answers are
-//! [`BackendEntry::new`] entries, which Rust allocates and releases.
+//! The options of `src/libgit2/config_mem.c`'s in-memory configuration backends
+//! (`git_config_backend_memory_options`, declared in `include/git2/sys/config.h`):
+//! [`BackendMemoryOptions`] and its handles, which name the backend type and origin path
+//! the backend's entries report.
 
 use core::ffi::CStr;
 use core::fmt;

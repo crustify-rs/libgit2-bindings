@@ -1,188 +1,9 @@
-//! Safe wrappers over `include/git2/commit.h`.
-//!
-//! # Commits
-//!
-//! A [`Commit`] is a `git_commit`: a parsed commit object, whose first member is the
-//! `git_object` every object starts with, of type `GIT_OBJECT_COMMIT`. It is opaque:
-//! libgit2 publishes no field. It is counted and shared as every [`Object`](super::object::Object)
-//! is (see the [`object` module](super::object#ownership)): the repository's object cache holds a
-//! reference of its own and hands the same commit, one more reference counted on it, to
-//! every lookup of its id; `git_commit_free` gives one reference back (it is
-//! `git_object_free`) and `git_commit_dup` takes another, on the same pointer. So the
-//! Rust owner is a [`CommitArc`], built by [`Commit::lookup`] and
-//! [`Commit::lookup_prefix`], or derived from another commit by [`CommitRef::parent`]
-//! and [`CommitRef::nth_gen_ancestor`], whose `Clone` is `git_commit_dup` and which
-//! never proves itself the only reference: it lends the shared handle, [`CommitRef`],
-//! and never [`CommitMut`]. [`CommitRef::tree`] looks a commit's tree up the same way,
-//! as a [`TreeArc`].
-//!
-//! A commit keeps the repository it was looked up in (`object.repo`, uncounted), which
-//! its owner, tree and parent lookups read and `git_repository_free` does not clear. So
-//! a commit carries the lifetime `'r` of the repository borrow it was looked up
-//! through, as an [`ObjectArc<'r>`](ObjectArc) does. Neither a commit nor its handles
-//! are `Send` or `Sync`: what a commit reaches is its repository, which is neither, and
-//! `git_commit_summary` and `git_commit_body` compute their result on first use and
-//! store it in the shared commit, without synchronisation.
-//!
-//! What the commit records is read through the shared handle, in place, borrowed for as
-//! long as the handle: its id, its tree's and its parents' ids ([`CommitRef::id`],
-//! [`CommitRef::tree_id`], [`CommitRef::parent_id`]), its message and headers as written
-//! ([`CommitRef::message_raw`], [`CommitRef::raw_header`]; [`CommitRef::header_field`]
-//! copies one header's value out), and its committer's time. libgit2 parses every commit
-//! it hands out in full (only the revision walker parses commits partially, into
-//! structs of its own that it never publishes), so each of these is set, the encoding
-//! alone being optional, and none is written again before the commit is freed.
-//!
-//! A commit is an object, and libgit2's casts between the two never check the type:
-//! [`CommitRef::as_object`] and [`Commit::into_object`] view or convert a commit as an
-//! object, and [`CommitRef::from_object`] and [`Commit::from_object`] take an
-//! object back as a commit only when it is of type `GIT_OBJECT_COMMIT`.
-//!
-//! # Commit arrays
-//!
-//! A [`CommitArray`] is a `git_commitarray`: a run of `count` commit pointers,
-//! `commits`, in one buffer of libgit2's allocator, each pointer holding one reference
-//! to a `git_commit`. libgit2 never allocates the struct itself: callers hold it by
-//! value, `git_repository_commit_parents` fills one (overwriting both fields without
-//! releasing what they held), and `git_commitarray_dispose` releases every commit with
-//! `git_commit_free`, frees the buffer with `git__free` and zeroes the struct, leaving
-//! it to its holder. Rust holds it the same way, as a [`CommitArrayVal`], which
-//! disposes it on drop.
-//!
-//! Every handle upholds one invariant, which the safe API keeps and
-//! [`CommitArray::from_raw`] or a crate-internal `from_ptr` over a C-owned struct must
-//! vouch for: `commits` is NULL, or a live buffer of libgit2's allocator holding at
-//! least `count` pointers, each to a live `git_commit` of which the array owns one
-//! reference, looked up in a repository that outlives the array's `'r`. libgit2 leaves
-//! `commits` NULL with `count == 0` for an empty result (an unborn `HEAD`, or a
-//! failure). A NULL `commits` reads as the empty array whatever `count` says, and is
-//! never handed to C.
-//!
-//! An empty array never reaches libgit2: nothing allocated it, so nothing has
-//! initialised the library on its behalf, and even `git__free(NULL)` reads the
-//! allocator a concurrent first `git_libgit2_init` writes. Every other array's buffer
-//! came from libgit2's allocator, whose allocation initialised the library first.
-//!
-//! The array lends each commit as a [`CommitRef`] borrowed from it
-//! ([`CommitArrayRef::get`], [`CommitArrayRef::iter`]), which
-//! [`to_commit`](CommitRef::to_commit) turns into an owner of its own.
-//! [`CommitArrayMut::set_commits`] moves owned commits in, in a fresh buffer of
-//! libgit2's allocator ([`CommitArray::from_commits`] builds an array of them), and
-//! [`CommitArrayMut::take`] moves them out. The array asserts neither `Send` nor
-//! `Sync`, as its commits do not.
-//!
-//! An array may be dropped after the repository its commits came from:
-//! `git_commit_free` touches only the commit. The commits may not be *used* past it,
-//! since each keeps that repository: so the array carries the commits' `'r`, as a
-//! [`CommitArc<'r>`](CommitArc) does, and lends them for no longer.
-//!
-//! # Extra headers
-//!
-//! A [`Header`] is a `git_commit_header`: a field name and a value that
-//! `git_commit_create_ext` (and `git_commit_create_from_stage`, through the same
-//! options) writes into the commit it creates, after `committer` and any `encoding`, as
-//! `<field> <value>\n`, each newline of the value continued by a space. libgit2 never
-//! allocates, keeps or frees one: callers build an array of them for the options'
-//! `extra_headers`, which the call reads and forgets. So Rust holds a header by value,
-//! borrowing both strings for `'h`, and a `[Header<'h>]` is the C array, the type being
-//! `#[repr(transparent)]` over the struct.
-//!
-//! Neither string is ever NULL: libgit2 refuses a NULL one (`GIT_ERROR_INVALID`, from
-//! `format_header_field`'s argument checks), so a header has no NULL state and no
-//! `Default`. libgit2 writes the field as given, without checking it for a space or a
-//! newline, either of which yields a commit git parses differently; a header keeps any
-//! string, as the C struct does.
-//!
-//! # The commit builder
-//!
-//! A [`CommitBuilder`] is a `git_commitbuilder`: the commit a `git_commit_create_*`
-//! routine is in the middle of writing, which it lends to the caller's signing callback
-//! (`git_commit_signature_cb`) so that `git_commitbuilder_add_header` can add the
-//! signature header to it. It is opaque: libgit2 publishes no field. libgit2 never
-//! allocates, frees or copies one: the only builder is a local of the routine writing
-//! the commit (`git_commit__create_internal`), pointing at that routine's commit
-//! buffer, and lives only while the callback runs. So Rust never owns one, and has no
-//! constructor, policy or owner for it: it is only ever reached through a
-//! [`CommitBuilderMut`] the callback's wrapper builds from the pointer libgit2 passes,
-//! for the call alone, and exclusively, since adding a header rewrites the buffer.
-//! Neither handle is `Send` or `Sync`: the buffer belongs to the thread writing the
-//! commit, which runs the callback.
-//!
-//! # Creation options
-//!
-//! A [`CreateExtOptions`] is a `git_commit_create_ext_options`: what
-//! `git_commit_create_ext` does besides writing the commit — the reference to move to
-//! it, the message's encoding, the [extra headers](#extra-headers), and the signing
-//! callback with its payload. libgit2 never allocates one it hands out, nor keeps or
-//! frees one it is given: the caller builds the struct (on the stack, in C) with
-//! `git_commit_create_ext_options_init`, and the call reads it, and everything it
-//! points at, through a `const` pointer, for the call only. libgit2's other creation
-//! routines (`git_commit_create`, `_v`, `_from_ids`, `_from_callback`, `git_commit_amend`)
-//! build one of their own the same way. So nothing it points at is owned: Rust holds
-//! the struct by value, borrowing the strings and the headers for `'o`.
-//!
-//! A [`CreateOptions`] is a `git_commit_create_options`: the options of the routines
-//! that commit the index or a tree on `HEAD` (`git_commit_create_from_stage`,
-//! `git_commit_create_from_tree`, `git_commit_amend_from_stage`,
-//! `git_commit_amend_from_tree`) — whether a commit that changes nothing is written,
-//! the author and the committer (the repository's default signature when unset), and
-//! the encoding, the extra headers and the signing callback, which those routines copy
-//! into a `git_commit_create_ext_options` of their own. It is held the same way: the
-//! caller builds it with `git_commit_create_options_init` and the routines read it,
-//! copying it or not, for the call only, so Rust holds it by value, borrowing the
-//! signatures, the strings and the headers for `'o`. `allow_empty_commit` is a one-bit
-//! bitfield, read and written through its storage byte.
-//!
-//! The signing callback is a [`SignatureCallback`], which
-//! [`CreateExtOptionsMut::set_signer`] and [`CreateOptionsMut::set_signer`] store with
-//! the callback itself as the payload.
-//!
-//! # Signing
-//!
-//! A [`SignatureCallback`] is the closure a `git_commit_signature_cb` runs: it is given
-//! the builder, the repository and the contents of the commit being written, and signs
-//! them by adding a header ([`CommitBuilderMut::add_header`]). Adding a header frees the
-//! buffer the contents were lent in (libgit2 swaps a rewritten copy in), so the closure
-//! is given a copy of the contents, which stays valid whatever it adds.
-//!
-//! A commit can also be signed outside libgit2: [`create_with_signature`] writes
-//! contents built elsewhere ([`create_buffer`]) with a signature added as a header, and
-//! [`extract_signature`] takes a written commit's signature header back out, with the
-//! contents it signs.
-//!
-//! # Reading a commit
-//!
-//! A commit lends what it records for as long as it is borrowed: its author and
-//! committer ([`CommitRef::author`], [`CommitRef::committer`]), as [`SignatureRef`]s
-//! into the commit, and the body of its message ([`CommitRef::body`]), which libgit2
-//! computes on first use and keeps in the commit. [`CommitRef::author_with_mailmap`]
-//! and [`CommitRef::committer_with_mailmap`] copy a signature out as a mailmap maps it.
-//!
-//! # Creating commits
-//!
-//! [`create`] writes a commit of a tree and parents looked up in the repository, as
-//! [`create_from_array`] does for a number of parents fixed at compile time (the
-//! variadic `git_commit_create_v`), and [`create_ext`] with [creation
-//! options](#creation-options); [`create_buffer`] formats the same contents without
-//! writing them, and [`CommitRef::amend`] writes a copy of a commit with some of its
-//! parts replaced. The routines of [`sys::commit`](super::sys::commit) take the tree and
-//! the parents by id. A [`CreateCallback`] (`git_commit_create_cb`) writes the commits a
-//! routine (a rebase) is about to write, in its place.
-//!
-//! [`create_from_stage`] and [`create_from_tree`] commit the index or a tree on `HEAD`,
-//! as `git commit` does, with [creation options](#creation-options) whose unset
-//! signatures are the repository's default identity, and [`amend_from_stage`] and
-//! [`amend_from_tree`] amend `HEAD`'s commit the same way. The two creating routines are
-//! composed from the routines libgit2 composes them from, but for the parents, which
-//! come from [`RepositoryRef::commit_parents`]: libgit2's own collection frees commits
-//! the object cache still holds when `MERGE_HEAD` cannot be read through.
-//!
-//! libgit2 asserts that the tree is the repository's (a release build fails, a debug
-//! one aborts), and ends the parent list silently at the first commit of another
-//! repository: the wrappers refuse both before it runs. They also refuse a signature
-//! libgit2 cannot write: one whose name or email its parser lost, which it would print
-//! as a NULL string, and one whose offset is `i32::MIN` minutes, which it would negate
-//! out of range. A time outside `u32` seconds is written wrapped, as libgit2 writes it.
+//! The typed object API of `src/libgit2/object_api.c`: the lookups, by id and by id
+//! prefix, of blobs, commits, tags and trees, their ids, their repositories, the extra
+//! counted references their handles hand out (`git_<type>_dup`), and the release
+//! policies their owners free them through (`git_<type>_free`). The types themselves,
+//! and the rest of their API, are their own modules': [`blob`](super::blob),
+//! [`commit`](super::commit), [`tag`](super::tag) and [`tree`](super::tree).
 
 use core::ffi::c_int;
 use core::ptr::{self, NonNull};
@@ -242,7 +63,8 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     }
 
     /// The repository the blob was looked up in, borrowed for `'r`, as the shared
-    /// handle it was looked up through ([`ObjectRef::owner`] for a blob).
+    /// handle it was looked up through
+    /// ([`ObjectRef::owner`](crate::libgit2::src::libgit2::object::ObjectRef::owner) for a blob).
     ///
     /// The result outlives the blob, but not the repository's borrow:
     ///
@@ -467,7 +289,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     }
 
     /// The repository the commit was looked up in, borrowed for `'r`, as the shared
-    /// handle it was looked up through, as [`ObjectRef::owner`] gives it.
+    /// handle it was looked up through, as
+    /// [`ObjectRef::owner`](crate::libgit2::src::libgit2::object::ObjectRef::owner) gives it.
     ///
     /// The result is that handle again, so it lets nothing happen that the commit's own
     /// lookups do not: it outlives the commit, but not the repository's borrow.
@@ -572,7 +395,7 @@ impl<'r> Commit<'r> {
     ///
     /// # Errors
     ///
-    /// Fails with [`ErrorCode::NotFound`]
+    /// Fails with [`ErrorCode::NotFound`](crate::libgit2::src::util::errors::ErrorCode::NotFound)
     /// when the object database has no such object (the zero id included), when the
     /// object is not a commit (class `GIT_ERROR_INVALID`, "the requested type does not
     /// match the type in the ODB"; a tag is not peeled, whatever libgit2's header
@@ -623,10 +446,10 @@ impl<'r> Commit<'r> {
     ///
     /// # Errors
     ///
-    /// Fails with [`ErrorCode::Ambiguous`]
+    /// Fails with [`ErrorCode::Ambiguous`](crate::libgit2::src::util::errors::ErrorCode::Ambiguous)
     /// when `len` is under 4 (`GIT_ERROR_OBJECT`, "ambiguous lookup - OID prefix is too
     /// short") or the prefix names several objects, with
-    /// [`ErrorCode::NotFound`] when
+    /// [`ErrorCode::NotFound`](crate::libgit2::src::util::errors::ErrorCode::NotFound) when
     /// it names none or one that is not a commit, and as [`lookup`](Self::lookup)
     /// otherwise; an `id` of another type than `repo`'s is refused as it is, whatever
     /// `len`.
@@ -767,8 +590,8 @@ impl<'r> Tag<'r> {
     /// # Errors
     ///
     /// Fails as [`Object::lookup`](crate::libgit2::src::libgit2::object::Object::lookup) with
-    /// type [`ObjectType::Tag`] does:
-    /// with [`ErrorCode::NotFound`]
+    /// type [`ObjectType::Tag`](crate::libgit2::src::libgit2::object::ObjectType::Tag) does:
+    /// with [`ErrorCode::NotFound`](crate::libgit2::src::util::errors::ErrorCode::NotFound)
     /// when the object database has no such object, or the object is not a tag (class
     /// `GIT_ERROR_INVALID`, "the requested type does not match the type in the ODB"),
     /// and with libgit2's error when the tag cannot be read or parsed. An `id` of
@@ -867,7 +690,9 @@ impl<'a, 'r> TagRef<'a, 'r> {
     }
 
     /// The repository the tag was looked up in, borrowed for `'r`, as the shared handle
-    /// it was looked up through, as [`ObjectRef::owner`] gives it for the tag's object.
+    /// it was looked up through, as
+    /// [`ObjectRef::owner`](crate::libgit2::src::libgit2::object::ObjectRef::owner) gives it for
+    /// the tag's object.
     ///
     /// ```compile_fail,E0505
     /// # use libgit2::libgit2::src::libgit2::tag::Tag;
@@ -980,8 +805,8 @@ impl<'r> Tree<'r> {
     /// # Errors
     ///
     /// Fails as [`Object::lookup`](crate::libgit2::src::libgit2::object::Object::lookup) with
-    /// type [`ObjectType::Tree`] does:
-    /// with [`ErrorCode::NotFound`]
+    /// type [`ObjectType::Tree`](crate::libgit2::src::libgit2::object::ObjectType::Tree) does:
+    /// with [`ErrorCode::NotFound`](crate::libgit2::src::util::errors::ErrorCode::NotFound)
     /// when the object database has no such object, or the object is not a tree (class
     /// `GIT_ERROR_INVALID`, "the requested type does not match the type in the ODB"),
     /// and with libgit2's error when the tree cannot be read or parsed. An `id` of

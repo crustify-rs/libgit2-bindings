@@ -1446,7 +1446,7 @@ impl ConfigError {
     }
 
     /// A failure in `class` described by `message`, returned as `GIT_ERROR`: what a
-    /// [`CustomBackend`](crate::libgit2::src::libgit2::config::CustomBackend) reports.
+    /// [`CustomBackend`] reports.
     #[must_use]
     pub fn new(class: ErrorClass, message: &CStr) -> Self {
         Self {
@@ -3001,7 +3001,7 @@ define_ctype!(
 
 /// Releases one acquired reference through the entry's own callback. State is
 /// recovered from the object; no callback from a different allocation is saved.
-/// The same C routine as [`EntryFree`](crate::libgit2::src::libgit2::config::EntryFree),
+/// The same C routine as [`EntryFree`],
 /// given the enclosing layout.
 ///
 /// Wraps: `git_config_entry_free`

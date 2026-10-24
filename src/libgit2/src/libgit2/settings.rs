@@ -2,20 +2,26 @@
 //!
 //! libgit2 reports how it was built through two enums passed by value. A
 //! `git_feature_t` names one compile-time feature, a single bit: `git_libgit2_features`
-//! returns the features compiled in as an `int` OR-ing those bits ([`Features`]), and
-//! `git_libgit2_feature_backend` takes one feature ([`Feature`]) and names the backend
+//! returns the features compiled in as an `int` OR-ing those bits
+//! ([`Features`](crate::libgit2::src::libgit2::libgit2::Features)), and
+//! `git_libgit2_feature_backend` takes one feature
+//! ([`Feature`](crate::libgit2::src::libgit2::libgit2::Feature)) and names the backend
 //! providing it. A `git_buildinfo_t` ([`BuildInfo`]) selects the build detail
 //! `git_libgit2_buildinfo` reports. Both routines switch on the value and answer NULL
 //! for one the header does not name, so a raw value is converted fallibly
-//! ([`Feature::from_raw`], [`BuildInfo::from_raw`]) and never transmuted; a feature
-//! set keeps the bits it does not name ([`Features::from_bits_retain`]), so it
-//! round-trips a later library's answer unchanged.
+//! ([`Feature::from_raw`](crate::libgit2::src::libgit2::libgit2::Feature::from_raw),
+//! [`BuildInfo::from_raw`]) and never transmuted; a feature set keeps the bits it does not name
+//! ([`Features::from_bits_retain`](crate::libgit2::src::libgit2::libgit2::Features::from_bits_retain)),
+//! so it round-trips a later library's answer unchanged.
 //!
 //! A [`LibraryOption`] is a `git_libgit2_opt_t`, the key `git_libgit2_opts`
 //! dispatches on; it refuses any other key, so a raw key is converted fallibly too
 //! ([`LibraryOption::from_raw`], [`LibraryOption::from_key`]).
 //!
-//! [`version`], [`prerelease`], [`features`], [`feature_backend`] and [`build_info`]
+//! [`version`](crate::libgit2::src::libgit2::libgit2::version),
+//! [`prerelease`](crate::libgit2::src::libgit2::libgit2::prerelease),
+//! [`features`](crate::libgit2::src::libgit2::libgit2::features),
+//! [`feature_backend`](crate::libgit2::src::libgit2::libgit2::feature_backend) and [`build_info`]
 //! answer from constants compiled into the loaded libgit2.so, so they need no
 //! initialisation.
 //!
@@ -432,7 +438,8 @@ impl std::error::Error for UnnamedLibraryOption {}
 ///
 /// It is the version of the loaded libgit2.so, which may differ from the headers this
 /// crate was generated from (`ffi::LIBGIT2_VERSION_*`). It displays as
-/// `major.minor.revision`; [`prerelease`] has the rest of the version.
+/// `major.minor.revision`; [`prerelease`](crate::libgit2::src::libgit2::libgit2::prerelease) has
+/// the rest of the version.
 ///
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -456,8 +463,8 @@ impl fmt::Display for Version {
 /// ([`BuildInfo::Commit`], as hex). `None` when the build did not record it: the
 /// commit is only known when the sources were a git checkout at configure time.
 ///
-/// libgit2 returns a string literal of its own, as [`prerelease`] does. Needs no
-/// initialisation.
+/// libgit2 returns a string literal of its own, as
+/// [`prerelease`](crate::libgit2::src::libgit2::libgit2::prerelease) does. Needs no initialisation.
 ///
 /// Wraps: `git_libgit2_buildinfo`
 #[must_use]

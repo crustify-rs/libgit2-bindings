@@ -3928,7 +3928,7 @@ define_ctype!(
 pub struct ReucSide<'a> {
     /// The file mode the side had, as stored: any non-zero 32-bit value read from
     /// an index file or passed to `git_index_reuc_add`, not only the modes
-    /// [`FileMode`](crate::libgit2::src::libgit2::tree::FileMode) names.
+    /// [`FileMode`] names.
     pub mode: u32,
     /// The side's blob id, borrowed from the record.
     pub id: OidRef<'a>,

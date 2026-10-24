@@ -165,7 +165,7 @@
 //! variadic `git_commit_create_v`), and [`create_ext`] with [creation
 //! options](#creation-options); [`create_buffer`] formats the same contents without
 //! writing them, and [`CommitRef::amend`] writes a copy of a commit with some of its
-//! parts replaced. The routines of [`sys::commit`](super::sys::commit) take the tree and
+//! parts replaced. The routines of `sys/commit.h` take the tree and
 //! the parents by id. A [`CreateCallback`] (`git_commit_create_cb`) writes the commits a
 //! routine (a rebase) is about to write, in its place.
 //!
@@ -4621,7 +4621,7 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
 }
 
 /// Writes a commit into `repo`'s object database and returns its id, as
-/// [`create`](crate::libgit2::src::libgit2::commit::create) does, but with the tree and the
+/// [`create`] does, but with the tree and the
 /// parents given by id, and the parents asked from `parents` in order, until it gives
 /// `None` (see the [module docs](self#parent-callbacks)).
 ///

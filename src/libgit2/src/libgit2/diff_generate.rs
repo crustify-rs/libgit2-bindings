@@ -1,19 +1,8 @@
-//! Safe views of diffs and their deltas.
-//!
-//! Generated diffs borrow their repository, but copy tree/index entries and paths.
-//! Parsed diffs own patches with copied paths, hunk lines and binary data. The public API has no
-//! diff up-ref or deep copy: fresh results are `DiffBox`, and a counted reference
-//! shared with C is `DiffArc` (without `Clone` or an exclusive access path).
-//! Retaining a generated patch must borrow the diff exclusively for the patch's
-//! lifetime, or consume the box into a shared owner: C patches can update deltas.
-//! The retained parse context still contains input cursors, but no public operation
-//! or destructor dereferences them after parsing (`patch_parse.c`).
-//! No wrapper here is `Send` or `Sync`; the atomic refcount does not protect deltas.
-//!
-//! Deltas are read-only output records, allocated/freed by their diff or patch;
-//! their embedded file paths belong to the parent's pool or parsed patch. There is
-//! no public delta constructor, disposer or cloner. Never free a delta separately.
-//! File views are the minimal dependency needed to project those embedded records.
+//! The diff generators of `src/libgit2/diff_generate.c`: [`Diff`]'s
+//! constructors over two trees, a tree and an index, an index and the working
+//! directory, a tree and the working directory (with or without the index), and two
+//! indices, with default options. The diffs and their deltas are
+//! [`diff`](super::diff)'s.
 
 use core::ptr::{self};
 

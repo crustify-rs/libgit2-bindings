@@ -2,8 +2,9 @@
 //!
 //! # Cleaning up messages
 //!
-//! [`prettify`] cleans up a commit message as `git commit` does (git's `stripspace`),
-//! into a fresh [`BufVal`] of libgit2's allocator.
+//! [`prettify`](crate::libgit2::src::libgit2::message::prettify) cleans up a commit message as `git
+//! commit` does (git's `stripspace`), into a fresh
+//! [`BufVal`](crate::libgit2::src::libgit2::buf::BufVal) of libgit2's allocator.
 //!
 //! # Trailers
 //!

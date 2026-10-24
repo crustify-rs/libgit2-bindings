@@ -60,7 +60,7 @@
 //! other, so every value is accepted. [`FilterList::load_ext`] takes the options as the
 //! raw `git_filter_options`, which it only copies. The blob the forms ending in
 //! `_with_blob` take is an object handle of type blob (an
-//! [`ObjectRef`](crate::libgit2::src::libgit2::object::ObjectRef), which a blob is); an object
+//! [`ObjectRef`], which a blob is); an object
 //! of another type is refused before libgit2 reads it as a blob.
 //!
 //! ## Paths

@@ -7,28 +7,32 @@
 //! write. A raw value is therefore converted fallibly (each enum's `from_raw` and
 //! `TryFrom`) and never transmuted.
 //!
-//! [`ObjectType`] names the four types an object can have, the values
-//! `git_object_type_is_valid` accepts. `GIT_OBJECT_ANY` is not one: it is the filter
-//! that lookups and peels take to mean "whatever type the object has", spelled `None`
-//! by [`ObjectType::raw_or_any`]. `GIT_OBJECT_INVALID` is what routines answer when
-//! they have no type (`git_object_string2type` for an unknown name,
-//! `git_object_type(NULL)`). libgit2 rejects every other value as an "invalid object
-//! type", except `0`: `git_odb_write` reads it as a blob for the object's id, but its
+//! [`ObjectType`](crate::libgit2::src::libgit2::object::ObjectType) names the four types an object
+//! can have, the values `git_object_type_is_valid` accepts. `GIT_OBJECT_ANY` is not one: it is the
+//! filter that lookups and peels take to mean "whatever type the object has", spelled `None`
+//! by [`ObjectType::raw_or_any`](crate::libgit2::src::libgit2::object::ObjectType::raw_or_any).
+//! `GIT_OBJECT_INVALID` is what routines answer when they have no type (`git_object_string2type`
+//! for an unknown name, `git_object_type(NULL)`). libgit2 rejects every other value as an "invalid
+//! object type", except `0`: `git_odb_write` reads it as a blob for the object's id, but its
 //! loose backend stores the object under an empty type name, so the object cannot be
 //! read back; a typed argument cannot carry it.
 //!
-//! [`ReferenceType`] names the two kinds of reference `git_reference_type` answers
-//! for every reference libgit2 builds. `GIT_REFERENCE_INVALID` (a reference without
-//! a target, inside a transaction) and `GIT_REFERENCE_ALL` (the union of both kinds,
-//! a listing filter no current routine takes) are not kinds a reference has.
+//! [`ReferenceType`](crate::libgit2::src::libgit2::refs::ReferenceType) names the two kinds of
+//! reference `git_reference_type` answers for every reference libgit2 builds.
+//! `GIT_REFERENCE_INVALID` (a reference without a target, inside a transaction) and
+//! `GIT_REFERENCE_ALL` (the union of both kinds, a listing filter no current routine takes) are not
+//! kinds a reference has.
 //!
-//! [`BranchType`] names the three selections every branch routine accepts: local,
-//! remote-tracking, or both. Its C enum is flag-shaped; `0` and other bits, which an
-//! iterator reads as flags but `git_branch_lookup` asserts on, have no variant.
+//! [`BranchType`](crate::libgit2::src::libgit2::branch::BranchType) names the three selections
+//! every branch routine accepts: local, remote-tracking, or both. Its C enum is flag-shaped; `0`
+//! and other bits, which an iterator reads as flags but `git_branch_lookup` asserts on, have no
+//! variant.
 //!
-//! The submodule settings ([`SubmoduleIgnore`], [`SubmoduleRecurse`],
-//! [`SubmoduleUpdate`]) are fieldless enums over their C values, converted fallibly
-//! from a raw one.
+//! The submodule settings
+//! ([`SubmoduleIgnore`](crate::libgit2::src::libgit2::submodule::SubmoduleIgnore),
+//! [`SubmoduleRecurse`](crate::libgit2::src::libgit2::submodule::SubmoduleRecurse),
+//! [`SubmoduleUpdate`](crate::libgit2::src::libgit2::submodule::SubmoduleUpdate)) are fieldless
+//! enums over their C values, converted fallibly from a raw one.
 //!
 //! A [`Time`] is a `git_time`: the moment a signature records, as seconds since the
 //! epoch, the timezone's offset from UTC in minutes, and the sign character the
@@ -58,9 +62,10 @@
 //! Times compare as libgit2 compares signatures' times: equal when all three fields
 //! are, whatever the struct's padding holds.
 //!
-//! A [`FileMode`] is a tree entry's `git_filemode_t`. A parsed tree keeps whatever
-//! 16-bit mode its object spells, so a raw mode is converted fallibly
-//! ([`FileMode::from_raw`]) and never transmuted.
+//! A [`FileMode`](crate::libgit2::src::libgit2::tree::FileMode) is a tree entry's `git_filemode_t`.
+//! A parsed tree keeps whatever 16-bit mode its object spells, so a raw mode is converted fallibly
+//! ([`FileMode::from_raw`](crate::libgit2::src::libgit2::tree::FileMode::from_raw)) and never
+//! transmuted.
 //!
 //! # Write streams
 //!
@@ -72,19 +77,26 @@
 //!
 //! A stream is written any number of times, then closed once, then freed:
 //!
-//! - [`WriteStreamMut::write`] calls the `write` member;
+//! - [`WriteStreamMut::write`](crate::libgit2::src::libgit2::filter::WriteStreamMut::write) calls
+//!   the `write` member;
 //! - closing ends the stream: libgit2's own streams accept nothing but `free` afterwards (a blob
 //!   stream's next write or commit calls a NULL function, since closing zeroes its file buffer; the
-//!   checkout writer writes to a closed file descriptor), so [`WriteStream::close`] consumes the
+//!   checkout writer writes to a closed file descriptor), so
+//!   [`WriteStream::close`](crate::libgit2::src::libgit2::filter::WriteStream::close) consumes the
 //!   owner;
-//! - the `free` member releases the whole container. [`WriteStreamFree`] calls it, so one owner,
-//!   [`WriteStreamBox`], holds any stream, C's or Rust's.
+//! - the `free` member releases the whole container.
+//!   [`WriteStreamFree`](crate::libgit2::src::libgit2::filter::WriteStreamFree) calls it, so one
+//!   owner, [`WriteStreamBox`](crate::libgit2::src::libgit2::filter::WriteStreamBox), holds any
+//!   stream, C's or Rust's.
 //!
-//! [`RustWriteStream`] implements a stream in Rust, over a [`StreamWriter`]: its members
-//! are `extern "C"` trampolines into the writer. It lends a [`WriteStreamMut`] to code
-//! that writes into it (libgit2's `git_filter_list_stream_*` take one as their target,
-//! write into it and close it, but never free it), or becomes a [`WriteStreamBox`] to
-//! hand over to libgit2 (a filter's `stream` callback returns one, which libgit2 frees).
+//! [`RustWriteStream`](crate::libgit2::src::libgit2::filter::RustWriteStream) implements a stream
+//! in Rust, over a [`StreamWriter`](crate::libgit2::src::libgit2::filter::StreamWriter): its
+//! members are `extern "C"` trampolines into the writer. It lends a
+//! [`WriteStreamMut`](crate::libgit2::src::libgit2::filter::WriteStreamMut) to code that writes
+//! into it (libgit2's `git_filter_list_stream_*` take one as their target, write into it and close
+//! it, but never free it), or becomes a
+//! [`WriteStreamBox`](crate::libgit2::src::libgit2::filter::WriteStreamBox) to hand over to libgit2
+//! (a filter's `stream` callback returns one, which libgit2 frees).
 //!
 //! # Signatures
 //!
