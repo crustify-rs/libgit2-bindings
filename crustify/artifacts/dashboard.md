@@ -50,7 +50,7 @@ in Notes.
 
 ## Overview
 
-- **branch** — `crustify/devel`, tip `<sha>`; `main` shipped at `<sha>`; crustify `4605156`, ffibox `0764300` (`feat/public-handle-seam`), wavefront `db28284`
+- **branch** — `crustify/devel`, tip `<sha>`; `main` shipped at `<sha>`; crustify `4605156`, ffibox `7950244` (`main`), wavefront `db28284`
 - **C test baseline** — `3443/3498`, `55` skipped; disabled: ctest targets `invasive`, `gitdaemon`, `gitdaemon_namespace`, `gitdaemon_sha256`, `ssh`, `online`, `online_customcert`, `proxy`, `auth_clone`, `auth_clone_and_push`
 - **Rust LoC** — `<n>` non-test, `<n>` tests; **C LoC** — `<n>`
 
@@ -1288,7 +1288,7 @@ test binaries' rpath.
 
 ### ffibox's seam traits
 
-ffibox `feat/public-handle-seam` (`0764300`, not yet on its `main`) moves the handles' raw
+ffibox `7950244` (`main`, merged from `feat/public-handle-seam`) moves the handles' raw
 seam (`from_ptr`, `as_ptr`, `as_mut_ptr` and their `void *` twins) from inherent
 `pub(crate)` methods that `define_ctype!` and `impl_cguarded!` emitted onto the traits
 `CRefSeam`, `CMutSeam` and `CLockedSeam`, so that a crate holding another crate's handles,
