@@ -132,7 +132,8 @@ use core::ptr::{self, NonNull};
 use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{
-    CArc, CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CZeroable, define_ctype, impl_cdrop,
+    CArc, CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CMutSeam, CRefSeam, CZeroable, define_ctype,
+    impl_cdrop,
 };
 
 use crate::ffi;
@@ -3101,7 +3102,7 @@ mod unit_tests {
         use core::ffi::CStr;
         use core::mem::size_of;
 
-        use ffibox::{CDrop, CRefClone};
+        use ffibox::{CDrop, CRefClone, CRefSeam};
 
         use crate::ffi;
         use crate::libgit2::src::libgit2::object::{Object, ObjectArc, ObjectRef, ObjectType};
@@ -3342,7 +3343,7 @@ mod unit_tests {
         use std::sync::atomic::Ordering::SeqCst;
         use std::sync::atomic::{AtomicBool, AtomicIsize};
 
-        use ffibox::CDrop;
+        use ffibox::{CDrop, CMutSeam, CRefSeam};
 
         use crate::libgit2::src::libgit2::oid::{Oid, OidRef, OidType};
         use crate::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
@@ -4085,6 +4086,8 @@ mod unit_tests {
         use std::panic::{self, AssertUnwindSafe};
         use std::path::PathBuf;
         use std::ptr;
+
+        use ffibox::{CMutSeam, CRefSeam};
 
         use crate::libgit2::src::libgit2::object::Object;
         use crate::libgit2::src::libgit2::oid::{Oid, OidType};

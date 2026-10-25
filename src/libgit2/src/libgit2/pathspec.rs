@@ -26,7 +26,9 @@ use core::marker::PhantomData;
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 use core::ptr::{self, NonNull};
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype, impl_cdrop};
+use ffibox::{
+    CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam, define_ctype, impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::diff::{DiffDeltaRef, DiffRef};

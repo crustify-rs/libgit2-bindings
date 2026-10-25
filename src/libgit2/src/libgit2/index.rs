@@ -82,7 +82,10 @@ use core::num::TryFromIntError;
 use core::ptr::{self, NonNull};
 use std::ffi::CString;
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CNew, CSlice, CZeroable, define_ctype, impl_cdrop};
+use ffibox::{
+    CArc, CBorrowedPtr, CBox, CCell, CMutSeam, CNew, CRefSeam, CSlice, CZeroable, define_ctype,
+    impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::object::id_fits;
@@ -6640,7 +6643,7 @@ mod unit_tests {
     }
 
     mod sys_index {
-        use ffibox::CZeroable;
+        use ffibox::{CRefSeam, CZeroable};
 
         use super::super::*;
 

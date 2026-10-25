@@ -45,7 +45,10 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::ptr::{NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CSlice, CSliceMut, CZeroable, define_ctype};
+use ffibox::{
+    CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam, CSlice, CSliceMut, CZeroable,
+    define_ctype,
+};
 
 use crate::ffi;
 use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, last, runtime_pinned, set};

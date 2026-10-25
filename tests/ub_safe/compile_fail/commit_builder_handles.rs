@@ -1,7 +1,8 @@
 // A commit builder lives on the stack of the routine writing the commit, for its signing
-// callback alone: nothing outside the crate can make a handle to one, and the exclusive
-// handle does not alias. (That neither handle is `Send` is a doctest on `CommitBuilder`:
-// the toolchains word that error differently.)
+// callback alone: safe code outside the crate cannot make a handle to one, even with the
+// seam trait in scope, and the exclusive handle does not alias. (That neither handle is
+// `Send` is a doctest on `CommitBuilder`: the toolchains word that error differently.)
+use ffibox::CMutSeam;
 use libgit2::libgit2::src::libgit2::commit::CommitBuilderMut;
 
 fn alias(mut builder: CommitBuilderMut<'_>) {
@@ -13,5 +14,5 @@ fn alias(mut builder: CommitBuilderMut<'_>) {
 
 fn main() {
     let mut slot = 0u64;
-    let _ = unsafe { CommitBuilderMut::from_ptr(core::ptr::from_mut(&mut slot).cast()) };
+    let _ = CommitBuilderMut::from_ptr(core::ptr::from_mut(&mut slot).cast());
 }

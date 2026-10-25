@@ -157,7 +157,9 @@ use core::ops::{BitOr, BitOrAssign, ControlFlow};
 use core::ptr::{self, NonNull};
 use std::panic::{self, AssertUnwindSafe};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CNew, CZeroable, define_ctype, impl_cdrop};
+use ffibox::{
+    CBorrowedPtr, CBox, CCell, CMutSeam, CNew, CRefSeam, CZeroable, define_ctype, impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::annotated_commit::AnnotatedCommitRef;
@@ -6719,6 +6721,8 @@ mod unit_tests {
             use std::process::Command;
             use std::sync::atomic::AtomicBool;
             use std::sync::atomic::Ordering::SeqCst;
+
+            use ffibox::CRefSeam;
 
             use crate::ffi;
             use crate::libgit2::src::util::alloc::{Alloc, Allocator};

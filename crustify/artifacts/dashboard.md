@@ -50,7 +50,7 @@ in Notes.
 
 ## Overview
 
-- **branch** — `crustify/devel`, tip `<sha>`; `main` shipped at `<sha>`; crustify `4605156`, ffibox `4722185`, wavefront `db28284`
+- **branch** — `crustify/devel`, tip `<sha>`; `main` shipped at `<sha>`; crustify `4605156`, ffibox `0764300` (`feat/public-handle-seam`), wavefront `db28284`
 - **C test baseline** — `3443/3498`, `55` skipped; disabled: ctest targets `invasive`, `gitdaemon`, `gitdaemon_namespace`, `gitdaemon_sha256`, `ssh`, `online`, `online_customcert`, `proxy`, `auth_clone`, `auth_clone_and_push`
 - **Rust LoC** — `<n>` non-test, `<n>` tests; **C LoC** — `<n>`
 
@@ -1286,3 +1286,16 @@ those installs, libc staying the system's; the C baseline ran again against them
 matches its version-1 record in every variant, and `libgit2-sys` puts the installs on the
 test binaries' rpath.
 
+### ffibox's seam traits
+
+ffibox `feat/public-handle-seam` (`0764300`, not yet on its `main`) moves the handles' raw
+seam (`from_ptr`, `as_ptr`, `as_mut_ptr` and their `void *` twins) from inherent
+`pub(crate)` methods that `define_ctype!` and `impl_cguarded!` emitted onto the traits
+`CRefSeam`, `CMutSeam` and `CLockedSeam`, so that a crate holding another crate's handles,
+such as a parent over its side campaigns' wrappers, can reach the pointer. Every file that
+uses the seam imports the traits it calls; the macro-made `as_ref` / `as_mut` stay inherent,
+as the user-facing API. The public surface is unchanged (ffimap: 48 `unsafe fn`, 5 raw
+pointers in safe signatures, 0 in public fields). The compile-fail case
+`commit_builder_handles` now checks that safe code outside the crate cannot make a handle
+even with the trait in scope (E0133), where it checked that the inherent `from_ptr` was
+private, a claim `CCell::mut_from_ptr` already made vacuous.

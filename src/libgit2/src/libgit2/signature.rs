@@ -176,7 +176,7 @@ use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::ptr::{self, addr_of, addr_of_mut};
 
-use ffibox::{CBox, CZeroable, define_ctype, impl_cdrop, impl_cdupclone};
+use ffibox::{CBox, CMutSeam, CRefSeam, CZeroable, define_ctype, impl_cdrop, impl_cdupclone};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::odb::OdbDataStr;
@@ -1482,6 +1482,8 @@ mod unit_tests {
         use core::ptr::NonNull;
         use std::cell::RefCell;
         use std::rc::Rc;
+
+        use ffibox::{CMutSeam, CRefSeam};
 
         use super::super::*;
         use crate::libgit2::src::libgit2::filter::{

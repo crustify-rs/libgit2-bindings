@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of};
 use std::ffi::CString;
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, define_ctype};
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CRefSeam, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::index::IndexRef;
@@ -600,6 +600,8 @@ impl<'r> Diff<'r> {
 
 #[cfg(test)]
 mod unit_tests {
+    use ffibox::CMutSeam;
+
     use super::*;
     use crate::libgit2::src::libgit2::oid::OidType;
     use crate::libgit2::src::util::errors::runtime_pinned;

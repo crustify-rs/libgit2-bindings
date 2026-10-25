@@ -91,7 +91,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CRefClone, CZeroable};
+use ffibox::{CArc, CBorrowedPtr, CCell, CDrop, CMutSeam, CRefClone, CRefSeam, CZeroable};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::buf::{Buf, BufVal};

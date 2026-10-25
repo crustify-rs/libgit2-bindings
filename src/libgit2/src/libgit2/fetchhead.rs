@@ -5,6 +5,8 @@
 
 use core::ops::ControlFlow;
 
+use ffibox::CRefSeam;
+
 use crate::ffi;
 use crate::libgit2::src::libgit2::repository::{
     FetchheadForeachCallback, RepositoryError, RepositoryRef, pathless, unpinned,

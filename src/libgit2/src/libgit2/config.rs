@@ -93,7 +93,9 @@ use std::ffi::CString;
 use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, define_ctype, impl_cdrop};
+use ffibox::{
+    CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CNew, CRefSeam, define_ctype, impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::repository::RepositoryRef;
@@ -3572,7 +3574,7 @@ impl IteratorNext {
 // libgit2 with USE_REGEX=pcre2; these bindings link the same system PCRE2 library,
 // use the same options and preserve arbitrary pattern/value bytes (not UTF-8).
 pub(crate) mod value_filter {
-    use ffibox::{CBox, impl_cdrop};
+    use ffibox::{CBox, CRefSeam, impl_cdrop};
     use pcre2_sys as pcre;
 
     use super::{

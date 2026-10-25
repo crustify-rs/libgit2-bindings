@@ -43,7 +43,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self};
 
-use ffibox::{CBorrowedPtr, CCell};
+use ffibox::{CBorrowedPtr, CCell, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::index::IndexRef;

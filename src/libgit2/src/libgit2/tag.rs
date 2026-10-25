@@ -83,7 +83,7 @@ use core::ptr::{self, NonNull};
 use std::ffi::CString;
 use std::panic::{self, AssertUnwindSafe};
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CZeroable};
+use ffibox::{CArc, CBorrowedPtr, CCell, CMutSeam, CRefSeam, CZeroable};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::object::{ObjectArc, ObjectRef, ObjectType, content_is_valid};
@@ -1957,7 +1957,7 @@ mod unit_tests {
         use core::mem::size_of;
         use core::ptr::{self, NonNull};
 
-        use ffibox::{CDrop, CRefClone};
+        use ffibox::{CDrop, CRefClone, CRefSeam};
 
         use crate::ffi;
         use crate::libgit2::src::libgit2::object::{Object, ObjectArc, ObjectRef, ObjectType};

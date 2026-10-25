@@ -224,7 +224,8 @@ use std::ffi::CString;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use ffibox::{
-    CArc, CBorrowedPtr, CCell, CDispose, CRefClone, CSlice, CVal, CZeroable, define_ctype,
+    CArc, CBorrowedPtr, CCell, CDispose, CMutSeam, CRefClone, CRefSeam, CSlice, CVal, CZeroable,
+    define_ctype,
 };
 
 use crate::ffi;

@@ -45,7 +45,7 @@ use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 use core::str::Utf8Error;
 
-use ffibox::{CDispose, CVal, define_ctype};
+use ffibox::{CDispose, CMutSeam, CRefSeam, CVal, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::odb::{OdbDataArrayFree, OdbDataStr, OdbDataVec};

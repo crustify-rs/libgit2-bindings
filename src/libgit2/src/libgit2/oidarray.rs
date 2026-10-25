@@ -34,7 +34,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of, addr_of_mut};
 
-use ffibox::{CDispose, CSlice, CSliceMut, CVal, define_ctype};
+use ffibox::{CDispose, CMutSeam, CRefSeam, CSlice, CSliceMut, CVal, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::odb::{OdbDataArrayFree, OdbDataVec};

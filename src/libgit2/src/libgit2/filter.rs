@@ -84,7 +84,7 @@ use core::ptr::{self, NonNull};
 use std::ffi::CString;
 use std::sync::Once;
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, define_ctype, impl_cdrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::object::ObjectRef;

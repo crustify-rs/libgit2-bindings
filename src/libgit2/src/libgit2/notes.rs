@@ -9,7 +9,7 @@ use core::ffi::CStr;
 use core::ptr::{self, NonNull};
 use std::ffi::CString;
 
-use ffibox::{CDrop, CZeroable};
+use ffibox::{CDrop, CMutSeam, CRefSeam, CZeroable};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::commit::{Commit, CommitRef};

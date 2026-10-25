@@ -52,7 +52,7 @@ use std::ffi::CString;
 use std::io;
 use std::sync::OnceLock;
 
-use ffibox::define_ctype;
+use ffibox::{CRefSeam, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::libgit2::{Runtime, init};

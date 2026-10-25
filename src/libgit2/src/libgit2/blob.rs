@@ -98,7 +98,7 @@ use core::ops::{BitOr, BitOrAssign};
 use core::ptr::{self, NonNull, addr_of_mut};
 use std::io;
 
-use ffibox::{CArc, CBorrowedPtr, CCell, CZeroable, define_ctype};
+use ffibox::{CArc, CBorrowedPtr, CCell, CMutSeam, CRefSeam, CZeroable, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::buf::{Buf, BufVal};

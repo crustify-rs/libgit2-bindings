@@ -52,6 +52,8 @@ use core::ptr::{self, NonNull};
 use core::{fmt, slice};
 use std::ffi::CString;
 
+use ffibox::{CMutSeam, CRefSeam};
+
 use crate::ffi;
 use crate::libgit2::src::libgit2::object::ObjectType;
 use crate::libgit2::src::libgit2::strarray::{StrArray, StrArrayVal};

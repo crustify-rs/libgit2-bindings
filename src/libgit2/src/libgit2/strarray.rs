@@ -51,7 +51,7 @@ use core::marker::PhantomData;
 use core::ops::Range;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CDispose, CVal, define_ctype};
+use ffibox::{CDispose, CMutSeam, CRefSeam, CVal, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::odb::{OdbDataStr, OdbDataStrVec};

@@ -41,7 +41,7 @@ use core::fmt;
 use core::ptr::{self, NonNull};
 use std::borrow::Cow;
 
-use ffibox::{CBox, CNew, define_ctype, impl_cdrop};
+use ffibox::{CBox, CMutSeam, CNew, CRefSeam, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::repository::RepositoryRef;

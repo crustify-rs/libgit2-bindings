@@ -106,7 +106,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use ffibox::{CBorrowedPtr, CBox, CCell, define_ctype, impl_cdrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CMutSeam, CRefSeam, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::buf::{Buf, BufVal};

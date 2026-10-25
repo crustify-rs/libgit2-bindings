@@ -1031,6 +1031,8 @@ mod unit_tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::atomic::{AtomicIsize, AtomicUsize};
 
+    use ffibox::CRefSeam;
+
     use super::*;
 
     #[repr(C)]
@@ -1580,6 +1582,8 @@ mod unit_tests {
         use std::process::Command;
         use std::sync::atomic::AtomicIsize;
         use std::sync::atomic::Ordering::SeqCst;
+
+        use ffibox::CRefSeam;
 
         use super::super::*;
         use crate::libgit2::src::util::alloc::{Alloc, Allocator};

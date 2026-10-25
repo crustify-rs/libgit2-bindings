@@ -86,7 +86,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of};
 
-use ffibox::{CBorrowedPtr, CCell, CDispose, CSlice, CVal, define_ctype};
+use ffibox::{CBorrowedPtr, CCell, CDispose, CMutSeam, CRefSeam, CSlice, CVal, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};

@@ -37,7 +37,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::oid::OidRef;

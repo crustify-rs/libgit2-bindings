@@ -8,7 +8,7 @@
 use core::ffi::c_int;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CDrop, CRefClone};
+use ffibox::{CDrop, CRefClone, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::blob::{Blob, BlobArc, BlobRef};

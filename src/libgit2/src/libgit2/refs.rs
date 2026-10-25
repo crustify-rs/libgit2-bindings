@@ -42,7 +42,7 @@ use core::hash::Hash;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, define_ctype, impl_cdrop};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CRefSeam, define_ctype, impl_cdrop};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::oid::OidRef;
@@ -460,6 +460,8 @@ mod unit_tests {
     use std::process::Command;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
+
+    use ffibox::CMutSeam;
 
     use super::*;
     use crate::libgit2::src::libgit2::oid::{Oid, OidType};

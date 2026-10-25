@@ -3,6 +3,8 @@
 
 use core::ffi::CStr;
 
+use ffibox::CMutSeam;
+
 use crate::ffi;
 use crate::libgit2::src::libgit2::buf::{Buf, BufVal};
 use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};

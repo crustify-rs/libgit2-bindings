@@ -23,7 +23,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::define_ctype;
+use ffibox::{CMutSeam, CRefSeam, define_ctype};
 
 use crate::ffi;
 

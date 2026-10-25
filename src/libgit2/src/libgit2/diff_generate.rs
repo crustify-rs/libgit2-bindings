@@ -6,6 +6,8 @@
 
 use core::ptr::{self};
 
+use ffibox::CRefSeam;
+
 use crate::ffi;
 use crate::libgit2::src::libgit2::diff::{Diff, DiffBox, DiffError, constructed};
 use crate::libgit2::src::libgit2::index::IndexRef;

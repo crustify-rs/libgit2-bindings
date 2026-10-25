@@ -9,6 +9,7 @@ use std::ffi::{CStr, c_int, c_void};
 use std::mem::MaybeUninit;
 use std::process::Command;
 
+use ffibox::{CMutSeam, CRefSeam};
 use libgit2::libgit2::src::libgit2::odb::OdbDataVec;
 
 const CHILD: &str = "CRUSTIFY_UB_SAFE_CHILD";
