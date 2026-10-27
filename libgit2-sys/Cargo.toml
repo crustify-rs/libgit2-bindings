@@ -1,6 +1,6 @@
 [package]
 name = "libgit2-sys"
-description = "Raw bindgen bindings to libgit2's public API, linked against a crustify prebuild."
+description = "Raw bindgen bindings to libgit2's public API."
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
@@ -18,5 +18,12 @@ build = "build.rs"
 doctest = false
 
 [build-dependencies]
-bindgen = "0.73"
+# Pinned exactly: the committed bindings are its output.
+bindgen = { version = "=0.73.2", optional = true }
 cc = "1.2"
+pkg-config = "0.3"
+serde_json = "1"
+
+[features]
+# Regenerates the bindings from the headers of the library found, in place of the shipped ones.
+bindgen = ["dep:bindgen"]

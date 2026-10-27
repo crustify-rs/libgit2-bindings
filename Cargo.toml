@@ -15,13 +15,15 @@ default = ["libgit2"]
 libgit2 = []
 
 [dependencies]
-ffibox = { path = "/opt/venv/share/ffibox" }
+ffibox = { git = "https://github.com/crustify-rs/ffibox", rev = "203b1a05269bdd549459a80d5d58d6c2f2689d01" }
 libc = "0.2"
 pcre2-sys = "0.2"
-libgit2-sys = { path = "libgit2-sys" }
+libgit2-sys = { version = "0.1.0", path = "libgit2-sys" }
 
 [dev-dependencies]
-libgit2-sys = { path = "libgit2-sys" }
+# The campaign's tests and gates regenerate the bindings, and check them against the
+# committed ones; the crate's dependents build from the shipped bindings.
+libgit2-sys = { version = "0.1.0", path = "libgit2-sys", features = ["bindgen"] }
 trybuild = "1.0"
 
 [lints]
@@ -82,3 +84,8 @@ allow_attributes_without_reason = "deny"
 module_inception = "allow"
 module_name_repetitions = "allow"
 multiple_crate_versions = "allow"
+
+# ffibox is pinned by Git so that this crate and the wrappers it takes by Git resolve one
+# copy of it; patched to the local checkout while the campaign runs against it.
+[patch."https://github.com/crustify-rs/ffibox"]
+ffibox = { path = "/opt/venv/share/ffibox" }

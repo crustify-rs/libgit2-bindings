@@ -1,0 +1,4 @@
+# Builds in this repository run the -sys crate in campaign mode, against the `plain`
+# variant unless CRUSTIFY_BUILD_VARIANT names another (crustify's specs/bindgen.md).
+[env]
+CRUSTIFY_BUILD_VARIANT = "plain"

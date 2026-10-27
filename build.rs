@@ -7,8 +7,10 @@ fn main() {
     // `cargo bsan` compiles with `--cfg bsan`; tests use it to skip paths it cannot run.
     println!("cargo:rustc-check-cfg=cfg(bsan)");
     println!("cargo:rerun-if-env-changed=DEP_GIT2_BUILD_DIR");
-    let dir = std::env::var("DEP_GIT2_BUILD_DIR").expect("libgit2-sys exports build_dir");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+    // A campaign build of libgit2-sys reports its build; a dependent's links an install.
+    if let Ok(dir) = std::env::var("DEP_GIT2_BUILD_DIR") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+    }
     // The side campaigns' installs libgit2 links, for binaries that link one directly.
     println!("cargo:rerun-if-env-changed=DEP_GIT2_DEP_LIB_DIRS");
     if let Ok(dirs) = std::env::var("DEP_GIT2_DEP_LIB_DIRS") {

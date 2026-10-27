@@ -1,0 +1,676 @@
+# Agent-owned bindgen allowlist: one `function|type|var <regex>` per line, matched against
+# C names. Add only the items a batch needs; keep each kind's entries sorted.
+
+function crustify_GIT_INDEX_ENTRY_STAGE
+function crustify_GIT_INDEX_ENTRY_STAGE_SET
+function crustify_GIT_OID_DEFAULT
+function git_annotated_commit_free
+function git_annotated_commit_from_fetchhead
+function git_annotated_commit_from_ref
+function git_annotated_commit_from_revspec
+function git_annotated_commit_id
+function git_annotated_commit_lookup
+function git_annotated_commit_ref
+function git_blob_create_from_buffer
+function git_blob_create_from_disk
+function git_blob_create_from_stream
+function git_blob_create_from_stream_commit
+function git_blob_create_from_workdir
+function git_blob_data_is_binary
+function git_blob_dup
+function git_blob_filter
+function git_blob_filter_options_init
+function git_blob_free
+function git_blob_id
+function git_blob_is_binary
+function git_blob_lookup
+function git_blob_lookup_prefix
+function git_blob_owner
+function git_blob_rawcontent
+function git_blob_rawsize
+function git_branch_iterator_free
+function git_branch_iterator_new
+function git_branch_lookup
+function git_branch_next
+function git_buf_dispose
+function git_checkout_index
+function git_checkout_options_init
+function git_checkout_tree
+function git_commit_amend
+function git_commit_amend_from_stage
+function git_commit_amend_from_tree
+function git_commit_author
+function git_commit_author_with_mailmap
+function git_commit_body
+function git_commit_committer
+function git_commit_committer_with_mailmap
+function git_commit_create
+function git_commit_create_buffer
+function git_commit_create_ext
+function git_commit_create_ext_options_init
+function git_commit_create_from_callback
+function git_commit_create_from_ids
+function git_commit_create_from_stage
+function git_commit_create_from_tree
+function git_commit_create_options_init
+function git_commit_create_v
+function git_commit_create_with_signature
+function git_commit_dup
+function git_commit_extract_signature
+function git_commit_free
+function git_commit_header_field
+function git_commit_id
+function git_commit_lookup
+function git_commit_lookup_prefix
+function git_commit_message
+function git_commit_message_encoding
+function git_commit_message_raw
+function git_commit_owner
+function git_commit_nth_gen_ancestor
+function git_commit_parent
+function git_commit_parent_id
+function git_commit_parentcount
+function git_commit_raw_header
+function git_commit_summary
+function git_commit_time
+function git_commit_time_offset
+function git_commit_tree
+function git_commit_tree_id
+function git_commitarray_dispose
+function git_commitbuilder_add_header
+function git_config_add_file_ondisk
+function git_config_backend_memory_options_init
+function git_config_free
+function git_config_get_int32
+function git_config_lock
+function git_config_lookup_map_value
+function git_config_new
+function git_config_set_int32
+function git_diff_free
+function git_diff_num_deltas
+function git_diff_tree_to_index
+function git_diff_tree_to_tree
+function git_error_clear
+function git_error_last
+function git_error_set
+function git_error_set_oom
+function git_error_set_str
+function git_filter_init
+function git_filter_list_apply_to_buffer
+function git_filter_list_contains
+function git_filter_list_free
+function git_filter_list_length
+function git_filter_list_load
+function git_filter_list_load_ext
+function git_filter_list_new
+function git_filter_list_push
+function git_filter_list_stream_buffer
+function git_filter_lookup
+function git_filter_register
+function git_filter_source_id
+function git_index_add
+function git_index_add_bypath
+function git_index_conflict_add
+function git_index_entrycount
+function git_index_free
+function git_index_get_byindex
+function git_index_new
+function git_index_new_ext
+function git_index_open
+function git_index_open_ext
+function git_index_owner
+function git_index_path
+function git_index_read
+function git_index_read_tree
+function git_index_remove
+function git_index_remove_bypath
+function git_index_remove_directory
+function git_index_reuc_find
+function git_index_set_version
+function git_index_version
+function git_index_write
+function git_index_write_tree
+function git_index_write_tree_to
+function git_libgit2_buildinfo
+function git_libgit2_feature_backend
+function git_libgit2_features
+function git_libgit2_init
+function git_libgit2_opts
+function git_libgit2_prerelease
+function git_libgit2_shutdown
+function git_libgit2_version
+function git_mailmap_add_entry
+function git_mailmap_free
+function git_mailmap_from_buffer
+function git_mailmap_from_repository
+function git_mailmap_new
+function git_mailmap_resolve
+function git_mailmap_resolve_signature
+function git_merge_bases
+function git_message_prettify
+function git_message_trailer_array_free
+function git_message_trailers
+function git_object_dup
+function git_object_free
+function git_object_id
+function git_object_id_from_buffer
+function git_object_id_from_file
+function git_object_id_options_init
+function git_object_lookup
+function git_object_lookup_prefix
+function git_object_lookup_bypath
+function git_object_owner
+function git_object_peel
+function git_object_rawcontent_is_valid
+function git_object_short_id
+function git_object_string2type
+function git_object_type
+function git_object_type2string
+function git_object_type_is_valid
+function git_odb_backend_data_alloc
+function git_odb_backend_data_free
+function git_odb_exists
+function git_odb_free
+function git_odb_new
+function git_odb_new_ext
+function git_odb_num_backends
+function git_odb_object_data
+function git_odb_object_free
+function git_odb_object_type
+function git_odb_object_size
+function git_odb_open
+function git_odb_open_ext
+function git_odb_read
+function git_odb_read_header
+function git_odb_write
+function git_oid_cmp
+function git_oid_cpy
+function git_oid_equal
+function git_oid_fmt
+function git_oid_from_prefix
+function git_oid_from_raw
+function git_oid_from_string
+function git_oid_is_zero
+function git_oid_ncmp
+function git_oid_nfmt
+function git_oid_pathfmt
+function git_oid_shorten_add
+function git_oid_shorten_free
+function git_oid_shorten_new
+function git_oid_strcmp
+function git_oid_streq
+function git_oid_tostr
+function git_oid_tostr_s
+function git_oidarray_dispose
+function git_path_is_gitfile
+function git_pathspec_free
+function git_pathspec_matches_path
+function git_pathspec_new
+function git_rebase_commit
+function git_rebase_free
+function git_rebase_init
+function git_rebase_next
+function git_rebase_options_init
+function git_refdb_backend_fs
+function git_refdb_compress
+function git_refdb_free
+function git_refdb_new
+function git_refdb_open
+function git_refdb_set_backend
+function git_reference__alloc
+function git_reference__alloc_symbolic
+function git_reference_cmp
+function git_reference_create
+function git_reference_dup
+function git_reference_dwim
+function git_reference_free
+function git_reference_lookup
+function git_reference_name
+function git_reference_normalize_name
+function git_reference_owner
+function git_reference_peel
+function git_reference_symbolic_target
+function git_reference_target
+function git_reference_target_peel
+function git_reference_type
+function git_remote_connect
+function git_remote_create_detached
+function git_remote_free
+function git_repository__cleanup
+function git_repository_commit_parents
+function git_repository_commondir
+function git_repository_config
+function git_repository_config_snapshot
+function git_repository_detach_head
+function git_repository_discover
+function git_repository_fetchhead_foreach
+function git_repository_free
+function git_repository_get_namespace
+function git_repository_hashfile
+function git_repository_head
+function git_repository_head_detached
+function git_repository_head_detached_for_worktree
+function git_repository_head_for_worktree
+function git_repository_head_unborn
+function git_repository_ident
+function git_repository_index
+function git_repository_init
+function git_repository_init_ext
+function git_repository_init_options_init
+function git_repository_is_bare
+function git_repository_is_empty
+function git_repository_is_shallow
+function git_repository_is_worktree
+function git_repository_item_path
+function git_repository_mergehead_foreach
+function git_repository_message
+function git_repository_message_remove
+function git_repository_new
+function git_repository_new_ext
+function git_repository_new_options_init
+function git_repository_odb
+function git_repository_oid_type
+function git_repository_open
+function git_repository_open_bare
+function git_repository_open_ext
+function git_repository_open_from_worktree
+function git_repository_path
+function git_repository_refdb
+function git_repository_reinit_filesystem
+function git_repository_set_bare
+function git_repository_set_config
+function git_repository_set_head
+function git_repository_set_head_detached
+function git_repository_set_head_detached_from_annotated
+function git_repository_set_ident
+function git_repository_set_index
+function git_repository_set_namespace
+function git_repository_set_odb
+function git_repository_set_refdb
+function git_repository_set_workdir
+function git_repository_state
+function git_repository_state_cleanup
+function git_repository_submodule_cache_all
+function git_repository_submodule_cache_clear
+function git_repository_workdir
+function git_repository_wrap_odb
+function git_signature_default
+function git_signature_default_from_env
+function git_signature_dup
+function git_signature_free
+function git_signature_from_buffer
+function git_signature_new
+function git_signature_now
+function git_strarray_dispose
+function git_submodule_fetch_recurse_submodules
+function git_submodule_free
+function git_submodule_ignore
+function git_submodule_init
+function git_submodule_lookup
+function git_submodule_set_fetch_recurse_submodules
+function git_submodule_set_ignore
+function git_submodule_set_update
+function git_submodule_update_strategy
+function git_tag_annotation_create
+function git_tag_create
+function git_tag_create_from_buffer
+function git_tag_create_lightweight
+function git_tag_delete
+function git_tag_dup
+function git_tag_foreach
+function git_tag_free
+function git_tag_id
+function git_tag_list
+function git_tag_list_match
+function git_tag_lookup
+function git_tag_lookup_prefix
+function git_tag_message
+function git_tag_name
+function git_tag_name_is_valid
+function git_tag_owner
+function git_tag_peel
+function git_tag_tagger
+function git_tag_target
+function git_tag_target_id
+function git_tag_target_type
+function git_trace_set
+function git_transaction_commit
+function git_transaction_free
+function git_transaction_lock_ref
+function git_transaction_new
+function git_transaction_remove
+function git_tree_create_updated
+function git_tree_dup
+function git_tree_entry_byid
+function git_tree_entry_byindex
+function git_tree_entry_byname
+function git_tree_entry_bypath
+function git_tree_entry_cmp
+function git_tree_entry_dup
+function git_tree_entry_filemode
+function git_tree_entry_filemode_raw
+function git_tree_entry_free
+function git_tree_entry_id
+function git_tree_entry_name
+function git_tree_entry_to_object
+function git_tree_entry_type
+function git_tree_entrycount
+function git_tree_free
+function git_tree_id
+function git_tree_lookup
+function git_tree_lookup_prefix
+function git_tree_owner
+function git_tree_walk
+function git_treebuilder_clear
+function git_treebuilder_entrycount
+function git_treebuilder_filter
+function git_treebuilder_free
+function git_treebuilder_get
+function git_treebuilder_insert
+function git_treebuilder_new
+function git_treebuilder_remove
+function git_treebuilder_write
+function git_worktree_add
+function git_worktree_add_options_init
+function git_worktree_free
+function git_worktree_is_locked
+function git_worktree_is_prunable
+function git_worktree_list
+function git_worktree_lock
+function git_worktree_lookup
+function git_worktree_name
+function git_worktree_open_from_repository
+function git_worktree_path
+function git_worktree_prune
+function git_worktree_prune_options_init
+function git_worktree_unlock
+function git_worktree_validate
+
+# config wave 0 batch 2: scalar parsers
+function git_config_parse_bool
+function git_config_parse_int32
+function git_config_parse_int64
+
+# config wave 1 batch 0: entry lifecycle
+function git_config_get_entry
+function git_config_entry_free
+
+# config wave 1 batch 1: file construction and scalar access
+function git_config_delete_entry
+function git_config_delete_multivar
+function git_config_find_global
+function git_config_find_system
+function git_config_find_xdg
+function git_config_get_bool
+function git_config_get_int64
+function git_config_get_path
+function git_config_get_string
+function git_config_get_string_buf
+function git_config_open_default
+function git_config_open_global
+function git_config_open_level
+function git_config_open_ondisk
+function git_config_parse_path
+function git_config_set_bool
+function git_config_set_int64
+function git_config_set_multivar
+
+# config wave 1 batch 2
+function git_config_set_string
+function git_config_set_writeorder
+function git_config_snapshot
+
+# config review wave 1 batch 0: entry lookup without get_entry on a failing backend
+function git_config_iterator_free
+function git_config_multivar_iterator_new
+function git_config_next
+
+# config wave 2 batch 1: mapping and callback validation
+function git_config_get_mapped
+function git_config_foreach
+
+# config wave 3 batch 1: safe synchronous enumeration
+function git_config_foreach_match
+function git_config_get_multivar_foreach
+# config wave 3 batch 0: iterator construction
+function git_config_iterator_new
+function git_config_iterator_glob_new
+
+# config wave 4 batch 0: backend construction and initialization
+function git_config_init_backend
+
+# config wave 5 batch 0: backend registration and enumeration
+function git_config_add_backend
+function git_config_backend_foreach_match
+
+# index wave 0 batch 1: capability equivalence tests
+function git_index_caps
+function git_index_set_caps
+
+# index wave 0 batch 8: callback C-callsite regression coverage
+function git_index_add_all
+function git_index_remove_all
+function git_index_update_all
+
+# index wave 0 batch 4: NAME lifecycle and stage equivalence
+function git_index_name_add
+function git_index_name_clear
+function git_index_name_entrycount
+function git_index_name_get_byindex
+function git_index_entry_stage
+
+# index wave 0 batch 3: iterator lifecycle, next for lifecycle equivalence evidence
+function git_index_iterator_new
+function git_index_iterator_free
+function git_index_iterator_next
+
+# index wave 0 batch 2: conflict cursor lifecycle (next for constructor-state tests)
+function git_index_conflict_iterator_new
+function git_index_conflict_iterator_free
+function git_index_conflict_next
+
+# index wave 1 batch 1: REUC entry lookups; add/count/remove/clear for test fixtures
+function git_index_reuc_get_byindex
+function git_index_reuc_get_bypath
+function git_index_reuc_add
+function git_index_reuc_entrycount
+function git_index_reuc_remove
+function git_index_reuc_clear
+# Diff lifecycle and borrowed delta projection
+function git_diff_from_buffer
+function git_diff_from_buffer_ext
+function git_diff_get_delta
+function git_diff_index_to_workdir
+function git_diff_tree_to_workdir
+function git_diff_tree_to_workdir_with_index
+function git_diff_index_to_index
+function git_diff_options_init
+
+# index wave 0 batch 7: match-list lifecycle and public observations
+function git_pathspec_match_workdir
+function git_pathspec_match_index
+function git_pathspec_match_tree
+function git_pathspec_match_diff
+function git_pathspec_match_list_free
+function git_pathspec_match_list_entrycount
+function git_pathspec_match_list_entry
+function git_pathspec_match_list_diff_entry
+function git_pathspec_match_list_failed_entrycount
+function git_pathspec_match_list_failed_entry
+
+# index wave 0 batch 5: note iterator lifecycle, equivalence and the composed constructor
+function git_note_iterator_new
+function git_note_commit_iterator_new
+function git_note_iterator_free
+function git_note_next
+function git_reference_name_to_id
+
+# index wave 1 batch 0: git_index_options constructor
+function git_index_options_init
+
+# index wave 1 batch 2: index symbol wrappers
+function git_index_clear
+function git_index_conflict_cleanup
+function git_index_conflict_remove
+function git_index_extension_add
+function git_index_extension_lookup
+function git_index_extension_remove
+function git_index_find
+function git_index_find_prefix
+function git_index_has_conflicts
+
+# index review wave 1 batch 1: the path lookup table behind git_index_remove(-1)
+function git_index_get_bypath
+
+# index wave 2 batch 0: index entry and conflict symbol wrappers
+function git_index_add_from_buffer
+function git_index_conflict_get
+function git_index_entry_is_conflict
+
+type git_allocator
+type git_blob_filter_flag_t
+type git_blob_filter_options
+type git_branch_t
+type git_buf
+type git_buildinfo_t
+type git_checkout_notify_t
+type git_checkout_options
+type git_commit_create_cb
+type git_commit_create_ext_options
+type git_commit_create_options
+type git_commit_header
+type git_commitarray
+type git_commitbuilder
+type git_config
+type git_config_backend_memory_options
+type git_config_level_t
+type git_configmap_t
+type git_error
+type git_error_code
+type git_error_t
+type git_feature_t
+type git_filemode_t
+type git_filter
+type git_filter_flag_t
+type git_filter_list
+type git_filter_mode_t
+type git_filter_options
+type git_index
+type git_index_entry
+type git_index_entry_extended_flag_t
+type git_index_options
+type git_libgit2_opt_t
+type git_mailmap
+type git_message_trailer
+type git_message_trailer_array
+type git_object_id_options
+type git_object_t
+type git_odb_options
+type git_oid
+type git_oid_shorten
+type git_oid_t
+type git_oidarray
+type git_path_fs
+type git_path_gitfile
+type git_pathspec_flag_t
+type git_rebase_options
+type git_refdb
+type git_refdb_backend
+type git_refdb_t
+type git_reference_format_t
+type git_reference_t
+type git_repository_fetchhead_foreach_cb
+type git_repository_init_flag_t
+type git_repository_init_mode_t
+type git_repository_init_options
+type git_repository_item_t
+type git_repository_mergehead_foreach_cb
+type git_repository_new_options
+type git_repository_open_flag_t
+type git_repository_state_t
+type git_strarray
+type git_submodule_ignore_t
+type git_submodule_recurse_t
+type git_submodule_update_t
+type git_tag_foreach_cb
+type git_time
+type git_trace_level_t
+type git_transaction
+type git_tree_update_t
+type git_treebuilder
+type git_treebuilder_filter_cb
+type git_treewalk_mode
+type git_worktree
+type git_worktree_add_options
+type git_worktree_prune_options
+type git_worktree_prune_t
+type git_writestream
+
+# config wave 1 batch 0: entries and mapping records
+type git_config_entry
+type git_configmap
+
+# config wave 2 batch 1: borrowed enumeration callback
+type git_config_foreach_cb
+
+# config wave 2 batch 0: backend entries
+type git_config_backend_entry
+
+# config wave 3 batch 0: iterator layout
+type git_config_iterator
+
+# config wave 4 batch 0
+type git_config_backend
+
+# index wave 0 batch 1: scalar options and capabilities
+type git_index_add_option_t
+type git_index_capability_t
+
+# index wave 0 batch 8: synchronous matched-path callback
+type git_index_matched_path_cb
+
+# index wave 0 batch 4
+type git_index_name_entry
+type git_index_stage_t
+
+# index wave 0 batch 3: opaque snapshot iterator and entry flag enum
+type git_index_iterator
+type git_index_entry_flag_t
+
+# index wave 1 batch 1: resolve-undo entry
+type git_index_reuc_entry
+# Diff generator option flags (required by the raw options seam tests)
+type git_diff_option_t
+
+# index wave 0 batch 5
+type git_index_time
+type git_note_iterator
+
+var GIT_BLOB_FILTER_OPTIONS_VERSION
+var GIT_CHECKOUT_OPTIONS_VERSION
+var GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION
+var GIT_COMMIT_CREATE_OPTIONS_VERSION
+var GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION
+var GIT_FILTER_VERSION
+var GIT_INDEX_OPTIONS_VERSION
+var GIT_ODB_OPTIONS_VERSION
+var GIT_OBJECT_ID_OPTIONS_VERSION
+var GIT_OID_MAX_HEXSIZE
+var GIT_OID_MAX_SIZE
+var GIT_OID_SHA1_HEXSIZE
+var GIT_OID_SHA1_SIZE
+var GIT_OID_SHA256_HEXSIZE
+var GIT_OID_SHA256_SIZE
+var GIT_REFDB_BACKEND_VERSION
+var GIT_REPOSITORY_INIT_OPTIONS_VERSION
+var GIT_REPOSITORY_NEW_OPTIONS_VERSION
+var GIT_WORKTREE_ADD_OPTIONS_VERSION
+var GIT_WORKTREE_PRUNE_OPTIONS_VERSION
+var LIBGIT2_VERSION_MAJOR
+var LIBGIT2_VERSION_MINOR
+var LIBGIT2_VERSION_REVISION
+var GIT_CONFIG_BACKEND_VERSION
+
+# Diff parse lifecycle defaults
+var GIT_DIFF_PARSE_OPTIONS_VERSION
+var GIT_DIFF_OPTIONS_VERSION
