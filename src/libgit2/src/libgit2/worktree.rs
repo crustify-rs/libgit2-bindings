@@ -913,6 +913,14 @@ unsafe impl<'o> CCell for AddOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for AddOptionsRef<'a, 'o> {
+    type Cell = AddOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for AddOptionsMut<'a, 'o> {
+    type Cell = AddOptions<'o>;
+}
+
 impl<'o> AddOptions<'o> {
     /// The structure version this crate's header declares
     /// (`GIT_WORKTREE_ADD_OPTIONS_VERSION`), the only one libgit2 accepts.
@@ -979,12 +987,6 @@ impl fmt::Debug for AddOptions<'_> {
 }
 
 impl<'a, 'o> AddOptionsRef<'a, 'o> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_worktree_add_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_worktree_add_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure's version, `GIT_WORKTREE_ADD_OPTIONS_VERSION`; fixed by
     /// [`AddOptions::new`].
     ///
@@ -1089,11 +1091,6 @@ impl fmt::Debug for AddOptionsRef<'_, '_> {
 }
 
 impl<'o> AddOptionsMut<'_, 'o> {
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_worktree_add_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> AddOptionsRef<'_, 'o> {

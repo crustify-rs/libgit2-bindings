@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull, addr_of};
 use std::ffi::CString;
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CRefSeam, define_ctype};
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::index::IndexRef;
@@ -138,29 +138,15 @@ unsafe impl<'r> CCell for Diff<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for DiffRef<'a, 'r> {
+    type Cell = Diff<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for DiffMut<'a, 'r> {
+    type Cell = Diff<'r>;
+}
+
 impl<'a> DiffRef<'a, '_> {
-    /// # Safety
-    /// A non-null pointer must be a live, initialized diff for `'a`, with its
-    /// repository and retained option referents live for `'r`. Nothing may mutate
-    /// or release the diff or its deltas during `'a`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(p: *const ffi::git_diff) -> Option<Self> {
-        NonNull::new(p.cast_mut()).map(|p| {
-            // SAFETY: caller establishes the lifetime and shared access contract.
-            Self(unsafe { CBorrowedPtr::new(p.cast()) })
-        })
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_diff {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// Number of deltas (including unmodified entries if requested).
     /// Wraps: `git_diff_num_deltas`
     #[must_use]
@@ -188,32 +174,6 @@ impl<'a> DiffRef<'a, '_> {
 }
 
 impl<'r> DiffMut<'_, 'r> {
-    /// # Safety
-    /// Same validity/keepalive as `DiffRef::from_ptr`; additionally access must be
-    /// exclusive for 'a, including every C-held reference and generated patch.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(p: *mut ffi::git_diff) -> Option<Self> {
-        // SAFETY: the caller promises validity and exclusivity.
-        unsafe { DiffRef::from_ptr(p) }.map(|p| Self(p, PhantomData))
-    }
-
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_diff {
-        self.0.as_ptr().cast_mut()
-    }
-
     /// A shared handle over the same object, borrowed from this one.
     #[must_use]
     pub fn as_ref(&self) -> DiffRef<'_, 'r> {
@@ -626,7 +586,7 @@ mod unit_tests {
         }
         assert!(owned.as_mut().as_ref().is_empty());
         // SAFETY: null pointers are accepted by both optional borrowing seams.
-        assert!(unsafe { DiffRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { DiffRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: null pointers are accepted by both optional borrowing seams.
         assert!(unsafe { DiffMut::from_ptr(ptr::null_mut()) }.is_none());
     }

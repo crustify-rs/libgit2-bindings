@@ -768,6 +768,14 @@ unsafe impl<'p> CCell for TreeUpdate<'p> {
         Self: 'a;
 }
 
+impl<'a, 'p: 'a> CRefSeam<'a> for TreeUpdateRef<'a, 'p> {
+    type Cell = TreeUpdate<'p>;
+}
+
+impl<'a, 'p: 'a> CMutSeam<'a> for TreeUpdateMut<'a, 'p> {
+    type Cell = TreeUpdate<'p>;
+}
+
 // SAFETY: an update is two enum values, 33 bytes of id and a string pointer, which only
 // the setters write, a `&'p CStr`'s pointer: a shared, immutable borrow of `CStr`, which
 // is `Sync`, so it may be read from any thread. Nothing in the struct has thread affinity
@@ -882,12 +890,6 @@ impl fmt::Debug for TreeUpdate<'_> {
 }
 
 impl<'a, 'p> TreeUpdateRef<'a, 'p> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_tree_update *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_tree_update {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// What the update does at its path.
     ///
     /// Field: `git_tree_update.action`
@@ -988,11 +990,6 @@ impl fmt::Debug for TreeUpdateRef<'_, '_> {
 }
 
 impl<'p> TreeUpdateMut<'_, 'p> {
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tree_update {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> TreeUpdateRef<'_, 'p> {
@@ -1174,29 +1171,19 @@ unsafe impl<'r> CCell for Tree<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for TreeRef<'a, 'r> {
+    type Cell = Tree<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for TreeMut<'a, 'r> {
+    type Cell = Tree<'r>;
+}
+
 impl<'a, 'r> TreeRef<'a, 'r> {
     /// The pointer the handle keeps, for the routines of other modules that count a
     /// reference on the tree (`object_api`'s `git_tree_dup`).
     pub(crate) fn as_non_null(self) -> NonNull<Tree<'r>> {
         self.0.as_non_null()
-    }
-
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live tree looked up in a repository that
-    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
-    /// least that long) and which no one writes during `'a`.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_tree) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_tree` that outlives `'a` and is not written meanwhile.
-        unsafe { <Tree<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_tree {
-        self.0.as_non_null().as_ptr().cast()
     }
 
     /// The tree `object` is, borrowed as long as `object` is; `None` for an object of
@@ -1210,7 +1197,7 @@ impl<'a, 'r> TreeRef<'a, 'r> {
         // whose first member is that `git_object`, so the pointer addresses the whole
         // tree; the object handle keeps it live and unwritten for `'a`, and its
         // repository outlives `'r`.
-        unsafe { Self::from_ptr(object.as_ptr().cast()) }
+        unsafe { Self::from_ptr(object.as_ptr().cast_mut().cast()) }
     }
 
     /// The tree as the object it is, borrowed as long as this handle: what every
@@ -1224,7 +1211,7 @@ impl<'a, 'r> TreeRef<'a, 'r> {
         // SAFETY: a `git_tree` starts with its `git_object`, so the tree's pointer is
         // its object's, live and unwritten for `'a` as the tree is, of a repository that
         // outlives `'r`.
-        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) };
+        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast_mut().cast()) };
         object.expect("a handle is never NULL")
     }
 }
@@ -1235,36 +1222,6 @@ fn is_tree(object: ObjectRef<'_, '_>) -> bool {
 }
 
 impl<'r> TreeMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`TreeRef::from_ptr`], plus: nothing else reaches the tree while the result
-    /// lives, its repository's cache included.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_tree) -> Option<Self> {
-        // SAFETY: the caller upholds `TreeRef::from_ptr`'s contract and exclusivity.
-        unsafe { TreeRef::from_ptr(ptr) }.map(|r| TreeMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tree {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> TreeRef<'_, 'r> {
@@ -1768,33 +1725,15 @@ unsafe impl<'r> CCell for TreeBuilder<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for TreeBuilderRef<'a, 'r> {
+    type Cell = TreeBuilder<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for TreeBuilderMut<'a, 'r> {
+    type Cell = TreeBuilder<'r>;
+}
+
 impl<'r> TreeBuilderRef<'_, 'r> {
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live tree builder, which no one frees or writes
-    /// during `'a`, built for a repository that outlives `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_treebuilder) -> Option<Self> {
-        NonNull::new(ptr.cast_mut()).map(|p| {
-            // SAFETY: a non-null pointer the caller vouches for, per this function's
-            // contract; `TreeBuilder` is transparent over `git_treebuilder`.
-            TreeBuilderRef(unsafe { CBorrowedPtr::new(p.cast()) })
-        })
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_treebuilder {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The number of entries the builder holds: one per distinct file name.
     ///
     /// Wraps: `git_treebuilder_entrycount`
@@ -1833,30 +1772,6 @@ impl<'r> TreeBuilderRef<'_, 'r> {
 }
 
 impl<'r> TreeBuilderMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`TreeBuilderRef::from_ptr`], plus: nothing else reaches the builder while the
-    /// result lives.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_treebuilder) -> Option<Self> {
-        // SAFETY: the caller upholds `TreeBuilderRef::from_ptr`'s contract and
-        // exclusivity.
-        unsafe { TreeBuilderRef::from_ptr(ptr) }.map(|r| TreeBuilderMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_treebuilder {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> TreeBuilderRef<'_, 'r> {
@@ -2808,7 +2723,7 @@ mod unit_tests {
         assert_eq!(format!("{m:?}"), "TreeBuilder { .. }");
         assert_eq!(format!("{:?}", m.as_ref()), "TreeBuilder { .. }");
         // SAFETY: NULL is refused before anything else.
-        assert!(unsafe { TreeBuilderRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { TreeBuilderRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.
         assert!(unsafe { TreeBuilderMut::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above; nothing is adopted.
@@ -3173,7 +3088,7 @@ mod unit_tests {
         #[test]
         fn handles_without_c() {
             // SAFETY: NULL is refused without being read.
-            assert!(unsafe { TreeRef::from_ptr(ptr::null()) }.is_none());
+            assert!(unsafe { TreeRef::from_ptr(ptr::null_mut()) }.is_none());
             // SAFETY: as above.
             assert!(unsafe { TreeMut::from_ptr(ptr::null_mut()) }.is_none());
             let p = NonNull::<ffi::git_tree>::dangling().as_ptr();

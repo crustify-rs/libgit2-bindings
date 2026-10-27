@@ -4,7 +4,7 @@
 
 use core::marker::PhantomData;
 
-use ffibox::{CBorrowedPtr, CBox, CCell};
+use ffibox::{CBorrowedPtr, CBox, CCell, CMutSeam, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::notes::NoteIteratorFree;
@@ -68,17 +68,12 @@ unsafe impl<'r> CCell for NoteIterator<'r> {
         Self: 'a;
 }
 
-impl NoteIteratorRef<'_, '_> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_note_iterator {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for NoteIteratorRef<'a, 'r> {
+    type Cell = NoteIterator<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for NoteIteratorMut<'a, 'r> {
+    type Cell = NoteIterator<'r>;
 }
 
 impl<'r> NoteIteratorMut<'_, 'r> {
@@ -91,17 +86,6 @@ impl<'r> NoteIteratorMut<'_, 'r> {
     /// Reborrows exclusively; the original handle is frozen until this expires.
     pub fn as_mut(&mut self) -> NoteIteratorMut<'_, 'r> {
         NoteIteratorMut(self.0, PhantomData)
-    }
-
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_note_iterator {
-        self.0.0.as_non_null().as_ptr().cast()
     }
 }
 

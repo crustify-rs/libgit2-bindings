@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CCell};
+use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam};
 
 use crate::ffi;
 
@@ -107,6 +107,14 @@ unsafe impl<'o> CCell for BackendMemoryOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for BackendMemoryOptionsRef<'a, 'o> {
+    type Cell = BackendMemoryOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for BackendMemoryOptionsMut<'a, 'o> {
+    type Cell = BackendMemoryOptions<'o>;
+}
+
 // SAFETY: the options are a version and two pointers that only the setters write, each
 // NULL or a `&'o CStr`'s: a shared, immutable borrow of `CStr`, which is `Sync`, so it
 // may be read from any thread. Nothing has thread affinity or interior mutability, and
@@ -184,30 +192,7 @@ impl Clone for BackendMemoryOptions<'_> {
     }
 }
 
-impl<'a, 'o> BackendMemoryOptionsRef<'a, 'o> {
-    /// # Safety
-    /// `ptr` is NULL or aligned initialized options, readable and unchanged for
-    /// `'a`; both strings are NULL or NUL-terminated immutable borrows for `'o`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(
-        ptr: *const ffi::git_config_backend_memory_options,
-    ) -> Option<Self> {
-        let ptr = NonNull::new(ptr.cast_mut().cast::<BackendMemoryOptions<'o>>())?;
-        // SAFETY: caller proves liveness, initialized fields and referent lifetimes;
-        // the layout cast is transparent.
-        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_config_backend_memory_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
+impl<'a> BackendMemoryOptionsRef<'a, '_> {
     /// Structure version; constructors use the current supported version.
     ///
     /// Field: `git_config_backend_memory_options.version`
@@ -281,10 +266,6 @@ impl fmt::Debug for BackendMemoryOptionsMut<'_, '_> {
 }
 
 impl<'o> BackendMemoryOptionsMut<'_, 'o> {
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_backend_memory_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// A shared handle over the same object, borrowed from this one.
     #[must_use]
     pub fn as_ref(&self) -> BackendMemoryOptionsRef<'_, 'o> {

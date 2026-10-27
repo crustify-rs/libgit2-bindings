@@ -43,7 +43,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self};
 
-use ffibox::{CBorrowedPtr, CCell, CRefSeam};
+use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::index::IndexRef;
@@ -142,6 +142,14 @@ unsafe impl<'o> CCell for CheckoutOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for CheckoutOptionsRef<'a, 'o> {
+    type Cell = CheckoutOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for CheckoutOptionsMut<'a, 'o> {
+    type Cell = CheckoutOptions<'o>;
+}
+
 impl<'o> CheckoutOptions<'o> {
     /// libgit2's default options, as `GIT_CHECKOUT_OPTIONS_INIT` spells them: version 1,
     /// a safe checkout (strategy 0), every other field zero or NULL.
@@ -201,28 +209,6 @@ impl fmt::Debug for CheckoutOptions<'_> {
 }
 
 impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
-    /// Borrows the options at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must address live, initialised options (or be NULL) that outlive `'a` and
-    /// that nothing writes while the handle lives, whose strings, path list and
-    /// baseline tree and index outlive `'o` (strings NULL or NUL-terminated; `paths` as
-    /// [`StrArrayRef`] requires; the tree NULL or one a [`TreeRef<'o, 'o>`] may
-    /// designate; the index NULL or one an [`IndexRef<'o>`] may designate).
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_checkout_options) -> Option<Self> {
-        let ptr = ptr::NonNull::new(ptr.cast::<CheckoutOptions<'o>>())?;
-        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
-        // liveness, the lifetimes and the absence of writers.
-        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
-    }
-
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_checkout_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_checkout_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure's version, `GIT_CHECKOUT_OPTIONS_VERSION`; fixed by
     /// [`CheckoutOptions::new`].
     ///
@@ -546,25 +532,6 @@ impl fmt::Debug for CheckoutOptionsRef<'_, '_> {
 }
 
 impl<'o> CheckoutOptionsMut<'_, 'o> {
-    /// Borrows the options at `ptr` exclusively; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// As [`CheckoutOptionsRef::from_ptr`], plus: nothing else reads or writes the
-    /// options while the result lives, and whatever the setters store may stay there
-    /// for as long as the options' owner expects `'o` borrows to.
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_checkout_options) -> Option<Self> {
-        // SAFETY: the caller upholds `CheckoutOptionsRef::from_ptr`'s contract, and
-        // excludes every other access for `'a`.
-        let shared = unsafe { CheckoutOptionsRef::from_ptr(ptr) }?;
-        Some(Self(shared, PhantomData))
-    }
-
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_checkout_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> CheckoutOptionsRef<'_, 'o> {

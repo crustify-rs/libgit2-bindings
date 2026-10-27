@@ -75,7 +75,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CRefSeam};
+use ffibox::{CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::repository::RepositoryRef;
@@ -186,46 +186,15 @@ unsafe impl<'r> CCell for Refdb<'r> {
         Self: 'a;
 }
 
-impl<'r> RefdbRef<'_, 'r> {
-    /// Borrows the refdb at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live refdb with a backend, of a repository
-    /// that outlives `'r`, which stays live for `'a` and is not written through
-    /// another handle meanwhile.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_refdb) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_refdb` that outlives `'a` and is not written meanwhile.
-        unsafe { <Refdb<'r> as CCell>::ref_from_ptr(ptr) }
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for RefdbRef<'a, 'r> {
+    type Cell = Refdb<'r>;
+}
 
-    /// Read-only pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_refdb {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CMutSeam<'a> for RefdbMut<'a, 'r> {
+    type Cell = Refdb<'r>;
 }
 
 impl<'r> RefdbMut<'_, 'r> {
-    /// Writable pointer to the C object.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_refdb {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> RefdbRef<'_, 'r> {

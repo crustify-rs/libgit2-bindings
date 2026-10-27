@@ -847,6 +847,14 @@ unsafe impl<'s> CCell for OidShortener<'s> {
         Self: 'a;
 }
 
+impl<'a, 's: 'a> CRefSeam<'a> for OidShortenerRef<'a, 's> {
+    type Cell = OidShortener<'s>;
+}
+
+impl<'a, 's: 'a> CMutSeam<'a> for OidShortenerMut<'a, 's> {
+    type Cell = OidShortener<'s>;
+}
+
 // SAFETY: a shortener is a `git__calloc`'d struct and its trie buffer, both from
 // libgit2's process-wide allocator, which frees on any thread, plus borrows of the
 // text ids added to it, which are `&'s [u8]` and so may be sent. No C routine keeps
@@ -858,26 +866,7 @@ unsafe impl Send for OidShortener<'_> {}
 // routine taking a `const git_oid_shorten *` — so shared access reads nothing.
 unsafe impl Sync for OidShortener<'_> {}
 
-impl OidShortenerRef<'_, '_> {
-    /// Read-only pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_oid_shorten {
-        self.0.as_non_null().as_ptr().cast()
-    }
-}
-
 impl<'s> OidShortenerMut<'_, 's> {
-    /// Writable pointer to the C object, for `git_oid_shorten_add`.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_oid_shorten {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> OidShortenerRef<'_, 's> {

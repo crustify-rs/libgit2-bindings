@@ -705,6 +705,14 @@ unsafe impl<'o> CCell for InitOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for InitOptionsRef<'a, 'o> {
+    type Cell = InitOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for InitOptionsMut<'a, 'o> {
+    type Cell = InitOptions<'o>;
+}
+
 // SAFETY: the options are integers and five string pointers that only the setters
 // write, each NULL or a `&'o CStr`'s pointer: shared, immutable borrows of `CStr`,
 // which is `Sync`, so they may be read from any thread. Nothing in the struct has
@@ -794,12 +802,6 @@ impl fmt::Debug for InitOptions<'_> {
 }
 
 impl<'o> InitOptionsRef<'_, 'o> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_repository_init_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_repository_init_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure version. [`InitOptions::new`] sets [`InitOptions::VERSION`];
     /// libgit2 refuses the options with `GIT_ERROR_INVALID` if it is 0 or above that.
     ///
@@ -993,12 +995,6 @@ impl fmt::Debug for InitOptionsRef<'_, '_> {
 }
 
 impl<'o> InitOptionsMut<'_, 'o> {
-    /// Writable pointer to the C struct, for the setters and for C calls that write
-    /// the options (`git_repository_init_ext`).
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_repository_init_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> InitOptionsRef<'_, 'o> {

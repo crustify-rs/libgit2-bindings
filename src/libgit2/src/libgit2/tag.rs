@@ -221,29 +221,19 @@ unsafe impl<'r> CCell for Tag<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for TagRef<'a, 'r> {
+    type Cell = Tag<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for TagMut<'a, 'r> {
+    type Cell = Tag<'r>;
+}
+
 impl<'a, 'r> TagRef<'a, 'r> {
     /// The pointer the handle keeps, for the routines of other modules that count a
     /// reference on the tag (`object_api`'s `git_tag_dup`).
     pub(crate) fn as_non_null(self) -> NonNull<Tag<'r>> {
         self.0.as_non_null()
-    }
-
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live tag looked up in a repository that outlives
-    /// `'r`, which stays live during `'a` (a reference to it is held for at least that
-    /// long) and which no one writes during `'a`.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_tag) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_tag` that outlives `'a` and is not written meanwhile.
-        unsafe { <Tag<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_tag {
-        self.0.as_non_null().as_ptr().cast()
     }
 
     /// The tag `object` is, borrowed as long as `object` is; `None` for an object of
@@ -257,7 +247,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
         // whose first member is that `git_object`, so the pointer addresses the whole
         // tag; the object handle keeps it live and unwritten for `'a`, and its
         // repository outlives `'r`.
-        unsafe { Self::from_ptr(object.as_ptr().cast()) }
+        unsafe { Self::from_ptr(object.as_ptr().cast_mut().cast()) }
     }
 
     /// The tag as the object it is, borrowed as long as this handle: what every
@@ -271,7 +261,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
         // SAFETY: a `git_tag` starts with its `git_object`, so the tag's pointer is its
         // object's, live and unwritten for `'a` as the tag is, of a repository that
         // outlives `'r`.
-        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) };
+        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast_mut().cast()) };
         object.expect("a handle is never NULL")
     }
 }
@@ -282,36 +272,6 @@ fn is_tag(object: ObjectRef<'_, '_>) -> bool {
 }
 
 impl<'r> TagMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`TagRef::from_ptr`], plus: nothing else reaches the tag while the result
-    /// lives, its repository's cache included.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_tag) -> Option<Self> {
-        // SAFETY: the caller upholds `TagRef::from_ptr`'s contract and exclusivity.
-        unsafe { TagRef::from_ptr(ptr) }.map(|r| TagMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_tag {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> TagRef<'_, 'r> {
@@ -2028,7 +1988,7 @@ mod unit_tests {
         #[test]
         fn handles_without_c() {
             // SAFETY: NULL is refused without being read.
-            assert!(unsafe { TagRef::from_ptr(ptr::null()) }.is_none());
+            assert!(unsafe { TagRef::from_ptr(ptr::null_mut()) }.is_none());
             // SAFETY: as above.
             assert!(unsafe { TagMut::from_ptr(ptr::null_mut()) }.is_none());
             let p = NonNull::<ffi::git_tag>::dangling().as_ptr();

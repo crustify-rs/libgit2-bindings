@@ -199,6 +199,14 @@ unsafe impl<'t> CCell for MessageTrailer<'t> {
         Self: 'a;
 }
 
+impl<'a, 't: 'a> CRefSeam<'a> for MessageTrailerRef<'a, 't> {
+    type Cell = MessageTrailer<'t>;
+}
+
+impl<'a, 't: 'a> CMutSeam<'a> for MessageTrailerMut<'a, 't> {
+    type Cell = MessageTrailer<'t>;
+}
+
 // SAFETY: a trailer is two string pointers, each a `&'t CStr`'s (per the handles'
 // invariant): shared, immutable borrows of `CStr`, which is `Sync`, so they may be read
 // from any thread. Nothing in the struct has thread affinity or interior mutability,
@@ -284,33 +292,6 @@ impl fmt::Debug for MessageTrailer<'_> {
 }
 
 impl<'t> MessageTrailerRef<'_, 't> {
-    /// Borrows the trailer at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live trailer that stays live, and that nothing
-    /// writes, for `'a`, whose `key` and `value` are non-NULL and address
-    /// NUL-terminated strings that stay live and unchanged for `'t`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_message_trailer) -> Option<Self> {
-        // SAFETY: non-NULL per `NonNull::new`; live for `'a` per this function's
-        // contract; `MessageTrailer` is transparent over `git_message_trailer`.
-        NonNull::new(ptr.cast_mut().cast::<MessageTrailer<'t>>())
-            .map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
-    }
-
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_message_trailer *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_message_trailer {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The trailer's key, without the separator or the whitespace around it
     /// (`Signed-off-by`). Borrowed for `'t`, as the trailer holds it.
     ///
@@ -357,11 +338,6 @@ impl fmt::Debug for MessageTrailerRef<'_, '_> {
 }
 
 impl<'t> MessageTrailerMut<'_, 't> {
-    /// Writable pointer to the C struct.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_message_trailer {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> MessageTrailerRef<'_, 't> {
@@ -867,7 +843,7 @@ mod unit_tests {
                 // the handle and the copy are last used.
                 let p = unsafe { trailers.as_ptr().add(i) };
                 // SAFETY: as above.
-                let value2 = unsafe { MessageTrailerRef::from_ptr(p) };
+                let value2 = unsafe { MessageTrailerRef::from_ptr(p.cast_mut()) };
                 // SAFETY: as above.
                 let read2 = unsafe { p.read() };
                 // SAFETY: as above.
@@ -877,7 +853,7 @@ mod unit_tests {
             assert_eq!((copy.as_ref().key(), copy.as_ref().value()), (key, value));
         }
         // SAFETY: NULL is refused before any handle exists.
-        assert!(unsafe { MessageTrailerRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { MessageTrailerRef::from_ptr(ptr::null_mut()) }.is_none());
     }
 
     #[test]

@@ -508,29 +508,19 @@ unsafe impl<'r> CCell for Blob<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for BlobRef<'a, 'r> {
+    type Cell = Blob<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for BlobMut<'a, 'r> {
+    type Cell = Blob<'r>;
+}
+
 impl<'a, 'r> BlobRef<'a, 'r> {
     /// The pointer the handle keeps, for the routines of other modules that count a
     /// reference on the blob (`object_api`'s `git_blob_dup`).
     pub(crate) fn as_non_null(self) -> NonNull<Blob<'r>> {
         self.0.as_non_null()
-    }
-
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live blob looked up in a repository that
-    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
-    /// least that long) and which no one writes during `'a`.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_blob) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_blob` that outlives `'a` and is not written meanwhile.
-        unsafe { <Blob<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
-
-    /// Read-only pointer to the C blob.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_blob {
-        self.0.as_non_null().as_ptr().cast()
     }
 
     /// The blob `object` is, borrowed as long as `object` is; `None` for an object of
@@ -545,7 +535,7 @@ impl<'a, 'r> BlobRef<'a, 'r> {
         // whose first member is that `git_object`, so the pointer addresses the whole
         // blob; the object handle keeps it live and unwritten for `'a`, and its
         // repository outlives `'r`.
-        unsafe { Self::from_ptr(p.cast()) }
+        unsafe { Self::from_ptr(p.cast_mut().cast()) }
     }
 
     /// The object this blob is, borrowed as long as the blob is.
@@ -557,7 +547,8 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     pub fn as_object(&self) -> ObjectRef<'a, 'r> {
         // SAFETY: a `git_blob` starts with its `git_object`, live and unwritten for
         // `'a` as the blob is, of a repository that outlives `'r`.
-        unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) }.expect("a handle is never NULL")
+        unsafe { ObjectRef::from_ptr(self.as_ptr().cast_mut().cast()) }
+            .expect("a handle is never NULL")
     }
 
     /// The blob's content, as the object database stores it, unfiltered: the
@@ -693,36 +684,6 @@ impl<'a, 'r> BlobRef<'a, 'r> {
 }
 
 impl<'r> BlobMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`BlobRef::from_ptr`], plus: nothing else reaches the blob while the result
-    /// lives, its repository's cache included.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_blob) -> Option<Self> {
-        // SAFETY: the caller upholds `BlobRef::from_ptr`'s contract and exclusivity.
-        unsafe { BlobRef::from_ptr(ptr) }.map(|r| BlobMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C blob.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_blob {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> BlobRef<'_, 'r> {
@@ -1872,7 +1833,7 @@ mod unit_tests {
     #[test]
     fn blob_handles_without_c() {
         // SAFETY: NULL is refused without being read.
-        assert!(unsafe { BlobRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { BlobRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.
         assert!(unsafe { BlobMut::from_ptr(ptr::null_mut()) }.is_none());
         let p = NonNull::<ffi::git_blob>::dangling().as_ptr();

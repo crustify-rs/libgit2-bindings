@@ -37,7 +37,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CRefSeam};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::oid::OidRef;
@@ -143,6 +143,14 @@ unsafe impl<'r> CCell for AnnotatedCommit<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for AnnotatedCommitRef<'a, 'r> {
+    type Cell = AnnotatedCommit<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for AnnotatedCommitMut<'a, 'r> {
+    type Cell = AnnotatedCommit<'r>;
+}
+
 // SAFETY: an owned annotated commit is its strings (libgit2's allocator) and a counted
 // reference to a commit (and the tree merge may cache), whose count libgit2 changes
 // atomically and whose other holders (the repository's object cache) never write the
@@ -154,66 +162,7 @@ unsafe impl Send for AnnotatedCommit<'_> {}
 // `&mut AnnotatedCommit`.
 unsafe impl Send for AnnotatedCommitMut<'_, '_> {}
 
-impl AnnotatedCommitRef<'_, '_> {
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live annotated commit, which no one frees or
-    /// writes during `'a`, looked up in a repository that outlives `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_annotated_commit) -> Option<Self> {
-        NonNull::new(ptr.cast_mut()).map(|p| {
-            // SAFETY: a non-null pointer the caller vouches for, per this function's
-            // contract; `AnnotatedCommit` is transparent over `git_annotated_commit`.
-            AnnotatedCommitRef(unsafe { CBorrowedPtr::new(p.cast()) })
-        })
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_annotated_commit {
-        self.0.as_non_null().as_ptr().cast()
-    }
-}
-
 impl<'r> AnnotatedCommitMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`AnnotatedCommitRef::from_ptr`], plus: nothing else reaches the commit while
-    /// the result lives.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_annotated_commit) -> Option<Self> {
-        // SAFETY: the caller upholds `AnnotatedCommitRef::from_ptr`'s contract and
-        // exclusivity.
-        unsafe { AnnotatedCommitRef::from_ptr(ptr) }.map(|r| AnnotatedCommitMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_annotated_commit {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> AnnotatedCommitRef<'_, 'r> {
@@ -528,7 +477,7 @@ mod unit_tests {
         assert_eq!(m.as_mut().as_ref().as_ptr(), p.cast_const());
         assert_eq!(format!("{m:?}"), "AnnotatedCommit { .. }");
         // SAFETY: NULL is refused before anything else.
-        assert!(unsafe { AnnotatedCommitRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { AnnotatedCommitRef::from_ptr(ptr::null_mut()) }.is_none());
     }
 
     /// A fresh bare repository of object id type `kind` holding one commit; removed on

@@ -1550,7 +1550,7 @@ impl IndexRef<'_> {
             let raw = unsafe { ffi::git_index_get_byindex(ptr, position) };
             // SAFETY: `raw` is that entry, with its path in its own allocation. Nothing
             // removes, replaces or writes entries until this function returns.
-            let Some(entry) = (unsafe { IndexEntryRef::from_ptr(raw) }) else {
+            let Some(entry) = (unsafe { IndexEntryRef::from_ptr(raw.cast_mut()) }) else {
                 continue;
             };
             let submodule = entry.mode() & 0o170_000 == ffi::GIT_FILEMODE_COMMIT;
@@ -2087,7 +2087,7 @@ impl IndexMut<'_> {
         let entry = unsafe { ffi::git_index_get_byindex(index, position) };
         // SAFETY: `entry` is NULL or an entry of the index, which nothing frees or rewrites while
         // `&self` is borrowed (see above).
-        unsafe { IndexEntryRef::from_ptr(entry) }
+        unsafe { IndexEntryRef::from_ptr(entry.cast_mut()) }
     }
 
     /// The entry at `path` and `stage`; `None` when the index has none. Compares paths as
@@ -2113,7 +2113,7 @@ impl IndexMut<'_> {
             // call, up in the path table, with a concrete stage (0..=3).
             let entry = unsafe { ffi::git_index_get_bypath(index, path.as_ptr(), stage.raw()) };
             // SAFETY: as in `entry`, for the result.
-            unsafe { IndexEntryRef::from_ptr(entry) }
+            unsafe { IndexEntryRef::from_ptr(entry.cast_mut()) }
         })
     }
 
@@ -2137,7 +2137,7 @@ impl IndexMut<'_> {
         }
         // SAFETY: each slot is NULL or one of the index's entries, path inline, which
         // nothing frees or rewrites while `&self` is borrowed, as in `entry`.
-        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot) });
+        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot.cast_mut()) });
         Conflict::from_sides(sides)
     }
 
@@ -2515,7 +2515,7 @@ impl Iterator for IndexIteratorMut<'_> {
         // SAFETY: an entry of the snapshot, path inline, which libgit2 frees no sooner
         // than the iterator; nothing runs between its return and the copy below, which
         // the borrow does not outlive.
-        let entry = unsafe { IndexEntryRef::from_ptr(entry) }?;
+        let entry = unsafe { IndexEntryRef::from_ptr(entry.cast_mut()) }?;
         Some(entry.to_entry_buf())
     }
 }
@@ -2605,24 +2605,15 @@ unsafe impl<'index> CCell for ConflictIterator<'index> {
         Self: 'a;
 }
 
-impl ConflictIteratorRef<'_, '_> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_index_conflict_iterator {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'index: 'a> CRefSeam<'a> for ConflictIteratorRef<'a, 'index> {
+    type Cell = ConflictIterator<'index>;
+}
+
+impl<'a, 'index: 'a> CMutSeam<'a> for ConflictIteratorMut<'a, 'index> {
+    type Cell = ConflictIterator<'index>;
 }
 
 impl<'index> ConflictIteratorMut<'_, 'index> {
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_index_conflict_iterator {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// A shared handle over the same object, borrowed from this one.
     #[must_use]
     pub fn as_ref(&self) -> ConflictIteratorRef<'_, 'index> {
@@ -2745,7 +2736,7 @@ impl<'index> Iterator for ConflictIteratorMut<'_, 'index> {
         }
         // SAFETY: each slot is NULL or one of the index's entries, path inline, which
         // nothing changes or frees for `'index`, the cursor's exclusive borrow of it.
-        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot) });
+        let sides = slots.map(|slot| unsafe { IndexEntryRef::from_ptr(slot.cast_mut()) });
         Conflict::from_sides(sides)
     }
 }
@@ -3096,6 +3087,14 @@ unsafe impl<'p> CCell for IndexEntry<'p> {
         Self: 'a;
 }
 
+impl<'a, 'p: 'a> CRefSeam<'a> for IndexEntryRef<'a, 'p> {
+    type Cell = IndexEntry<'p>;
+}
+
+impl<'a, 'p: 'a> CMutSeam<'a> for IndexEntryMut<'a, 'p> {
+    type Cell = IndexEntry<'p>;
+}
+
 // SAFETY: an entry value is integers, an id's bytes and a string pointer, a `&'p CStr`'s
 // (per the handles' invariant): a shared, immutable borrow of `CStr`, which is `Sync`, so
 // it may be read from any thread. Nothing in the struct has thread affinity or interior
@@ -3184,28 +3183,6 @@ impl fmt::Debug for IndexEntry<'_> {
 }
 
 impl<'a, 'p> IndexEntryRef<'a, 'p> {
-    /// Borrows the entry at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live, initialised entry that stays live, and that
-    /// nothing writes, for `'a`, whose `path` is non-NULL and addresses a NUL-terminated
-    /// string that stays live and unchanged for `'p`. For an entry an index lends, both
-    /// end before the index is next changed or released: the path lives in the entry's
-    /// own allocation.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_index_entry) -> Option<Self> {
-        let ptr = NonNull::new(ptr.cast_mut().cast::<IndexEntry<'p>>())?;
-        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
-        // liveness, the lifetimes and the absence of writers.
-        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
-    }
-
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_index_entry *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_index_entry {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// When the file's metadata last changed, truncated to 32-bit seconds; in place, for
     /// as long as the entry is borrowed.
     ///
@@ -3464,11 +3441,6 @@ impl fmt::Debug for IndexEntryRef<'_, '_> {
 }
 
 impl<'p> IndexEntryMut<'_, 'p> {
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_index_entry {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> IndexEntryRef<'_, 'p> {
@@ -3791,7 +3763,8 @@ impl IndexEntryBuf {
     pub fn as_ref(&self) -> IndexEntryRef<'_, '_> {
         // SAFETY: `entry` is initialised and lives, unchanged, while `self` is borrowed,
         // and its path is the string `self` owns, NUL-terminated and likewise unchanged.
-        unsafe { IndexEntryRef::from_ptr(&raw const self.entry) }.expect("a field is never NULL")
+        unsafe { IndexEntryRef::from_ptr((&raw const self.entry).cast_mut()) }
+            .expect("a field is never NULL")
     }
 
     /// The entry's path, this value's own copy; as `self.as_ref().path()`.
@@ -5977,7 +5950,7 @@ mod unit_tests {
     #[test]
     fn entry_borrowed_from_a_raw_pointer() {
         // SAFETY: NULL is accepted by the contract and yields no handle.
-        assert!(unsafe { IndexEntryRef::<'_, '_>::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { IndexEntryRef::<'_, '_>::from_ptr(ptr::null_mut()) }.is_none());
         let path = CString::new("dir/lent").unwrap();
         let mut raw = ffi::git_index_entry {
             ctime: ffi::git_index_time {
@@ -6000,7 +5973,7 @@ mod unit_tests {
         let mut copy = {
             // SAFETY: `raw` is initialised, outlives the handle and is not written while
             // it lives; its path is a live NUL-terminated string that outlives `copy`.
-            let entry = unsafe { IndexEntryRef::from_ptr(&raw const raw) }.unwrap();
+            let entry = unsafe { IndexEntryRef::from_ptr((&raw const raw).cast_mut()) }.unwrap();
             assert_eq!(entry.as_ptr(), &raw const raw);
             assert_eq!(
                 (entry.ctime().seconds(), entry.ctime().nanoseconds()),
@@ -6105,7 +6078,7 @@ mod unit_tests {
             };
             // SAFETY: `raw` is initialised, outlives the handle and is not written while
             // it lives; its path is a live NUL-terminated string that outlives `copy`.
-            let entry = unsafe { IndexEntryRef::from_ptr(&raw const raw) }.unwrap();
+            let entry = unsafe { IndexEntryRef::from_ptr((&raw const raw).cast_mut()) }.unwrap();
             assert_eq!(entry.stage(), stage);
             let mut copy = entry.to_index_entry();
             copy.as_mut().set_stage(Stage::Ancestor).unwrap();
@@ -6573,7 +6546,9 @@ mod unit_tests {
                         let index_get_byindex =
                             unsafe { ffi::git_index_get_byindex(index.as_mut_ptr(), 0) };
                         // SAFETY: as above.
-                        let entry = unsafe { IndexEntryRef::from_ptr(index_get_byindex) }.unwrap();
+                        let entry =
+                            unsafe { IndexEntryRef::from_ptr(index_get_byindex.cast_mut()) }
+                                .unwrap();
                         assert_eq!(entry.path(), c"file");
                         assert_eq!(
                             (entry.dev(), entry.ino()),
@@ -6611,7 +6586,8 @@ mod unit_tests {
                     let index_get_byindex =
                         unsafe { ffi::git_index_get_byindex(index.as_c_ptr(), 0) };
                     // SAFETY: as above.
-                    let entry = unsafe { IndexEntryRef::from_ptr(index_get_byindex) }.unwrap();
+                    let entry =
+                        unsafe { IndexEntryRef::from_ptr(index_get_byindex.cast_mut()) }.unwrap();
                     assert_eq!(entry.path(), c"legacy");
                     assert_eq!((entry.mode(), entry.filemode()), (0o100_664, None));
                     assert_eq!(entry.id().id()[..20], [0x11; 20]);

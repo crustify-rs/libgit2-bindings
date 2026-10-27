@@ -803,58 +803,15 @@ unsafe impl<'r> CCell for FilterList<'r> {
         Self: 'a;
 }
 
-impl<'r> FilterListRef<'_, 'r> {
-    /// Borrows the list at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live filter list, built for a repository that
-    /// outlives `'r`, which stays live for `'a` and is not written through another
-    /// handle meanwhile.
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_filter_list) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_filter_list` that outlives `'a` and is not written meanwhile.
-        unsafe { <FilterList<'r> as CCell>::ref_from_ptr(ptr) }
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for FilterListRef<'a, 'r> {
+    type Cell = FilterList<'r>;
+}
 
-    /// Read-only pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_filter_list {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CMutSeam<'a> for FilterListMut<'a, 'r> {
+    type Cell = FilterList<'r>;
 }
 
 impl<'r> FilterListMut<'_, 'r> {
-    /// Borrows the list at `ptr` exclusively; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// As [`FilterListRef::from_ptr`], plus: nothing else reaches the list while the
-    /// result lives.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_filter_list) -> Option<Self> {
-        // SAFETY: the caller upholds `FilterListRef::from_ptr`'s contract and
-        // exclusivity.
-        unsafe { FilterListRef::from_ptr(ptr) }.map(|r| Self(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_filter_list {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> FilterListRef<'_, 'r> {

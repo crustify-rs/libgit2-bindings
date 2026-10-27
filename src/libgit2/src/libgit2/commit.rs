@@ -329,25 +329,15 @@ unsafe impl<'r> CCell for Commit<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for CommitRef<'a, 'r> {
+    type Cell = Commit<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for CommitMut<'a, 'r> {
+    type Cell = Commit<'r>;
+}
+
 impl<'a, 'r> CommitRef<'a, 'r> {
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live commit looked up in a repository that
-    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
-    /// least that long).
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_commit) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_commit` that outlives `'a` and is not written meanwhile.
-        unsafe { <Commit<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// Another counted reference to the commit, as `git_commit_dup` takes one: the
     /// same commit, now also kept alive by the result, which may outlive this borrow
     /// but not the repository.
@@ -391,7 +381,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
         // SAFETY: a `git_commit` starts with its `git_object`, so the handle's pointer
         // addresses a live object of the same repository for `'a`, as this handle's
         // does; nothing is written through it while it is shared.
-        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast()) };
+        let object = unsafe { ObjectRef::from_ptr(self.as_ptr().cast_mut().cast()) };
         object.expect("a handle is never NULL")
     }
 
@@ -405,7 +395,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
         // SAFETY: an object of type `GIT_OBJECT_COMMIT` is a `git_commit` (libgit2
         // allocates each object by its type), live for `'a` and of a repository that
         // outlives `'r`, as `object` vouches.
-        unsafe { Self::from_ptr(object.as_ptr().cast()) }
+        unsafe { Self::from_ptr(object.as_ptr().cast_mut().cast()) }
     }
 
     /// The commit's `n`th parent, counting from 0 in the order the commit lists them
@@ -763,36 +753,6 @@ impl<'a, 'r> CommitRef<'a, 'r> {
 }
 
 impl<'r> CommitMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`CommitRef::from_ptr`], plus: nothing else reaches the commit while the
-    /// result lives, its repository's cache included.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit) -> Option<Self> {
-        // SAFETY: the caller upholds `CommitRef::from_ptr`'s contract and exclusivity.
-        unsafe { CommitRef::from_ptr(ptr) }.map(|r| CommitMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> CommitRef<'_, 'r> {
@@ -1081,6 +1041,14 @@ unsafe impl<'r> CCell for CommitArray<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for CommitArrayRef<'a, 'r> {
+    type Cell = CommitArray<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for CommitArrayMut<'a, 'r> {
+    type Cell = CommitArray<'r>;
+}
+
 /// Releases an array's commits through `git_commitarray_dispose`, which hands each to
 /// `git_commit_free`, the buffer to `git__free`, and zeroes the struct, leaving the
 /// struct itself, Rust's storage, alone.
@@ -1203,32 +1171,6 @@ impl<'r> CommitArray<'r> {
 }
 
 impl<'a, 'r> CommitArrayRef<'a, 'r> {
-    /// Borrows the array at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must address a live `git_commitarray` (or be NULL) that outlives `'a`,
-    /// that nothing writes while the handle lives, and that keeps the handles'
-    /// invariant (see the [module docs](self#commit-arrays)) for `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commitarray) -> Option<Self> {
-        let ptr = NonNull::new(ptr.cast::<CommitArray<'r>>())?;
-        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
-        // liveness, the invariant and the absence of writers.
-        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
-    }
-
-    /// Read-only pointer to the C struct.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_commitarray {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The number of commits; 0 without a buffer, whatever `count` says, as
     /// [`get`](Self::get) reads it.
     ///
@@ -1322,32 +1264,6 @@ impl fmt::Debug for CommitArrayMut<'_, '_> {
 }
 
 impl<'r> CommitArrayMut<'_, 'r> {
-    /// Borrows the array at `ptr` exclusively; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// As [`CommitArrayRef::from_ptr`], plus: nothing else reads or writes the array
-    /// while the result lives, and whatever the setters store may stay there for as
-    /// long as the array's owner expects commits of `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commitarray) -> Option<Self> {
-        // SAFETY: the caller upholds `CommitArrayRef::from_ptr`'s contract, and
-        // excludes every other access for `'a`.
-        let shared = unsafe { CommitArrayRef::from_ptr(ptr) }?;
-        Some(Self(shared, PhantomData))
-    }
-
-    /// Writable pointer to the C struct, for the setters and for libgit2 to fill.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commitarray {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> CommitArrayRef<'_, 'r> {
@@ -2984,7 +2900,7 @@ unsafe extern "C" fn create_with_closure(
     let committer = unsafe { SignatureRef::from_ptr(committer.cast_mut()) };
     // SAFETY: per this function's contract, a non-NULL tree is live for the call, of a
     // repository live and used on this thread only meanwhile.
-    let tree = unsafe { TreeRef::from_ptr(tree) };
+    let tree = unsafe { TreeRef::from_ptr(tree.cast_mut()) };
     let (Some(author), Some(committer), Some(tree), false, false) =
         (author, committer, tree, message.is_null(), out.is_null())
     else {
@@ -3007,7 +2923,7 @@ unsafe extern "C" fn create_with_closure(
         .iter()
         // SAFETY: per this function's contract, each non-NULL pointer is a live commit
         // for the call; the handles live no longer.
-        .map(|&p| unsafe { CommitRef::from_ptr(p) })
+        .map(|&p| unsafe { CommitRef::from_ptr(p.cast_mut()) })
         .collect();
     let Some(parents) = parents else {
         return ErrorCode::User.raw();
@@ -3144,6 +3060,14 @@ unsafe impl<'h> CCell for Header<'h> {
         Self: 'a;
 }
 
+impl<'a, 'h: 'a> CRefSeam<'a> for HeaderRef<'a, 'h> {
+    type Cell = Header<'h>;
+}
+
+impl<'a, 'h: 'a> CMutSeam<'a> for HeaderMut<'a, 'h> {
+    type Cell = Header<'h>;
+}
+
 // SAFETY: a header is two string pointers that only the setters write, each a
 // `&'h CStr`'s pointer: shared, immutable borrows of `CStr`, which is `Sync`, so they
 // may be read from any thread. Nothing in the struct has thread affinity or interior
@@ -3213,12 +3137,6 @@ impl fmt::Debug for Header<'_> {
 }
 
 impl<'h> HeaderRef<'_, 'h> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_commit_header *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_header {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The field name, borrowed for `'h`, as it was set.
     ///
     /// Field: `git_commit_header.field`
@@ -3268,11 +3186,6 @@ impl fmt::Debug for HeaderRef<'_, '_> {
 }
 
 impl<'h> HeaderMut<'_, 'h> {
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_header {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> HeaderRef<'_, 'h> {
@@ -3434,6 +3347,14 @@ unsafe impl<'o> CCell for CreateExtOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for CreateExtOptionsRef<'a, 'o> {
+    type Cell = CreateExtOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for CreateExtOptionsMut<'a, 'o> {
+    type Cell = CreateExtOptions<'o>;
+}
+
 impl<'o> CreateExtOptions<'o> {
     /// libgit2's default options, as `GIT_COMMIT_CREATE_EXT_OPTIONS_INIT` spells them:
     /// version 1, every other field NULL, zero or `None`.
@@ -3499,35 +3420,6 @@ impl fmt::Debug for CreateExtOptions<'_> {
 }
 
 impl<'o> CreateExtOptionsRef<'_, 'o> {
-    /// Borrows the options at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must address live, initialised options (or be NULL) that outlive `'a` and
-    /// that nothing writes while the handle lives, whose strings are NULL or
-    /// NUL-terminated and outlive `'o`, and whose `extra_headers` is NULL or addresses
-    /// `extra_headers_len` headers whose strings are non-NULL and NUL-terminated, all
-    /// outliving `'o`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit_create_ext_options) -> Option<Self> {
-        let ptr = NonNull::new(ptr.cast::<CreateExtOptions<'o>>())?;
-        // SAFETY: layout-preserving cast per `#[repr(transparent)]`; the caller upholds
-        // liveness, the lifetimes and the absence of writers.
-        Some(Self(unsafe { CBorrowedPtr::new(ptr) }))
-    }
-
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_commit_create_ext_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_create_ext_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure's version, `GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION`; fixed by
     /// [`CreateExtOptions::new`].
     ///
@@ -3661,34 +3553,6 @@ impl fmt::Debug for DebugHeaders<'_> {
 }
 
 impl<'o> CreateExtOptionsMut<'_, 'o> {
-    /// Borrows the options at `ptr` exclusively; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// As [`CreateExtOptionsRef::from_ptr`], plus: nothing else reads or writes the
-    /// options while the result lives, whatever the setters store may stay there for
-    /// as long as the options' owner expects `'o` borrows to, and a non-NULL `payload`
-    /// addresses a [`SignatureCallback`] the options borrow exclusively for `'o`, as
-    /// [`set_signer`](Self::set_signer) stores one.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_commit_create_ext_options) -> Option<Self> {
-        // SAFETY: the caller upholds `CreateExtOptionsRef::from_ptr`'s contract, and
-        // excludes every other access for `'a`.
-        let shared = unsafe { CreateExtOptionsRef::from_ptr(ptr) }?;
-        Some(Self(shared, PhantomData))
-    }
-
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_create_ext_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> CreateExtOptionsRef<'_, 'o> {
@@ -3955,6 +3819,14 @@ unsafe impl<'o> CCell for CreateOptions<'o> {
         Self: 'a;
 }
 
+impl<'a, 'o: 'a> CRefSeam<'a> for CreateOptionsRef<'a, 'o> {
+    type Cell = CreateOptions<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for CreateOptionsMut<'a, 'o> {
+    type Cell = CreateOptions<'o>;
+}
+
 impl<'o> CreateOptions<'o> {
     /// libgit2's default options, as `GIT_COMMIT_CREATE_OPTIONS_INIT` spells them:
     /// version 1, empty commits refused, every other field NULL, zero or `None`.
@@ -4023,12 +3895,6 @@ impl fmt::Debug for CreateOptions<'_> {
 }
 
 impl<'o> CreateOptionsRef<'_, 'o> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_commit_create_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_commit_create_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure's version, `GIT_COMMIT_CREATE_OPTIONS_VERSION`; fixed by
     /// [`CreateOptions::new`].
     ///
@@ -4194,11 +4060,6 @@ impl fmt::Debug for CreateOptionsRef<'_, '_> {
 }
 
 impl<'o> CreateOptionsMut<'_, 'o> {
-    /// Writable pointer to the C struct, for the setters.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_commit_create_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> CreateOptionsRef<'_, 'o> {
@@ -4945,7 +4806,7 @@ mod unit_tests {
     #[test]
     fn commit_handles_without_c() {
         // SAFETY: NULL is refused without being read.
-        assert!(unsafe { CommitRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { CommitRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.
         assert!(unsafe { CommitMut::from_ptr(ptr::null_mut()) }.is_none());
         let p = NonNull::<ffi::git_commit>::dangling().as_ptr();

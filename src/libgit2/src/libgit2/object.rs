@@ -280,25 +280,15 @@ unsafe impl<'r> CCell for Object<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for ObjectRef<'a, 'r> {
+    type Cell = Object<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for ObjectMut<'a, 'r> {
+    type Cell = Object<'r>;
+}
+
 impl<'a, 'r> ObjectRef<'a, 'r> {
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live object looked up in a repository that
-    /// outlives `'r`, which stays live during `'a` (a reference to it is held for at
-    /// least that long) and which no one writes during `'a`.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_object) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_object` that outlives `'a` and is not written meanwhile.
-        unsafe { <Object<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
-
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_object {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// Another counted reference to the object, as `git_object_dup` takes one: the
     /// same object, now also kept alive by the result, which may outlive this borrow
     /// but not the repository.
@@ -542,36 +532,6 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
 }
 
 impl<'r> ObjectMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`ObjectRef::from_ptr`], plus: nothing else reaches the object while the
-    /// result lives, its repository's cache included.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_object) -> Option<Self> {
-        // SAFETY: the caller upholds `ObjectRef::from_ptr`'s contract and exclusivity.
-        unsafe { ObjectRef::from_ptr(ptr) }.map(|r| ObjectMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_object {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> ObjectRef<'_, 'r> {
@@ -949,6 +909,14 @@ unsafe impl<'f> CCell for ObjectIdOptions<'f> {
         Self: 'a;
 }
 
+impl<'a, 'f: 'a> CRefSeam<'a> for ObjectIdOptionsRef<'a, 'f> {
+    type Cell = ObjectIdOptions<'f>;
+}
+
+impl<'a, 'f: 'a> CMutSeam<'a> for ObjectIdOptionsMut<'a, 'f> {
+    type Cell = ObjectIdOptions<'f>;
+}
+
 impl<'f> ObjectIdOptions<'f> {
     /// The structure version this crate's header declares
     /// (`GIT_OBJECT_ID_OPTIONS_VERSION`), the newest `git_object_id_options_init`
@@ -1013,12 +981,6 @@ impl fmt::Debug for ObjectIdOptions<'_> {
 }
 
 impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
-    /// Read-only pointer to the C struct, for FFI calls taking
-    /// `const git_object_id_options *`.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_object_id_options {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// The structure's version, `GIT_OBJECT_ID_OPTIONS_VERSION`; fixed by
     /// [`ObjectIdOptions::new`], and read by no routine taking the options.
     ///
@@ -1105,12 +1067,6 @@ impl fmt::Debug for ObjectIdOptionsRef<'_, '_> {
 }
 
 impl<'f> ObjectIdOptionsMut<'_, 'f> {
-    /// Writable pointer to the C struct, for the setters and for FFI calls that apply
-    /// the options' filter list.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_object_id_options {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> ObjectIdOptionsRef<'_, 'f> {
@@ -1504,7 +1460,7 @@ mod unit_tests {
     #[test]
     fn handles_without_c() {
         // SAFETY: NULL is refused without being read.
-        assert!(unsafe { ObjectRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { ObjectRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.
         assert!(unsafe { ObjectMut::from_ptr(ptr::null_mut()) }.is_none());
         let p = NonNull::<ffi::git_object>::dangling().as_ptr();

@@ -10,7 +10,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CRefSeam};
+use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CRefSeam};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::config::{ConfigMut, ConfigRef};
@@ -83,31 +83,15 @@ unsafe impl<'r> CCell for Transaction<'r> {
         Self: 'a;
 }
 
-impl TransactionRef<'_, '_> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_transaction {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for TransactionRef<'a, 'r> {
+    type Cell = Transaction<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for TransactionMut<'a, 'r> {
+    type Cell = Transaction<'r>;
 }
 
 impl<'r> TransactionMut<'_, 'r> {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_transaction {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// A shared handle over the same object, borrowed from this one.
     #[must_use]
     pub fn as_ref(&self) -> TransactionRef<'_, 'r> {

@@ -341,6 +341,14 @@ unsafe impl<'diff> CCell for MatchList<'diff> {
         Self: 'a;
 }
 
+impl<'a, 'diff: 'a> CRefSeam<'a> for MatchListRef<'a, 'diff> {
+    type Cell = MatchList<'diff>;
+}
+
+impl<'a, 'diff: 'a> CMutSeam<'a> for MatchListMut<'a, 'diff> {
+    type Cell = MatchList<'diff>;
+}
+
 /// Releases the list, its arrays, string pool and retained pathspec reference.
 /// Borrowed diff deltas are never freed. No C clone operation exists.
 ///
@@ -362,10 +370,6 @@ unsafe impl CDrop<MatchList<'_>> for MatchListFree {
 pub type MatchListBox<'diff> = CBox<MatchList<'diff>, MatchListFree>;
 
 impl<'a> MatchListRef<'a, '_> {
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_pathspec_match_list {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
     /// Number of filenames or diff deltas; zero with `FAILURES_ONLY`.
     ///
     /// Wraps: `git_pathspec_match_list_entrycount`

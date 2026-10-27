@@ -218,39 +218,15 @@ unsafe impl<'r> CCell for Config<'r> {
         Self: 'a;
 }
 
-impl<'r> ConfigRef<'_, 'r> {
-    /// Borrows the config at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live config that stays live for `'a`, loaded
-    /// for no repository or for one that outlives `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_config) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_config` that outlives `'a` and is not written meanwhile.
-        unsafe { <Config<'r> as CCell>::ref_from_ptr(ptr) }
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for ConfigRef<'a, 'r> {
+    type Cell = Config<'r>;
+}
 
-    /// Pointer to the C object, for the routines that take a `git_config *` and
-    /// only read it.
-    pub(crate) fn as_ptr(&self) -> *mut ffi::git_config {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CMutSeam<'a> for ConfigMut<'a, 'r> {
+    type Cell = Config<'r>;
 }
 
 impl<'r> ConfigMut<'_, 'r> {
-    /// Writable pointer to the C object.
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> ConfigRef<'_, 'r> {
@@ -280,7 +256,7 @@ impl ConfigRef<'_, '_> {
         // SAFETY: this handle keeps the source and its repository live. `out` is
         // a writable pointer slot. C copies entries synchronously, retaining no
         // Rust borrow, and frees partial construction on failure.
-        let rc = unsafe { ffi::git_config_snapshot(&raw mut out, self.as_ptr()) };
+        let rc = unsafe { ffi::git_config_snapshot(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -597,7 +573,7 @@ impl<'a, 'r: 'a> ConfigRef<'a, 'r> {
         let mut out = ptr::null_mut();
         // SAFETY: live parent borrowed for 'a; C returns a fresh config holding
         // one retained backend. The returned shared owner keeps the parent borrowed.
-        let rc = unsafe { ffi::git_config_open_global(&raw mut out, self.as_ptr()) };
+        let rc = unsafe { ffi::git_config_open_global(&raw mut out, self.as_ptr().cast_mut()) };
         if rc < 0 {
             return Err(ConfigError::from_libgit2(rc));
         }
@@ -2732,6 +2708,14 @@ unsafe impl<'s> CCell for ConfigMap<'s> {
         Self: 'a;
 }
 
+impl<'a, 's: 'a> CRefSeam<'a> for ConfigMapRef<'a, 's> {
+    type Cell = ConfigMap<'s>;
+}
+
+impl<'a, 's: 'a> CMutSeam<'a> for ConfigMapMut<'a, 's> {
+    type Cell = ConfigMap<'s>;
+}
+
 // SAFETY: the record is two scalars and a pointer that only the setters write,
 // NULL or a `&'s CStr`'s: a shared, immutable borrow of `CStr`, which is `Sync`.
 // Nothing has thread affinity or interior mutability, and nothing is released on
@@ -2814,28 +2798,7 @@ impl fmt::Debug for ConfigMapMut<'_, '_> {
     }
 }
 
-impl<'a, 's> ConfigMapRef<'a, 's> {
-    /// # Safety
-    /// NULL or a live aligned initialized record, unchanged for `'a`, with
-    /// a known mode and immutable NUL string valid for `'s` when non-NULL;
-    /// String mode requires non-NULL. `'s` must outlive `'a`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(raw: *const ffi::git_configmap) -> Option<Self> {
-        let p = NonNull::new(raw.cast_mut().cast::<ConfigMap<'s>>())?;
-        // SAFETY: caller proves layout, validity, liveness and string lifetimes.
-        Some(Self(unsafe { CBorrowedPtr::new(p) }))
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_configmap {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
+impl<'a> ConfigMapRef<'a, '_> {
     /// Field: `git_configmap.type`
     ///
     /// # Panics
@@ -2904,10 +2867,6 @@ impl<'s> ConfigMapMut<'_, 's> {
     /// An exclusive handle over the same object, reborrowed from this one.
     pub fn as_mut(&mut self) -> ConfigMapMut<'_, 's> {
         ConfigMapMut(self.0, PhantomData)
-    }
-
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_configmap {
-        self.0.0.as_non_null().as_ptr().cast()
     }
 
     /// Replaces mode and string together, preserving String's non-NULL invariant.
@@ -3344,6 +3303,14 @@ unsafe impl<'c> CCell for Iterator<'c> {
         Self: 'a;
 }
 
+impl<'a, 'c: 'a> CRefSeam<'a> for IteratorRef<'a, 'c> {
+    type Cell = Iterator<'c>;
+}
+
+impl<'a, 'c: 'a> CMutSeam<'a> for IteratorMut<'a, 'c> {
+    type Cell = Iterator<'c>;
+}
+
 /// Stateless release dispatch, recovered from the allocation being released.
 ///
 /// Wraps: `git_config_iterator_free`
@@ -3400,18 +3367,6 @@ impl IteratorFree {
 }
 
 impl<'a> IteratorRef<'a, '_> {
-    pub(crate) fn as_ptr(&self) -> *mut ffi::git_config_iterator {
-        self.0.as_non_null().as_ptr().cast()
-    }
-
-    /// # Safety
-    /// `p` is NULL or a complete initialized iterator with matching callbacks,
-    /// live and unmodified for `'a`; its config/backend dependencies outlive `'c`.
-    pub(crate) unsafe fn from_ptr(p: *mut ffi::git_config_iterator) -> Option<Self> {
-        // SAFETY: the contract supplies initialized live storage for 'a.
-        NonNull::new(p.cast()).map(|p| Self(unsafe { CBorrowedPtr::new(p) }))
-    }
-
     /// User/backend flags; libgit2's built-in iterators leave these zero.
     ///
     /// Field: `git_config_iterator.flags`
@@ -3459,10 +3414,6 @@ impl<'a> IteratorRef<'a, '_> {
 }
 
 impl<'c> IteratorMut<'_, 'c> {
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_config_iterator {
-        self.0.as_ptr()
-    }
-
     /// A shared handle over the same object, borrowed from this one.
     #[must_use]
     pub fn as_ref(&self) -> IteratorRef<'_, 'c> {
@@ -5484,14 +5435,14 @@ pub(crate) mod unit_tests {
             assert_eq!(m.as_ref().rule(), rule);
             // SAFETY: the exclusive handle is frozen during this shared reborrow;
             // initialized record and its string remain live and immutable.
-            let shared = unsafe { ConfigMapRef::from_ptr(m.as_ref().as_ptr()) }.unwrap();
+            let shared = unsafe { ConfigMapRef::from_ptr(m.as_ref().as_ptr().cast_mut()) }.unwrap();
             assert_eq!(shared.rule(), rule);
             m.set_str_match(&text);
             assert_eq!(m.as_ref().str_match(), Some(text.as_c_str()));
         }
         assert_eq!(cloned.as_ref().str_match(), Some(text.as_c_str()));
         // SAFETY: NULL is refused without forming a handle.
-        assert!(unsafe { ConfigMapRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { ConfigMapRef::from_ptr(ptr::null_mut()) }.is_none());
     }
 
     #[test]
@@ -6795,13 +6746,13 @@ pub(crate) mod unit_tests {
             let options = fixture();
             let ptr = options.as_ref().as_ptr();
             // SAFETY: shared initialized fixture, both strings NULL, unchanged here.
-            let borrowed = unsafe { BackendMemoryOptionsRef::from_ptr(ptr) }.unwrap();
+            let borrowed = unsafe { BackendMemoryOptionsRef::from_ptr(ptr.cast_mut()) }.unwrap();
             assert_eq!(
                 borrowed.version(),
                 ffi::GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION
             );
             // SAFETY: NULL is rejected before a handle is created.
-            assert!(unsafe { BackendMemoryOptionsRef::from_ptr(ptr::null()) }.is_none());
+            assert!(unsafe { BackendMemoryOptionsRef::from_ptr(ptr::null_mut()) }.is_none());
         }
 
         #[test]

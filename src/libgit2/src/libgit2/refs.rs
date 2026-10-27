@@ -42,7 +42,9 @@ use core::hash::Hash;
 use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 
-use ffibox::{CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CRefSeam, define_ctype, impl_cdrop};
+use ffibox::{
+    CBorrowedPtr, CBox, CCell, CDrop, CDupClone, CMutSeam, CRefSeam, define_ctype, impl_cdrop,
+};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::oid::OidRef;
@@ -199,58 +201,15 @@ unsafe impl<'r> CCell for Reference<'r> {
         Self: 'a;
 }
 
-impl<'r> ReferenceRef<'_, 'r> {
-    /// Borrows a raw pointer; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live reference attached to a reference
-    /// database, which no one frees or writes during `'a`, and whose repository
-    /// outlives `'r`.
-    pub(crate) unsafe fn from_ptr(ptr: *const ffi::git_reference) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_reference` that outlives `'a` and is not written meanwhile.
-        unsafe { <Reference<'r> as CCell>::ref_from_ptr(ptr.cast_mut()) }
-    }
+impl<'a, 'r: 'a> CRefSeam<'a> for ReferenceRef<'a, 'r> {
+    type Cell = Reference<'r>;
+}
 
-    /// Read-only pointer to the C object.
-    pub(crate) fn as_ptr(&self) -> *const ffi::git_reference {
-        self.0.as_non_null().as_ptr().cast()
-    }
+impl<'a, 'r: 'a> CMutSeam<'a> for ReferenceMut<'a, 'r> {
+    type Cell = Reference<'r>;
 }
 
 impl<'r> ReferenceMut<'_, 'r> {
-    /// Borrows a raw pointer exclusively; `None` if null.
-    ///
-    /// # Safety
-    ///
-    /// As [`ReferenceRef::from_ptr`], plus: nothing else reaches the reference while
-    /// the result lives.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_reference) -> Option<Self> {
-        // SAFETY: the caller upholds `ReferenceRef::from_ptr`'s contract and
-        // exclusivity.
-        unsafe { ReferenceRef::from_ptr(ptr) }.map(|r| ReferenceMut(r, PhantomData))
-    }
-
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_reference {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> ReferenceRef<'_, 'r> {
@@ -653,7 +612,7 @@ mod unit_tests {
     #[test]
     fn null_pointers_borrow_nothing() {
         // SAFETY: NULL, which `from_ptr` accepts.
-        assert!(unsafe { ReferenceRef::from_ptr(ptr::null()) }.is_none());
+        assert!(unsafe { ReferenceRef::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.
         assert!(unsafe { ReferenceMut::from_ptr(ptr::null_mut()) }.is_none());
         // SAFETY: as above.

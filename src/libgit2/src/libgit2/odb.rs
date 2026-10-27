@@ -94,8 +94,9 @@ use core::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
 use core::ptr::{self, NonNull};
 
 use ffibox::{
-    CAlloc, CAllocZeroed, CArc, CBorrowedPtr, CBox, CCell, CDrop, CNew, CPlainElem, CStrBox, CVec,
-    CZeroable, impl_cdrop_str, impl_cdupclone_str, impl_clenclone, impl_clendrop,
+    CAlloc, CAllocZeroed, CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CNew, CPlainElem,
+    CRefSeam, CStrBox, CVec, CZeroable, impl_cdrop_str, impl_cdupclone_str, impl_clenclone,
+    impl_clendrop,
 };
 
 use crate::ffi;
@@ -174,6 +175,14 @@ unsafe impl<'r> CCell for Odb<'r> {
         Self: 'a;
 }
 
+impl<'a, 'r: 'a> CRefSeam<'a> for OdbRef<'a, 'r> {
+    type Cell = Odb<'r>;
+}
+
+impl<'a, 'r: 'a> CMutSeam<'a> for OdbMut<'a, 'r> {
+    type Cell = Odb<'r>;
+}
+
 // SAFETY: an odb has no thread affinity: libgit2 frees it, its backends and its mutex
 // from whichever thread drops the last reference, and its reference count and owner
 // are atomics. Every routine that changes it takes its mutex (backends, commit-graph)
@@ -200,46 +209,7 @@ unsafe impl Send for OdbMut<'_, '_> {}
 // SAFETY: `&OdbMut` only reaches the shared handle, and `Odb` is `Sync`.
 unsafe impl Sync for OdbMut<'_, '_> {}
 
-impl<'r> OdbRef<'_, 'r> {
-    /// Borrows the odb at `ptr`; `None` if it is NULL.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must be NULL or address a live odb that stays live for `'a`, owned by no
-    /// repository or by one that outlives `'r`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) unsafe fn from_ptr(ptr: *mut ffi::git_odb) -> Option<Self> {
-        // SAFETY: this function's contract is `CCell::ref_from_ptr`'s: `ptr` is NULL or a
-        // live `git_odb` that outlives `'a` and is not written meanwhile.
-        unsafe { <Odb<'r> as CCell>::ref_from_ptr(ptr) }
-    }
-
-    /// Pointer to the C object, for the routines that take a `git_odb *` and lock it
-    /// themselves.
-    pub(crate) fn as_ptr(&self) -> *mut ffi::git_odb {
-        self.0.as_non_null().as_ptr().cast()
-    }
-}
-
 impl<'r> OdbMut<'_, 'r> {
-    /// Writable pointer to the C object.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "only the unit tests reach it until a consumer needs it"
-        )
-    )]
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::git_odb {
-        self.0.0.as_non_null().as_ptr().cast()
-    }
-
     /// Reborrows shared.
     #[must_use]
     pub fn as_ref(&self) -> OdbRef<'_, 'r> {
