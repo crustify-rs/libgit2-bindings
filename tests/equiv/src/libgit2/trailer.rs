@@ -34,6 +34,7 @@
 use std::ffi::{CStr, CString, c_char};
 use std::mem::MaybeUninit;
 
+use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::trailer::{MessageTrailer, MessageTrailerArray};
 

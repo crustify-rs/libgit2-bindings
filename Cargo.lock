@@ -102,6 +102,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "glibc-bindings"
+version = "0.1.0"
+dependencies = [
+ "ffibox",
+ "libc-sys",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -146,11 +154,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
+name = "libc-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "libgit2"
 version = "0.1.0"
 dependencies = [
  "ffibox",
- "libc",
+ "glibc-bindings",
  "libgit2-sys",
  "pcre2-sys",
  "trybuild",

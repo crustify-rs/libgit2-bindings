@@ -25,6 +25,8 @@ use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::process::Command;
 use std::ptr;
 
+use glibc_bindings::libc::csu::errno_loc::{errno, set_errno};
+use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::util::errors::{
     ErrorClass, ErrorCode, UnnamedErrorClass, UnnamedErrorCode, clear, last, set_str,
@@ -404,17 +406,6 @@ struct Seen {
     class: c_int,
     message: Vec<u8>,
     errno: c_int,
-}
-
-fn set_errno(value: c_int) {
-    // SAFETY: the calling thread's `errno`, valid for writes.
-    let value2 = unsafe { libc::__errno_location() };
-    // SAFETY: as above.
-    unsafe { value2.write(value) }
-}
-
-fn errno() -> c_int {
-    std::io::Error::last_os_error().raw_os_error().unwrap()
 }
 
 /// `git_error_last()`'s class and message, copied out.

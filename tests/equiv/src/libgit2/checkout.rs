@@ -21,6 +21,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::{fs, ptr};
 
+use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::checkout::{CheckoutOptions, CheckoutOptionsRef};
 use libgit2::libgit2::src::libgit2::index::IndexArc;

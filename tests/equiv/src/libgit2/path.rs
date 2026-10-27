@@ -124,6 +124,7 @@ mod filesystem {
 
     use std::ffi::{CStr, CString, c_int};
 
+    use glibc_bindings::libc::csu::errno_loc::set_errno;
     use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::path::{Filesystem, GitFile, UnnamedFilesystem};
 
@@ -144,10 +145,7 @@ mod filesystem {
     ) -> Result<c_int, (c_int, String)> {
         let name = CString::new(name).unwrap();
         let len = name.as_bytes().len();
-        // SAFETY: the calling thread's `errno`, valid for writes.
-        let value2 = unsafe { libc::__errno_location() };
-        // SAFETY: as above.
-        unsafe { value2.write(0) };
+        set_errno(0);
         // SAFETY: `name` is NUL-terminated and `len` long, read for the call only (the
         // NTFS check reads past `len` up to the NUL, which the `CString` supplies).
         let rc = unsafe { ffi::git_path_is_gitfile(name.as_ptr(), len, gitfile.raw(), fs) };

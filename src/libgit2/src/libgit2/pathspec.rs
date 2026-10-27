@@ -779,6 +779,8 @@ mod unit_tests {
         use std::sync::atomic::AtomicIsize;
         use std::sync::atomic::Ordering::SeqCst;
 
+        use glibc_bindings::libc::ffi as libc;
+
         use super::*;
         use crate::libgit2::src::util::alloc::{Alloc, Allocator};
 

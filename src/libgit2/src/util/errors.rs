@@ -53,6 +53,7 @@ use std::io;
 use std::sync::OnceLock;
 
 use ffibox::{CRefSeam, define_ctype};
+use glibc_bindings::libc::csu::errno_loc::set_errno;
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::libgit2::{Runtime, init};
@@ -557,11 +558,7 @@ pub(crate) fn runtime_pinned() -> bool {
     }
     let errno = io::Error::last_os_error().raw_os_error().unwrap_or(0);
     let pinned = PINNED.get_or_init(|| init().ok()).is_some();
-    // SAFETY: `__errno_location` returns the calling thread's `errno`, valid for writes
-    // for the thread's lifetime.
-    let value = unsafe { libc::__errno_location() };
-    // SAFETY: as above.
-    unsafe { value.write(errno) };
+    set_errno(errno);
     pinned
 }
 
@@ -1217,6 +1214,9 @@ mod unit_tests {
         use std::sync::atomic::AtomicBool;
         use std::sync::atomic::Ordering::SeqCst;
 
+        use glibc_bindings::libc::csu::errno_loc::{errno, set_errno};
+        use glibc_bindings::libc::ffi as libc;
+
         use super::super::*;
         use crate::libgit2::src::util::alloc::{Alloc, Allocator};
 
@@ -1240,17 +1240,6 @@ mod unit_tests {
                 "child `{name}` failed:\n{stdout}\n{}",
                 String::from_utf8_lossy(&out.stderr)
             );
-        }
-
-        fn set_errno(value: c_int) {
-            // SAFETY: the calling thread's `errno`, valid for writes.
-            let value2 = unsafe { libc::__errno_location() };
-            // SAFETY: as above.
-            unsafe { value2.write(value) }
-        }
-
-        fn errno() -> c_int {
-            io::Error::last_os_error().raw_os_error().unwrap()
         }
 
         /// `git_error_last()`'s class and message, copied out.
