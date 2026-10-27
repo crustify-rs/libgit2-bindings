@@ -1871,6 +1871,19 @@ mod iterator_entries {
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
     fn public_entries_interleaved_views_snapshots_and_reparse() {
+        // Moving HEAD writes a reflog entry, whose signature reads the time through glibc's
+        // `tzset`, which TSan reports against any concurrent caller: run in a child.
+        isolated(
+            concat!(
+                module_path!(),
+                "::public_entries_interleaved_views_snapshots_and_reparse"
+            ),
+            interleaved_views_snapshots_and_reparse,
+        );
+    }
+
+    /// The body of [`public_entries_interleaved_views_snapshots_and_reparse`], run in its child.
+    fn interleaved_views_snapshots_and_reparse() {
         use std::ffi::CString;
         let path = scratch("public-iterator-interleaved");
         std::fs::write(

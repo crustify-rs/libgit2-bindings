@@ -1288,7 +1288,7 @@ pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, R
 /// # Errors
 ///
 /// Refuses an absolute `path` with libgit2's `GIT_ERROR_INTERNAL` error,
-/// "unrecoverable internal error: '!((path)[0] == '/')'", before reading anything (see
+/// `unrecoverable internal error: '!((path)[0] == '/')'`, before reading anything (see
 /// the [module docs](self#writing-blobs)). Fails with `GIT_ERROR_REPOSITORY`, "repository
 /// has no working directory", for a bare repository or one without paths; with
 /// [`ErrorCode::Directory`] for a directory; and with libgit2's error when the file
