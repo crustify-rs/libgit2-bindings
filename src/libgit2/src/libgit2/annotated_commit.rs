@@ -102,8 +102,9 @@ use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, last, runtime_pinn
 /// copyable::<AnnotatedCommitBox<'static>>();
 /// ```
 ///
-/// Wraps: `git_annotated_commit`
+/// Wraps `ty::git_annotated_commit`
 /// Handwritten
+#[doc(alias = "git_annotated_commit")]
 #[repr(transparent)]
 pub struct AnnotatedCommit<'r>(ffi::git_annotated_commit, PhantomData<(*const (), &'r ())>);
 
@@ -192,7 +193,6 @@ impl fmt::Debug for AnnotatedCommitMut<'_, '_> {
 /// `git__free`, then frees the struct. libgit2 has no copy routine, so the policy
 /// does not clone.
 ///
-/// Wraps: `git_annotated_commit_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AnnotatedCommitFree;
@@ -202,6 +202,8 @@ pub struct AnnotatedCommitFree;
 // branch frees the commit reference, the tree and the three strings, each NULL or
 // owned). It needs no state beyond the pointer, and no repository.
 unsafe impl<'r> CDrop<AnnotatedCommit<'r>> for AnnotatedCommitFree {
+    /// Wraps `fn::git_annotated_commit_free`
+    #[doc(alias = "git_annotated_commit_free")]
     unsafe fn c_drop(&self, ptr: NonNull<AnnotatedCommit<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live annotated commit whose
         // ownership the caller gives up; `AnnotatedCommit` is transparent over
@@ -255,13 +257,14 @@ impl<'r> AnnotatedCommit<'r> {
     /// The commit `id` names in `repo`, annotated with nothing but its id: its
     /// description is the id's hex form, and it carries no reference name.
     ///
-    /// Wraps: `git_annotated_commit_lookup`
+    /// Wraps `fn::git_annotated_commit_lookup`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when `repo` holds no object `id` names, or one that
     /// is not a commit. An id whose type is not the repository's is refused before the
     /// call (see the [module docs](self)).
+    #[doc(alias = "git_annotated_commit_lookup")]
     pub fn lookup(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -300,7 +303,7 @@ impl<'r> AnnotatedCommit<'r> {
     /// out of memory copying the description, it leaks the half-built commit before
     /// reporting the error.
     ///
-    /// Wraps: `git_annotated_commit_from_ref`
+    /// Wraps `fn::git_annotated_commit_from_ref`
     ///
     /// # Errors
     ///
@@ -308,6 +311,7 @@ impl<'r> AnnotatedCommit<'r> {
     /// the commit it peels to is not in `repo`. A reference of a repository whose object id type is
     /// not `repo`'s is refused before the call (see the [module docs](self)): libgit2 would look
     /// its peeled id up in `repo` as it does an id of that type.
+    #[doc(alias = "git_annotated_commit_from_ref")]
     pub fn from_ref(
         repo: RepositoryRef<'r>,
         reference: ReferenceRef<'_, '_>,
@@ -352,12 +356,13 @@ impl<'r> AnnotatedCommit<'r> {
     /// copying the description, it leaks the half-built commit before reporting the
     /// error.
     ///
-    /// Wraps: `git_annotated_commit_from_fetchhead`
+    /// Wraps `fn::git_annotated_commit_from_fetchhead`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, as [`lookup`](Self::lookup) does, and refuses an id
     /// as it does; neither string is checked.
+    #[doc(alias = "git_annotated_commit_from_fetchhead")]
     pub fn from_fetchhead(
         repo: RepositoryRef<'r>,
         branch_name: &CStr,
@@ -394,12 +399,13 @@ impl<'r> AnnotatedCommit<'r> {
     /// peeled to a commit and annotated with `revspec` as its description; it carries
     /// no reference name.
     ///
-    /// Wraps: `git_annotated_commit_from_revspec`
+    /// Wraps `fn::git_annotated_commit_from_revspec`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when `revspec` does not parse, names nothing, or
     /// names an object that does not peel to a commit.
+    #[doc(alias = "git_annotated_commit_from_revspec")]
     pub fn from_revspec(
         repo: RepositoryRef<'r>,
         revspec: &CStr,
