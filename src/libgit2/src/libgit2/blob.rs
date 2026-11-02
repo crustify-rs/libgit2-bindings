@@ -117,7 +117,8 @@ use crate::libgit2::src::util::errors::ErrorCode;
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: `git_blob_filter_flag_t`
+/// Wraps `ty::git_blob_filter_flag_t`
+#[doc(alias = "git_blob_filter_flag_t")]
 /// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
@@ -228,7 +229,8 @@ impl std::error::Error for UnnamedFilterFlag {}
 /// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
 /// [`unnamed_bits`](Self::unnamed_bits) the rest.
 ///
-/// Wraps: `git_blob_filter_flag_t`
+/// Wraps `ty::git_blob_filter_flag_t`
+#[doc(alias = "git_blob_filter_flag_t")]
 /// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct FilterFlags(u32);
@@ -455,7 +457,8 @@ impl core::iter::FusedIterator for FilterFlagsIter {}
 /// }
 /// ```
 ///
-/// Wraps: `git_blob`
+/// Wraps `ty::git_blob`
+#[doc(alias = "git_blob")]
 /// Handwritten
 #[repr(transparent)]
 pub struct Blob<'r>(ffi::git_blob, PhantomData<(*const (), &'r ())>);
@@ -569,12 +572,13 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// let _ = content.len();
     /// ```
     ///
-    /// Wraps: `git_blob_rawcontent`
-    ///
     /// # Panics
     ///
     /// Panics, with `a blob's content is held in memory, so its size fits a usize`, only if libgit2
     /// breaks its contract.
+    ///
+    /// Wraps `fn::git_blob_rawcontent`
+    #[doc(alias = "git_blob_rawcontent")]
     #[must_use]
     pub fn content(&self) -> &'a [u8] {
         let size = usize::try_from(self.size())
@@ -593,7 +597,8 @@ impl<'a, 'r> BlobRef<'a, 'r> {
 
     /// The size of the blob's [`content`](Self::content), in bytes.
     ///
-    /// Wraps: `git_blob_rawsize`
+    /// Wraps `fn::git_blob_rawsize`
+    #[doc(alias = "git_blob_rawsize")]
     #[must_use]
     pub fn size(&self) -> u64 {
         // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
@@ -605,7 +610,8 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// `GIT_FILTER_BYTES_TO_CHECK_NUL`): a NUL byte or a long run of non-printable
     /// bytes after them is not seen.
     ///
-    /// Wraps: `git_blob_is_binary`
+    /// Wraps `fn::git_blob_is_binary`
+    #[doc(alias = "git_blob_is_binary")]
     #[must_use]
     pub fn is_binary(&self) -> bool {
         // SAFETY: the handle addresses a live blob for `'a`, whose content libgit2 reads
@@ -624,8 +630,6 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// that [`is_binary`](Self::is_binary) is left unfiltered, and the result is
     /// empty, as libgit2 leaves it.
     ///
-    /// Wraps: `git_blob_filter`
-    ///
     /// # Errors
     ///
     /// Refuses an absolute `as_path` with libgit2's `GIT_ERROR_INTERNAL` error,
@@ -638,6 +642,9 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// `GIT_ERROR_INVALID` for options whose version is 0 or above
     /// [`FilterOptions::VERSION`]; and with libgit2's error when the attributes or that
     /// commit cannot be read or a filter fails.
+    ///
+    /// Wraps `fn::git_blob_filter`
+    #[doc(alias = "git_blob_filter")]
     pub fn filter(
         &self,
         as_path: &CStr,
@@ -823,7 +830,8 @@ define_ctype!(
     /// let _ = id.raw_kind();
     /// ```
     ///
-    /// Wraps: git_blob_filter_options
+    /// Wraps `ty::git_blob_filter_options`
+    #[doc(alias = "git_blob_filter_options")]
     #[derive(Clone, Copy)]
     FilterOptions,
     FilterOptionsRef,
@@ -867,12 +875,13 @@ impl FilterOptions {
     /// unfiltered), no `reserved` pointer and the zero id, of no type. Needs no
     /// initialised libgit2.
     ///
-    /// Wraps: `git_blob_filter_options_init`
-    ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    ///
+    /// Wraps `fn::git_blob_filter_options_init`
+    #[doc(alias = "git_blob_filter_options_init")]
     #[must_use]
     pub fn new() -> FilterOptions {
         let mut raw = MaybeUninit::<ffi::git_blob_filter_options>::uninit();
@@ -923,7 +932,8 @@ impl<'a> FilterOptionsRef<'a> {
     /// `GIT_ERROR_INVALID` if it is 0 or above that, so a negative version is refused
     /// too.
     ///
-    /// Field: `git_blob_filter_options.version`
+    /// Wraps `fld::git_blob_filter_options.version`
+    #[doc(alias = "git_blob_filter_options.version")]
     #[must_use]
     pub fn version(&self) -> c_int {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -936,7 +946,8 @@ impl<'a> FilterOptionsRef<'a> {
 
     /// The filter flags, every stored bit kept.
     ///
-    /// Field: `git_blob_filter_options.flags`
+    /// Wraps `fld::git_blob_filter_options.flags`
+    #[doc(alias = "git_blob_filter_options.flags")]
     #[must_use]
     pub fn flags(&self) -> FilterFlags {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -953,7 +964,8 @@ impl<'a> FilterOptionsRef<'a> {
     /// unset, and only a value converted from a raw `git_blob_filter_options` can
     /// carry one.
     ///
-    /// Field: `git_blob_filter_options.reserved`
+    /// Wraps `fld::git_blob_filter_options.reserved`
+    #[doc(alias = "git_blob_filter_options.reserved")]
     #[must_use]
     pub fn has_reserved(&self) -> bool {
         // SAFETY: the shared handle's pointer addresses live options; the projection forms no
@@ -967,7 +979,8 @@ impl<'a> FilterOptionsRef<'a> {
     /// flags hold [`FilterFlag::AttributesFromCommit`], borrowed in place for as long
     /// as the options are. [`FilterOptions::new`] leaves the zero id, of no type.
     ///
-    /// Field: `git_blob_filter_options.attr_commit_id`
+    /// Wraps `fld::git_blob_filter_options.attr_commit_id`
+    #[doc(alias = "git_blob_filter_options.attr_commit_id")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -1060,7 +1073,8 @@ impl FilterOptionsMut<'_> {
     /// whose version, read as an `unsigned int`, is 0 or above
     /// [`FilterOptions::VERSION`].
     ///
-    /// Field: `git_blob_filter_options.version`
+    /// Wraps `fld::git_blob_filter_options.version`
+    #[doc(alias = "git_blob_filter_options.version")]
     pub fn set_version(&mut self, version: c_int) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -1072,7 +1086,8 @@ impl FilterOptionsMut<'_> {
 
     /// Replaces the filter flags, every bit as given.
     ///
-    /// Field: `git_blob_filter_options.flags`
+    /// Wraps `fld::git_blob_filter_options.flags`
+    #[doc(alias = "git_blob_filter_options.flags")]
     pub fn set_flags(&mut self, flags: FilterFlags) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -1085,7 +1100,8 @@ impl FilterOptionsMut<'_> {
     /// Unsets the deprecated `reserved` pointer, as [`FilterOptions::new`] leaves it.
     /// Nothing it pointed at is released: the options never own it.
     ///
-    /// Field: `git_blob_filter_options.reserved`
+    /// Wraps `fld::git_blob_filter_options.reserved`
+    #[doc(alias = "git_blob_filter_options.reserved")]
     pub fn clear_reserved(&mut self) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -1097,7 +1113,8 @@ impl FilterOptionsMut<'_> {
 
     /// The commit id, borrowed exclusively in place, for writing it field by field.
     ///
-    /// Field: `git_blob_filter_options.attr_commit_id`
+    /// Wraps `fld::git_blob_filter_options.attr_commit_id`
+    #[doc(alias = "git_blob_filter_options.attr_commit_id")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: an embedded id is never NULL"
@@ -1114,7 +1131,8 @@ impl FilterOptionsMut<'_> {
 
     /// Replaces the commit id with a copy of `id`, its type included.
     ///
-    /// Field: `git_blob_filter_options.attr_commit_id`
+    /// Wraps `fld::git_blob_filter_options.attr_commit_id`
+    #[doc(alias = "git_blob_filter_options.attr_commit_id")]
     pub fn set_attr_commit_id(&mut self, id: OidRef<'_>) {
         {
             // SAFETY: `id` is a shared handle to a live `git_oid`, read whole; it cannot be
@@ -1160,7 +1178,8 @@ const _: () = assert!(
 /// assert!(!data_is_binary(b""));
 /// ```
 ///
-/// Wraps: `git_blob_data_is_binary`
+/// Wraps `fn::git_blob_data_is_binary`
+#[doc(alias = "git_blob_data_is_binary")]
 #[must_use]
 pub fn data_is_binary(data: &[u8]) -> bool {
     if !fits_c_counters(data.len()) {
@@ -1252,13 +1271,14 @@ fn filter_path(path: &CStr) -> Result<(), RepositoryError> {
 /// # std::fs::remove_dir_all(&dir).unwrap();
 /// ```
 ///
-/// Wraps: `git_blob_create_from_buffer`
-///
 /// # Errors
 ///
 /// Fails with libgit2's error when the object database cannot be loaded (a repository
 /// without paths has none: `GIT_ERROR_INVALID`, "path cannot exist in repository") or
 /// written.
+///
+/// Wraps `fn::git_blob_create_from_buffer`
+#[doc(alias = "git_blob_create_from_buffer")]
 pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, RepositoryError> {
     let mut id = Oid::zeroed();
     let out = id.as_mut().as_mut_ptr();
@@ -1283,8 +1303,6 @@ pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, R
 /// path selects for the object database (`core.autocrlf`, `.gitattributes`); a
 /// symbolic link is stored as its target.
 ///
-/// Wraps: `git_blob_create_from_workdir`
-///
 /// # Errors
 ///
 /// Refuses an absolute `path` with libgit2's `GIT_ERROR_INTERNAL` error,
@@ -1293,6 +1311,9 @@ pub fn create_from_buffer(repo: RepositoryRef<'_>, data: &[u8]) -> Result<Oid, R
 /// has no working directory", for a bare repository or one without paths; with
 /// [`ErrorCode::Directory`] for a directory; and with libgit2's error when the file
 /// cannot be read or filtered, or the object database cannot be written.
+///
+/// Wraps `fn::git_blob_create_from_workdir`
+#[doc(alias = "git_blob_create_from_workdir")]
 pub fn create_from_workdir(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
     filter_path(path)?;
     initialise_builtin_filters();
@@ -1312,13 +1333,14 @@ pub fn create_from_workdir(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, 
 /// the filters its path there selects, as with [`create_from_workdir`]; any other is
 /// stored as it is. A symbolic link is resolved, as libgit2 resolves the whole path.
 ///
-/// Wraps: `git_blob_create_from_disk`
-///
 /// # Errors
 ///
 /// Fails with [`ErrorCode::Directory`] for a directory, and with libgit2's error when
 /// the path cannot be resolved, the file cannot be read or filtered, or the object
 /// database cannot be loaded or written.
+///
+/// Wraps `fn::git_blob_create_from_disk`
+#[doc(alias = "git_blob_create_from_disk")]
 pub fn create_from_disk(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, RepositoryError> {
     initialise_builtin_filters();
     let mut id = Oid::zeroed();
@@ -1354,8 +1376,6 @@ pub fn create_from_disk(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, Rep
 /// writer.write(b"data").unwrap();
 /// ```
 ///
-/// Wraps: `git_blob_create_from_stream`
-///
 /// # Errors
 ///
 /// Refuses an absolute `hint_path` as [`create_from_workdir`] does. Fails with libgit2's
@@ -1365,6 +1385,9 @@ pub fn create_from_disk(repo: RepositoryRef<'_>, path: &CStr) -> Result<Oid, Rep
 /// # Panics
 ///
 /// Panics, with `a stream opened without a stream`, only if libgit2 breaks its contract.
+///
+/// Wraps `fn::git_blob_create_from_stream`
+#[doc(alias = "git_blob_create_from_stream")]
 pub fn create_from_stream<'r>(
     repo: RepositoryRef<'r>,
     hint_path: Option<&CStr>,
@@ -1439,12 +1462,13 @@ impl BlobWriter<'_> {
     /// writer's hint path selects, and returns its id. The writer is freed either way,
     /// its temporary file removed.
     ///
-    /// Wraps: `git_blob_create_from_stream_commit`
-    ///
     /// # Errors
     ///
     /// Fails with libgit2's error when a write failed, the temporary file cannot be
     /// flushed or read back, the filters fail, or the object database cannot be written.
+    ///
+    /// Wraps `fn::git_blob_create_from_stream_commit`
+    #[doc(alias = "git_blob_create_from_stream_commit")]
     pub fn commit(self) -> Result<Oid, RepositoryError> {
         initialise_builtin_filters();
         let stream = self.stream.into_c();
