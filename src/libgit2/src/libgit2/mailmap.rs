@@ -93,7 +93,8 @@ define_ctype!(
     /// The box and its handles are `Send` and `Sync`: shared access only reads (see the
     /// [module docs](self#threads)).
     ///
-    /// Wraps: git_mailmap
+    /// Wraps `ty::git_mailmap`
+    #[doc(alias = "git_mailmap")]
     Mailmap,
     MailmapRef,
     MailmapMut,
@@ -144,19 +145,24 @@ impl fmt::Debug for MailmapMut<'_> {
 /// No mailmap reaches C before libgit2 is initialised: each constructor pins the
 /// runtime first, so the free is ordered after the initialisation that settled the
 /// allocator it frees into.
-///
-/// Wraps: `git_mailmap_free`
-/// Wraps: `git_mailmap_new`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MailmapFree;
 
-impl_cdrop!(MailmapFree, Mailmap, ffi::git_mailmap_free);
+impl_cdrop!(
+    /// Wraps `fn::git_mailmap_free`
+    #[doc(alias = "git_mailmap_free")]
+    MailmapFree,
+    Mailmap,
+    ffi::git_mailmap_free
+);
 
 // SAFETY: `git_mailmap_new` writes a fresh `git__calloc`'d mailmap with an empty,
 // sorted entry vector, which the caller owns alone and `git_mailmap_free` releases; it
 // writes `out` only on success, so a failure (out of memory) leaves it NULL, which is
 // `None`. The runtime is pinned before the call.
 unsafe impl CNew<Mailmap> for MailmapFree {
+    /// Wraps `fn::git_mailmap_new`
+    #[doc(alias = "git_mailmap_new")]
     fn c_new(&self) -> Option<NonNull<Mailmap>> {
         if !runtime_pinned() {
             return None;
@@ -181,8 +187,6 @@ impl Mailmap {
     ///
     /// Pins the runtime first.
     ///
-    /// Wraps: `git_mailmap_new`
-    ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the mailmap cannot be allocated or libgit2 cannot be
@@ -203,7 +207,7 @@ impl Mailmap {
     /// [`ErrorClass::Invalid`], "invalid argument: '`replace_email` && *`replace_email`'",
     /// and leaks the entry; so those lines are left out of what it is given.
     ///
-    /// Wraps: `git_mailmap_from_buffer`
+    /// Wraps `fn::git_mailmap_from_buffer`
     ///
     /// # Errors
     ///
@@ -211,6 +215,7 @@ impl Mailmap {
     /// refuses without an error of its own, reported as [`ErrorClass::Invalid`],
     /// "mailmap buffer contains a NUL byte"; and with libgit2's error when the mailmap
     /// cannot be allocated or libgit2 cannot be initialised.
+    #[doc(alias = "git_mailmap_from_buffer")]
     pub fn from_buffer(buf: &[u8]) -> Result<MailmapBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -263,12 +268,13 @@ impl Mailmap {
     ///
     /// Pins the runtime first.
     ///
-    /// Wraps: `git_mailmap_from_repository`
+    /// Wraps `fn::git_mailmap_from_repository`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, only when the mailmap cannot be allocated or libgit2 cannot be
     /// initialised.
+    #[doc(alias = "git_mailmap_from_repository")]
     pub fn from_repository(repo: RepositoryRef<'_>) -> Result<MailmapBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -323,8 +329,9 @@ impl<'a> MailmapRef<'a> {
     /// let _ = name;
     /// ```
     ///
-    /// Wraps: `git_mailmap_resolve`
+    /// Wraps `fn::git_mailmap_resolve`
     #[must_use]
+    #[doc(alias = "git_mailmap_resolve")]
     pub fn resolve<'s>(&self, name: &'s CStr, email: &'s CStr) -> (&'s CStr, &'s CStr)
     where
         'a: 's,
@@ -380,7 +387,7 @@ impl<'a> MailmapRef<'a> {
     /// assert_eq!(real.as_ref().when(), old.as_ref().when());
     /// ```
     ///
-    /// Wraps: `git_mailmap_resolve_signature`
+    /// Wraps `fn::git_mailmap_resolve_signature`
     ///
     /// # Errors
     ///
@@ -388,6 +395,7 @@ impl<'a> MailmapRef<'a> {
     /// allocation while it parsed the signature) with libgit2's own error for it, class
     /// `GIT_ERROR_INTERNAL`, "unrecoverable internal error: 'name'" (or `'email'`),
     /// which a debug build of libgit2 aborts on instead.
+    #[doc(alias = "git_mailmap_resolve_signature")]
     pub fn resolve_signature(&self, signature: SignatureRef<'_>) -> Result<SignatureBox, ErrorBuf> {
         if signature.name().is_none() {
             set(
@@ -448,7 +456,7 @@ impl MailmapMut<'_> {
     /// assert_eq!(resolved, (c"Real Name", c"old@example.com"));
     /// ```
     ///
-    /// Wraps: `git_mailmap_add_entry`
+    /// Wraps `fn::git_mailmap_add_entry`
     ///
     /// # Errors
     ///
@@ -456,6 +464,7 @@ impl MailmapMut<'_> {
     /// for it (`GIT_ERROR_INVALID`, "invalid argument: '`replace_email` && *`replace_email`'"),
     /// which libgit2 raises only after allocating the entry, leaking it (and aborts a
     /// debug build). Fails with libgit2's error when the entry cannot be allocated.
+    #[doc(alias = "git_mailmap_add_entry")]
     pub fn add_entry(
         &mut self,
         real_name: Option<&CStr>,
