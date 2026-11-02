@@ -45,7 +45,7 @@ Unanswered optional questions use their defaults.
 8. **Should the campaign use the default batching and parallelism settings, or
    customize them?** (`id: workload`)
    - Answer: `max-types: 2, max-syms: 25, max-loc: 500`, at least 20 fields per type
-     batch; parallelism up to 16 agents.
+     batch; parallelism up to 32 agents.
 
 9. **What batch caps should review agents use? We recommend the same caps as
    translation by default.** (`id: review-workload`)

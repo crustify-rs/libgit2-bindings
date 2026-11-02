@@ -13,7 +13,7 @@ and in Notes.
 - **translate-agent** — `openrouter/anthropic/claude-opus-5.5`, `api`
 - **review-agent** — `openrouter/anthropic/claude-opus-5.5`, `api`; objectives `all`
 - **plan-agent** — `anthropic/claude-opus-5-5`, `subscription`; `2` runs
-- **workload** — max-types `2`, max-syms `25`, max-loc `500`, parallelism `16`
+- **workload** — max-types `2`, max-syms `25`, max-loc `500`, parallelism `32` from the annotation pass (wave `525`), `16` before
 - **review-workload** — orchestrator's choice: max-types `20`, max-syms `100`
 - **sanitizers** — `asan-ubsan`, `tsan`, `bsan`
 - **target-config** — default, deprecated features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate auth and i18n off, threads on; OpenSSL, PCRE2 and zlib from the side campaigns' installs of each variant; `build.json` version `3`
@@ -1299,3 +1299,15 @@ pointers in safe signatures, 0 in public fields). The compile-fail case
 `commit_builder_handles` now checks that safe code outside the crate cannot make a handle
 even with the trait in scope (E0133), where it checked that the inherent `from_ptr` was
 private, a claim `CCell::mut_from_ptr` already made vacuous.
+
+### Annotation pass
+
+On 2026-11-02 the conventions' Anchors section changed to kind-qualified anchors in backticks,
+``/// Wraps `fn::<name>` ``, each beside a `#[doc(alias = "<name>")]`, on the public item that stands
+in for the C item. The landed bindings are brought to it by review batches with the `conventions`
+and `fix` objectives, one per `.rs` file, on the `paths` route, filing no reports, under
+`openrouter/openai/gpt-6.1-sol`: a smoke batch on `filter.rs` (wave `524`, `reviewer/run-45`,
+`$0.66`), then the remaining files in wave `525`. Neither wave has an entry in `schedule.json`, and
+their batches fill no dashboard rows. Each file's checklist lists the scheduled items whose
+anchors sit in it, since the schedule's `home`s predate the current tree. From wave `525` the
+settings' `workload` answer raises the parallelism to `32` agents.
