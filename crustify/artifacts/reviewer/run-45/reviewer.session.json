@@ -1,0 +1,13 @@
+{
+ "cli": "codex",
+ "provider": "openrouter",
+ "model": "openai/gpt-6.1-sol",
+ "session_id": "01a19e90-a686-75d2-87e8-903900bd82f6",
+ "transcript": "/work/.crustify/providers/codex/sessions/2026/11/02/rollout-2026-11-02T23-20-42-01a19e90-a686-75d2-87e8-903900bd82f6.jsonl",
+ "exit_code": 0,
+ "resumed": false,
+ "agent": "reviewer",
+ "started_at": "2026-11-02T23:20:42+00:00",
+ "ended_at": "2026-11-02T23:26:20+00:00",
+ "duration_ms": 338613
+}

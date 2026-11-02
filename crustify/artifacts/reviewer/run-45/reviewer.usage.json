@@ -1,0 +1,275 @@
+{
+ "sessions": [
+  {
+   "source": "/work/.crustify/transcripts/01a19e90-a686-75d2-87e8-903900bd82f6.jsonl",
+   "provider": "openrouter",
+   "model": "openai/gpt-6.1-sol",
+   "started_at": "2026-11-02T23:20:42+00:00",
+   "ended_at": "2026-11-02T23:26:20+00:00",
+   "duration_ms": 338282,
+   "request_count": 34,
+   "tokens": {
+    "input_tokens": 84739,
+    "output_tokens": 7063,
+    "cache_read_tokens": 2109938,
+    "cache_write_tokens": 84637,
+    "cache_write_1h_tokens": 0
+   },
+   "cost_usd": 0.662694,
+   "requests": [
+    {
+     "input_tokens": 27038,
+     "output_tokens": 93,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 27035,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 1432,
+     "output_tokens": 193,
+     "cache_read_tokens": 27035,
+     "cache_write_tokens": 1429,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 11100,
+     "output_tokens": 202,
+     "cache_read_tokens": 28464,
+     "cache_write_tokens": 11097,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 7018,
+     "output_tokens": 157,
+     "cache_read_tokens": 39561,
+     "cache_write_tokens": 7015,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 6163,
+     "output_tokens": 1081,
+     "cache_read_tokens": 46576,
+     "cache_write_tokens": 6160,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 3310,
+     "output_tokens": 164,
+     "cache_read_tokens": 52736,
+     "cache_write_tokens": 3307,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 3202,
+     "output_tokens": 195,
+     "cache_read_tokens": 56043,
+     "cache_write_tokens": 3199,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 256,
+     "output_tokens": 122,
+     "cache_read_tokens": 59242,
+     "cache_write_tokens": 253,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 182,
+     "output_tokens": 125,
+     "cache_read_tokens": 59495,
+     "cache_write_tokens": 179,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 219,
+     "output_tokens": 202,
+     "cache_read_tokens": 59674,
+     "cache_write_tokens": 216,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 3753,
+     "output_tokens": 93,
+     "cache_read_tokens": 59890,
+     "cache_write_tokens": 3750,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 155,
+     "output_tokens": 398,
+     "cache_read_tokens": 63640,
+     "cache_write_tokens": 152,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 458,
+     "output_tokens": 424,
+     "cache_read_tokens": 63792,
+     "cache_write_tokens": 455,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 1202,
+     "output_tokens": 362,
+     "cache_read_tokens": 64247,
+     "cache_write_tokens": 1199,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 527,
+     "output_tokens": 110,
+     "cache_read_tokens": 65446,
+     "cache_write_tokens": 524,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 170,
+     "output_tokens": 199,
+     "cache_read_tokens": 65970,
+     "cache_write_tokens": 167,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 262,
+     "output_tokens": 85,
+     "cache_read_tokens": 66137,
+     "cache_write_tokens": 259,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 318,
+     "output_tokens": 216,
+     "cache_read_tokens": 66396,
+     "cache_write_tokens": 315,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 247,
+     "output_tokens": 44,
+     "cache_read_tokens": 66711,
+     "cache_write_tokens": 244,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 75,
+     "output_tokens": 49,
+     "cache_read_tokens": 66955,
+     "cache_write_tokens": 72,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 80,
+     "output_tokens": 54,
+     "cache_read_tokens": 67027,
+     "cache_write_tokens": 77,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 85,
+     "output_tokens": 95,
+     "cache_read_tokens": 67104,
+     "cache_write_tokens": 82,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 126,
+     "output_tokens": 273,
+     "cache_read_tokens": 67186,
+     "cache_write_tokens": 123,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 304,
+     "output_tokens": 110,
+     "cache_read_tokens": 67309,
+     "cache_write_tokens": 301,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 141,
+     "output_tokens": 76,
+     "cache_read_tokens": 67610,
+     "cache_write_tokens": 138,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 107,
+     "output_tokens": 48,
+     "cache_read_tokens": 67748,
+     "cache_write_tokens": 104,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 1334,
+     "output_tokens": 286,
+     "cache_read_tokens": 67852,
+     "cache_write_tokens": 1331,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 11465,
+     "output_tokens": 499,
+     "cache_read_tokens": 69183,
+     "cache_write_tokens": 11462,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 559,
+     "output_tokens": 73,
+     "cache_read_tokens": 80645,
+     "cache_write_tokens": 556,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 104,
+     "output_tokens": 152,
+     "cache_read_tokens": 81201,
+     "cache_write_tokens": 101,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 473,
+     "output_tokens": 147,
+     "cache_read_tokens": 81302,
+     "cache_write_tokens": 470,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 209,
+     "output_tokens": 298,
+     "cache_read_tokens": 81772,
+     "cache_write_tokens": 206,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2036,
+     "output_tokens": 362,
+     "cache_read_tokens": 81978,
+     "cache_write_tokens": 2033,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 629,
+     "output_tokens": 76,
+     "cache_read_tokens": 84011,
+     "cache_write_tokens": 626,
+     "cache_write_1h_tokens": 0
+    }
+   ]
+  }
+ ],
+ "total": {
+  "sessions": 1,
+  "request_count": 34,
+  "tokens": {
+   "input_tokens": 84739,
+   "output_tokens": 7063,
+   "cache_read_tokens": 2109938,
+   "cache_write_tokens": 84637,
+   "cache_write_1h_tokens": 0
+  },
+  "cost_usd": 0.662694,
+  "unpriced_sessions": 0,
+  "duration_ms": 338282
+ }
+}
