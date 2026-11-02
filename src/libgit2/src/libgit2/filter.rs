@@ -124,7 +124,8 @@ define_ctype!(
     /// }
     /// ```
     ///
-    /// Wraps: git_writestream
+    /// Wraps `ty::git_writestream`
+    #[doc(alias = "git_writestream")]
     WriteStream,
     WriteStreamRef,
     WriteStreamMut,
@@ -142,12 +143,13 @@ impl WriteStream {
     /// `git_blob_create_from_stream` opens is committed instead, and closing it
     /// discards what was written (dropping it does the same).
     ///
-    /// Field: `git_writestream.close`
-    ///
     /// # Errors
     ///
     /// A negative return from `close` is an error, which comes back with the thread's last libgit2
     /// error; the stream is freed either way.
+    ///
+    /// Wraps `fld::git_writestream.close`
+    #[doc(alias = "git_writestream.close")]
     pub fn close(mut stream: WriteStreamBox) -> Result<(), StreamError> {
         // SAFETY: `stream` is dropped right below, so the stream is freed and never
         // written or closed again.
@@ -171,7 +173,8 @@ impl WriteStreamMut<'_> {
     /// If the stream has no `write` member, which no producer leaves unset and the
     /// handle's invariant excludes.
     ///
-    /// Field: `git_writestream.write`
+    /// Wraps `fld::git_writestream.write`
+    #[doc(alias = "git_writestream.write")]
     pub fn write(&mut self, data: &[u8]) -> Result<(), StreamError> {
         let stream = self.as_mut_ptr();
         // SAFETY: `stream` is the handle's pointer to the live object it borrows; the projection
@@ -198,8 +201,6 @@ impl WriteStreamMut<'_> {
     ///
     /// Closing ends the stream: afterwards it must not be written or closed again
     /// through any handle, only freed, unless it is a [`RustWriteStream`]'s.
-    ///
-    /// Field: `git_writestream.close`
     pub(crate) unsafe fn close(&mut self) -> Result<(), StreamError> {
         let stream = self.as_mut_ptr();
         // SAFETY: `stream` is the handle's pointer to the live object it borrows; the projection
@@ -249,12 +250,17 @@ pub(crate) unsafe fn stream_free(stream: *mut ffi::git_writestream) {
 /// header is embedded in: a blob writer's file buffer, hint path and allocation; a
 /// [`RustWriteStream`]'s box. Stateless: the routine is recovered from the object.
 ///
-/// Field: `git_writestream.free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WriteStreamFree;
 
-impl_cdrop!(WriteStreamFree, WriteStream, stream_free);
+impl_cdrop!(
+    /// Wraps `fld::git_writestream.free`
+    #[doc(alias = "git_writestream.free")]
+    WriteStreamFree,
+    WriteStream,
+    stream_free
+);
 
 /// The sole owner of a stream, C's or Rust's, released through its `free` member.
 ///
@@ -366,7 +372,6 @@ pub(crate) struct Repr<W> {
 /// std::thread::spawn(move || drop(stream));
 /// ```
 ///
-/// Wraps: `git_writestream`
 /// Handwritten
 pub struct RustWriteStream<W: StreamWriter> {
     pub(crate) raw: NonNull<Repr<W>>,
@@ -759,8 +764,9 @@ impl std::error::Error for StreamError {}
 /// }
 /// ```
 ///
-/// Wraps: `git_filter_list`
+/// Wraps `ty::git_filter_list`
 /// Handwritten
+#[doc(alias = "git_filter_list")]
 #[repr(transparent)]
 pub struct FilterList<'r>(
     ffi::git_filter_list,
@@ -842,7 +848,6 @@ impl fmt::Debug for FilterListMut<'_, '_> {
 /// The free reads neither the repository nor the path; it reaches each filter the list
 /// holds, which the registry keeps (see the [module docs](self#the-repository)).
 ///
-/// Wraps: `git_filter_list_free`
 /// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FilterListFree;
@@ -852,6 +857,8 @@ pub struct FilterListFree;
 // the block, all from libgit2's allocator. It needs no state beyond the pointer, and no
 // repository.
 unsafe impl<'r> CDrop<FilterList<'r>> for FilterListFree {
+    /// Wraps `fn::git_filter_list_free`
+    #[doc(alias = "git_filter_list_free")]
     unsafe fn c_drop(&self, ptr: NonNull<FilterList<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live list whose ownership
         // the caller gives up; `FilterList` is transparent over `git_filter_list`. It
@@ -939,11 +946,12 @@ impl<'r> FilterList<'r> {
     /// Raw seam: `mode` is a raw `git_filter_mode_t` and `flags` a raw
     /// `git_filter_flag_t` set until those are wrapped; libgit2 accepts every value.
     ///
-    /// Wraps: `git_filter_list_new`
+    /// Wraps `fn::git_filter_list_new`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's out-of-memory error, when the list cannot be allocated.
+    #[doc(alias = "git_filter_list_new")]
     pub fn new(
         repo: RepositoryRef<'r>,
         mode: ffi::git_filter_mode_t,
@@ -999,13 +1007,14 @@ impl<'r> FilterList<'r> {
     ///
     /// Raw seam: `mode` and `flags` as for [`new`](Self::new).
     ///
-    /// Wraps: `git_filter_list_load`
+    /// Wraps `fn::git_filter_list_load`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the attributes cannot be read (with
     /// `GIT_FILTER_ATTRIBUTES_FROM_HEAD`, when `HEAD` is unborn), or a filter's `check`
     /// fails.
+    #[doc(alias = "git_filter_list_load")]
     pub fn load(
         repo: RepositoryRef<'r>,
         path: &CStr,
@@ -1020,12 +1029,13 @@ impl<'r> FilterList<'r> {
     /// while it decides whether to apply. The list keeps neither the blob nor its id,
     /// and libgit2's built-in filters do not read it.
     ///
-    /// Wraps: `git_filter_list_load`
+    /// Wraps `fn::git_filter_list_load`
     ///
     /// # Errors
     ///
     /// Refuses, with a `GIT_ERROR_FILTER` error "the object is not a blob", an object
     /// of another type, which libgit2 would read as a blob.
+    #[doc(alias = "git_filter_list_load")]
     pub fn load_with_blob(
         repo: RepositoryRef<'r>,
         blob: ObjectRef<'_, '_>,
@@ -1074,11 +1084,12 @@ impl<'r> FilterList<'r> {
     /// Raw seam: `opts` is the raw `git_filter_options` until it is wrapped, and `mode`
     /// as for [`new`](Self::new).
     ///
-    /// Wraps: `git_filter_list_load_ext`
+    /// Wraps `fn::git_filter_list_load_ext`
     ///
     /// # Errors
     ///
     /// Fails as [`load`](Self::load) does.
+    #[doc(alias = "git_filter_list_load_ext")]
     pub fn load_ext(
         repo: RepositoryRef<'r>,
         path: &CStr,
@@ -1092,11 +1103,12 @@ impl<'r> FilterList<'r> {
     /// [`load_with_blob`](Self::load_with_blob) is for [`load`](Self::load): an object
     /// of type blob, refused otherwise.
     ///
-    /// Wraps: `git_filter_list_load_ext`
+    /// Wraps `fn::git_filter_list_load_ext`
     ///
     /// # Errors
     ///
     /// Fails as [`load_with_blob`](Self::load_with_blob) does.
+    #[doc(alias = "git_filter_list_load_ext")]
     pub fn load_ext_with_blob(
         repo: RepositoryRef<'r>,
         blob: ObjectRef<'_, '_>,
