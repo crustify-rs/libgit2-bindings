@@ -45,7 +45,7 @@ Unanswered optional questions use their defaults.
 8. **Should the campaign use the default batching and parallelism settings, or
    customize them?** (`id: workload`)
    - Answer: `max-types: 2, max-syms: 25, max-loc: 500`, at least 20 fields per type
-     batch; parallelism up to 32 agents.
+     batch; parallelism: assistant's choice.
 
 9. **What batch caps should review agents use? We recommend the same caps as
    translation by default.** (`id: review-workload`)
@@ -68,23 +68,31 @@ Unanswered optional questions use their defaults.
       features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate
       auth and i18n off, threads on.
 
+## Commits
+
+13. **Which git identity should the campaign's commits carry: an author, and any
+    co-authors? By default, Crustify's own, `crustify <crustify@berkeley.edu>` (the
+    GitHub account `crustify-ai`), as the author, with no co-author.** (`id: identity`)
+    - Answer: `author: Marius Momeu <marius.momeu@berkeley.edu>, co-authors: crustify
+      <crustify@berkeley.edu>` (the GitHub account `crustify-ai`)
+
 ## Autonomy (if question 6 is answered `no`)
 
 Answer these approval-gate questions only if question 6 is answered `no`.
 
-13. **Should I wait for your approval before starting the setup phase?** (`id: gates.setup`)
+14. **Should I wait for your approval before starting the setup phase?** (`id: gates.setup`)
     - Answer: `no`
-14. **Should I wait for your approval before starting the translation phase?**
+15. **Should I wait for your approval before starting the translation phase?**
     (`id: gates.translation`)
     - Answer: `yes`
-15. **Should I wait for your approval between modules?** (`id: gates.module`)
+16. **Should I wait for your approval between modules?** (`id: gates.module`)
     - Answer: `no`
-16. **Should I wait for your approval before starting review passes?** (`id: gates.review`)
+17. **Should I wait for your approval before starting review passes?** (`id: gates.review`)
     - Answer: `no`
 
 # Benchmark recording questions
 
-17. **Where and in what format should the dashboard be recorded? By default, at
+18. **Where and in what format should the dashboard be recorded? By default, at
     `crustify/artifacts/dashboard.md`, from the standard template.** (`id: dashboard`)
     - Answer: `<repo-checkout>/crustify/artifacts/dashboard.md`, `standard` template
 
