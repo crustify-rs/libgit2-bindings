@@ -1328,3 +1328,13 @@ From 2026-11-03 the settings' `workload` answer leaves the parallelism to the as
 new `identity` answer makes Marius Momeu the author of the campaign's commits, with Crustify as
 co-author. `build.json`'s commands carry no job count, its `version` unchanged: the jobs are given
 through the environment of each run.
+
+On 2026-11-03 the campaign's checkout moved to `/target/libgit2-bindings`, beside its side
+campaigns' clones. Its variants had been built in `/work/libgit2-bindings`, where the configure
+commands' relative paths to the OpenSSL, PCRE2 and zlib installs, `../../../../<source>-bindings`,
+named clones that did not exist there: those variants linked the system's libraries, uninstrumented,
+in place of the side campaigns' installs, and every gate run there tested against them. Every
+variant was configured again from the checkout, its commands and `build.json`'s `version`
+unchanged, and links the side campaigns' installs of the same variant. The C baseline's `offline`
+and `util` suites pass on `plain`, `util` on every other variant, and the workspace's tests pass but
+for the five `tests/ub_safe` compile-fail snapshots that fail on this host.
