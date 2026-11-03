@@ -59,17 +59,17 @@ in Notes.
 
 | | count | share | C LoC coverage | Rust LoC coverage |
 |---|---:|---:|---:|---:|
-| UB safe tests | `769` | — | `35.80`% | `84.57`% |
-| UB unsafe tests | `96` | — | `22.20`% | `12.70`% |
-| Equiv tests | `470` | — | `43.73`% | `76.50`% |
-| Unit tests | `735` | — | `32.13`% | `87.48`% |
-| **Total tests** | **`2070`** | — | **`46.65`%** | **`99.55`%** |
+| UB safe tests | `774` | — | `35.80`% | `84.57`% |
+| UB unsafe tests | `100` | — | `22.20`% | `12.70`% |
+| Equiv tests | `473` | — | `43.73`% | `76.50`% |
+| Unit tests | `742` | — | `32.13`% | `87.48`% |
+| **Total tests** | **`2089`** | — | **`46.65`%** | **`99.55`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
-| wrapped types | `101` | `39.15`% | — | — |
+| wrapped types | `102` | `39.53`% | — | — |
 | total symbols | `979` | — | — | — |
 | ported symbols | `4` | `0.41`% | — | — |
-| wrapped symbols | `424` | `43.31`% | — | — |
+| wrapped symbols | `443` | `45.25`% | — | — |
 
 ### Module stats
 
@@ -511,6 +511,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `50` | `4` | wrap | first | `5` | `47` | `+342/-22` | `45.76`% / `99.53`% | `$3.09` | `7.11M` | `12m00s` | `$0.62` | `$0.07` |
 | `libgit2/index` | `52` | `0` | wrap | first | `17` | `383` | `+2323/-79` | `46.66`% / `99.55`% | `$14.38` | `43.62M` | `43m51s` | `$0.85` | `$0.04` |
 | `libgit2/index` | `52` | `1` | wrap | first | `2` | `0` | `+369/-6` | `46.57`% / `99.53`% | `$3.31` | `8.07M` | `18m25s` | `$1.66` | — |
+| `libgit2/src/libgit2/odb.c` | `176` | `2` | wrap | first | `22` | `1143` | `+2136/-126` | — | — | — | — | — | — |
 | `libgit2/raw-lifetime-void` | `1` | `0` | wrap | review | `2` | — | `+80/-1` | — | `$7.89` | `10.78M` | `18m36s` | `$3.94` | — |
 | `libgit2/raw-lifetime-string` | `3` | `0` | wrap | review | `2` | — | `+345/-23` | — | `$10.89` | `14.41M` | `22m03s` | `$5.45` | — |
 | `libgit2/util` | `6` | `2` | wrap | review | `4` | — | `+281/-117` | `1.63`% / `99.74`% | `$12.00` | `16.87M` | `28m49s` | `$3.00` | — |
@@ -535,7 +536,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `1` | wrap | review | `1` | — | `+303/-147` | `45.57`% / `99.51`% | `$6.50` | `18.04M` | `24m32s` | `$6.50` | — |
 | `libgit2/index` | `51` | `1` | wrap | review | `55` | — | `+442/-9` | `46.58`% / `99.53`% | `$12.37` | `39.58M` | `39m02s` | `$0.22` | — |
 | `libgit2/index` | `53` | `0` | wrap | review | `19` | — | `+190/-21` | `46.64`% / `99.55`% | `$20.10` | `42.35M` | `1h18m28s` | `$1.06` | — |
-| **Σ first** |  |  |  |  | **`389`** | **`6630`** | **`+62075/-2348`** | **`46.66`% / `99.55`%** | **`$371.14`** | **`1143.40M`** | — | **`$0.95`** | **`$0.05`** |
+| **Σ first** |  |  |  |  | **`411`** | **`7773`** | **`+64211/-2474`** | **`46.66`% / `99.55`%** | **`$371.14`** | **`1143.40M`** | — | **`$0.95`** | **`$0.05`** |
 | **Σ review** |  |  |  |  | **`389`** | — | **`+6686/-1295`** | **`46.64`% / `99.55`%** | **`$312.87`** | **`562.64M`** | — | **`$0.80`** | — |
 
 ### Batches: tests
@@ -579,6 +580,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `50` | `4` | first | `+3` (`+0.10`/`+0.04` pp) | `+0` (`-0.04`/`+0.00` pp) | `+2` (`+0.02`/`+0.06` pp) | `+0` (`+0.00`/`-0.04` pp) |
 | `libgit2/index` | `52` | `0` | first | `+10` (`+0.19`/`+0.18` pp) | `+0` (`-0.13`/`-0.15` pp) | `+10` (`+0.09`/`+0.47` pp) | `+6` (`+0.14`/`+0.01` pp) |
 | `libgit2/index` | `52` | `1` | first | `+2` (`+0.00`/`+0.00` pp) | `+0` (`+0.03`/`-0.01` pp) | `+3` (`-0.02`/`+0.08` pp) | `+2` (`-0.02`/`+0.01` pp) |
+| `libgit2/src/libgit2/odb.c` | `176` | `2` | first | `+5` (—/— pp) | `+4` (—/— pp) | `+3` (—/— pp) | `+7` (—/— pp) |
 | `libgit2/util` | `6` | `2` | review | `+1` (`+0.00`/`-0.79` pp) | `+0` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`-0.79` pp) | `+1` (`+0.00`/`+4.47` pp) |
 | `libgit2/util` | `7` | `0` | review | `+0` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) |
 | `libgit2/oid` | `12` | `1` | review | `+0` (`+0.00`/`+0.02` pp) | `+0` (`+0.00`/`-0.04` pp) | `+1` (`+0.00`/`+0.03` pp) | `+1` (`+0.00`/`+0.27` pp) |
@@ -601,7 +603,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `1` | review | `+1` (`-0.02`/`+0.02` pp) | `+0` (`-0.13`/`-0.01` pp) | `+0` (`-0.01`/`-0.01` pp) | `+2` (`+0.01`/`+0.01` pp) |
 | `libgit2/index` | `51` | `1` | review | `+2` (`+0.04`/`+0.01` pp) | `+0` (`-0.02`/`-0.06` pp) | `+0` (`+0.01`/`+0.16` pp) | `+4` (`+0.16`/`+0.17` pp) |
 | `libgit2/index` | `53` | `0` | review | `+3` (`+0.01`/`+0.01` pp) | `+0` (`+0.10`/`+0.00` pp) | `+1` (`+0.00`/`+0.01` pp) | `+1` (`-0.02`/`+0.00` pp) |
-| **Σ first** |  |  |  | **`+263` (`+10.21`/`+6.04` pp)** | **`+13` (`+3.17`/`-8.14` pp)** | **`+183` (`+8.99`/`+13.91` pp)** | **`+202` (`+11.76`/`-33.75` pp)** |
+| **Σ first** |  |  |  | **`+268` (`+10.21`/`+6.04` pp)** | **`+17` (`+3.17`/`-8.14` pp)** | **`+186` (`+8.99`/`+13.91` pp)** | **`+209` (`+11.76`/`-33.75` pp)** |
 | **Σ review** |  |  |  | **`+14` (`+0.34`/`-1.41` pp)** | **`+2` (`-0.92`/`+0.27` pp)** | **`+19` (`+0.09`/`-0.37` pp)** | **`+32` (`+2.44`/`+7.45` pp)** |
 
 ### Batches: safety audit
@@ -645,6 +647,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `50` | `4` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+1` | — | — | `+0` | `+0` |
 | `libgit2/index` | `52` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `-0.03` pp | `+14` | — | — | `+2` | `+0` |
 | `libgit2/index` | `52` | `1` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `-0.01` pp | `+2` | — | — | `+0` | `+0` |
+| `libgit2/src/libgit2/odb.c` | `176` | `2` | wrap | first | `+0` | `+0` | `+0` | `+4` | — | — | `+0.02` pp | `+27` | `+6` | — | `+0` | `+0` |
 | `libgit2/raw-lifetime-void` | `1` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/raw-lifetime-string` | `3` | `0` | wrap | review | `+0` | `+0` | `+0` | `+1` | — | — | `-0.34` pp | `+1` | — | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `2` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.02` pp | `+0` | — | — | `+0` | `+0` |
@@ -669,7 +672,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `49` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.01` pp | `+0` | — | — | `+0` | `-1` |
 | `libgit2/index` | `51` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+7` | — | — | `+0` | `+0` |
 | `libgit2/index` | `53` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
-| **Σ first** |  |  |  |  | **`+1`** | **`+1`** | **`-2`** | **`+37`** | — | — | **`+18.28` pp** | **`+541`** | — | — | **`+6`** | **`+11`** |
+| **Σ first** |  |  |  |  | **`+1`** | **`+1`** | **`-2`** | **`+41`** | — | — | **`+18.30` pp** | **`+568`** | — | — | **`+6`** | **`+11`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`+1`** | — | — | **`-0.38` pp** | **`+19`** | — | — | **`+0`** | **`-1`** |
 
 ### Batches — review: PoC + reports
@@ -1076,6 +1079,42 @@ the `bsan` toolchain's clang 23 adds doc comments to 26 macro constants, none of
 batch's, so its regenerated `bindings.rs` differs from the committed one. ASan+UBSan, TSan and
 Miri ran on every new test. The same five compile-fail snapshots mismatch from the ffibox pin
 drift.
+
+### `libgit2/src/libgit2/odb.c` wave 176 batch 2: odb readers, writers and objects
+
+Coverage is not measured, as for wave 172: its `cov (C/Rust)` cell and its tests'
+`(+C/+Rust pp)` pairs stay `—`, and the Coverage stats percentages stand as the previous
+landing left them; the test counts move. `nightly-2026-10-08` ships no `llvm-tools`, and the
+`coverage` variant is a gcov build. The batch's Rust was checked with source-based coverage
+instead (`-C instrument-coverage`, `nightly-2026-10-07`'s `llvm-cov`, every test of the four
+suites matching `odb`): every line of its additions to `src/libgit2/src/libgit2/odb.rs` runs
+but `OdbObjectMut`'s `Debug`, which nothing reaches, since nothing lends an `OdbObjectMut`.
+
+The batch wraps `ty::git_odb_object` with its readers (wave 170 batch 0's type), since its
+signatures need it. The readers learn the odb's id type through `git_odb_expand_ids` and
+refuse ids of any other type, which libgit2's loose backend would format out of bounds.
+`git_odb_write_multi_pack_index` and `git_odb_set_commit_graph` are bound as `unsafe fn`s
+(`+2` `pub unsafe fn`): the first walks the backends and the packed backend's packs without
+the odb's lock, the second frees a commit-graph whose file a revision walk reads past it, and
+no type of the crate proves that no other thread uses the odb. Only the NULL form of
+`git_odb_set_commit_graph` is bound (`clear_commit_graph`), pending `git_commit_graph`.
+
+The safety audit row comes from `ffimap` scans of the wave tip this landing rebased onto
+(`3f43c106d`, batch 1's recorded scan) and this tree. `pub unsafe fn` is `+4`: the two
+methods above and `OdbObjectFree`'s `CDrop::c_drop` and `CRefClone::c_up_ref`. `Send/Sync` is
+`+6`, for `OdbObject` and its two handles. `OdbObjectRef::data` is one more slice borrowed
+over C memory, the object's buffer, which libgit2 never writes and frees only with the
+object; the column stays `—`. The four new `Clone`s are derived and count in no column.
+`+LoC` leaves out the 187 regenerated lines of `libgit2-sys/src/bindings.rs`.
+
+ASan+UBSan and TSan ran every test matching `odb` (and `index::entries`, whose fixture call
+changed) after the rebase; Miri ran the batch's Rust-only tests, and each new test marked
+`ignore` under Miri was run there alone and seen to stop where its reason says. No test of
+the batch is expected to trigger BorrowSanitizer, so none ran under it. Under ASan, the
+`ub_unsafe` binary's untouched `repository` tests stop in the dynamic linker:
+`libpcre2-8.so.0` of the `asan-ubsan` pcre2 install lacks `__asan_stack_malloc_9`; the
+batch's own `ub_unsafe` tests pass there. The same five compile-fail snapshots mismatch from
+the ffibox pin drift.
 
 ### Parallelism and review caps from `libgit2/repository`
 

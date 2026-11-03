@@ -13,6 +13,7 @@ use libgit2::libgit2::src::libgit2::index::{
     ConflictIterator, EntryExtendedFlags, EntryFlags, Index, IndexArc, IndexBox, IndexEntry,
     IndexEntryBuf, IndexIterator, Stage,
 };
+use libgit2::libgit2::src::libgit2::object::ObjectType;
 use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
 use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox, RepositoryRef};
 use libgit2::libgit2::src::libgit2::tree::{FileMode, Tree, TreeArc, TreeBuilder};
@@ -20,7 +21,6 @@ use libgit2::libgit2::src::libgit2::tree::{FileMode, Tree, TreeArc, TreeBuilder}
 use super::{Scratch, c_path};
 use crate::fixture::index::{add_staged, isolated_tolerating_leaks, repository_index_box};
 use crate::fixture::init;
-use crate::fixture::odb::write_tree;
 
 /// An entry of mode `mode` at `path` and `stage`, of id type `kind` with first id byte
 /// `byte`.
@@ -482,8 +482,8 @@ fn refused_tree_entry_names_leave_the_index_as_it_was() {
                 raw.extend_from_slice(&id.as_ref().id()[..20]);
             }
             let odb = repo.as_ref().odb().unwrap();
-            let dot =
-                Oid::from_raw(&write_tree(&odb, &raw).unwrap().id[..20], OidType::Sha1).unwrap();
+            // A tree no tree builder writes: `write` stores it as given.
+            let dot = odb.as_ref().write(&raw, ObjectType::Tree).unwrap();
             drop(odb);
             let dot = Tree::lookup(repo.as_ref(), dot.as_ref()).unwrap();
             let error = index.as_mut().read_tree(dot.as_ref()).unwrap_err();

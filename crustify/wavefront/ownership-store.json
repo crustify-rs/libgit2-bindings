@@ -15941,6 +15941,44 @@
    }
   },
   {
+   "name": "git_odb_add_disk_alternate",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:odb"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock. Adds a loose and a pack backend (as alternates, read-only) under the lock, and the commit-graph if none; a path that cannot be stat'ed is skipped (returns 0). Does not retain path's storage."
+     }
+    },
+    {
+     "name": "path",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:path"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "NUL-terminated objects directory; stat'ed and copied into the new backends' paths (git_str), never retained. Not NULL-checked (p_stat(NULL) would crash)."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_odb_backend_data_alloc",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {
@@ -16032,6 +16070,183 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object, a buffer, or a NUL-terminated string) without reading it; NULL is a no-op. Strings: libgit2 makes its strings with git__strdup/git__strndup/git__substrdup (git__malloc) and releases them with git__free in git_strarray_dispose (each element, then the array), git_signature_free (name, email) and git_buf_dispose (ptr), none of which exports a single-string free, so this is the only exported releaser for one libgit2 string or a char** array of them; Rust OdbDataStrFree / OdbDataStrVec drop through it. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_exists",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. A zero id returns 0 without a lookup."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_exists_ext",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. A zero id returns 0 without a lookup. Returns 1/0; a lock failure in the first walk reads as found (the (int) of a negative error is truthy), in the post-refresh walk is returned negative."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_exists_prefix",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "Optional out id: written only on success (the full id found), untouched otherwise."
+     }
+    },
+    {
+     "name": "short_id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:short_id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. Copied into a key of short_id's type (git_oid__cpy_prefix, (len+1)/2 bytes, at most GIT_OID_MAX_SIZE since len < hexsize there); len >= the odb's hexsize takes the full-id git_odb_exists path."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_foreach_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "The id of one object, lent for the call: a local of the backend's walk (loose: parsed from the file name; pack: read out of the index), of the odb's oid type. Never retained by the callee contract."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "The payload given to git_odb_foreach, passed through unchanged by every backend; libgit2 never reads it."
      }
     }
    ]
@@ -16149,6 +16364,234 @@
       "nullable": false,
       "mutable": true,
       "note": "Out slot: on success receives a fresh git__calloc'd odb holding one reference (no backends, own cache, mutex), owned by the caller and released by git_odb_free; left untouched on failure (OOM in the calloc, mutex, cache or vector init, each unwound without leaks)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_num_backends",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:odb"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock. Reads backends.length under the lock (a lock failure is ignored and the length read unlocked)."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_object_data",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed for the call: a live git_odb_object (refcounted git_cached_obj). Never NULL-checked; its fields (cached.oid/size/type, buffer) are written only by odb_object__alloc and never after, so concurrent readers race nothing."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": null,
+     "array": {
+      "by_val": true
+     },
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:object"
+     },
+     "nullable": true,
+     "mutable": false,
+     "note": "The object's buffer: git_odb_object_size bytes, owned by the object and freed with it (git_odb_object__free); never written after the read. A custom backend may hand back NULL for an empty object; the built-in ones allocate at least one byte."
+    }
+   }
+  },
+  {
+   "name": "git_odb_object_dup",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "source",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": {
+     "deep": false,
+     "upref": true
+    },
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "dest",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:dest"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: receives source itself after an atomic incref; the caller owns that new reference and releases it with git_odb_object_free. Always returns 0."
+     }
+    },
+    {
+     "name": "source",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:source"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed: its refcount is atomically incremented (git_cached_obj_incref); not NULL-checked."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_object_free",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "object",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "One counted reference given up: NULL is a no-op; git_cached_obj_decref atomically decrements and frees (buffer, then the struct, through git_odb_object__free) at zero. The odb's (or owner repository's) cache holds a reference of its own while it keeps the object. Callable from any thread."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_object_id",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed for the call: a live git_odb_object (refcounted git_cached_obj). Never NULL-checked; its fields (cached.oid/size/type, buffer) are written only by odb_object__alloc and never after, so concurrent readers race nothing."
+     }
+    }
+   ],
+   "ptr_ret": {
+    "ptr": {
+     "scalar": {
+      "by_val": true
+     },
+     "array": null,
+     "string": false,
+     "owned": false,
+     "borrowed": {
+      "lifetime": "arg:object"
+     },
+     "nullable": false,
+     "mutable": false,
+     "note": "&object->cached.oid: the id the object was read under (for a prefix read, the full id found); lives and stays unchanged as long as the object."
+    }
+   }
+  },
+  {
+   "name": "git_odb_object_size",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed for the call: a live git_odb_object (refcounted git_cached_obj). Never NULL-checked; its fields (cached.oid/size/type, buffer) are written only by odb_object__alloc and never after, so concurrent readers race nothing."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_object_type",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "object",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:object"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Borrowed for the call: a live git_odb_object (refcounted git_cached_obj). Never NULL-checked; its fields (cached.oid/size/type, buffer) are written only by odb_object__alloc and never after, so concurrent readers race nothing. The built-in backends only produce commit, tree, blob or tag; a custom backend may report anything."
      }
     }
    ]
@@ -16463,6 +16906,261 @@
    ]
   },
   {
+   "name": "git_odb_read",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. A zero id fails GIT_ENOTFOUND without a lookup; the not-found message formats the id at its own type's hexsize."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success receives one counted reference to the object (from the cache, or freshly read and stored in it with git_cache_store_raw), owned by the caller and released with git_odb_object_free. Set to NULL first on the paths that reach the cache; untouched on early argument and prefix-length failures."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_read_header",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. The SHA-1 empty tree is answered without a backend."
+     }
+    },
+    {
+     "name": "len_p",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:len_p"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out: the object's size. GIT_ASSERT_ARG. Written on success; a backend's read_header may write it before failing."
+     }
+    },
+    {
+     "name": "type_p",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:type_p"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out: the object's type. GIT_ASSERT_ARG. As len_p."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_read_prefix",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock."
+     }
+    },
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out slot: on success receives one counted reference to the object (from the cache, or freshly read and stored in it with git_cache_store_raw), owned by the caller and released with git_odb_object_free. Set to NULL first on the paths that reach the cache; untouched on early argument and prefix-length failures."
+     }
+    },
+    {
+     "name": "short_id",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:short_id"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. Not NULL-checked. len below GIT_OID_MINPREFIXLEN fails GIT_EAMBIGUOUS; above the odb's hexsize it is clamped; the key copies (len+1)/2 bytes with short_id's type."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_refresh",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock. Calls each backend's refresh and git_commit_graph_refresh under the lock; the latter frees the commit-graph file when it changed on disk, while a revwalk on another thread may still hold that file (git_odb__get_commit_graph_file returns it past the lock): a C race that every read miss shares, since reads refresh on a miss."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_set_commit_graph",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "cgraph",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "Ownership passes to the odb on success (freed by odb_free or the next set); NULL removes the graph. Left with the caller when the lock cannot be taken."
+     }
+    },
+    {
+     "name": "odb",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:odb"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Frees the current commit-graph and installs cgraph under the lock; the freed graph's file may still be in use by a revwalk on another thread, which obtained it past the lock (git_odb__get_commit_graph_file): exclusive access needed."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_odb_stream_free",
    "defined_in": "src/libgit2/odb.c",
    "lifetime": {
@@ -16486,6 +17184,86 @@
       "nullable": true,
       "mutable": true,
       "note": "Released: hash_ctx cleaned up and freed, then the free member, which must be set. NULL is a no-op."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_write",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "data",
+     "ptr": {
+      "scalar": null,
+      "array": {
+       "by_val": true
+      },
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:data"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "len bytes, read for the call only (hashed, then handed to the backend's write or stream). NULL only with len 0."
+     }
+    },
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Borrowed for the call: every backend walk takes db->lock; options and do_fsync are read unlocked but fixed once built. The odb's object cache is its owner repository's when rc.owner is set (odb_cache), read under that cache's rwlock. The backend loop runs under the lock; alternates are skipped; a fallback streaming write opens a write stream."
+     }
+    },
+    {
+     "name": "oid",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:oid"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out: the id computed with the odb's oid type; written before the store is attempted, so also on most failures."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_write_multi_pack_index",
+   "defined_in": "src/libgit2/odb.c",
+   "ptr_args": [
+    {
+     "name": "db",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:db"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Walks db->backends WITHOUT the odb lock, and the pack backend's writemidx rescans and replaces its packs and midx unlocked: racing any other use of the odb (a backend added, a read refreshing packs) is a data race. Exclusive access needed."
      }
     }
    ]

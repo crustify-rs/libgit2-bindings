@@ -84,6 +84,34 @@
 //! handle, [`OdbRef`], which an [`OdbArc`] lends through `as_ref()`; nothing hands out
 //! an [`OdbMut`], since a repository holding the odb may use it at any time.
 //!
+//! Two routines break that locking, and are `unsafe` for it, their contract excluding
+//! every other thread for the call: [`OdbRef::write_multi_pack_index`] walks the
+//! backends, and the packed backend its packs, without the lock, and
+//! [`OdbRef::clear_commit_graph`] frees a commit-graph whose file a revision walk reads
+//! past the lock. No type of this crate proves that exclusion: an `OdbArc<'static>`
+//! may still be one a leaked repository owns.
+//!
+//! # Reading and writing
+//!
+//! [`OdbRef::read`], [`read_prefix`](OdbRef::read_prefix),
+//! [`read_header`](OdbRef::read_header), [`exists`](OdbRef::exists) and
+//! [`exists_prefix`](OdbRef::exists_prefix) look an object up by id. libgit2 never checks
+//! the id's type against the odb's: its loose backend formats the id into a path sized
+//! for the odb's type, so a SHA-256 id in a SHA-1 odb writes past that buffer and the
+//! converse leaves part of it unwritten. The wrappers learn the odb's type first (from
+//! `git_odb_expand_ids`, which clears an entry it cannot expand to that type, without a
+//! lookup), and refuse an id of another type before the call: the readers fail with
+//! `GIT_ERROR_INVALID`, and the existence checks answer `false`.
+//!
+//! An object read is an [`OdbObjectArc`]: one counted reference to libgit2's
+//! [`OdbObject`], which the odb's cache (or its owning repository's) may share, and
+//! which outlives the odb. [`OdbRef::write`] hashes with the odb's type and returns the
+//! id. The routines fail with an [`OdbError`], whose code tells a missing object
+//! ([`ErrorCode::NotFound`]) from an ambiguous prefix ([`ErrorCode::Ambiguous`]).
+//!
+//! A walk over every object calls a [`ForeachCallback`] (`git_odb_foreach_cb`) with each
+//! id.
+//!
 //! The constructors pin libgit2's runtime first (`runtime_pinned`), since they
 //! allocate, and return the thread's libgit2 error, copied out, as an [`ErrorBuf`].
 //!
@@ -93,25 +121,31 @@
 //! options the `_ext` constructors read, and [`OdbExpandId`], one query of
 //! `git_odb_expand_ids`, which a caller fills and the routine answers in place.
 
-use core::ffi::{CStr, c_char, c_int, c_uint};
+use core::any::Any;
+use core::ffi::{CStr, c_char, c_int, c_uint, c_void};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
+use core::num::NonZero;
+use core::ops::{BitOr, BitOrAssign, ControlFlow};
 use core::ptr::{self, NonNull};
+use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{
     CAlloc, CAllocZeroed, CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CNew, CPlainElem,
-    CRefSeam, CStrBox, CVec, CZeroable, define_ctype, impl_cdrop_str, impl_cdupclone_str,
-    impl_clenclone, impl_clendrop,
+    CRefClone, CRefSeam, CStrBox, CVec, CZeroable, define_ctype, impl_cdrop_str,
+    impl_cdupclone_str, impl_clenclone, impl_clendrop,
 };
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::filter::StreamError;
 use crate::libgit2::src::libgit2::indexer::IndexerProgressMut;
 use crate::libgit2::src::libgit2::object::ObjectType;
-use crate::libgit2::src::libgit2::oid::{OidMut, OidRef, OidType, UnnamedOidType};
-use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last, runtime_pinned};
+use crate::libgit2::src::libgit2::oid::{Oid, OidMut, OidRef, OidType, UnnamedOidType};
+use crate::libgit2::src::util::errors::{
+    ErrorBuf, ErrorClass, ErrorCode, last, runtime_pinned, set,
+};
 
 /// An object database (`git_odb`): the layout type named by [`OdbArc`] and the
 /// handles, never held by value.
@@ -191,9 +225,12 @@ impl<'a, 'r: 'a> CMutSeam<'a> for OdbMut<'a, 'r> {
 
 // SAFETY: an odb has no thread affinity: libgit2 frees it, its backends and its mutex
 // from whichever thread drops the last reference, and its reference count and owner
-// are atomics. Every routine that changes it takes its mutex (backends, commit-graph)
-// or a cache's rwlock, and the fields read unlocked (options, `do_fsync`) are written
-// only before the odb is published. The one object an odb reaches outside itself is
+// are atomics. Every routine a safe method calls that changes it takes its mutex
+// (backends, commit-graph) or a cache's rwlock, and the fields read unlocked (options,
+// `do_fsync`) are written only before the odb is published. The two routines that touch
+// shared state without the lock (`git_odb_write_multi_pack_index`,
+// `git_odb_set_commit_graph`) are reached only through `unsafe` methods whose contract
+// excludes every other thread for the call. The one object an odb reaches outside itself is
 // its owning repository's object cache (`odb_cache()`), read and written under that
 // cache's rwlock: the repository outlives `'r`, which every owner and handle of the
 // odb carries, so it is live for every such access.
@@ -372,8 +409,8 @@ fn construct(
 impl Odb<'static> {
     /// A new object database with no backends, which hashes SHA-1 ids.
     ///
-    /// Nothing can be read from it or written to it until a backend is added. Fails,
-    /// with libgit2's error, when the odb cannot be allocated.
+    /// Nothing can be read from it or written to it until a backend is added
+    /// ([`OdbRef::add_disk_alternate`] adds a read-only one).
     ///
     /// # Errors
     ///
@@ -1029,6 +1066,874 @@ const _: () = assert!(
     size_of::<OdbExpandId>() == size_of::<ffi::git_odb_expand_id>()
         && align_of::<OdbExpandId>() == align_of::<ffi::git_odb_expand_id>()
 );
+
+/// The failure of an odb routine: the code it returned, and the error it left as the
+/// thread's last libgit2 error, copied out.
+///
+/// The code tells the failures apart: [`ErrorCode::NotFound`] when no object matches an
+/// id or prefix, [`ErrorCode::Ambiguous`] when a prefix matches several objects or is
+/// shorter than `GIT_OID_MINPREFIXLEN` (4 hex digits), [`ErrorCode::Generic`] for the
+/// rest, a refused id of another type than the odb's included.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct OdbError {
+    code: c_int,
+    error: ErrorBuf,
+}
+
+impl OdbError {
+    /// The failure a routine reported by returning `rc`, with the thread's last error.
+    /// A positive `rc`, which no odb routine documents, is reported as `GIT_ERROR`.
+    fn from_libgit2(rc: c_int) -> Self {
+        Self {
+            code: if rc < 0 { rc } else { ErrorCode::Generic.raw() },
+            error: last(),
+        }
+    }
+
+    /// The returned code; `None` for one the header does not name
+    /// ([`raw_code`](Self::raw_code) has it).
+    #[must_use]
+    pub fn code(&self) -> Option<ErrorCode> {
+        ErrorCode::from_raw(self.code)
+    }
+
+    /// The returned code, always negative.
+    #[must_use]
+    pub fn raw_code(&self) -> c_int {
+        self.code
+    }
+
+    /// The error's class; `None` for a class the header does not name
+    /// ([`raw_class`](Self::raw_class) has it).
+    #[must_use]
+    pub fn class(&self) -> Option<ErrorClass> {
+        self.error.class()
+    }
+
+    /// The error's class as libgit2 stored it.
+    #[must_use]
+    pub fn raw_class(&self) -> c_int {
+        self.error.raw_class()
+    }
+
+    /// The error message.
+    #[must_use]
+    pub fn message(&self) -> &CStr {
+        self.error.message()
+    }
+
+    /// The error, without the code.
+    #[must_use]
+    pub fn error(&self) -> &ErrorBuf {
+        &self.error
+    }
+}
+
+/// The error, without the code.
+impl From<OdbError> for ErrorBuf {
+    fn from(error: OdbError) -> Self {
+        error.error
+    }
+}
+
+impl fmt::Debug for OdbError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("OdbError");
+        match self.code() {
+            Some(code) => s.field("code", &code),
+            None => s.field("code", &self.code),
+        };
+        s.field("error", &self.error).finish()
+    }
+}
+
+impl fmt::Display for OdbError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for OdbError {}
+
+/// `Ok` for a routine's 0, its failure otherwise.
+fn status(rc: c_int) -> Result<(), OdbError> {
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(OdbError::from_libgit2(rc))
+    }
+}
+
+/// The object a reading routine returned `rc` for, adopted from its out slot.
+fn read_out(rc: c_int, out: *mut ffi::git_odb_object) -> Result<OdbObjectArc, OdbError> {
+    status(rc)?;
+    // SAFETY: the routine succeeded, so `out` is one counted reference to a live object,
+    // which the caller owns and `git_odb_object_free` releases, as `OdbObjectFree` does.
+    let object = unsafe { OdbObjectArc::from_c(out) };
+    Ok(object.expect("an odb read succeeded without an object"))
+}
+
+/// The message of a refused id, in the wording libgit2 uses for a repository's.
+const MISMATCH: &CStr = c"specified object ID type does not match object database object ID type";
+
+/// Options of an odb lookup (`git_odb_lookup_flags_t`), for [`OdbRef::exists_ext`].
+///
+/// Bits, which combine; this version of libgit2 reads [`NO_REFRESH`](Self::NO_REFRESH)
+/// alone and ignores every other bit, which [`from_bits_retain`](Self::from_bits_retain)
+/// keeps for forward compatibility.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct LookupFlags(ffi::git_odb_lookup_flags_t);
+
+impl LookupFlags {
+    /// No option: a lookup that misses refreshes the odb and looks again.
+    pub const NONE: Self = Self(0);
+    /// A lookup that misses does not refresh the odb (`GIT_ODB_LOOKUP_NO_REFRESH`): for
+    /// a batch of lookups of objects that may legitimately be missing, after one
+    /// [`refresh`](OdbRef::refresh).
+    pub const NO_REFRESH: Self = Self(ffi::GIT_ODB_LOOKUP_NO_REFRESH);
+
+    /// The bits `bits`, every one kept, including those this version ignores.
+    #[must_use]
+    pub const fn from_bits_retain(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    /// The bits, as libgit2 takes them.
+    #[must_use]
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    /// Whether every bit of `other` is set.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl BitOr for LookupFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for LookupFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl OdbRef<'_, '_> {
+    /// The object id type the odb hashes with, which libgit2 publishes no accessor for.
+    ///
+    /// `git_odb_expand_ids` clears an entry it cannot expand to the odb's type
+    /// (`git_oid_clear(&id, db->options.oid_type)`): one of length 0 is neither expanded
+    /// nor looked up, so the probe takes no lock and reaches no backend. `None` only for
+    /// a type this header does not name, which no constructor of this crate builds.
+    fn id_type(&self) -> Option<OidType> {
+        let mut query = ffi::git_odb_expand_id::default();
+        // SAFETY: the handle addresses a live odb for the call, whose options the routine
+        // reads (fixed once the odb is built, so shared reads race nothing); `query` is
+        // one writable entry, which the routine clears in place and does not retain.
+        // With length 0 it neither locks nor calls a backend, then clears this thread's
+        // error state, which the pinned runtime keeps live.
+        let rc = unsafe { ffi::git_odb_expand_ids(self.as_ptr().cast_mut(), &raw mut query, 1) };
+        debug_assert_eq!(rc, 0, "an unexpandable entry is cleared, not an error");
+        OidType::from_raw(ffi::git_oid_t::from(query.id.type_))
+    }
+
+    /// Whether `id` is of the odb's type: the only ids the backends format safely.
+    fn same_type(self, id: OidRef<'_>) -> bool {
+        id.kind().is_some_and(|kind| Some(kind) == self.id_type())
+    }
+
+    /// Refuses an id of another type than the odb's, with `GIT_ERROR_INVALID`
+    /// [`MISMATCH`] set on the thread, as libgit2 refuses one for a repository.
+    fn fits(self, id: OidRef<'_>) -> Result<(), OdbError> {
+        if self.same_type(id) {
+            return Ok(());
+        }
+        set(ErrorClass::Invalid, MISMATCH);
+        Err(OdbError {
+            code: ErrorCode::Generic.raw(),
+            error: last(),
+        })
+    }
+
+    /// Adds the loose and packed backends of the `objects` directory `path` as
+    /// alternates: searched after every main backend, and never written to. Its own
+    /// `info/alternates` are followed, as [`Odb::open`] follows them; a directory the odb
+    /// already reads (by inode) is skipped, and so is one that does not exist.
+    ///
+    /// Wraps `fn::git_odb_add_disk_alternate`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with `-1` and libgit2's error, when an `info/alternates` file cannot be
+    /// read, when a backend cannot be built, or when memory runs out; the backends added
+    /// before the failure stay.
+    #[doc(alias = "git_odb_add_disk_alternate")]
+    pub fn add_disk_alternate(&self, path: &CStr) -> Result<(), OdbError> {
+        // SAFETY: the handle addresses a live odb, whose backend list and commit-graph
+        // the routine changes under the odb's mutex only; `path` is NUL-terminated, read
+        // and copied for the call, never retained.
+        let rc =
+            unsafe { ffi::git_odb_add_disk_alternate(self.as_ptr().cast_mut(), path.as_ptr()) };
+        status(rc)
+    }
+
+    /// Whether an object with the id `id` is in the odb: its cache, then each backend,
+    /// and after a miss each backend again once [refreshed](Self::refresh).
+    ///
+    /// The zero id is in no odb. Neither is an id of another type than the odb's, which
+    /// is not looked up: libgit2 would format it out of bounds (see the
+    /// [module docs](self#reading-and-writing)). A failure to take the odb's lock reads
+    /// as a miss, as the header's "0 otherwise" has it.
+    ///
+    /// Wraps `fn::git_odb_exists`
+    #[doc(alias = "git_odb_exists")]
+    #[must_use]
+    pub fn exists(&self, id: OidRef<'_>) -> bool {
+        if !self.same_type(id) {
+            return false;
+        }
+        // SAFETY: the handle addresses a live odb, which the routine walks under its
+        // mutex and whose cache it reads under the cache's lock; `id` is a live id of
+        // the odb's type (checked above), read for the call only.
+        let rc = unsafe { ffi::git_odb_exists(self.as_ptr().cast_mut(), id.as_ptr()) };
+        rc > 0
+    }
+
+    /// Whether an object with the id `id` is in the odb, as [`exists`](Self::exists),
+    /// with `flags`: [`LookupFlags::NO_REFRESH`] skips the refresh after a miss.
+    ///
+    /// Wraps `fn::git_odb_exists_ext`
+    #[doc(alias = "git_odb_exists_ext")]
+    #[must_use]
+    pub fn exists_ext(&self, id: OidRef<'_>, flags: LookupFlags) -> bool {
+        if !self.same_type(id) {
+            return false;
+        }
+        // SAFETY: as in `exists`; `flags` is plain bits, of which libgit2 reads one.
+        let rc =
+            unsafe { ffi::git_odb_exists_ext(self.as_ptr().cast_mut(), id.as_ptr(), flags.bits()) };
+        rc > 0
+    }
+
+    /// The full id of the one object whose id starts with the first `len` hex digits of
+    /// `short_id`, searched in each backend, and after a miss in each refreshed one.
+    ///
+    /// A `len` of the odb's [`hex_size`](OidType::hex_size) or more asks whether
+    /// `short_id` itself [`exists`](Self::exists).
+    ///
+    /// Wraps `fn::git_odb_exists_prefix`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::Ambiguous`] for a `len` below 4, or when several objects
+    /// match; with [`ErrorCode::NotFound`] when none does; with code `-1` and libgit2's
+    /// `GIT_ERROR_INVALID` error [`MISMATCH`] for a `short_id` of another type than the
+    /// odb's, which is not looked up; and with libgit2's error when a backend fails.
+    #[doc(alias = "git_odb_exists_prefix")]
+    pub fn exists_prefix(&self, short_id: OidRef<'_>, len: usize) -> Result<Oid, OdbError> {
+        self.fits(short_id)?;
+        let mut out = Oid::zeroed();
+        // SAFETY: `out` addresses a writable id, written on success only; the handle a
+        // live odb, walked under its mutex; `short_id` a live id of the odb's type
+        // (checked above), read for the call: a `len` below the odb's hex size copies
+        // `(len + 1) / 2` bytes of it, within its `GIT_OID_MAX_SIZE`, and any other
+        // takes the full-id path.
+        let rc = unsafe {
+            ffi::git_odb_exists_prefix(
+                out.as_mut().as_mut_ptr(),
+                self.as_ptr().cast_mut(),
+                short_id.as_ptr(),
+                len,
+            )
+        };
+        status(rc)?;
+        Ok(out)
+    }
+
+    /// The number of backends the odb reads, alternates included.
+    ///
+    /// Wraps `fn::git_odb_num_backends`
+    #[doc(alias = "git_odb_num_backends")]
+    #[must_use]
+    pub fn num_backends(&self) -> usize {
+        // SAFETY: the handle addresses a live odb, whose backend count the routine reads
+        // under its mutex.
+        unsafe { ffi::git_odb_num_backends(self.as_ptr().cast_mut()) }
+    }
+
+    /// The object with the id `id`: from the cache when it holds it, otherwise read from
+    /// the first backend that has it, checked against its id when strict hash
+    /// verification is on, and cached.
+    ///
+    /// The object is libgit2's, counted: it outlives the odb and every other holder.
+    ///
+    /// Wraps `fn::git_odb_read`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::NotFound`] when no backend has the object (the zero id
+    /// included); with code `-1` and libgit2's `GIT_ERROR_INVALID` error [`MISMATCH`] for
+    /// an `id` of another type than the odb's, which is not looked up; and with libgit2's
+    /// error when a backend fails to read it, or its content does not hash to `id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an odb read succeeded without an object`, only if libgit2 breaks its
+    /// contract.
+    #[doc(alias = "git_odb_read")]
+    pub fn read(&self, id: OidRef<'_>) -> Result<OdbObjectArc, OdbError> {
+        self.fits(id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, set to one counted reference on success; the
+        // handle addresses a live odb, walked under its mutex and cached under its
+        // cache's lock; `id` is a live id of the odb's type (checked above), read for
+        // the call only.
+        let rc = unsafe { ffi::git_odb_read(&raw mut out, self.as_ptr().cast_mut(), id.as_ptr()) };
+        read_out(rc, out)
+    }
+
+    /// The size and type of the object with the id `id`, read without its content where
+    /// a backend can (the loose and packed ones can), otherwise from the whole object.
+    ///
+    /// The type is `None` only for one a custom backend reported that names no object
+    /// type; libgit2's own backends refuse such an object.
+    ///
+    /// Wraps `fn::git_odb_read_header`
+    ///
+    /// # Errors
+    ///
+    /// Fails as [`read`](Self::read) does.
+    #[doc(alias = "git_odb_read_header")]
+    pub fn read_header(&self, id: OidRef<'_>) -> Result<(usize, Option<ObjectType>), OdbError> {
+        self.fits(id)?;
+        let (mut len, mut kind) = (0, ffi::GIT_OBJECT_INVALID);
+        // SAFETY: `len` and `kind` are writable out slots; the handle addresses a live
+        // odb, walked under its mutex; `id` is a live id of the odb's type (checked
+        // above), read for the call only. An object the routine reads to answer is
+        // released before it returns.
+        let rc = unsafe {
+            ffi::git_odb_read_header(
+                &raw mut len,
+                &raw mut kind,
+                self.as_ptr().cast_mut(),
+                id.as_ptr(),
+            )
+        };
+        status(rc)?;
+        Ok((len, ObjectType::from_raw(kind)))
+    }
+
+    /// The one object whose id starts with the first `len` hex digits of `short_id`, as
+    /// [`read`](Self::read) reads it; a `len` past the odb's
+    /// [`hex_size`](OidType::hex_size) reads as the whole id.
+    ///
+    /// Wraps `fn::git_odb_read_prefix`
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ErrorCode::Ambiguous`] for a `len` below 4, or when several objects
+    /// match; otherwise as [`read`](Self::read) does.
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an odb read succeeded without an object`, only if libgit2 breaks its
+    /// contract.
+    #[doc(alias = "git_odb_read_prefix")]
+    pub fn read_prefix(&self, short_id: OidRef<'_>, len: usize) -> Result<OdbObjectArc, OdbError> {
+        self.fits(short_id)?;
+        let mut out = ptr::null_mut();
+        // SAFETY: as in `read`; `len` is clamped to the odb's hex size before the prefix
+        // is copied, so at most `GIT_OID_MAX_SIZE` bytes of `short_id` are read.
+        let rc = unsafe {
+            ffi::git_odb_read_prefix(
+                &raw mut out,
+                self.as_ptr().cast_mut(),
+                short_id.as_ptr(),
+                len,
+            )
+        };
+        read_out(rc, out)
+    }
+
+    /// Reloads what each backend knows of its directory (new packfiles, a rewritten
+    /// multi-pack-index) and drops a commit-graph file that changed on disk.
+    ///
+    /// Never needed for correctness: a lookup that misses refreshes on its own, unless
+    /// [`LookupFlags::NO_REFRESH`] says otherwise.
+    ///
+    /// Wraps `fn::git_odb_refresh`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when a backend cannot rescan its directory.
+    #[doc(alias = "git_odb_refresh")]
+    pub fn refresh(&self) -> Result<(), OdbError> {
+        // SAFETY: the handle addresses a live odb, whose backends and commit-graph the
+        // routine refreshes under its mutex.
+        let rc = unsafe { ffi::git_odb_refresh(self.as_ptr().cast_mut()) };
+        status(rc)
+    }
+
+    /// Removes the odb's commit-graph, freeing it; reads then walk commits without it.
+    ///
+    /// The odb loads one with its first on-disk backend ([`Odb::open`],
+    /// [`add_disk_alternate`](Self::add_disk_alternate)); adding a disk backend later
+    /// loads one again. Installing a commit-graph of the caller's (the routine's other
+    /// use) awaits a wrapper of `git_commit_graph`.
+    ///
+    /// Wraps `fn::git_odb_set_commit_graph`
+    ///
+    /// # Safety
+    ///
+    /// No other thread may use the odb until the call returns: not through another
+    /// handle or owner of it, and not through a repository that owns it. The routine
+    /// frees the graph under the odb's lock, but libgit2's revision walk reads the
+    /// graph's file after that lock is released, so a walk running meanwhile would read
+    /// freed memory.
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when the odb's lock cannot be taken.
+    #[doc(alias = "git_odb_set_commit_graph")]
+    pub unsafe fn clear_commit_graph(&self) -> Result<(), OdbError> {
+        // SAFETY: the handle addresses a live odb; NULL asks the routine to free the
+        // graph it holds and keep none, under its mutex; per this function's contract no
+        // other thread holds the freed graph's file.
+        let rc =
+            unsafe { ffi::git_odb_set_commit_graph(self.as_ptr().cast_mut(), ptr::null_mut()) };
+        status(rc)
+    }
+
+    /// Writes an object of type `kind` with the content `data` to the first main backend
+    /// that writes (alternates never do), and returns its id, hashed with the odb's id
+    /// type. An object the odb already has is not written again: its file's time is
+    /// refreshed instead.
+    ///
+    /// The content is not validated against `kind`: a tree or commit libgit2 could not
+    /// parse is stored as given.
+    ///
+    /// Wraps `fn::git_odb_write`
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when no backend can write (`GIT_ERROR_ODB`, "cannot
+    /// write object - unsupported in the loaded odb backends" for an odb without one),
+    /// or when the write fails.
+    #[doc(alias = "git_odb_write")]
+    pub fn write(&self, data: &[u8], kind: ObjectType) -> Result<Oid, OdbError> {
+        let mut out = Oid::zeroed();
+        // SAFETY: `out` addresses a writable id; the handle a live odb, written under its
+        // mutex; `data` is valid for reads of its length (any non-NULL pointer when
+        // empty), read for the call only; `kind` names an object type.
+        let rc = unsafe {
+            ffi::git_odb_write(
+                out.as_mut().as_mut_ptr(),
+                self.as_ptr().cast_mut(),
+                data.as_ptr().cast(),
+                data.len(),
+                kind.raw(),
+            )
+        };
+        status(rc)?;
+        Ok(out)
+    }
+
+    /// Writes a `multi-pack-index` next to the packfiles of each main backend that packs,
+    /// indexing every object of every pack, then reloads it.
+    ///
+    /// Wraps `fn::git_odb_write_multi_pack_index`
+    ///
+    /// # Safety
+    ///
+    /// No other thread may use the odb until the call returns: not through another
+    /// handle or owner of it, and not through a repository that owns it. Unlike every
+    /// other odb routine, this one walks the backend list without the odb's lock, and
+    /// the packed backend rescans and replaces its pack list unlocked, so a concurrent
+    /// read, refresh or added backend is a data race.
+    ///
+    /// # Errors
+    ///
+    /// Fails, with libgit2's error, when no main backend packs (`GIT_ERROR_ODB`, "cannot
+    /// write multi-pack-index - unsupported in the loaded odb backends"), or when a pack
+    /// index cannot be read or the file cannot be written.
+    #[doc(alias = "git_odb_write_multi_pack_index")]
+    pub unsafe fn write_multi_pack_index(&self) -> Result<(), OdbError> {
+        // SAFETY: the handle addresses a live odb; per this function's contract no other
+        // thread uses it, so the unlocked walk of its backends and of the packed
+        // backend's packs races nothing.
+        let rc = unsafe { ffi::git_odb_write_multi_pack_index(self.as_ptr().cast_mut()) };
+        status(rc)
+    }
+}
+
+define_ctype!(
+    /// An object read from an object database (`git_odb_object`): its id, its type and
+    /// its raw, uncompressed content, without the `<type> <size>` header.
+    ///
+    /// libgit2 allocates, counts and frees it, so it is only ever reached through an
+    /// [`OdbObjectArc`] and the handles it lends, from [`OdbRef::read`] or
+    /// [`OdbRef::read_prefix`]. Nothing in it changes once it is read, and it keeps no
+    /// pointer to the odb, which it may outlive.
+    ///
+    /// Wraps `ty::git_odb_object`
+    #[doc(alias = "git_odb_object")]
+    OdbObject,
+    OdbObjectRef,
+    OdbObjectMut,
+    ffi::git_odb_object
+);
+
+// SAFETY: an odb object has no thread affinity: its count is atomic
+// (`git_cached_obj_decref`), the last reference frees it from whichever thread drops it,
+// and nothing else of it is written after it is read.
+unsafe impl Send for OdbObject {}
+
+// SAFETY: as above: every reader only reads its id, type, size and content, which are
+// written once, before the object is published to the cache or the reader.
+unsafe impl Sync for OdbObject {}
+
+// SAFETY: `OdbObjectRef` is a shared borrow, as `&OdbObject`, and `OdbObject` is `Sync`.
+unsafe impl Send for OdbObjectRef<'_> {}
+
+// SAFETY: as above.
+unsafe impl Sync for OdbObjectRef<'_> {}
+
+// SAFETY: `OdbObjectMut` is an exclusive borrow, as `&mut OdbObject`, and `OdbObject` is
+// `Send`; nothing lends one, since an object is always shared with the cache.
+unsafe impl Send for OdbObjectMut<'_> {}
+
+// SAFETY: `&OdbObjectMut` only reaches the shared handle, and `OdbObject` is `Sync`.
+unsafe impl Sync for OdbObjectMut<'_> {}
+
+impl<'a> OdbObjectRef<'a> {
+    /// The id the object was read under; for [`OdbRef::read_prefix`], the full id it
+    /// found.
+    ///
+    /// Wraps `fn::git_odb_object_id`
+    ///
+    /// # Panics
+    ///
+    /// Panics, with `an odb object always has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_odb_object_id")]
+    #[must_use]
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the handle addresses a live object for `'a`, which the routine only
+        // reads.
+        let id = unsafe { ffi::git_odb_object_id(self.as_ptr().cast_mut()) };
+        // SAFETY: `id` addresses the object's own id, never written after the read, which
+        // lives as long as the object, past `'a`.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("an odb object always has an id")
+    }
+
+    /// The object's content: its [`size`](Self::size) bytes, NUL bytes included,
+    /// borrowed in place for as long as the handle. The object holds them, and nothing
+    /// writes them.
+    ///
+    /// The content lives no longer than the object's borrow:
+    ///
+    /// ```compile_fail,E0505
+    /// use libgit2::libgit2::src::libgit2::object::ObjectType;
+    /// use libgit2::libgit2::src::libgit2::odb::Odb;
+    ///
+    /// let odb = Odb::open(c".git/objects").unwrap();
+    /// let id = odb.as_ref().write(b"x", ObjectType::Blob).unwrap();
+    /// let object = odb.as_ref().read(id.as_ref()).unwrap();
+    /// let content = object.as_ref().data();
+    /// drop(object);
+    /// let _ = content.len();
+    /// ```
+    ///
+    /// Wraps `fn::git_odb_object_data`
+    #[doc(alias = "git_odb_object_data")]
+    #[must_use]
+    pub fn data(&self) -> &'a [u8] {
+        let size = self.size();
+        // SAFETY: the handle addresses a live object for `'a`, which the routine only
+        // reads.
+        let data = unsafe { ffi::git_odb_object_data(self.as_ptr().cast_mut()) };
+        if size == 0 || data.is_null() {
+            // A custom backend may hand back NULL for an empty object.
+            return &[];
+        }
+        // SAFETY: an object's buffer is the `size` initialised bytes its backend read,
+        // owned by the object, freed with it and never written after the read; the
+        // object lives past `'a`.
+        unsafe { core::slice::from_raw_parts(data.cast::<u8>(), size) }
+    }
+
+    /// The size of the object's [`data`](Self::data), in bytes.
+    ///
+    /// Wraps `fn::git_odb_object_size`
+    #[doc(alias = "git_odb_object_size")]
+    #[must_use]
+    pub fn size(&self) -> usize {
+        // SAFETY: the handle addresses a live object for `'a`, which the routine only
+        // reads.
+        unsafe { ffi::git_odb_object_size(self.as_ptr().cast_mut()) }
+    }
+
+    /// The object's type. `None` only for one a custom backend reported that names no
+    /// object type; libgit2's own backends refuse such an object.
+    ///
+    /// Wraps `fn::git_odb_object_type`
+    #[doc(alias = "git_odb_object_type")]
+    #[must_use]
+    pub fn kind(&self) -> Option<ObjectType> {
+        // SAFETY: the handle addresses a live object for `'a`, which the routine only
+        // reads.
+        let kind = unsafe { ffi::git_odb_object_type(self.as_ptr().cast_mut()) };
+        ObjectType::from_raw(kind)
+    }
+}
+
+impl fmt::Debug for OdbObjectRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OdbObject")
+            .field("id", &self.id())
+            .field("kind", &self.kind())
+            .field("size", &self.size())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for OdbObjectMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Releases one counted reference to an [`OdbObject`] through `git_odb_object_free`,
+/// and takes another through `git_odb_object_dup`.
+///
+/// The free decrements the object's atomic count and, at zero, frees its content and
+/// itself; the odb's cache counts a reference of its own while it keeps the object. The
+/// copy increments the same count and hands back the same pointer. Neither can fail,
+/// and neither allocates.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OdbObjectFree;
+
+// SAFETY: `git_odb_object_free` gives back exactly one counted reference of a live
+// object (a NULL pointer, which it skips, never reaches it); the object is freed once,
+// when the count, of which the cache's reference is part, reaches zero. It reads nothing
+// but the object.
+unsafe impl CDrop<OdbObject> for OdbObjectFree {
+    /// Wraps `fn::git_odb_object_free`
+    #[doc(alias = "git_odb_object_free")]
+    unsafe fn c_drop(&self, ptr: NonNull<OdbObject>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live object of which the
+        // caller gives up one reference; `OdbObject` is transparent over
+        // `git_odb_object`.
+        unsafe { ffi::git_odb_object_free(ptr.as_ptr().cast()) }
+    }
+}
+
+// SAFETY: `git_odb_object_dup` atomically increments the count of the live object it is
+// given and stores that same pointer in `dest`, returning 0: the object then owes one
+// more `git_odb_object_free`, which this policy performs. `c_is_sole_owner` keeps its
+// `false` default: the cache counts a reference no owner sees.
+unsafe impl CRefClone<OdbObject> for OdbObjectFree {
+    /// Wraps `fn::git_odb_object_dup`
+    #[doc(alias = "git_odb_object_dup")]
+    unsafe fn c_up_ref(&self, ptr: NonNull<OdbObject>) -> bool {
+        let mut dest = ptr::null_mut();
+        // SAFETY: `dest` is a writable slot; `ptr` addresses a live object whose
+        // reference the caller holds, per `c_up_ref`'s contract.
+        let rc = unsafe { ffi::git_odb_object_dup(&raw mut dest, ptr.as_ptr().cast()) };
+        debug_assert_eq!(dest, ptr.as_ptr().cast());
+        rc == 0
+    }
+}
+
+/// One counted reference to an [`OdbObject`], given back by `git_odb_object_free` on
+/// drop; `clone` takes another through `git_odb_object_dup`, on the same object.
+///
+/// It lends the shared handle through `as_ref()`, and never the exclusive one:
+/// `get_mut` answers `None`, since the cache may hold the object too, and nothing
+/// copies an object.
+///
+/// ```
+/// use libgit2::libgit2::src::libgit2::object::ObjectType;
+/// use libgit2::libgit2::src::libgit2::odb::Odb;
+///
+/// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+/// let dir = std::env::temp_dir().join(format!("odb-object-doc-{}", std::process::id()));
+/// std::fs::create_dir_all(&dir).unwrap();
+/// let path = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+/// let odb = Odb::open(&path).unwrap();
+/// let id = odb.as_ref().write(b"hello", ObjectType::Blob).unwrap();
+/// let object = odb.as_ref().read(id.as_ref()).unwrap();
+/// let mut again = object.clone();
+/// assert!(again.get_mut().is_none());
+/// drop(odb);
+/// assert_eq!(again.as_ref().data(), b"hello");
+/// assert_eq!(again.as_ref().kind(), Some(ObjectType::Blob));
+/// assert_eq!(again.as_ref().id(), id.as_ref());
+/// # drop((object, again));
+/// # std::fs::remove_dir_all(&dir).unwrap();
+/// ```
+pub type OdbObjectArc = CArc<OdbObject, OdbObjectFree>;
+
+const _: () = assert!(size_of::<OdbObjectArc>() == size_of::<*mut ffi::git_odb_object>());
+
+/// The closure behind a [`ForeachCallback`].
+type ForeachFn<'f> = dyn FnMut(OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f;
+
+/// A `git_odb_foreach_cb`: the callback an odb walk calls with the id of each object of
+/// each backend, in the backends' order.
+///
+/// Built over a closure with [`new`](Self::new). Its `extern "C"` trampoline lends the
+/// closure each id as an [`OidRef`] valid for the call only (a backend lends a local or
+/// an index entry), and returns [`ControlFlow::Continue`] as 0 and
+/// [`ControlFlow::Break`]`(code)` as `code`, which a non-zero type guarantees stops the
+/// walk. A panic in the closure does not cross into C: the trampoline stops the walk
+/// with `GIT_EUSER` and the panic resumes once control is back in Rust, from
+/// [`call`](Self::call) or from the wrapper that ran the walk.
+///
+/// ```
+/// use std::ops::ControlFlow;
+///
+/// use libgit2::libgit2::src::libgit2::odb::ForeachCallback;
+/// use libgit2::libgit2::src::libgit2::oid::{Oid, OidRef, OidType};
+///
+/// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+/// let mut seen = Vec::new();
+/// let mut collect = |id: OidRef<'_>| {
+///     seen.push(id.to_oid());
+///     ControlFlow::Continue(())
+/// };
+/// let mut callback = ForeachCallback::new(&mut collect);
+/// let id = Oid::zero(OidType::Sha1);
+/// assert_eq!(callback.call(id.as_ref()), ControlFlow::Continue(()));
+/// drop(callback);
+/// assert_eq!(seen, [id]);
+/// ```
+///
+/// The id cannot outlive the call:
+///
+/// ```compile_fail,E0521
+/// use std::ops::ControlFlow;
+/// use libgit2::libgit2::src::libgit2::odb::ForeachCallback;
+/// use libgit2::libgit2::src::libgit2::oid::OidRef;
+///
+/// fn keep<'k>(kept: &mut Option<OidRef<'k>>) {
+///     let mut f = |id: OidRef<'_>| {
+///         *kept = Some(id);
+///         ControlFlow::Continue(())
+///     };
+///     let _ = ForeachCallback::new(&mut f);
+/// }
+/// ```
+///
+/// It borrows its closure exclusively and stays on its thread: libgit2 calls it
+/// synchronously, and the closure need not be `Send`.
+///
+/// ```compile_fail,E0277
+/// use std::ops::ControlFlow;
+/// use libgit2::libgit2::src::libgit2::odb::ForeachCallback;
+/// use libgit2::libgit2::src::libgit2::oid::OidRef;
+///
+/// fn send<T: Send>(_: T) {}
+/// let mut f = |_: OidRef<'_>| ControlFlow::Continue(());
+/// send(ForeachCallback::new(&mut f));
+/// ```
+///
+/// Wraps `ty::git_odb_foreach_cb`
+#[doc(alias = "git_odb_foreach_cb")]
+pub struct ForeachCallback<'f> {
+    f: &'f mut ForeachFn<'f>,
+    /// A panic the closure raised inside a C walk, resumed once the walk returns.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> ForeachCallback<'f> {
+    /// The callback that calls `f` with each object's id, until it breaks.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f,
+    {
+        Self { f, panic: None }
+    }
+
+    /// Calls the callback with `id`, through the trampoline libgit2 calls, and returns
+    /// what libgit2 would read from it. A panic of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: the trampoline is never NULL"
+    )]
+    pub fn call(&mut self, id: OidRef<'_>) -> ControlFlow<NonZero<c_int>> {
+        let rc = self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is never NULL");
+            // SAFETY: `payload` is this callback, which nothing else uses during the
+            // walk; `id` a live id, lent for the call, which only reads it: the
+            // trampoline's contract.
+            unsafe { callback(id.as_ptr(), payload) }
+        });
+        match NonZero::new(rc) {
+            None => ControlFlow::Continue(()),
+            Some(code) => ControlFlow::Break(code),
+        }
+    }
+
+    /// Runs `walk` with the C callback and its payload, as the wrapper of a routine that
+    /// calls the callback (`git_odb_foreach`) hands them to it, then resumes a panic the
+    /// closure raised meanwhile. The payload is this callback, which nothing else
+    /// touches until `walk` returns.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_odb_foreach_cb, *mut c_void) -> R,
+    ) -> R {
+        let result = walk(Some(foreach_with), ptr::from_mut(self).cast());
+        if let Some(panic) = self.panic.take() {
+            panic::resume_unwind(panic);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for ForeachCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ForeachCallback")
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_odb_foreach_cb` over a [`ForeachCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`ForeachCallback`] that nothing else uses during the
+/// call, and `id` be NULL or a `git_oid` live and unchanged for the call.
+unsafe extern "C" fn foreach_with(id: *const ffi::git_oid, payload: *mut c_void) -> c_int {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for the
+    // call alone.
+    let callback = unsafe { &mut *payload.cast::<ForeachCallback<'_>>() };
+    if callback.panic.is_some() {
+        return ErrorCode::User.raw();
+    }
+    // SAFETY: per this function's contract, a non-NULL `id` is live and unchanged for the
+    // call; the closure only reads it, through a handle that cannot outlive the call.
+    let Some(id) = (unsafe { OidRef::from_ptr(id.cast_mut()) }) else {
+        // libgit2's backends never pass NULL; stop the walk rather than invent an id.
+        return ErrorCode::User.raw();
+    };
+    match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(id))) {
+        Ok(ControlFlow::Continue(())) => 0,
+        Ok(ControlFlow::Break(code)) => code.get(),
+        Err(panic) => {
+            callback.panic = Some(panic);
+            ErrorCode::User.raw()
+        }
+    }
+}
 
 /// The alignment `git_odb_backend_data_alloc` storage is guaranteed to have.
 ///
@@ -3633,7 +4538,7 @@ mod unit_tests {
             _: usize,
             _: *mut ffi::git_indexer_progress,
         ) -> c_int {
-            crate::libgit2::src::util::errors::set(ErrorClass::Indexer, c"bad pack");
+            set(ErrorClass::Indexer, c"bad pack");
             -7
         }
 
@@ -3650,6 +4555,233 @@ mod unit_tests {
             assert_eq!(err.raw_code(), -7);
             assert_eq!(err.class(), Some(ErrorClass::Indexer));
             assert_eq!(err.message(), c"bad pack");
+        }
+    }
+
+    /// The readers' and writers' internals: the id-type probe and the refusal of other
+    /// ids it backs, the error type, the lookup flags, the object policy, and the foreach
+    /// trampoline under a real `git_odb_foreach` walk.
+    mod odb_ops {
+        use std::ffi::CString;
+
+        use super::super::*;
+
+        /// The libgit2 calls below need the runtime the constructors pin.
+        fn init() {
+            assert!(runtime_pinned());
+        }
+
+        /// A temporary `objects` directory, removed on drop.
+        struct Objects(std::path::PathBuf, CString);
+
+        impl Objects {
+            fn new(tag: &str) -> Self {
+                let path = std::env::temp_dir()
+                    .join(format!("crustify-odb-unit-{}-{tag}", std::process::id()));
+                drop(std::fs::remove_dir_all(&path));
+                std::fs::create_dir_all(&path).unwrap();
+                let c = CString::new(path.to_str().unwrap()).unwrap();
+                Self(path, c)
+            }
+        }
+
+        impl Drop for Objects {
+            fn drop(&mut self) {
+                drop(std::fs::remove_dir_all(&self.0));
+            }
+        }
+
+        const TYPES: [OidType; 2] = [OidType::Sha1, OidType::Sha256];
+
+        #[test]
+        fn lookup_flags_are_bits() {
+            assert_eq!(LookupFlags::default(), LookupFlags::NONE);
+            assert_eq!(LookupFlags::NONE.bits(), 0);
+            assert_eq!(
+                LookupFlags::NO_REFRESH.bits(),
+                ffi::GIT_ODB_LOOKUP_NO_REFRESH
+            );
+            let mut flags = LookupFlags::from_bits_retain(0x80);
+            assert!(!flags.contains(LookupFlags::NO_REFRESH));
+            flags |= LookupFlags::NO_REFRESH;
+            assert!(flags.contains(LookupFlags::NO_REFRESH));
+            assert!(flags.contains(LookupFlags::NONE));
+            assert_eq!(flags.bits(), 0x81);
+            assert_eq!(
+                LookupFlags::NONE | LookupFlags::NO_REFRESH,
+                LookupFlags::NO_REFRESH
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn errors_carry_the_code_and_the_thread_error() {
+            init();
+            set(ErrorClass::Odb, c"first");
+            let error = OdbError::from_libgit2(ErrorCode::NotFound.raw());
+            assert_eq!(error.code(), Some(ErrorCode::NotFound));
+            assert_eq!(error.raw_code(), ffi::GIT_ENOTFOUND);
+            assert_eq!(error.class(), Some(ErrorClass::Odb));
+            assert_eq!(error.raw_class(), ErrorClass::Odb.raw());
+            assert_eq!(error.message(), c"first");
+            assert_eq!(error.to_string(), error.error().to_string());
+            assert!(format!("{error:?}").contains("NotFound"));
+            // A positive return, which no routine documents, is a generic failure; a code
+            // the header does not name is kept raw.
+            assert_eq!(OdbError::from_libgit2(1).raw_code(), ffi::GIT_ERROR);
+            let unnamed = OdbError::from_libgit2(-12_345);
+            assert_eq!((unnamed.code(), unnamed.raw_code()), (None, -12_345));
+            assert!(format!("{unnamed:?}").contains("-12345"));
+            let buf: ErrorBuf = unnamed.clone().into();
+            assert_eq!(&buf, unnamed.error());
+            assert_eq!(status(0), Ok(()));
+            assert_eq!(status(-3).unwrap_err().raw_code(), -3);
+        }
+
+        /// The probe answers every constructor's type, reaching no backend and taking no
+        /// lock, and leaves no error behind.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn the_probe_answers_the_odbs_type() {
+            init();
+            let dir = Objects::new("probe");
+            assert_eq!(Odb::new().unwrap().as_ref().id_type(), Some(OidType::Sha1));
+            assert_eq!(
+                Odb::open(&dir.1).unwrap().as_ref().id_type(),
+                Some(OidType::Sha1)
+            );
+            for kind in TYPES {
+                let odb = Odb::with_oid_type(kind).unwrap();
+                assert_eq!(odb.as_ref().id_type(), Some(kind));
+                let odb = Odb::open_with_oid_type(&dir.1, kind).unwrap();
+                set(ErrorClass::Odb, c"stale");
+                assert_eq!(odb.as_ref().id_type(), Some(kind));
+                // `git_odb_expand_ids` clears the thread's error.
+                assert_eq!(last().raw_class(), 0, "no error is left");
+            }
+        }
+
+        /// The C defect the readers correct: an id of another type, of none, or of an
+        /// unnamed one is refused before libgit2 formats it, with a set error.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn ids_of_another_type_are_refused_before_the_call() {
+            init();
+            for kind in TYPES {
+                let odb = Odb::with_oid_type(kind).unwrap();
+                let handle = odb.as_ref();
+                let mut own = Oid::zero(kind);
+                own.as_mut().set_id([7; 32]);
+                assert!(handle.same_type(own.as_ref()));
+                assert!(handle.fits(own.as_ref()).is_ok());
+                for raw in [0, 1, 2, 3, 0xFF] {
+                    let mut id = own;
+                    id.as_mut().set_raw_kind(raw);
+                    if id.as_ref().kind() == Some(kind) {
+                        continue;
+                    }
+                    assert!(!handle.same_type(id.as_ref()), "{raw}");
+                    assert!(!handle.exists(id.as_ref()));
+                    let error = handle.fits(id.as_ref()).unwrap_err();
+                    assert_eq!(error.code(), Some(ErrorCode::Generic));
+                    assert_eq!(error.class(), Some(ErrorClass::Invalid));
+                    assert_eq!(error.message(), MISMATCH);
+                    assert_eq!(handle.read(id.as_ref()).unwrap_err(), error);
+                    assert_eq!(handle.read_prefix(id.as_ref(), 64).unwrap_err(), error);
+                    assert_eq!(handle.exists_prefix(id.as_ref(), 64).unwrap_err(), error);
+                    assert_eq!(handle.read_header(id.as_ref()).unwrap_err(), error);
+                }
+            }
+        }
+
+        /// The object policy takes and gives back references on the same object.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn the_object_policy_counts_one_object() {
+            init();
+            let dir = Objects::new("policy");
+            let odb = Odb::open(&dir.1).unwrap();
+            let id = odb.as_ref().write(b"counted", ObjectType::Blob).unwrap();
+            let object = odb.as_ref().read(id.as_ref()).unwrap();
+            let ptr = NonNull::new(object.as_c_ptr().cast::<OdbObject>()).unwrap();
+            // SAFETY: `ptr` is the live object `object` holds a reference to.
+            assert!(unsafe { OdbObjectFree.c_up_ref(ptr) });
+            // SAFETY: gives back the reference just taken.
+            unsafe { OdbObjectFree.c_drop(ptr) };
+            assert_eq!(object.as_ref().data(), b"counted");
+            assert!(format!("{:?}", object.as_ref()).contains("Blob"));
+            assert_eq!(read_out(-1, ptr::null_mut()).unwrap_err().raw_code(), -1);
+        }
+
+        /// The trampoline under `git_odb_foreach`: every id of every backend, a break
+        /// returned as the walk's result, and a panic resumed once the walk is back.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn the_trampoline_walks_every_object() {
+            init();
+            let dir = Objects::new("foreach");
+            let odb = Odb::open(&dir.1).unwrap();
+            let mut written: Vec<Oid> = (0..5)
+                .map(|i| {
+                    let data = format!("object {i}");
+                    odb.as_ref()
+                        .write(data.as_bytes(), ObjectType::Blob)
+                        .unwrap()
+                })
+                .collect();
+            written.sort();
+            let walk = |callback: &mut ForeachCallback<'_>| {
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: a live odb; `cb` and `payload` are the trampoline and its
+                    // callback, live for the walk.
+                    unsafe { ffi::git_odb_foreach(odb.as_c_ptr(), cb, payload) }
+                })
+            };
+            let mut seen = Vec::new();
+            let mut collect = |id: OidRef<'_>| {
+                seen.push(id.to_oid());
+                ControlFlow::Continue(())
+            };
+            assert_eq!(walk(&mut ForeachCallback::new(&mut collect)), 0);
+            seen.sort();
+            assert_eq!(seen, written);
+            let mut calls = 0;
+            let mut stop = |_: OidRef<'_>| {
+                calls += 1;
+                ControlFlow::Break(NonZero::new(-77).unwrap())
+            };
+            assert_eq!(walk(&mut ForeachCallback::new(&mut stop)), -77);
+            assert_eq!(calls, 1);
+            let mut boom = |_: OidRef<'_>| -> ControlFlow<NonZero<c_int>> { panic!("boom") };
+            let mut callback = ForeachCallback::new(&mut boom);
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| walk(&mut callback)));
+            assert_eq!(caught.unwrap_err().downcast_ref::<&str>(), Some(&"boom"));
+            assert!(format!("{callback:?}").contains("panicked: false"));
+        }
+
+        /// The trampoline refuses a NULL id and a callback that already panicked.
+        #[test]
+        fn the_trampoline_stops_on_null_and_after_a_panic() {
+            let mut calls = 0;
+            let mut count = |_: OidRef<'_>| {
+                calls += 1;
+                ControlFlow::Continue(())
+            };
+            let mut callback = ForeachCallback::new(&mut count);
+            let payload = ptr::from_mut(&mut callback).cast::<c_void>();
+            // SAFETY: `payload` is the live callback, used by nothing else meanwhile; the
+            // id is NULL, which the trampoline accepts.
+            let rc = unsafe { foreach_with(ptr::null(), payload) };
+            assert_eq!(rc, ErrorCode::User.raw());
+            callback.panic = Some(Box::new("earlier"));
+            let payload = ptr::from_mut(&mut callback).cast::<c_void>();
+            let id = Oid::zero(OidType::Sha1);
+            // SAFETY: as above, with a live id; the payload is taken again after the
+            // write above.
+            let rc = unsafe { foreach_with(id.as_ref().as_ptr(), payload) };
+            assert_eq!(rc, ErrorCode::User.raw());
+            drop(callback);
+            assert_eq!(calls, 0);
         }
     }
 }

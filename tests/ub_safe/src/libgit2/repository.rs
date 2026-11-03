@@ -1135,11 +1135,12 @@ mod routines {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use libgit2::libgit2::src::libgit2::object::ObjectType;
     use libgit2::libgit2::src::libgit2::odb::Odb;
     use libgit2::libgit2::src::libgit2::oid::OidType;
     use libgit2::libgit2::src::libgit2::repository::Repository;
 
-    use crate::fixture::odb::{Repo, backends, write_blob};
+    use crate::fixture::odb::Repo;
 
     fn scratch(tag: &str) -> PathBuf {
         crate::fixture::init();
@@ -1165,8 +1166,8 @@ mod routines {
             // The caller's reference is gone; the repository's keeps the odb.
             let lent = repo.odb();
             // No backends: the odb answers, and refuses the write.
-            assert_eq!(backends(&lent), 0);
-            assert!(write_blob(&lent, b"x").is_err());
+            assert_eq!(lent.as_ref().num_backends(), 0);
+            assert!(lent.as_ref().write(b"x", ObjectType::Blob).is_err());
             drop(lent);
             drop(repo);
         }
@@ -1257,6 +1258,7 @@ mod heads_and_parts {
     use libgit2::libgit2::src::libgit2::annotated_commit::AnnotatedCommit;
     use libgit2::libgit2::src::libgit2::config::{Config, ConfigArc};
     use libgit2::libgit2::src::libgit2::index::{Index, IndexArc};
+    use libgit2::libgit2::src::libgit2::object::ObjectType;
     use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc};
     use libgit2::libgit2::src::libgit2::oid::{Oid, OidRef, OidType};
     use libgit2::libgit2::src::libgit2::repository::{
@@ -1265,8 +1267,8 @@ mod heads_and_parts {
     };
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
+    use crate::fixture::isolated;
     use crate::fixture::worktree::WorktreeRepo;
-    use crate::fixture::{isolated, odb};
 
     fn resource(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1363,7 +1365,7 @@ mod heads_and_parts {
             for odb in [first, second] {
                 s.spawn(move || {
                     for _ in 0..50 {
-                        assert!(odb::backends(&odb) > 0);
+                        assert!(odb.as_ref().num_backends() > 0);
                     }
                     drop(odb);
                 });
@@ -1400,7 +1402,7 @@ mod heads_and_parts {
                     .set_odb(Odb::with_oid_type(kind).unwrap())
                     .unwrap();
                 let lent = repo.as_ref().odb().unwrap();
-                assert_eq!(odb::backends(&lent), 0);
+                assert_eq!(lent.as_ref().num_backends(), 0);
             }
             let other = if kind == OidType::Sha1 {
                 OidType::Sha256
@@ -1413,7 +1415,7 @@ mod heads_and_parts {
                 .unwrap_err();
             assert_eq!(error.class(), Some(ErrorClass::Invalid));
             // The refused odb was released; the installed one stays.
-            assert_eq!(odb::backends(&repo.as_ref().odb().unwrap()), 0);
+            assert_eq!(repo.as_ref().odb().unwrap().as_ref().num_backends(), 0);
         }
         // An opened odb, installed in a repository that then writes through it.
         let scratch = Scratch::new("set-odb");
@@ -1423,8 +1425,11 @@ mod heads_and_parts {
         let mut repo = Repository::new().unwrap();
         repo.as_mut().set_odb(opened).unwrap();
         let lent: OdbArc<'_> = repo.as_ref().odb().unwrap();
-        let id = odb::write_blob(&lent, b"kept").unwrap();
-        assert_eq!(odb::read_header(&lent, &id), Ok((4, 3)));
+        let id = lent.as_ref().write(b"kept", ObjectType::Blob).unwrap();
+        assert_eq!(
+            lent.as_ref().read_header(id.as_ref()),
+            Ok((4, Some(ObjectType::Blob)))
+        );
         // The lent reference goes before the repository that owns the odb.
         drop(lent);
         drop(repo);

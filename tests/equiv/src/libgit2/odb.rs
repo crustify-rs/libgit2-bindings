@@ -6,8 +6,17 @@
 //! `objects` directories laid out alike. A failure must report libgit2's error; a
 //! success must build an odb that behaves like C's through a sequence of steps, each
 //! compared as it runs: the backend count, writes (the id each blob gets, or the
-//! failure), header reads and existence checks. The Rust odb has no safe readers yet,
-//! so the steps call libgit2 on both odbs alike.
+//! failure), reads of whole objects (their id, type, size, content, and a duplicate
+//! that is the same object), reads by prefix, header reads, existence checks with and
+//! without a refresh, prefix expansion and refreshes. Each step runs through libgit2's
+//! routines on the C odb and through the Rust wrappers on [`OdbRef`].
+//!
+//! The Rust wrappers refuse an id of another type than the odb's, which libgit2 formats
+//! out of bounds; the steps here use ids of the odb's own type, and the unit tests the
+//! refusal.
+//!
+//! Alternates added to an open odb, a rewritten multi-pack-index and a removed
+//! commit-graph are compared too, each followed by the same reads.
 //!
 //! The owner's lifecycle is compared too: an [`OdbArc`] given to a repository
 //! (`git_repository_wrap_odb`) and then dropped must leave the repository the same odb
@@ -24,7 +33,9 @@ use std::{fs, ptr};
 use ffibox::CZeroable;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::object::ObjectType;
-use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbExpandId, OdbOptions};
+use libgit2::libgit2::src::libgit2::odb::{
+    LookupFlags, Odb, OdbArc, OdbError, OdbExpandId, OdbOptions, OdbRef,
+};
 use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
 use libgit2::libgit2::src::util::errors::ErrorBuf;
 
@@ -159,27 +170,42 @@ enum Op<'a> {
     Write(&'a [u8]),
     Header(Id),
     Exists(Id),
+    ExistsExt(Id, u32),
+    ExistsPrefix(Id, usize),
+    Read(Id),
+    ReadPrefix(Id, usize),
+    Refresh,
 }
 
 /// What one step observed: a count, the id a write produced, a header, an existence
-/// answer, or the return and the thread's last error after a failure.
+/// answer, an object read, an expanded id, a success, or the return and the thread's
+/// last error after a failure.
 #[derive(Debug, PartialEq)]
 enum Seen {
     Backends(usize),
     Written(Id),
     Header(ffi::git_object_t, usize),
     Exists(c_int),
+    Object {
+        id: Id,
+        kind: ffi::git_object_t,
+        data: Vec<u8>,
+        dup_is_same: bool,
+    },
+    Found(Id),
+    Done,
     Failed(c_int, (c_int, String)),
 }
 
 /// The thread's last error with the random suffix of a loose backend's temporary
 /// file name (`tmp_object_git2_<hex>`) blanked, so two writes' failures compare.
-#[expect(
-    clippy::items_after_statements,
-    reason = "each helper item sits beside the steps that use it"
-)]
 fn c_last_normalized() -> (c_int, String) {
-    let (class, mut message) = c_last();
+    let (class, message) = c_last();
+    (class, normalized(message))
+}
+
+/// `message` with the random suffix of a loose backend's temporary file name blanked.
+fn normalized(mut message: String) -> String {
     const TMP: &str = "tmp_object_git2_";
     if let Some(at) = message.find(TMP) {
         let start = at + TMP.len();
@@ -188,7 +214,7 @@ fn c_last_normalized() -> (c_int, String) {
             .map_or(message.len(), |n| start + n);
         message.replace_range(start..end, "*");
     }
-    (class, message)
+    message
 }
 
 /// Runs `op` on the live odb `odb`, through C.
@@ -235,6 +261,153 @@ fn step(odb: *mut ffi::git_odb, op: Op<'_>) -> Seen {
             // SAFETY: `id` is a live `git_oid`, read for the call only.
             Seen::Exists(unsafe { ffi::git_odb_exists(odb, &raw const id) })
         }
+        Op::ExistsExt((type_, id), flags) => {
+            let id = ffi::git_oid { type_, id };
+            // SAFETY: as for `Exists`; `flags` is plain bits.
+            Seen::Exists(unsafe { ffi::git_odb_exists_ext(odb, &raw const id, flags) })
+        }
+        Op::ExistsPrefix((type_, id), len) => {
+            let id = ffi::git_oid { type_, id };
+            let mut out = ffi::git_oid::default();
+            // SAFETY: `out` is a writable `git_oid`; `id` a live one of the odb's type.
+            let rc = unsafe { ffi::git_odb_exists_prefix(&raw mut out, odb, &raw const id, len) };
+            if rc == 0 {
+                Seen::Found((out.type_, out.id))
+            } else {
+                Seen::Failed(rc, c_last())
+            }
+        }
+        Op::Read((type_, id)) => {
+            let id = ffi::git_oid { type_, id };
+            let mut object = ptr::null_mut();
+            // SAFETY: `object` is a writable slot; `id` a live id of the odb's type.
+            let rc = unsafe { ffi::git_odb_read(&raw mut object, odb, &raw const id) };
+            c_object(rc, object)
+        }
+        Op::ReadPrefix((type_, id), len) => {
+            let id = ffi::git_oid { type_, id };
+            let mut object = ptr::null_mut();
+            // SAFETY: as for `Read`.
+            let rc = unsafe { ffi::git_odb_read_prefix(&raw mut object, odb, &raw const id, len) };
+            c_object(rc, object)
+        }
+        Op::Refresh => {
+            // SAFETY: `odb` is live.
+            let rc = unsafe { ffi::git_odb_refresh(odb) };
+            if rc == 0 {
+                Seen::Done
+            } else {
+                Seen::Failed(rc, c_last())
+            }
+        }
+    }
+}
+
+/// What a C read returned `rc` for: the object in `object`, observed through
+/// `git_odb_object_*` and duplicated once, then released.
+fn c_object(rc: c_int, object: *mut ffi::git_odb_object) -> Seen {
+    if rc != 0 {
+        return Seen::Failed(rc, c_last());
+    }
+    // SAFETY: `object` is the live object the read returned; it is released below.
+    let id = unsafe { ffi::git_odb_object_id(object) };
+    // SAFETY: the object's own id, live while the object is.
+    let id = unsafe { id.read() };
+    // SAFETY: as above.
+    let size = unsafe { ffi::git_odb_object_size(object) };
+    // SAFETY: as above.
+    let data = unsafe { ffi::git_odb_object_data(object) }.cast::<u8>();
+    let data = if size == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: the object's buffer holds `size` initialised bytes while it lives.
+        unsafe { std::slice::from_raw_parts(data, size) }.to_vec()
+    };
+    // SAFETY: as above.
+    let kind = unsafe { ffi::git_odb_object_type(object) };
+    let mut dup = ptr::null_mut();
+    // SAFETY: `dup` is a writable slot; `object` is live.
+    assert_eq!(unsafe { ffi::git_odb_object_dup(&raw mut dup, object) }, 0);
+    let dup_is_same = dup == object;
+    // SAFETY: the duplicate's reference, released once.
+    unsafe { ffi::git_odb_object_free(dup) };
+    // SAFETY: the read's reference, released once.
+    unsafe { ffi::git_odb_object_free(object) };
+    Seen::Object {
+        id: (id.type_, id.id),
+        kind,
+        data,
+        dup_is_same,
+    }
+}
+
+/// The id `id` names.
+fn oid((type_, id): Id) -> Oid {
+    let mut oid = Oid::zero(OidType::Sha1);
+    oid.as_mut().set_raw_kind(type_);
+    oid.as_mut().set_id(id);
+    oid
+}
+
+/// The pair an id's bytes make.
+fn id_of(oid: &Oid) -> Id {
+    (oid.as_ref().raw_kind(), oid.as_ref().id())
+}
+
+/// A Rust failure as a step sees it.
+fn rust_failed(error: &OdbError) -> Seen {
+    Seen::Failed(
+        error.raw_code(),
+        (
+            error.raw_class(),
+            error.message().to_string_lossy().into_owned(),
+        ),
+    )
+}
+
+/// The Rust result `seen`, or its failure as a step sees it.
+fn rust_seen<T>(result: Result<T, OdbError>, seen: impl FnOnce(T) -> Seen) -> Seen {
+    result.map_or_else(|error| rust_failed(&error), seen)
+}
+
+/// Runs `op` on `odb` through the Rust wrappers.
+fn rust_step(odb: OdbRef<'_, '_>, op: Op<'_>) -> Seen {
+    let object = |object: libgit2::libgit2::src::libgit2::odb::OdbObjectArc| {
+        let o = object.as_ref();
+        let dup = object.clone();
+        let dup_is_same = libgit2::libgit2::src::libgit2::odb::OdbObjectArc::ptr_eq(&dup, &object);
+        Seen::Object {
+            id: id_of(&o.id().to_oid()),
+            kind: o.kind().map_or(ffi::GIT_OBJECT_INVALID, ObjectType::raw),
+            data: o.data().to_vec(),
+            dup_is_same,
+        }
+    };
+    match op {
+        Op::Backends => Seen::Backends(odb.num_backends()),
+        Op::Write(data) => match odb.write(data, ObjectType::Blob) {
+            Ok(id) => Seen::Written(id_of(&id)),
+            Err(error) => {
+                let Seen::Failed(rc, (class, message)) = rust_failed(&error) else {
+                    unreachable!()
+                };
+                Seen::Failed(rc, (class, normalized(message)))
+            }
+        },
+        Op::Header(id) => rust_seen(odb.read_header(oid(id).as_ref()), |(len, kind)| {
+            Seen::Header(kind.map_or(ffi::GIT_OBJECT_INVALID, ObjectType::raw), len)
+        }),
+        Op::Exists(id) => Seen::Exists(odb.exists(oid(id).as_ref()).into()),
+        Op::ExistsExt(id, flags) => Seen::Exists(
+            odb.exists_ext(oid(id).as_ref(), LookupFlags::from_bits_retain(flags))
+                .into(),
+        ),
+        Op::ExistsPrefix(id, len) => rust_seen(odb.exists_prefix(oid(id).as_ref(), len), |found| {
+            Seen::Found(id_of(&found))
+        }),
+        Op::Read(id) => rust_seen(odb.read(oid(id).as_ref()), object),
+        Op::ReadPrefix(id, len) => rust_seen(odb.read_prefix(oid(id).as_ref(), len), object),
+        Op::Refresh => rust_seen(odb.refresh(), |()| Seen::Done),
     }
 }
 
@@ -250,19 +423,20 @@ fn blank(seen: Seen, dir: Option<&CStr>) -> Seen {
 }
 
 /// Runs the same steps on both odbs, comparing each pair as it is observed; the ids
-/// the writes produce feed the later steps. `dirs` names the directories each side
-/// opened, which failures blank.
+/// the writes produce feed the later steps, beside the zero id of `kind`, the odbs'
+/// type. `dirs` names the directories each side opened, which failures blank.
 fn compare_in(
     c: *mut ffi::git_odb,
     rust: &OdbArc<'_>,
+    kind: OidType,
     dirs: Option<(&CStr, &CStr)>,
     data: &[&[u8]],
 ) {
-    let mut ids = vec![(0u8, [0u8; 32])];
+    let mut ids = vec![id_of(&Oid::zero(kind))];
     let both = |op: Op<'_>| {
         let seen = blank(step(c, op), dirs.map(|d| d.0));
         assert_eq!(
-            blank(step(rust.as_c_ptr(), op), dirs.map(|d| d.1)),
+            blank(rust_step(rust.as_ref(), op), dirs.map(|d| d.1)),
             seen,
             "{op:?}"
         );
@@ -274,10 +448,19 @@ fn compare_in(
             ids.push(id);
         }
     }
+    let hex = kind.hex_size();
     for &id in &ids {
         both(Op::Header(id));
         both(Op::Exists(id));
+        both(Op::ExistsExt(id, 0));
+        both(Op::ExistsExt(id, ffi::GIT_ODB_LOOKUP_NO_REFRESH));
+        both(Op::Read(id));
+        for len in [3, 4, 9, hex - 1, hex, hex + 3] {
+            both(Op::ReadPrefix(id, len));
+            both(Op::ExistsPrefix(id, len));
+        }
     }
+    both(Op::Refresh);
     // A second write of what is stored is a no-op that reports the same id.
     for &bytes in data {
         both(Op::Write(bytes));
@@ -295,14 +478,19 @@ fn blobs() -> Vec<Vec<u8>> {
     ]
 }
 
-fn compare_blobs(c: *mut ffi::git_odb, rust: &OdbArc<'_>) {
-    compare_blobs_in(c, rust, None);
+fn compare_blobs(c: *mut ffi::git_odb, rust: &OdbArc<'_>, kind: OidType) {
+    compare_blobs_in(c, rust, kind, None);
 }
 
-fn compare_blobs_in(c: *mut ffi::git_odb, rust: &OdbArc<'_>, dirs: Option<(&CStr, &CStr)>) {
+fn compare_blobs_in(
+    c: *mut ffi::git_odb,
+    rust: &OdbArc<'_>,
+    kind: OidType,
+    dirs: Option<(&CStr, &CStr)>,
+) {
     let blobs = blobs();
     let data: Vec<&[u8]> = blobs.iter().map(Vec::as_slice).collect();
-    compare_in(c, rust, dirs, &data);
+    compare_in(c, rust, kind, dirs, &data);
 }
 
 #[test]
@@ -312,7 +500,7 @@ fn new_builds_what_git_odb_new_builds() {
     let c = c_new().unwrap();
     let rust = Odb::new().unwrap();
     // No backend: writes fail, and nothing is found.
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::Sha1);
 }
 
 #[test]
@@ -322,7 +510,7 @@ fn with_oid_type_builds_what_git_odb_new_ext_builds() {
     for kind in [OidType::Sha1, OidType::Sha256] {
         let c = c_new_ext(Some(&c_options(kind.raw()))).unwrap();
         let rust = Odb::with_oid_type(kind).unwrap();
-        compare_blobs(c.0, &rust);
+        compare_blobs(c.0, &rust, kind);
     }
     // `new` is `new_ext` with the default options, which a NULL options pointer and a
     // zeroed type also select.
@@ -331,7 +519,7 @@ fn with_oid_type_builds_what_git_odb_new_ext_builds() {
         c_new_ext(None).unwrap(),
         c_new_ext(Some(&c_options(0))).unwrap(),
     ] {
-        compare_blobs(c.0, &rust);
+        compare_blobs(c.0, &rust, OidType::default());
     }
 }
 
@@ -367,12 +555,12 @@ fn open_builds_what_git_odb_open_builds() {
     let c = c_open(&dirs.c).unwrap();
     let rust = Odb::open(&dirs.rust).unwrap();
     // The loose and the packed backend: writes land as loose objects, read back.
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::Sha1);
     // Reopened, each directory serves what was written to it.
     drop((c, rust));
     let c = c_open(&dirs.c).unwrap();
     let rust = Odb::open(&dirs.rust).unwrap();
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::Sha1);
 }
 
 #[test]
@@ -383,8 +571,8 @@ fn open_with_oid_type_builds_what_git_odb_open_ext_builds() {
         let dirs = Pair::new(&format!("open-ext-{}", kind.raw()), |_| {});
         let c = c_open_ext(&dirs.c, Some(&c_options(kind.raw()))).unwrap();
         let rust = Odb::open_with_oid_type(&dirs.rust, kind).unwrap();
-        compare_blobs(c.0, &rust);
-        let Seen::Written((type_, _)) = step(rust.as_c_ptr(), Op::Write(b"typed")) else {
+        compare_blobs(c.0, &rust, kind);
+        let Seen::Written((type_, _)) = rust_step(rust.as_ref(), Op::Write(b"typed")) else {
             panic!("an on-disk odb writes")
         };
         assert_eq!(OidType::from_raw(type_.into()), Some(kind));
@@ -392,7 +580,7 @@ fn open_with_oid_type_builds_what_git_odb_open_ext_builds() {
     let dirs = Pair::new("open-ext-default", |_| {});
     let c = c_open_ext(&dirs.c, None).unwrap();
     let rust = Odb::open_with_oid_type(&dirs.rust, OidType::default()).unwrap();
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::default());
 }
 
 /// Every way the open fails reports what C reports, and nothing is built.
@@ -427,7 +615,7 @@ fn open_fails_as_git_odb_open_fails() {
     let files = (dir.c_path("c-file"), dir.c_path("rust-file"));
     let c = c_open(&files.0).unwrap();
     let rust = Odb::open(&files.1).unwrap();
-    compare_blobs_in(c.0, &rust, Some((&files.0, &files.1)));
+    compare_blobs_in(c.0, &rust, OidType::Sha1, Some((&files.0, &files.1)));
 }
 
 /// Alternates: another directory's objects are read through it; missing ones are
@@ -455,12 +643,15 @@ fn open_follows_alternates_as_git_odb_open_does() {
     });
     let c = c_open(&dirs.c).unwrap();
     let rust = Odb::open(&dirs.rust).unwrap();
-    assert_eq!(step(rust.as_c_ptr(), Op::Backends), Seen::Backends(4));
-    compare_blobs(c.0, &rust);
-    for op in [Op::Header(seeded), Op::Exists(seeded)] {
-        assert_eq!(step(rust.as_c_ptr(), op), step(c.0, op), "{op:?}");
+    assert_eq!(rust_step(rust.as_ref(), Op::Backends), Seen::Backends(4));
+    compare_blobs(c.0, &rust, OidType::Sha1);
+    for op in [Op::Header(seeded), Op::Exists(seeded), Op::Read(seeded)] {
+        assert_eq!(rust_step(rust.as_ref(), op), step(c.0, op), "{op:?}");
     }
-    assert_eq!(step(rust.as_c_ptr(), Op::Exists(seeded)), Seen::Exists(1));
+    assert_eq!(
+        rust_step(rust.as_ref(), Op::Exists(seeded)),
+        Seen::Exists(1)
+    );
 }
 
 /// One repository over an odb, freed on drop.
@@ -539,11 +730,192 @@ fn a_shared_odb_lives_as_long_as_in_c() {
         // an odb `rust_repo` owns, which the result's borrow of `rust_repo` keeps alive.
         unsafe { OdbArc::<'_>::from_c(adopted) }.unwrap()
     };
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::Sha1);
     drop(rust);
     drop((c_repo, rust_repo));
     let rust = Odb::open(&dirs.rust).unwrap();
-    compare_blobs(c.0, &rust);
+    compare_blobs(c.0, &rust, OidType::Sha1);
+}
+
+/// An `objects` directory seeded with one blob, through C; its id.
+fn seeded(dir: &Path, data: &[u8]) -> Id {
+    fs::create_dir_all(dir).unwrap();
+    let seed = c_open(&c_path(dir)).unwrap();
+    let Seen::Written(id) = step(seed.0, Op::Write(data)) else {
+        panic!("the directory takes a write")
+    };
+    id
+}
+
+/// `git_odb_add_disk_alternate`: on an odb with and without backends, each side adds
+/// the same alternates (a seeded one, a missing one, the same one twice, the odb's own
+/// directory), and both then read and write alike.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn add_disk_alternate_adds_what_c_adds() {
+    init();
+    let shared = TempDir::new("add-alternate-shared");
+    let seed = seeded(&shared.0.join("objects"), b"from the added alternate");
+    let alternate = c_path(&shared.0.join("objects"));
+    let missing = shared.c_path("missing/objects");
+    let add = |c: *mut ffi::git_odb, rust: &OdbArc<'_>, path: &CStr| {
+        // SAFETY: `c` is live; `path` NUL-terminated, read for the call.
+        let rc = unsafe { ffi::git_odb_add_disk_alternate(c, path.as_ptr()) };
+        let c_seen = if rc == 0 {
+            Seen::Done
+        } else {
+            Seen::Failed(rc, c_last())
+        };
+        let rust_seen = rust_seen(rust.as_ref().add_disk_alternate(path), |()| Seen::Done);
+        assert_eq!(rust_seen, c_seen, "{path:?}");
+    };
+    // An odb without backends reads the alternate, and cannot write to it.
+    let c = c_new().unwrap();
+    let rust = Odb::new().unwrap();
+    for path in [&alternate, &missing, &alternate] {
+        add(c.0, &rust, path);
+    }
+    for op in [
+        Op::Backends,
+        Op::Read(seed),
+        Op::Exists(seed),
+        Op::Header(seed),
+    ] {
+        assert_eq!(rust_step(rust.as_ref(), op), step(c.0, op), "{op:?}");
+    }
+    compare_blobs(c.0, &rust, OidType::Sha1);
+    // An open odb: its own directory again is skipped, the alternate is added.
+    let dirs = Pair::new("add-alternate", |_| {});
+    let c = c_open(&dirs.c).unwrap();
+    let rust = Odb::open(&dirs.rust).unwrap();
+    // Each side's own directory, as the other side sees it: both skip their own.
+    let (c_self, rust_self) = (dirs.c.clone(), dirs.rust.clone());
+    // SAFETY: as in `add`.
+    let rc = unsafe { ffi::git_odb_add_disk_alternate(c.0, c_self.as_ptr()) };
+    assert_eq!(rc, 0);
+    rust.as_ref().add_disk_alternate(&rust_self).unwrap();
+    add(c.0, &rust, &alternate);
+    for op in [Op::Backends, Op::Read(seed), Op::ReadPrefix(seed, 7)] {
+        assert_eq!(rust_step(rust.as_ref(), op), step(c.0, op), "{op:?}");
+    }
+    compare_blobs(c.0, &rust, OidType::Sha1);
+}
+
+/// One writable copy per side of libgit2's `testrepo.git` objects, packs, commit-graph
+/// and multi-pack-index included.
+fn testrepo_pair(tag: &str) -> Pair {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("c/tests/resources/testrepo.git");
+    Pair::new(tag, |objects| copy_dir(&source.join("objects"), objects))
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Packed objects of `testrepo.git`, read after each change.
+fn packed_ids() -> Vec<Id> {
+    [
+        c"a65fedf39aefe402d3bb6e24df4d4f5fe4547750",
+        c"be3563ae3f795b2b4353bcce3a527ad0a4f7f644",
+        c"1810dff58d8a660512d4832e740f692884338ccd",
+    ]
+    .iter()
+    .map(|hex| id_of(&Oid::from_string(hex, OidType::Sha1).unwrap()))
+    .collect()
+}
+
+/// `git_odb_write_multi_pack_index`, over packs and without a packed main backend:
+/// the same result, the same file, and the same reads after.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn write_multi_pack_index_writes_what_c_writes() {
+    init();
+    let dirs = testrepo_pair("midx");
+    for side in [&dirs.c, &dirs.rust] {
+        let midx = Path::new(side.to_str().unwrap()).join("pack/multi-pack-index");
+        fs::remove_file(midx).unwrap();
+    }
+    let c = c_open(&dirs.c).unwrap();
+    let rust = Odb::open(&dirs.rust).unwrap();
+    let write = |c: *mut ffi::git_odb, rust: &OdbArc<'_>| {
+        // SAFETY: `c` is live and used by this thread alone.
+        let rc = unsafe { ffi::git_odb_write_multi_pack_index(c) };
+        let c_seen = if rc == 0 {
+            Seen::Done
+        } else {
+            Seen::Failed(rc, c_last())
+        };
+        // SAFETY: this thread alone uses the Rust odb, which no repository owns.
+        let rust_seen = rust_seen(unsafe { rust.as_ref().write_multi_pack_index() }, |()| {
+            Seen::Done
+        });
+        assert_eq!(rust_seen, c_seen);
+    };
+    for _ in 0..2 {
+        write(c.0, &rust);
+        let files = [&dirs.c, &dirs.rust].map(|side| {
+            fs::read(Path::new(side.to_str().unwrap()).join("pack/multi-pack-index")).unwrap()
+        });
+        assert_eq!(files[0], files[1], "the same multi-pack-index");
+        for id in packed_ids() {
+            for op in [Op::Read(id), Op::Header(id), Op::ReadPrefix(id, 8)] {
+                assert_eq!(rust_step(rust.as_ref(), op), step(c.0, op), "{op:?}");
+            }
+        }
+    }
+    // Without a packed main backend, both refuse.
+    let (c, rust) = (c_new().unwrap(), Odb::new().unwrap());
+    write(c.0, &rust);
+    // SAFETY: as in `add_disk_alternate_adds_what_c_adds`.
+    let rc = unsafe { ffi::git_odb_add_disk_alternate(c.0, dirs.c.as_ptr()) };
+    assert_eq!(rc, 0);
+    rust.as_ref().add_disk_alternate(&dirs.rust).unwrap();
+    write(c.0, &rust);
+}
+
+/// `git_odb_set_commit_graph` with NULL: the same result, again and again, and the same
+/// reads after, on odbs with and without a graph.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn clear_commit_graph_clears_what_c_clears() {
+    init();
+    let dirs = testrepo_pair("cgraph");
+    let clear = |c: *mut ffi::git_odb, rust: &OdbArc<'_>| {
+        // SAFETY: `c` is live and used by this thread alone.
+        let rc = unsafe { ffi::git_odb_set_commit_graph(c, ptr::null_mut()) };
+        let c_seen = if rc == 0 {
+            Seen::Done
+        } else {
+            Seen::Failed(rc, c_last())
+        };
+        // SAFETY: this thread alone uses the Rust odb, which no repository owns.
+        let rust_seen = rust_seen(unsafe { rust.as_ref().clear_commit_graph() }, |()| {
+            Seen::Done
+        });
+        assert_eq!(rust_seen, c_seen);
+    };
+    let (c, rust) = (c_new().unwrap(), Odb::new().unwrap());
+    clear(c.0, &rust);
+    let c = c_open(&dirs.c).unwrap();
+    let rust = Odb::open(&dirs.rust).unwrap();
+    for _ in 0..2 {
+        clear(c.0, &rust);
+        for id in packed_ids() {
+            for op in [Op::Read(id), Op::Exists(id), Op::Refresh] {
+                assert_eq!(rust_step(rust.as_ref(), op), step(c.0, op), "{op:?}");
+            }
+        }
+    }
+    compare_blobs(c.0, &rust, OidType::Sha1);
 }
 
 /// `git_odb_options_init` into a fresh `git_odb_options`: the return and what it wrote.
@@ -586,7 +958,7 @@ fn odb_options_are_what_c_initialises_and_reads() {
         // SAFETY: `rust.0` is the one reference `git_odb_new_ext` returned, given up to
         // the owner here.
         let rust = unsafe { OdbArc::from_c(rust.into_raw()) }.unwrap();
-        compare_blobs(c.0, &rust);
+        compare_blobs(c.0, &rust, kind.unwrap_or_default());
     }
     for version in [0, 2, u32::MAX, ffi::GIT_ODB_OPTIONS_VERSION] {
         opts.as_mut().set_version(version);

@@ -1380,6 +1380,12 @@ pub struct git_odb_object {
 pub struct git_refdb {
     _unused: [u8; 0],
 }
+/// A git commit-graph
+#[repr(C)]
+#[derive(Debug)]
+pub struct git_commit_graph {
+    _unused: [u8; 0],
+}
 /** Representation of an existing git repository,
  including all its object contents*/
 #[repr(C)]
@@ -1820,6 +1826,13 @@ pub type git_indexer_progress_cb = ::std::option::Option<
         payload: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int,
 >;
+/** Don't call `git_odb_refresh` if the lookup fails. Useful when doing
+ a batch of lookup operations for objects that may legitimately not
+ exist. When using this flag, you may wish to manually call
+ `git_odb_refresh` before processing a batch of objects.*/
+pub const GIT_ODB_LOOKUP_NO_REFRESH: git_odb_lookup_flags_t = 1;
+/// Flags controlling the behavior of ODB lookup operations
+pub type git_odb_lookup_flags_t = ::std::os::raw::c_uint;
 /** Function type for callbacks from git_odb_foreach.
 
  @param id an id of an object in the object database
@@ -1942,6 +1955,25 @@ unsafe extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
+    /** Add an on-disk alternate to an existing Object DB.
+
+ Note that the added path must point to an `objects`, not
+ to a full repository, to use it as an alternate store.
+
+ Alternate backends are always checked for objects *after*
+ all the main backends have been exhausted.
+
+ Writing is disabled on alternate backends.
+
+ @param odb database to add the backend to
+ @param path path to the objects folder for the alternate
+ @return 0 on success, error code otherwise*/
+    pub fn git_odb_add_disk_alternate(
+        odb: *mut git_odb,
+        path: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
     /** Close an open object database.
 
  @param db database pointer to close. If NULL no action is taken.*/
@@ -1966,6 +1998,38 @@ unsafe extern "C" {
         obj: *mut *mut git_odb_object,
         db: *mut git_odb,
         id: *const git_oid,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Read an object from the database, given a prefix
+ of its identifier.
+
+ This method queries all available ODB backends
+ trying to match the 'len' first hexadecimal
+ characters of the 'short_id'.
+ The remaining (GIT_OID_SHA1_HEXSIZE-len)*4 bits of
+ 'short_id' must be 0s.
+ 'len' must be at least GIT_OID_MINPREFIXLEN,
+ and the prefix must be long enough to identify
+ a unique object in all the backends; the
+ method will fail otherwise.
+
+ The returned object is reference counted and
+ internally cached, so it should be closed
+ by the user once it's no longer in use.
+
+ @param[out] obj pointer where to store the read object
+ @param db database to search for the object in.
+ @param short_id a prefix of the id of the object to read.
+ @param len the length of the prefix
+ @return 0 if the object was read, GIT_ENOTFOUND if the object is not in the
+         database. GIT_EAMBIGUOUS if the prefix is ambiguous
+         (several objects match the prefix)*/
+    pub fn git_odb_read_prefix(
+        obj: *mut *mut git_odb_object,
+        db: *mut git_odb,
+        short_id: *const git_oid,
+        len: usize,
     ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
@@ -1998,6 +2062,37 @@ unsafe extern "C" {
  @param id the object to search for.
  @return 1 if the object was found, 0 otherwise*/
     pub fn git_odb_exists(db: *mut git_odb, id: *const git_oid) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Determine if the given object can be found in the object database, with
+ extended options.
+
+ @param db database to be searched for the given object.
+ @param id the object to search for.
+ @param flags flags affecting the lookup (see `git_odb_lookup_flags_t`)
+ @return 1 if the object was found, 0 otherwise*/
+    pub fn git_odb_exists_ext(
+        db: *mut git_odb,
+        id: *const git_oid,
+        flags: ::std::os::raw::c_uint,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Determine if an object can be found in the object database by an
+ abbreviated object ID.
+
+ @param out The full OID of the found object if just one is found.
+ @param db The database to be searched for the given object.
+ @param short_id A prefix of the id of the object to read.
+ @param len The length of the prefix.
+ @return 0 if found, GIT_ENOTFOUND if not found, GIT_EAMBIGUOUS if multiple
+         matches were found, other value < 0 if there was a read error.*/
+    pub fn git_odb_exists_prefix(
+        out: *mut git_oid,
+        db: *mut git_odb,
+        short_id: *const git_oid,
+        len: usize,
+    ) -> ::std::os::raw::c_int;
 }
 /** The information about object IDs to query in `git_odb_expand_ids`,
  which will be populated upon return.*/
@@ -2060,6 +2155,43 @@ unsafe extern "C" {
         db: *mut git_odb,
         ids: *mut git_odb_expand_id,
         count: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Refresh the object database to load newly added files.
+
+ If the object databases have changed on disk while the library
+ is running, this function will force a reload of the underlying
+ indexes.
+
+ Use this function when you're confident that an external
+ application has tampered with the ODB.
+
+ NOTE that it is not necessary to call this function at all. The
+ library will automatically attempt to refresh the ODB
+ when a lookup fails, to see if the looked up object exists
+ on disk but hasn't been loaded yet.
+
+ @param db database to refresh
+ @return 0 on success, error code otherwise*/
+    pub fn git_odb_refresh(db: *mut git_odb) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** List all objects available in the database
+
+ The callback will be called for each object available in the
+ database. Note that the objects are likely to be returned in the index
+ order, which would make accessing the objects in that order inefficient.
+ Return a non-zero value from the callback to stop looping.
+
+ @param db database to use
+ @param cb the callback to call for each object
+ @param payload data to pass to the callback
+ @return 0 on success, non-zero callback return value, or error code*/
+    pub fn git_odb_foreach(
+        db: *mut git_odb,
+        cb: git_odb_foreach_cb,
+        payload: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
@@ -2227,6 +2359,35 @@ unsafe extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
+    /** Write a `multi-pack-index` file from all the `.pack` files in the ODB.
+
+ If the ODB layer understands pack files, then this will create a file called
+ `multi-pack-index` next to the `.pack` and `.idx` files, which will contain
+ an index of all objects stored in `.pack` files. This will allow for
+ O(log n) lookup for n objects (regardless of how many packfiles there
+ exist).
+
+ @param db object database where the `multi-pack-index` file will be written.
+ @return 0 or an error code.*/
+    pub fn git_odb_write_multi_pack_index(db: *mut git_odb) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Create a copy of an odb_object
+
+ The returned copy must be manually freed with `git_odb_object_free`.
+ Note that because of an implementation detail, the returned copy will be
+ the same pointer as `source`: the object is internally refcounted, so the
+ copy still needs to be freed twice.
+
+ @param dest pointer where to store the copy
+ @param source object to copy
+ @return 0 or an error code*/
+    pub fn git_odb_object_dup(
+        dest: *mut *mut git_odb_object,
+        source: *mut git_odb_object,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
     /** Close an ODB object
 
  This method must always be called once a `git_odb_object` is no
@@ -2234,6 +2395,15 @@ unsafe extern "C" {
 
  @param object object to close*/
     pub fn git_odb_object_free(object: *mut git_odb_object);
+}
+unsafe extern "C" {
+    /** Return the OID of an ODB object
+
+ This is the OID from which the object was read from
+
+ @param object the object
+ @return a pointer to the OID*/
+    pub fn git_odb_object_id(object: *mut git_odb_object) -> *const git_oid;
 }
 unsafe extern "C" {
     /** Return the data of an ODB object
@@ -2272,6 +2442,23 @@ unsafe extern "C" {
  @param odb object database
  @return number of backends in the ODB*/
     pub fn git_odb_num_backends(odb: *mut git_odb) -> usize;
+}
+unsafe extern "C" {
+    /** Set the git commit-graph for the ODB.
+
+ After a successful call, the ownership of the cgraph parameter will be
+ transferred to libgit2, and the caller should not free it.
+
+ The commit-graph can also be unset by explicitly passing NULL as the cgraph
+ parameter.
+
+ @param odb object database
+ @param cgraph the git commit-graph
+ @return 0 on success; error code otherwise*/
+    pub fn git_odb_set_commit_graph(
+        odb: *mut git_odb,
+        cgraph: *mut git_commit_graph,
+    ) -> ::std::os::raw::c_int;
 }
 /// Array of strings
 #[repr(C)]

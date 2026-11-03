@@ -21,13 +21,34 @@ use std::sync::Arc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::indexer::IndexerProgress;
 use libgit2::libgit2::src::libgit2::object::ObjectType;
-use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbStreamBox, OdbWritepack};
+use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbError, OdbStreamBox, OdbWritepack};
 use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
 use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
 use crate::fixture::init;
-use crate::fixture::odb::{Repo, read_header, write_blob};
+use crate::fixture::odb::Repo;
 use crate::fixture::odb_stream::{finalize, read, write, write_pack};
+
+/// A blob written through the odb's own writer, as the raw id the stream steps compare.
+fn write_blob(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, OdbError> {
+    odb.as_ref().write(data, ObjectType::Blob).map(|id| {
+        let id = id.as_ref();
+        ffi::git_oid {
+            type_: id.raw_kind(),
+            id: id.id(),
+        }
+    })
+}
+
+/// The header of the raw id `id`, through the odb's own reader, as raw values.
+fn read_header(
+    odb: &OdbArc<'_>,
+    id: &ffi::git_oid,
+) -> Result<(usize, ffi::git_object_t), OdbError> {
+    odb.as_ref()
+        .read_header(oid(id).as_ref())
+        .map(|(len, kind)| (len, kind.map_or(ffi::GIT_OBJECT_INVALID, ObjectType::raw)))
+}
 
 /// A directory of its own under the temporary directory, removed on drop.
 struct TempDir(PathBuf);

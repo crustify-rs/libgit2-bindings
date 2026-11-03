@@ -795,66 +795,10 @@ impl TempRepo {
 // --- `git2/odb.h`: `git_odb` -------------------------------------------------------
 
 pub(crate) mod odb {
-    //! Stand-ins for the odb readers and writers and for `git_repository_odb`, which
-    //! their wrappers replace; each reaches the odb through its owner's raw seam.
+    //! A repository over an odb, for the tests that share one with it.
 
-    use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::odb::OdbArc;
     use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
-
-    /// `git_odb_write` of a blob; the id, or the error code.
-    pub(crate) fn write_blob(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
-        let mut id = ffi::git_oid::default();
-        // SAFETY: the odb is live while `odb` is borrowed; `id` is writable and `data`
-        // live for its length, read for the call only.
-        let rc = unsafe {
-            ffi::git_odb_write(
-                &raw mut id,
-                odb.as_c_ptr(),
-                data.as_ptr().cast(),
-                data.len(),
-                ffi::GIT_OBJECT_BLOB,
-            )
-        };
-        if rc == 0 { Ok(id) } else { Err(rc) }
-    }
-
-    /// `git_odb_write` of `data` as a tree, unchecked: a tree no tree builder writes (an
-    /// entry named `.git`, say); the id, or the error code.
-    pub(crate) fn write_tree(odb: &OdbArc<'_>, data: &[u8]) -> Result<ffi::git_oid, i32> {
-        let mut id = ffi::git_oid::default();
-        // SAFETY: as in `write_blob`.
-        let rc = unsafe {
-            ffi::git_odb_write(
-                &raw mut id,
-                odb.as_c_ptr(),
-                data.as_ptr().cast(),
-                data.len(),
-                ffi::GIT_OBJECT_TREE,
-            )
-        };
-        if rc == 0 { Ok(id) } else { Err(rc) }
-    }
-
-    /// `git_odb_read_header`: the object's length and type, or the error code.
-    pub(crate) fn read_header(
-        odb: &OdbArc<'_>,
-        id: &ffi::git_oid,
-    ) -> Result<(usize, ffi::git_object_t), i32> {
-        let (mut len, mut kind) = (0, 0);
-        // SAFETY: the odb is live while `odb` is borrowed; the out slots are writable
-        // and `id` live, read for the call only.
-        let rc =
-            unsafe { ffi::git_odb_read_header(&raw mut len, &raw mut kind, odb.as_c_ptr(), id) };
-        if rc == 0 { Ok((len, kind)) } else { Err(rc) }
-    }
-
-    /// `git_odb_num_backends`.
-    pub(crate) fn backends(odb: &OdbArc<'_>) -> usize {
-        // SAFETY: the odb is live while `odb` is borrowed; the routine reads the count
-        // under the odb's lock.
-        unsafe { ffi::git_odb_num_backends(odb.as_c_ptr()) }
-    }
 
     /// A repository over an odb ([`Repository::wrap_odb`]), which holds a reference of
     /// its own and becomes the odb's owner; freed on drop. [`odb`](Self::odb) stands in
