@@ -19,8 +19,8 @@ use crate::ffi;
 /// [`Remote`](Self::Remote), never [`All`](Self::All). The three variants are the values
 /// every routine accepts; [`from_raw`](Self::from_raw) gives `None` for the rest.
 ///
-/// Wraps: `git_branch_t`
-/// Handwritten
+/// Wraps `ty::git_branch_t`
+#[doc(alias = "git_branch_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum BranchType {
@@ -90,8 +90,6 @@ impl From<BranchType> for ffi::git_branch_t {
 /// A branch type that libgit2's header does not name: `0`, which a branch iterator reads
 /// as listing nothing, or a value with bits beyond `GIT_BRANCH_ALL`. [`raw`](Self::raw)
 /// has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedBranchType(ffi::git_branch_t);
 
