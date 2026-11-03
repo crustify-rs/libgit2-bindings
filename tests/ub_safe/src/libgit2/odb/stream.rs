@@ -468,3 +468,40 @@ fn writepacks_fail_and_discard() {
     let empty = Odb::new().unwrap();
     assert!(write_pack(&empty).is_err());
 }
+
+/// A read stream is never opened for an id of another type than the odb's: libgit2 hands
+/// the id to the loose backend unchecked, which formats it into a path sized for the odb's
+/// type (`ASan` flags the overflow of a SHA-256 id in a SHA-1 odb; a SHA-1 id in a SHA-256
+/// odb leaves part of the path unwritten). The refusal reaches no backend, and an id of the
+/// odb's type still opens its stream afterwards.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn read_streams_refuse_ids_of_another_type() {
+    init();
+    let dir = TempDir::new("foreign");
+    for kind in TYPES {
+        let odb = Odb::open_with_oid_type(&dir.objects(&format!("f{}", kind.raw())), kind).unwrap();
+        let id = write_blob(&odb, b"foreign").unwrap();
+        for other in TYPES.into_iter().filter(|&other| other != kind) {
+            let len = if other == OidType::Sha1 { 20 } else { 32 };
+            let foreign = Oid::from_raw(&[0xAB; 32][..len], other).unwrap();
+            for _ in 0..3 {
+                let err = odb.as_ref().open_read_stream(foreign.as_ref()).unwrap_err();
+                assert_eq!(err.code(), Some(ErrorCode::Generic));
+                assert_eq!(err.class(), Some(ErrorClass::Invalid));
+                assert!(
+                    err.message()
+                        .to_bytes()
+                        .starts_with(b"specified object ID type")
+                );
+            }
+        }
+        let opened = odb.as_ref().open_read_stream(oid(&id).as_ref()).unwrap();
+        assert_eq!(opened.len, 7);
+        assert_eq!(opened.kind, Some(ObjectType::Blob));
+        let mut stream = opened.stream;
+        let mut buf = [0_u8; 16];
+        assert_eq!(read(&mut stream, &mut buf), Ok(7));
+        assert_eq!(&buf[..7], b"foreign");
+    }
+}

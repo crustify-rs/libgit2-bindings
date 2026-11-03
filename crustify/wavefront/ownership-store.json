@@ -16777,7 +16777,7 @@
       },
       "nullable": false,
       "mutable": false,
-      "note": "Read for the call only."
+      "note": "Read for the call only, never retained; handed to each backend's readstream member unchecked. Its type must be the odb's: the loose backend (loose_backend__readstream -> locate_object -> object_file_name) formats it into a path sized for the odb's oid type, so a SHA-256 id in a SHA-1 odb overflows that heap buffer and a SHA-1 or typeless id in a SHA-256 odb leaves it partly unwritten."
      }
     },
     {
@@ -16963,7 +16963,17 @@
       "note": "Out slot: on success receives one counted reference to the object (from the cache, or freshly read and stored in it with git_cache_store_raw), owned by the caller and released with git_odb_object_free. Set to NULL first on the paths that reach the cache; untouched on early argument and prefix-length failures."
      }
     }
-   ]
+   ],
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   }
   },
   {
    "name": "git_odb_read_header",
@@ -17097,7 +17107,17 @@
       "note": "Read for the call only, never retained. GIT_ASSERT_ARG. Its type must be the odb's: the loose backend formats it into a path sized for the odb's oid type (object_file_name), so a SHA-256 id in a SHA-1 odb overflows that heap buffer and the converse leaves it partly unwritten. Not NULL-checked. len below GIT_OID_MINPREFIXLEN fails GIT_EAMBIGUOUS; above the odb's hexsize it is clamped; the key copies (len+1)/2 bytes with short_id's type."
      }
     }
-   ]
+   ],
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   }
   },
   {
    "name": "git_odb_refresh",

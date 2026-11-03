@@ -91,11 +91,25 @@
 //! past the lock. No type of this crate proves that exclusion: an `OdbArc<'static>`
 //! may still be one a leaked repository owns.
 //!
+//! libgit2 frees that commit-graph file on one more path, which is safe here only
+//! because no wrapper of this crate reads the file yet: `git_odb_refresh` drops the
+//! file, under the lock, when it changed on disk. [`OdbRef::refresh`] calls it, and so
+//! does every lookup that misses before it looks again ([`read`](OdbRef::read),
+//! [`read_prefix`](OdbRef::read_prefix), [`read_header`](OdbRef::read_header),
+//! [`exists`](OdbRef::exists) without [`LookupFlags::NO_REFRESH`],
+//! [`exists_prefix`](OdbRef::exists_prefix), and [`write`](OdbRef::write) of an object
+//! the odb lacks). A revision walk reads the file after `git_odb__get_commit_graph_file`
+//! releases the lock (`git_commit_list_parse`), so in C a walk on one thread races any of
+//! these on another. The wrappers of the routines that walk commits (`git_revwalk_*`,
+//! `git_merge_base*`, `git_graph_*`, and what calls them) must not let a walk overlap
+//! another thread's use of its odb.
+//!
 //! # Reading and writing
 //!
 //! [`OdbRef::read`], [`read_prefix`](OdbRef::read_prefix),
-//! [`read_header`](OdbRef::read_header), [`exists`](OdbRef::exists) and
-//! [`exists_prefix`](OdbRef::exists_prefix) look an object up by id. libgit2 never checks
+//! [`read_header`](OdbRef::read_header), [`exists`](OdbRef::exists),
+//! [`exists_prefix`](OdbRef::exists_prefix) and
+//! [`open_read_stream`](OdbRef::open_read_stream) look an object up by id. libgit2 never checks
 //! the id's type against the odb's: its loose backend formats the id into a path sized
 //! for the odb's type, so a SHA-256 id in a SHA-1 odb writes past that buffer and the
 //! converse leaves part of it unwritten. The wrappers learn the odb's type first (from
@@ -230,7 +244,10 @@ impl<'a, 'r: 'a> CMutSeam<'a> for OdbMut<'a, 'r> {
 // `do_fsync`) are written only before the odb is published. The two routines that touch
 // shared state without the lock (`git_odb_write_multi_pack_index`,
 // `git_odb_set_commit_graph`) are reached only through `unsafe` methods whose contract
-// excludes every other thread for the call. The one object an odb reaches outside itself is
+// excludes every other thread for the call. `git_odb_refresh`, which the safe readers and
+// writers call after a miss, frees a commit-graph file that changed on disk under the
+// lock; only a revision walk reads that file past the lock, and no safe method reaches
+// one (see the module docs' Threads section). The one object an odb reaches outside itself is
 // its owning repository's object cache (`odb_cache()`), read and written under that
 // cache's rwlock: the repository outlives `'r`, which every owner and handle of the
 // odb carries, so it is live for every such access.
@@ -775,8 +792,17 @@ define_ctype!(
     /// object of a matching type holds its full id, the id type's hex size as `length`
     /// and the object's type; any other, the id type's zero id, `length` 0 and `type` 0.
     ///
-    /// Every value is valid for the type: libgit2 reads no more than the 32 id bytes
-    /// whatever `length` says, and a `type` it does not know matches nothing.
+    /// Every value is valid for the type itself: its getters and setters read and write
+    /// plain bytes, and nothing in this crate hands one to libgit2 yet. Not every value is
+    /// a query `git_odb_expand_ids` can answer safely, though. It never checks the id's
+    /// type against the odb's, and it looks up an id whose `length` is the odb's hex size
+    /// or more as it is: the loose backend then formats the id into a path sized for the
+    /// odb's type, as for the odb's readers (see the [module docs](self#reading-and-writing)),
+    /// so a SHA-256 id in a SHA-1 odb writes past that path, and a SHA-1 id in a SHA-256
+    /// odb, or a typeless id in either, leaves part of it unwritten. A shorter prefix reads
+    /// `(length + 1) / 2` of the 32 id bytes, and a `type` libgit2 does not know matches
+    /// nothing. The wrapper of `git_odb_expand_ids` must refuse a full-length query whose id
+    /// is not of the odb's type.
     ///
     /// ```
     /// use libgit2::libgit2::src::libgit2::object::ObjectType;
@@ -1469,6 +1495,10 @@ impl OdbRef<'_, '_> {
     /// Never needed for correctness: a lookup that misses refreshes on its own, unless
     /// [`LookupFlags::NO_REFRESH`] says otherwise.
     ///
+    /// A commit-graph file that changed on disk is freed, under the odb's lock; libgit2's
+    /// revision walk reads that file past the lock, which no wrapper of this crate reaches
+    /// yet (see the [module docs](self#threads)).
+    ///
     /// Wraps `fn::git_odb_refresh`
     ///
     /// # Errors
@@ -1497,7 +1527,8 @@ impl OdbRef<'_, '_> {
     /// handle or owner of it, and not through a repository that owns it. The routine
     /// frees the graph under the odb's lock, but libgit2's revision walk reads the
     /// graph's file after that lock is released, so a walk running meanwhile would read
-    /// freed memory.
+    /// freed memory. (libgit2's own [`refresh`](Self::refresh) frees that file too, when
+    /// it changed on disk; see the [module docs](self#threads).)
     ///
     /// # Errors
     ///
@@ -2867,23 +2898,32 @@ impl<'a> OdbRef<'a, '_> {
     /// Only backends that stream reads can open one: libgit2's loose objects do, its
     /// packfiles do not. The stream borrows the odb.
     ///
+    /// An id of another type than the odb's is refused before the call: libgit2 hands
+    /// it to each backend unchecked, and the loose backend would format it out of bounds
+    /// (see the [module docs](self#reading-and-writing)).
+    ///
     /// # Errors
     ///
     /// The code and libgit2's error of the backend that failed, as C returns them:
     /// `GIT_ENOTFOUND` when no backend that streams reads has the object. A
     /// `GIT_ERROR_ODB` error when no backend streams reads, or when every one passes the
     /// request on (`GIT_PASSTHROUGH`), for which libgit2 reports success without a
-    /// stream.
+    /// stream. A `GIT_ERROR_INVALID` error [`MISMATCH`], code `-1`, for an `id` of
+    /// another type than the odb's, which reaches no backend.
     ///
     /// Wraps `fn::git_odb_open_rstream`
     #[doc(alias = "git_odb_open_rstream")]
     pub fn open_read_stream(&self, id: OidRef<'_>) -> Result<OdbReadStream<'a>, StreamError> {
+        if !self.same_type(id) {
+            return Err(StreamError::new(ErrorClass::Invalid, MISMATCH));
+        }
         let mut out = ptr::null_mut();
         let mut len = 0;
         let mut kind = ffi::GIT_OBJECT_INVALID;
-        // SAFETY: the out slots are writable, and filled on success; `id` is a live
-        // `git_oid`, read for the call only; the odb is live for `'a` and locks itself
-        // while it picks a backend.
+        // SAFETY: the out slots are writable, and filled on success; `id` is a live id
+        // of the odb's type (checked above), read for the call only, which the loose
+        // backend formats into a path sized for that type; the odb is live for `'a` and
+        // locks itself while it picks a backend.
         let rc = unsafe {
             ffi::git_odb_open_rstream(
                 &raw mut out,
