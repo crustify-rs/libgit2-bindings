@@ -109,8 +109,8 @@ use crate::libgit2::src::util::errors::{
 /// [`from_raw`](Self::from_raw) gives `None` for both, and for every value
 /// `git_object_type_is_valid` refuses.
 ///
-/// Wraps: `git_object_t`
-/// Handwritten
+/// Wraps `ty::git_object_t`
+#[doc(alias = "git_object_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(i32)]
 #[non_exhaustive]
@@ -173,8 +173,6 @@ impl From<ObjectType> for ffi::git_object_t {
 /// A `git_object_t` value that is no object's type: `GIT_OBJECT_ANY`,
 /// `GIT_OBJECT_INVALID`, or a value the header does not name. [`raw`](Self::raw) has
 /// it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NotAnObjectType(ffi::git_object_t);
 
@@ -227,8 +225,8 @@ impl std::error::Error for NotAnObjectType {}
 /// }
 /// ```
 ///
-/// Wraps: `git_object`
-/// Handwritten
+/// Wraps `ty::git_object`
+#[doc(alias = "git_object")]
 #[repr(transparent)]
 pub struct Object<'r>(ffi::git_object, PhantomData<(*const (), &'r ())>);
 
@@ -244,8 +242,6 @@ pub struct Object<'r>(ffi::git_object, PhantomData<(*const (), &'r ())>);
 ///     send(handle)
 /// }
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct ObjectRef<'a, 'r>(CBorrowedPtr<'a, Object<'r>>);
@@ -254,8 +250,6 @@ pub struct ObjectRef<'a, 'r>(CBorrowedPtr<'a, Object<'r>>);
 /// [`as_ref`](Self::as_ref).
 ///
 /// No owner hands one out: every object is shared with its repository's cache.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct ObjectMut<'a, 'r>(
     ObjectRef<'a, 'r>,
@@ -305,8 +299,6 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// drop(repo);
     /// drop(copy);
     /// ```
-    ///
-    /// Wraps: `git_object_dup`
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a handle is never NULL"
@@ -327,11 +319,12 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in the
     /// object, which writes it once, when it is parsed.
     ///
-    /// Wraps: `git_object_id`
+    /// Wraps `fn::git_object_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live object has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_id")]
     #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live object for `'a`; libgit2 only reads it, and
@@ -361,11 +354,12 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: `git_object_owner`
+    /// Wraps `fn::git_object_owner`
     ///
     /// # Panics
     ///
     /// Panics, with `an object always has a repository`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_owner")]
     #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live object for `'a`, which libgit2 only reads.
@@ -389,7 +383,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// shares with every lookup, so the result lives no longer than the repository's
     /// borrow `'r`, as this object does.
     ///
-    /// Wraps: `git_object_peel`
+    /// Wraps `fn::git_object_peel`
     ///
     /// # Errors
     ///
@@ -404,6 +398,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// # Panics
     ///
     /// Panics, with `a peel succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_peel")]
     pub fn peel(&self, kind: Option<ObjectType>) -> Result<ObjectArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
@@ -438,7 +433,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// The result lives no longer than the repository's borrow `'r`, as this object
     /// does.
     ///
-    /// Wraps: `git_object_lookup_bypath`
+    /// Wraps `fn::git_object_lookup_bypath`
     ///
     /// # Errors
     ///
@@ -453,6 +448,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_lookup_bypath")]
     pub fn lookup_bypath(
         &self,
         path: &CStr,
@@ -483,11 +479,12 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// The object's type: what it was parsed as when it was looked up, which never
     /// changes.
     ///
-    /// Wraps: `git_object_type`
+    /// Wraps `fn::git_object_type`
     ///
     /// # Panics
     ///
     /// Panics, with `a parsed object always has a named type`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_type")]
     #[must_use]
     pub fn kind(&self) -> ObjectType {
         // SAFETY: the handle addresses a live object for `'a`; `git_object_type` reads
@@ -509,7 +506,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// The result is a fresh buffer: libgit2 overwrites the `git_buf` it is given
     /// without releasing what it held, which a fresh one does not hold.
     ///
-    /// Wraps: `git_object_short_id`
+    /// Wraps `fn::git_object_short_id`
     ///
     /// # Errors
     ///
@@ -517,6 +514,7 @@ impl<'a, 'r> ObjectRef<'a, 'r> {
     /// ("invalid oid abbreviation setting: '…'") or none of the above ("failed to map
     /// '…'", `true` included), and with libgit2's error when the
     /// configuration or the object database cannot be read.
+    #[doc(alias = "git_object_short_id")]
     pub fn short_id(&self) -> Result<BufVal, RepositoryError> {
         let mut out = Buf::new();
         // SAFETY: `out` is an empty buffer libgit2 fills; the handle addresses a live
@@ -564,10 +562,6 @@ impl fmt::Debug for ObjectMut<'_, '_> {
 /// pointer. The copy increments the same count and hands back the same pointer, so a
 /// copy is the same object, of the same repository, for the same `'r`. Neither can
 /// fail, and neither allocates.
-///
-/// Wraps: `git_object_free`
-/// Wraps: `git_object_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ObjectFree;
 
@@ -576,6 +570,8 @@ pub struct ObjectFree;
 // the object outlives the call through that reference, and is freed only once the
 // count, which the cache's reference is part of, reaches zero.
 unsafe impl<'r> CDrop<Object<'r>> for ObjectFree {
+    /// Wraps `fn::git_object_free`
+    #[doc(alias = "git_object_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Object<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live object of which the
         // caller gives up one reference; `Object` is transparent over `git_object`.
@@ -589,6 +585,8 @@ unsafe impl<'r> CDrop<Object<'r>> for ObjectFree {
 // fails. `c_is_sole_owner` keeps its `false` default: the repository's cache counts a
 // reference no owner sees, and a later lookup may take another.
 unsafe impl<'r> CRefClone<Object<'r>> for ObjectFree {
+    /// Wraps `fn::git_object_dup`
+    #[doc(alias = "git_object_dup")]
     unsafe fn c_up_ref(&self, ptr: NonNull<Object<'r>>) -> bool {
         let mut dest = ptr::null_mut();
         // SAFETY: `dest` is a writable slot; `ptr` addresses a live object whose
@@ -625,7 +623,7 @@ impl<'r> Object<'r> {
     /// drop(object);
     /// ```
     ///
-    /// Wraps: `git_object_lookup`
+    /// Wraps `fn::git_object_lookup`
     ///
     /// # Errors
     ///
@@ -644,6 +642,7 @@ impl<'r> Object<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_lookup")]
     pub fn lookup(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -683,7 +682,7 @@ impl<'r> Object<'r> {
     /// candidate, whatever its type: the prefix must name exactly one, which must then
     /// be of type `kind`.
     ///
-    /// Wraps: `git_object_lookup_prefix`
+    /// Wraps `fn::git_object_lookup_prefix`
     ///
     /// # Errors
     ///
@@ -696,6 +695,7 @@ impl<'r> Object<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_lookup_prefix")]
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -865,8 +865,8 @@ pub(crate) fn id_fits(repo: RepositoryRef<'_>, id: OidRef<'_>) -> Result<(), Rep
 /// let _copy = opts.clone();
 /// ```
 ///
-/// Wraps: `git_object_id_options`
-/// Handwritten
+/// Wraps `ty::git_object_id_options`
+#[doc(alias = "git_object_id_options")]
 #[repr(transparent)]
 pub struct ObjectIdOptions<'f>(
     ffi::git_object_id_options,
@@ -874,16 +874,12 @@ pub struct ObjectIdOptions<'f>(
 );
 
 /// Shared borrow of an [`ObjectIdOptions`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct ObjectIdOptionsRef<'a, 'f>(CBorrowedPtr<'a, ObjectIdOptions<'f>>);
 
 /// Exclusive borrow of an [`ObjectIdOptions`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct ObjectIdOptionsMut<'a, 'f>(
     ObjectIdOptionsRef<'a, 'f>,
@@ -931,12 +927,13 @@ impl<'f> ObjectIdOptions<'f> {
     /// its own it reaches no global, no allocator and no thread state, so this needs no
     /// initialised library.
     ///
-    /// Wraps: `git_object_id_options_init`
+    /// Wraps `fn::git_object_id_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_object_id_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_object_id_options>::uninit();
@@ -984,7 +981,8 @@ impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
     /// The structure's version, `GIT_OBJECT_ID_OPTIONS_VERSION`; fixed by
     /// [`ObjectIdOptions::new`], and read by no routine taking the options.
     ///
-    /// Field: `git_object_id_options.version`
+    /// Wraps `fld::git_object_id_options.version`
+    #[doc(alias = "git_object_id_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
@@ -999,7 +997,8 @@ impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
     /// The type of the object whose content is hashed, which its header names;
     /// `None` means the default, a blob.
     ///
-    /// Field: `git_object_id_options.object_type`
+    /// Wraps `fld::git_object_id_options.object_type`
+    #[doc(alias = "git_object_id_options.object_type")]
     #[must_use]
     pub fn object_type(&self) -> Option<ObjectType> {
         let p = self.as_ptr();
@@ -1016,7 +1015,8 @@ impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
 
     /// The type of id computed; `None` means the default, `GIT_OID_DEFAULT` (SHA-1).
     ///
-    /// Field: `git_object_id_options.oid_type`
+    /// Wraps `fld::git_object_id_options.oid_type`
+    #[doc(alias = "git_object_id_options.oid_type")]
     #[must_use]
     pub fn oid_type(&self) -> Option<OidType> {
         let p = self.as_ptr();
@@ -1036,7 +1036,8 @@ impl<'a, 'f> ObjectIdOptionsRef<'a, 'f> {
     /// The handle lives no longer than this shared borrow of the options, which keep
     /// the list exclusively for `'f`.
     ///
-    /// Field: `git_object_id_options.filters`
+    /// Wraps `fld::git_object_id_options.filters`
+    #[doc(alias = "git_object_id_options.filters")]
     #[must_use]
     pub fn filters(&self) -> Option<FilterListRef<'a, 'f>> {
         let p = self.as_ptr();
@@ -1081,7 +1082,8 @@ impl<'f> ObjectIdOptionsMut<'_, 'f> {
     /// Sets the type of the object whose content is hashed; `None` means the default,
     /// a blob.
     ///
-    /// Field: `git_object_id_options.object_type`
+    /// Wraps `fld::git_object_id_options.object_type`
+    #[doc(alias = "git_object_id_options.object_type")]
     pub fn set_object_type(&mut self, kind: Option<ObjectType>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -1094,7 +1096,8 @@ impl<'f> ObjectIdOptionsMut<'_, 'f> {
 
     /// Sets the type of id computed; `None` means the default, SHA-1.
     ///
-    /// Field: `git_object_id_options.oid_type`
+    /// Wraps `fld::git_object_id_options.oid_type`
+    #[doc(alias = "git_object_id_options.oid_type")]
     pub fn set_oid_type(&mut self, kind: Option<OidType>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -1112,7 +1115,8 @@ impl<'f> ObjectIdOptionsMut<'_, 'f> {
     /// built for, which then both outlive the options; no other handle to it is used
     /// meanwhile, since applying it writes its filters' state.
     ///
-    /// Field: `git_object_id_options.filters`
+    /// Wraps `fld::git_object_id_options.filters`
+    #[doc(alias = "git_object_id_options.filters")]
     pub fn set_filters<'r>(&mut self, filters: Option<FilterListMut<'f, 'r>>) {
         let list = filters.map_or(ptr::null_mut(), |mut l| l.as_mut_ptr());
         let p = self.as_mut_ptr();
@@ -1152,11 +1156,12 @@ impl ObjectType {
     /// assert_eq!(ObjectType::from_name(c"tag"), Some(ObjectType::Tag));
     /// ```
     ///
-    /// Wraps: `git_object_type2string`
+    /// Wraps `fn::git_object_type2string`
     ///
     /// # Panics
     ///
     /// Panics, with `libgit2's object type names are ASCII`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_object_type2string")]
     #[must_use]
     pub fn name(self) -> &'static str {
         // SAFETY: no pointer argument; libgit2 returns a string of its static table of
@@ -1173,7 +1178,8 @@ impl ObjectType {
     /// [`Commit`](Self::Commit). The match is case-sensitive; `None` for any other
     /// name, the empty one included.
     ///
-    /// Wraps: `git_object_string2type`
+    /// Wraps `fn::git_object_string2type`
+    #[doc(alias = "git_object_string2type")]
     #[must_use]
     pub fn from_name(name: &CStr) -> Option<Self> {
         // SAFETY: `name` is a NUL-terminated string, read up to its NUL for the call
@@ -1187,7 +1193,8 @@ impl ObjectType {
 /// [`ObjectType`]s. Every other value is not, `GIT_OBJECT_ANY` and
 /// `GIT_OBJECT_INVALID` included; a valid value converts with [`ObjectType::from_raw`].
 ///
-/// Wraps: `git_object_type_is_valid`
+/// Wraps `fn::git_object_type_is_valid`
+#[doc(alias = "git_object_type_is_valid")]
 #[must_use]
 pub fn type_is_valid(raw: ffi::git_object_t) -> bool {
     // SAFETY: a plain value, checked against libgit2's static table of object types.
@@ -1231,12 +1238,13 @@ pub fn type_is_valid(raw: ffi::git_object_t) -> bool {
 /// );
 /// ```
 ///
-/// Wraps: `git_object_rawcontent_is_valid`
+/// Wraps `fn::git_object_rawcontent_is_valid`
 ///
 /// # Errors
 ///
 /// Fails, with libgit2's error, when libgit2 runs out of memory parsing, or cannot be
 /// initialised.
+#[doc(alias = "git_object_rawcontent_is_valid")]
 pub fn content_is_valid(
     content: &[u8],
     kind: ObjectType,
@@ -1302,13 +1310,14 @@ pub fn content_is_valid(
 /// assert_eq!(tree.as_ref().kind(), Some(OidType::Sha256));
 /// ```
 ///
-/// Wraps: `git_object_id_from_buffer`
+/// Wraps `fn::git_object_id_from_buffer`
 ///
 /// # Errors
 ///
 /// Fails, with the filter's code and error, when a filter fails, as a CRLF filter does
 /// under `core.safecrlf`; and with libgit2's error when it runs out of memory, or
 /// cannot be initialised.
+#[doc(alias = "git_object_id_from_buffer")]
 pub fn id_from_buffer(
     data: &[u8],
     opts: Option<ObjectIdOptionsMut<'_, '_>>,
@@ -1348,7 +1357,7 @@ pub fn id_from_buffer(
 /// [`RepositoryRef::hash_file`](crate::libgit2::src::libgit2::repository::RepositoryRef::hash_file)
 /// computes.
 ///
-/// Wraps: `git_object_id_from_file`
+/// Wraps `fn::git_object_id_from_file`
 ///
 /// # Errors
 ///
@@ -1356,6 +1365,7 @@ pub fn id_from_buffer(
 /// file; with libgit2's error (`GIT_ERROR_OS`) when it cannot be opened or read in
 /// full (a directory, say, or a file that shrinks meanwhile); and as
 /// [`id_from_buffer`] does otherwise.
+#[doc(alias = "git_object_id_from_file")]
 pub fn id_from_file(
     path: &CStr,
     opts: Option<ObjectIdOptionsMut<'_, '_>>,
