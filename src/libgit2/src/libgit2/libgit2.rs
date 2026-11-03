@@ -42,8 +42,8 @@ use crate::libgit2::src::libgit2::settings::Version;
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: `git_feature_t`
-/// Handwritten
+/// Wraps `ty::git_feature_t`
+#[doc(alias = "git_feature_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -137,8 +137,6 @@ impl From<Feature> for ffi::git_feature_t {
 
 /// A feature value that this version of libgit2's header does not name: `0`, a
 /// combination of features, or a later header's bit. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedFeature(ffi::git_feature_t);
 
@@ -168,9 +166,6 @@ impl std::error::Error for UnnamedFeature {}
 /// It keeps every bit it is given, named or not, so [`bits`](Self::bits) returns
 /// what C produced; [`iter`](Self::iter) and [`contains`](Self::contains) see the
 /// named features, and [`unnamed_bits`](Self::unnamed_bits) the rest.
-///
-/// Wraps: `git_feature_t`
-/// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Features(c_int);
 
@@ -326,8 +321,6 @@ impl fmt::Debug for Features {
 
 /// The named features of a [`Features`] set, in ascending bit order
 /// ([`Features::iter`]).
-///
-/// Handwritten
 #[derive(Clone, Debug)]
 pub struct FeaturesIter {
     set: Features,
@@ -360,7 +353,8 @@ impl core::iter::FusedIterator for FeaturesIter {}
 /// libgit2 answers from constants compiled into it, so this needs no initialisation
 /// and cannot fail.
 ///
-/// Wraps: `git_libgit2_version`
+/// Wraps `fn::git_libgit2_version`
+#[doc(alias = "git_libgit2_version")]
 #[must_use]
 pub fn version() -> Version {
     let (mut major, mut minor, mut revision) = (0, 0, 0);
@@ -382,7 +376,8 @@ pub fn version() -> Version {
 /// stays loaded: this crate links it for the life of the process. Needs no
 /// initialisation.
 ///
-/// Wraps: `git_libgit2_prerelease`
+/// Wraps `fn::git_libgit2_prerelease`
+#[doc(alias = "git_libgit2_prerelease")]
 #[must_use]
 pub fn prerelease() -> Option<&'static CStr> {
     // SAFETY: no arguments, no state read.
@@ -398,7 +393,8 @@ pub fn prerelease() -> Option<&'static CStr> {
 /// The set keeps any bit a later libgit2 adds that this crate's [`Feature`] does not
 /// name. Needs no initialisation.
 ///
-/// Wraps: `git_libgit2_features`
+/// Wraps `fn::git_libgit2_features`
+#[doc(alias = "git_libgit2_features")]
 #[must_use]
 pub fn features() -> Features {
     // SAFETY: no arguments; the routine ORs compile-time constants.
@@ -415,7 +411,8 @@ pub fn features() -> Features {
 /// assertion for a compiled-in feature whose backend no define names, cannot be
 /// reached by a build that `CMake` configured, which always names one.
 ///
-/// Wraps: `git_libgit2_feature_backend`
+/// Wraps `fn::git_libgit2_feature_backend`
+#[doc(alias = "git_libgit2_feature_backend")]
 #[must_use]
 pub fn feature_backend(feature: Feature) -> Option<&'static CStr> {
     // SAFETY: a named `git_feature_t`, by value; the routine reads no state.
@@ -444,8 +441,6 @@ static INIT: Mutex<bool> = Mutex::new(false);
 /// It holds no pointer and no thread affinity — libgit2 counts references under its
 /// own mutex — so it is `Send` and `Sync`, and may be dropped on any thread. It is not
 /// `Clone`: another reference is another [`init`], which can fail.
-///
-/// Handwritten
 #[derive(Debug)]
 #[must_use = "dropping the reference releases it at once"]
 pub struct Runtime {
@@ -460,7 +455,7 @@ pub struct Runtime {
 /// No libgit2 error is set or reported: after a failed initialisation, the per-thread
 /// error state may have no TLS key to be looked up under.
 ///
-/// Wraps: `git_libgit2_init`
+/// Wraps `fn::git_libgit2_init`
 ///
 /// # Errors
 ///
@@ -471,6 +466,7 @@ pub struct Runtime {
 /// half-initialised state. It also refuses to let the count grow past `c_int::MAX / 2`
 /// ([`InitError::TooManyReferences`]), so a program leaking references cannot wrap it
 /// around.
+#[doc(alias = "git_libgit2_init")]
 pub fn init() -> Result<Runtime, InitError> {
     let mut failed = INIT.lock().unwrap_or_else(PoisonError::into_inner);
     if *failed {
@@ -507,7 +503,7 @@ impl Runtime {
     /// remain, as `git_libgit2_shutdown` returns it: 0 when this one was the last and
     /// libgit2 tore its global state down.
     ///
-    /// Wraps: `git_libgit2_shutdown`
+    /// Wraps `fn::git_libgit2_shutdown`
     ///
     /// # Errors
     ///
@@ -516,6 +512,7 @@ impl Runtime {
     /// tearing it down under another holder; or when an unbalanced C
     /// `git_libgit2_shutdown` had already released this reference's count, so that
     /// libgit2 reports a negative one.
+    #[doc(alias = "git_libgit2_shutdown")]
     pub fn shutdown(self) -> Result<usize, ShutdownError> {
         // The reference is released here, not again by `Drop`.
         let _ = core::mem::ManuallyDrop::new(self);
@@ -525,8 +522,6 @@ impl Runtime {
 
 /// Releases the reference with `git_libgit2_shutdown`, ignoring a mutex failure as
 /// [`Runtime::shutdown`] would report it.
-///
-/// Wraps: `git_libgit2_shutdown`
 impl Drop for Runtime {
     fn drop(&mut self) {
         let _ = release();
