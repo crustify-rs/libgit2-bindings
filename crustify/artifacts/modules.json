@@ -19020,7 +19020,7 @@
         {
           "index": 94,
           "name": "src/libgit2/odb.c",
-          "status": "todo",
+          "status": "frozen",
           "foundational": false,
           "depends_on": {
             "scheduled": [
