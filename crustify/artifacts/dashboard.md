@@ -59,17 +59,17 @@ in Notes.
 
 | | count | share | C LoC coverage | Rust LoC coverage |
 |---|---:|---:|---:|---:|
-| UB safe tests | `760` | — | `35.80`% | `84.57`% |
+| UB safe tests | `769` | — | `35.80`% | `84.57`% |
 | UB unsafe tests | `96` | — | `22.20`% | `12.70`% |
-| Equiv tests | `466` | — | `43.73`% | `76.50`% |
-| Unit tests | `727` | — | `32.13`% | `87.48`% |
-| **Total tests** | **`2049`** | — | **`46.65`%** | **`99.55`%** |
+| Equiv tests | `470` | — | `43.73`% | `76.50`% |
+| Unit tests | `735` | — | `32.13`% | `87.48`% |
+| **Total tests** | **`2070`** | — | **`46.65`%** | **`99.55`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
-| wrapped types | `99` | `38.37`% | — | — |
+| wrapped types | `101` | `39.15`% | — | — |
 | total symbols | `979` | — | — | — |
 | ported symbols | `4` | `0.41`% | — | — |
-| wrapped symbols | `421` | `43.00`% | — | — |
+| wrapped symbols | `424` | `43.31`% | — | — |
 
 ### Module stats
 
@@ -208,6 +208,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `50` | `1` | first | `1` | `3` | `+806/-5` | `45.85`% / `99.54`% | `$6.21` | `17.23M` | `25m45s` | `$6.21` | `$2.07` |
 | `libgit2/src/libgit2/indexer.c` | `172` | `0` | first | `1` | `7` | `+727/-0` | — | `$5.75` | `16.14M` | `26m16s` | `$5.75` | `$0.82` |
 | `libgit2/src/libgit2/odb.c` | `176` | `0` | first | `2` | `5` | `+1256/-20` | — | — | — | — | — | — |
+| `libgit2/src/libgit2/odb.c` | `176` | `1` | first | `2` | `14` | `+2132/-4` | — | — | — | — | — | — |
 | `libgit2/util` | `6` | `0` | review | `2` | `5` | `+172/-15` | `1.63`% / `99.74`% | `$20.66` | `23.31M` | `48m16s` | `$10.33` | `$4.13` |
 | `libgit2/util` | `6` | `1` | review | `2` | `0` | `+149/-12` | `1.63`% / `98.42`% | `$7.58` | `10.10M` | `18m18s` | `$3.79` | — |
 | `libgit2/oid` | `11` | `0` | review | `2` | `2` | `+224/-6` | `7.81`% / `99.48`% | `$14.93` | `18.05M` | `29m10s` | `$7.46` | `$7.46` |
@@ -229,7 +230,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `0` | review | `15` | `5` | `+738/-79` | `45.75`% / `99.53`% | `$15.85` | `50.35M` | `46m20s` | `$1.06` | `$3.17` |
 | `libgit2/index` | `51` | `0` | review | `3` | `17` | `+203/-8` | `46.57`% / `99.53`% | `$12.82` | `35.96M` | `48m41s` | `$4.27` | `$0.75` |
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `1` | `7` | `+10/-7` | — | `$3.93` | `10.78M` | `16m22s` | `$3.93` | `$0.56` |
-| **Σ first** |  |  |  | **`99`** | **`157`** | **`+91130/-2055`** | **`45.85`% / `99.54`%** | **`$530.95`** | **`1264.35M`** | — | **`$5.47`** | **`$3.49`** |
+| **Σ first** |  |  |  | **`101`** | **`171`** | **`+93262/-2059`** | **`45.85`% / `99.54`%** | **`$530.95`** | **`1264.35M`** | — | **`$5.47`** | **`$3.49`** |
 | **Σ review** |  |  |  | **`97`** | **`152`** | **`+9274/-2038`** | **`46.57`% / `99.53`%** | **`$392.97`** | **`623.63M`** | — | **`$4.05`** | **`$2.59`** |
 
 ### Batches — wrap: tests
@@ -299,6 +300,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `50` | `1` | first | `+4` (`+0.12`/`+0.00` pp) | `+0` (`-0.16`/`-0.06` pp) | `+2` (`+0.13`/`+0.03` pp) | `+2` (`+0.02`/`-0.04` pp) |
 | `libgit2/src/libgit2/indexer.c` | `172` | `0` | first | `+6` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+5` (—/— pp) |
 | `libgit2/src/libgit2/odb.c` | `176` | `0` | first | `+2` (—/— pp) | `+0` (—/— pp) | `+2` (—/— pp) | `+10` (—/— pp) |
+| `libgit2/src/libgit2/odb.c` | `176` | `1` | first | `+9` (—/— pp) | `+0` (—/— pp) | `+4` (—/— pp) | `+8` (—/— pp) |
 | `libgit2/util` | `6` | `0` | review | `+0` (`+0.00`/`+0.00` pp) | `+1` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) | `+2` (`+0.00`/`+0.00` pp) |
 | `libgit2/util` | `6` | `1` | review | `+0` (`+0.00`/`-0.44` pp) | `+0` (`+0.00`/`-0.79` pp) | `+1` (`+0.27`/`-0.49` pp) | `+1` (`+0.00`/`+0.20` pp) |
 | `libgit2/oid` | `11` | `0` | review | `+1` (`+0.00`/`+0.32` pp) | `+0` (`+0.00`/`-0.39` pp) | `+1` (`+0.00`/`-0.61` pp) | `+4` (`+0.00`/`+0.57` pp) |
@@ -320,7 +322,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `0` | review | `+1` (`+0.08`/`-0.09` pp) | `+2` (`+0.33`/`+0.40` pp) | `+1` (`+0.18`/`-0.04` pp) | `+2` (`+0.00`/`+0.09` pp) |
 | `libgit2/index` | `51` | `0` | review | `+1` (`-0.01`/`+0.00` pp) | `+0` (`+0.04`/`+0.00` pp) | `+0` (`-0.01`/`+0.00` pp) | `+2` (`+0.10`/`+0.05` pp) |
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
-| **Σ first** |  |  |  | **`+433` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+246` (`+31.12`/`-24.83` pp)** | **`+448` (`+12.61`/`+24.41` pp)** |
+| **Σ first** |  |  |  | **`+442` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+250` (`+31.12`/`-24.83` pp)** | **`+456` (`+12.61`/`+24.41` pp)** |
 | **Σ review** |  |  |  | **`+34` (`+0.37`/`+2.20` pp)** | **`+3` (`-0.40`/`-5.36` pp)** | **`+22` (`+2.71`/`-1.21` pp)** | **`+39` (`+4.66`/`+2.36` pp)** |
 
 ### Batches — port
@@ -410,6 +412,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `50` | `1` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.08` pp | `+10` | — | — | `+0` | `+0` |
 | `libgit2/src/libgit2/indexer.c` | `172` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.03` pp | `+30` | `+6` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/odb.c` | `176` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `-0.06` pp | `+27` | `+12` | — | `+0` | `+0` |
+| `libgit2/src/libgit2/odb.c` | `176` | `1` | wrap | first | `+2` | `+2` | `+0` | `+2` | — | — | `+0.09` pp | `+35` | `+0` | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.04` pp | `+2` | — | — | `+0` | `+0` |
 | `libgit2/oid` | `11` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.18` pp | `+0` | — | — | `+0` | `+0` |
@@ -431,7 +434,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `49` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.03` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/index` | `51` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
-| **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+13`** | — | — | **`-0.70` pp** | **`+1022`** | — | — | **`+7`** | **`+7`** |
+| **Σ first** |  |  |  |  | **`+6`** | **`+11`** | **`+8`** | **`+15`** | — | — | **`-0.61` pp** | **`+1057`** | — | — | **`+7`** | **`+7`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`-3`** | — | — | **`-0.14` pp** | **`+20`** | — | — | **`+0`** | **`-2`** |
 
 ### Batches — review: PoC + reports
@@ -1046,6 +1049,32 @@ row comes from `ffimap` scans of the wave base and this tree. `Send/Sync` is `+1
 and `Sync` for each type and its two handles. Derived `Clone` counts under neither
 `Drop/Clone` nor any other column. `C borrow`, `slice borrow` and `C by value` stay `—`.
 Five compile-fail snapshots of other modules mismatch, as at wave 173, from the ffibox pin
+drift.
+
+### `libgit2/src/libgit2/odb.c` wave 176 batch 1: `git_odb_stream` and `git_odb_writepack`
+
+Wave 176 batch 1 wraps `git_odb_stream` as `OdbStream` and `git_odb_writepack` as
+`OdbWritepack`. It also binds the stream's lifecycle routines, `git_odb_open_wstream`,
+`git_odb_open_rstream` and `git_odb_stream_free`, which Coverage stats counts as `+3`
+wrapped symbols. `git_odb_write_pack` stays with wave 180, since it takes wave 178's
+`git_indexer_progress_cb`. Coverage cells stay `—` for wave 172's reason. Source-based
+coverage on `nightly-2026-10-07` over the new odb unit, `ub_safe` and `equiv` tests covers
+every line of the new code except the open routines' passthrough branch, which only a custom
+backend reaches. The C fake write stream, used for a backend without streaming writes, is
+also out of reach for the same reason. `+LoC` leaves out the 144 regenerated lines of
+`libgit2-sys/src/bindings.rs`.
+
+The safety audit row comes from `ffimap` scans of the wave tip this landing rebased onto
+(`603bf0085`) and this tree. `pub raw ptr (safe)` is `+2`: the two `backend()` getters,
+which return `*mut git_odb_backend` until wave 180 wraps that type. `pub unsafe fn` is `+2`:
+the two `CDrop::c_drop` methods. Derived `Clone` counts in no column; no `Drop` or `Clone`
+is hand-written. `deref outside impl` is `+0` because every raw-pointer dereference sits in
+an impl or trait body; the scanner no longer reports that counter.
+
+BorrowSanitizer did not run. `cargo-variant.sh bsan` stops in `libgit2-sys`'s bindings check:
+the `bsan` toolchain's clang 23 adds doc comments to 26 macro constants, none of them this
+batch's, so its regenerated `bindings.rs` differs from the committed one. ASan+UBSan, TSan and
+Miri ran on every new test. The same five compile-fail snapshots mismatch from the ffibox pin
 drift.
 
 ### Parallelism and review caps from `libgit2/repository`

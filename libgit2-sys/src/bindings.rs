@@ -2088,6 +2088,145 @@ unsafe extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
+    /** Open a stream to write an object into the ODB
+
+ The type and final length of the object must be specified
+ when opening the stream.
+
+ The returned stream will be of type `GIT_STREAM_WRONLY`, and it
+ won't be effective until `git_odb_stream_finalize_write` is called
+ and returns without an error
+
+ The stream must always be freed when done with `git_odb_stream_free` or
+ will leak memory.
+
+ @see git_odb_stream
+
+ @param[out] out pointer where to store the stream
+ @param db object database where the stream will write
+ @param size final size of the object that will be written
+ @param type type of the object that will be written
+ @return 0 if the stream was created; error code otherwise*/
+    pub fn git_odb_open_wstream(
+        out: *mut *mut git_odb_stream,
+        db: *mut git_odb,
+        size: git_object_size_t,
+        type_: git_object_t,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Write to an odb stream
+
+ This method will fail if the total number of received bytes exceeds the
+ size declared with `git_odb_open_wstream()`
+
+ @param stream the stream
+ @param buffer the data to write
+ @param len the buffer's length
+ @return 0 if the write succeeded, error code otherwise*/
+    pub fn git_odb_stream_write(
+        stream: *mut git_odb_stream,
+        buffer: *const ::std::os::raw::c_char,
+        len: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Finish writing to an odb stream
+
+ The object will take its final name and will be available to the
+ odb.
+
+ This method will fail if the total number of received bytes
+ differs from the size declared with `git_odb_open_wstream()`
+
+ @param out pointer to store the resulting object's id
+ @param stream the stream
+ @return 0 on success, an error code otherwise*/
+    pub fn git_odb_stream_finalize_write(
+        out: *mut git_oid,
+        stream: *mut git_odb_stream,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Read from an odb stream
+
+ Most backends don't implement streaming reads
+
+ @param stream the stream
+ @param buffer a user-allocated buffer to store the data in.
+ @param len the buffer's length
+ @return the number of bytes read if succeeded, error code otherwise*/
+    pub fn git_odb_stream_read(
+        stream: *mut git_odb_stream,
+        buffer: *mut ::std::os::raw::c_char,
+        len: usize,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Free an odb stream
+
+ @param stream the stream to free*/
+    pub fn git_odb_stream_free(stream: *mut git_odb_stream);
+}
+unsafe extern "C" {
+    /** Open a stream to read an object from the ODB
+
+ Note that most backends do *not* support streaming reads
+ because they store their objects as compressed/delta'ed blobs.
+
+ It's recommended to use `git_odb_read` instead, which is
+ assured to work on all backends.
+
+ The returned stream will be of type `GIT_STREAM_RDONLY` and
+ will have the following methods:
+
+		- stream->read: read `n` bytes from the stream
+		- stream->free: free the stream
+
+ The stream must always be free'd or will leak memory.
+
+ @see git_odb_stream
+
+ @param[out] out pointer where to store the stream
+ @param[out] len pointer where to store the length of the object
+ @param type pointer where to store the type of the object
+ @param db object database where the stream will read from
+ @param oid oid of the object the stream will read from
+ @return 0 if the stream was created, error code otherwise*/
+    pub fn git_odb_open_rstream(
+        out: *mut *mut git_odb_stream,
+        len: *mut usize,
+        type_: *mut git_object_t,
+        db: *mut git_odb,
+        oid: *const git_oid,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
+    /** Open a stream for writing a pack file to the ODB.
+
+ If the ODB layer understands pack files, then the given
+ packfile will likely be streamed directly to disk (and a
+ corresponding index created).  If the ODB layer does not
+ understand pack files, the objects will be stored in whatever
+ format the ODB layer uses.
+
+ @see git_odb_writepack
+
+ @param[out] out pointer to the writepack functions
+ @param db object database where the stream will read from
+ @param progress_cb function to call with progress information.
+ Be aware that this is called inline with network and indexing operations,
+ so performance may be affected.
+ @param progress_payload payload for the progress callback
+ @return 0 or an error code.*/
+    pub fn git_odb_write_pack(
+        out: *mut *mut git_odb_writepack,
+        db: *mut git_odb,
+        progress_cb: git_indexer_progress_cb,
+        progress_payload: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
     /** Close an ODB object
 
  This method must always be called once a `git_odb_object` is no
@@ -10869,6 +11008,11 @@ unsafe extern "C" {
         it: *mut git_note_iterator,
     ) -> ::std::os::raw::c_int;
 }
+pub const GIT_STREAM_RDONLY: git_odb_stream_t = 2;
+pub const GIT_STREAM_WRONLY: git_odb_stream_t = 4;
+pub const GIT_STREAM_RW: git_odb_stream_t = 6;
+/// Streaming mode
+pub type git_odb_stream_t = ::std::os::raw::c_uint;
 /** A stream to read/write from a backend.
 
  This represents a stream of data being written to or read from a

@@ -528,6 +528,13 @@ function git_index_get_bypath
 function git_index_add_from_buffer
 function git_index_conflict_get
 function git_index_entry_is_conflict
+function git_odb_open_rstream
+function git_odb_open_wstream
+function git_odb_stream_finalize_write
+function git_odb_stream_free
+function git_odb_stream_read
+function git_odb_stream_write
+function git_odb_write_pack
 
 type git_allocator
 type git_blob_filter_flag_t
@@ -680,3 +687,6 @@ var GIT_DIFF_OPTIONS_VERSION
 
 # Indexer progress counters
 type git_indexer_progress
+type git_odb_stream
+type git_odb_stream_t
+type git_odb_writepack

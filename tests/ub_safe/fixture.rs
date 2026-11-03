@@ -2205,3 +2205,60 @@ pub(crate) fn match_list_index(paths: &[&CStr]) -> libgit2::libgit2::src::libgit
     }
     index
 }
+
+// --- `git2/odb_backend.h`: `git_odb_stream`, `git_odb_writepack` --------------------
+
+/// Stand-ins for the stream operations (`git_odb_stream_write`,
+/// `git_odb_stream_finalize_write`, `git_odb_stream_read`) and for the writepack
+/// constructor (`git_odb_write_pack`), which their wrappers replace; each reaches the
+/// stream or odb through its owner's raw seam.
+pub(crate) mod odb_stream {
+    use libgit2::ffi;
+    use libgit2::libgit2::src::libgit2::odb::{OdbArc, OdbStreamBox, OdbWritepackBox};
+
+    /// `git_odb_stream_write`: its return code.
+    pub(crate) fn write(stream: &mut OdbStreamBox<'_>, data: &[u8]) -> i32 {
+        // SAFETY: the stream is a write stream libgit2 opened, live and exclusively
+        // borrowed; `data` is live for its length, read for the call only.
+        unsafe { ffi::git_odb_stream_write(stream.as_c_ptr(), data.as_ptr().cast(), data.len()) }
+    }
+
+    /// `git_odb_stream_finalize_write`: the stored object's id, or the error code.
+    pub(crate) fn finalize(stream: &mut OdbStreamBox<'_>) -> Result<ffi::git_oid, i32> {
+        let mut id = ffi::git_oid::default();
+        // SAFETY: as in `write`; `id` is writable.
+        let rc = unsafe { ffi::git_odb_stream_finalize_write(&raw mut id, stream.as_c_ptr()) };
+        if rc == 0 { Ok(id) } else { Err(rc) }
+    }
+
+    /// `git_odb_stream_read` into `buf`: the bytes read, or the error code.
+    pub(crate) fn read(stream: &mut OdbStreamBox<'_>, buf: &mut [u8]) -> Result<usize, i32> {
+        // SAFETY: the stream is a read stream libgit2 opened (its `read` member set),
+        // live and exclusively borrowed; `buf` is writable for its length.
+        let rc = unsafe {
+            ffi::git_odb_stream_read(stream.as_c_ptr(), buf.as_mut_ptr().cast(), buf.len())
+        };
+        usize::try_from(rc).map_err(|_| rc)
+    }
+
+    /// A writepack over the odb's first backend that writes packs, without a progress
+    /// callback (`git_odb_write_pack`), adopted; the error code when none does.
+    ///
+    /// The one unsafe adoption of `OdbWritepackBox`, until the safe constructor lands.
+    pub(crate) fn write_pack<'o>(odb: &'o OdbArc<'_>) -> Result<OdbWritepackBox<'o>, i32> {
+        let mut out = core::ptr::null_mut();
+        // SAFETY: `out` is a writable slot; the odb is live while `odb` is borrowed and
+        // locks itself; no progress callback, so no payload.
+        let rc = unsafe {
+            ffi::git_odb_write_pack(&raw mut out, odb.as_c_ptr(), None, core::ptr::null_mut())
+        };
+        if rc < 0 {
+            return Err(rc);
+        }
+        // SAFETY: the routine succeeded, so `out` is NULL (every backend passed) or a
+        // writepack its backend made for this odb, with its members set, which the
+        // caller owns and its `free` member releases; it reads the odb, borrowed for
+        // `'o`.
+        unsafe { OdbWritepackBox::from_c(out) }.ok_or(ffi::GIT_PASSTHROUGH)
+    }
+}

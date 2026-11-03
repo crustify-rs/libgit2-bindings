@@ -10,6 +10,7 @@
 //! again from one owner and used between other calls (`BSan`). The odb readers and
 //! writers are stand-ins from `fixture::odb`.
 
+mod stream;
 mod sys;
 
 use std::ffi::CString;

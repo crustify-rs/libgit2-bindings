@@ -93,7 +93,7 @@
 //! options the `_ext` constructors read, and [`OdbExpandId`], one query of
 //! `git_odb_expand_ids`, which a caller fills and the routine answers in place.
 
-use core::ffi::{CStr, c_char, c_int};
+use core::ffi::{CStr, c_char, c_int, c_uint};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -107,9 +107,11 @@ use ffibox::{
 };
 
 use crate::ffi;
+use crate::libgit2::src::libgit2::filter::StreamError;
+use crate::libgit2::src::libgit2::indexer::IndexerProgressMut;
 use crate::libgit2::src::libgit2::object::ObjectType;
-use crate::libgit2::src::libgit2::oid::{OidMut, OidRef, OidType};
-use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
+use crate::libgit2::src::libgit2::oid::{OidMut, OidRef, OidType, UnnamedOidType};
+use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last, runtime_pinned};
 
 /// An object database (`git_odb`): the layout type named by [`OdbArc`] and the
 /// handles, never held by value.
@@ -1564,6 +1566,742 @@ impl fmt::Debug for OdbDataStrVec {
     }
 }
 
+// --- `git2/odb_backend.h`: `git_odb_stream`, `git_odb_writepack` -----------------------
+
+/// A stream that writes one object into an object database, or reads one out of it
+/// (`git_odb_stream`), as a backend implements it: the layout type named by
+/// [`OdbStreamBox`] and the handles, never held by value.
+///
+/// A backend allocates the stream, typically as the first member of a container of
+/// its own (`fake_wstream`, `loose_writestream` and `loose_readstream` in libgit2), and
+/// sets its `backend`, `mode` and members; `git_odb_open_wstream` then gives a write
+/// stream its hashing context, the odb's object id type and its declared size.
+/// [`OdbRef::open_write_stream`] and [`OdbRef::open_read_stream`] open one, as an
+/// [`OdbStreamBox`] that [`OdbStreamFree`] releases.
+///
+/// `'o` is the borrow of the odb whose backend made the stream. The stream keeps that
+/// backend without a reference (`backend`), and finishing a write reaches the backend
+/// and its odb (`git_odb_stream_finalize_write` reads `stream->backend->odb`; the
+/// stream libgit2 fakes for a backend without streaming writes calls the backend's
+/// `write`), so neither an owner nor a handle outlives the odb:
+///
+/// ```compile_fail,E0597
+/// use libgit2::libgit2::src::libgit2::object::ObjectType;
+/// use libgit2::libgit2::src::libgit2::odb::Odb;
+///
+/// let stream = {
+///     let odb = Odb::new().unwrap();
+///     odb.as_ref().open_write_stream(1, ObjectType::Blob).unwrap()
+/// };
+/// drop(stream);
+/// ```
+///
+/// The lifetime only shrinks, and the exclusive handle is invariant in it, as `&mut` is
+/// in its pointee:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::src::libgit2::odb::OdbStreamMut;
+///
+/// fn shrink<'a, 'o>(m: OdbStreamMut<'a, 'static>) -> OdbStreamMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// Neither the owner nor the handles are `Send` or `Sync`: a stream is a backend's
+/// container, which a custom backend may tie to its thread, and libgit2 states nothing
+/// about moving one.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::src::libgit2::odb::OdbStreamBox;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn forward(stream: OdbStreamBox<'static>) {
+///     send(stream);
+/// }
+/// ```
+///
+/// There are no setters. libgit2 keeps the counters, the id type and the hashing
+/// context for its own checks, and a backend may size its storage from them: the stream
+/// libgit2 fakes for a backend without streaming writes copies each write into a
+/// buffer of the declared size, trusting `git_odb_stream_write` to refuse what does not
+/// fit. Its members belong to the container its backend cast the stream to.
+///
+/// Wraps `ty::git_odb_stream`
+#[doc(alias = "git_odb_stream")]
+#[repr(transparent)]
+pub struct OdbStream<'o>(
+    ffi::git_odb_stream,
+    PhantomData<(*const (), &'o ffi::git_odb)>,
+);
+
+/// Shared borrow of an [`OdbStream`]: its getters. `Copy`, like `&T`.
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct OdbStreamRef<'a, 'o>(CBorrowedPtr<'a, OdbStream<'o>>);
+
+/// Exclusive borrow of an [`OdbStream`]. Reaches the getters with
+/// [`as_ref`](Self::as_ref); the stream's reads and writes take it.
+#[repr(transparent)]
+pub struct OdbStreamMut<'a, 'o>(
+    OdbStreamRef<'a, 'o>,
+    // Invariant in the stream, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut OdbStream<'o>>,
+);
+
+// SAFETY: `OdbStream` is `#[repr(transparent)]` over `git_odb_stream` with a zero-sized
+// marker; both handles are `#[repr(transparent)]` over `CBorrowedPtr<'a, OdbStream<'o>>`
+// (`OdbStreamMut` through `OdbStreamRef`) with zero-sized markers and no `Drop`, hand out
+// no reference to the stream, and `OdbStreamRef` has no write operation. `OdbStreamMut`
+// is invariant in the stream through its `PhantomData<&'a mut OdbStream<'o>>`.
+unsafe impl<'o> CCell for OdbStream<'o> {
+    type C = ffi::git_odb_stream;
+    type Mut<'a>
+        = OdbStreamMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = OdbStreamRef<'a, 'o>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'o: 'a> CRefSeam<'a> for OdbStreamRef<'a, 'o> {
+    type Cell = OdbStream<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for OdbStreamMut<'a, 'o> {
+    type Cell = OdbStream<'o>;
+}
+
+impl<'o> OdbStreamMut<'_, 'o> {
+    /// Reborrows shared.
+    #[must_use]
+    pub fn as_ref(&self) -> OdbStreamRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> OdbStreamMut<'_, 'o> {
+        OdbStreamMut(self.0, PhantomData)
+    }
+}
+
+impl OdbStreamRef<'_, '_> {
+    /// The backend that made the stream, which libgit2 hands back to the backend's own
+    /// members; NULL only for a stream no backend set up.
+    ///
+    /// A raw pointer until `git_odb_backend` is wrapped: the backend belongs to the odb
+    /// the stream borrows for `'o`, and is reached only through it. Nothing here
+    /// dereferences it.
+    ///
+    /// Wraps `fld::git_odb_stream.backend`
+    #[doc(alias = "git_odb_stream.backend")]
+    #[must_use]
+    pub fn backend(&self) -> *mut ffi::git_odb_backend {
+        // SAFETY: `self.as_ptr()` addresses the live stream this handle borrows; the
+        // projection forms no reference to it.
+        let backend_ptr = unsafe { &raw const (*self.as_ptr()).backend };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid raw pointer.
+        unsafe { backend_ptr.read() }
+    }
+
+    /// The stream's mode, as its backend set it: the bits of `git_odb_stream_t`,
+    /// [`ffi::GIT_STREAM_RDONLY`] for a read stream and [`ffi::GIT_STREAM_WRONLY`] for a
+    /// write stream, or 0 when the backend set none (libgit2's loose read stream does
+    /// not).
+    ///
+    /// libgit2 never reads it: what a stream does is what its members do
+    /// ([`can_read`](Self::can_read), [`can_write`](Self::can_write)).
+    ///
+    /// Wraps `fld::git_odb_stream.mode`
+    #[doc(alias = "git_odb_stream.mode")]
+    #[must_use]
+    pub fn mode(&self) -> c_uint {
+        // SAFETY: as in `backend`.
+        let mode_ptr = unsafe { &raw const (*self.as_ptr()).mode };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid `c_uint`.
+        unsafe { mode_ptr.read() }
+    }
+
+    /// Whether the stream holds a hashing context, which libgit2 owns and
+    /// `git_odb_stream_free` releases.
+    ///
+    /// `git_odb_open_wstream` gives every write stream one, over which the object's id is
+    /// computed as it is written; libgit2's loose read stream holds one too. The context
+    /// is libgit2-private (`git_hash_ctx`), so only its presence is published.
+    ///
+    /// Wraps `fld::git_odb_stream.hash_ctx`
+    #[doc(alias = "git_odb_stream.hash_ctx")]
+    #[must_use]
+    pub fn has_hash_ctx(&self) -> bool {
+        // SAFETY: as in `backend`.
+        let hash_ctx_ptr = unsafe { &raw const (*self.as_ptr()).hash_ctx };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid raw pointer, which is only compared with NULL.
+        !unsafe { hash_ctx_ptr.read() }.is_null()
+    }
+
+    /// The type of the id a write stream computes, the odb's own
+    /// (`git_odb_open_wstream` copies it); `Err` with the raw value for a type the
+    /// header does not name, such as the 0 of a read stream, for which libgit2 sets
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`UnnamedOidType`], carrying the raw value, when the stream holds no known id
+    /// type.
+    ///
+    /// Wraps `fld::git_odb_stream.oid_type`
+    #[doc(alias = "git_odb_stream.oid_type")]
+    pub fn oid_type(&self) -> Result<OidType, UnnamedOidType> {
+        // SAFETY: as in `backend`.
+        let oid_type_ptr = unsafe { &raw const (*self.as_ptr()).oid_type };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid `git_oid_t`, an unsigned integer.
+        OidType::try_from(unsafe { oid_type_ptr.read() })
+    }
+
+    /// The size a write stream was opened for, in bytes: the length of the object's
+    /// content, which `git_odb_stream_finalize_write` requires to have been written in
+    /// full. 0 for a read stream, for which libgit2 sets none.
+    ///
+    /// Wraps `fld::git_odb_stream.declared_size`
+    #[doc(alias = "git_odb_stream.declared_size")]
+    #[must_use]
+    pub fn declared_size(&self) -> u64 {
+        // SAFETY: as in `backend`.
+        let declared_size_ptr = unsafe { &raw const (*self.as_ptr()).declared_size };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid `u64`.
+        unsafe { declared_size_ptr.read() }
+    }
+
+    /// The bytes written into a write stream so far, as `git_odb_stream_write` counts
+    /// them, refused writes included: it adds a write's length before checking it
+    /// against [`declared_size`](Self::declared_size). 0 for a fresh write stream and
+    /// for a read stream.
+    ///
+    /// Wraps `fld::git_odb_stream.received_bytes`
+    #[doc(alias = "git_odb_stream.received_bytes")]
+    #[must_use]
+    pub fn received_bytes(&self) -> u64 {
+        // SAFETY: as in `backend`.
+        let received_bytes_ptr = unsafe { &raw const (*self.as_ptr()).received_bytes };
+        // SAFETY: a read through the shared handle's pointer to a live stream; any
+        // value is a valid `u64`.
+        unsafe { received_bytes_ptr.read() }
+    }
+
+    /// Whether the stream can be read: whether its backend set its `read` member, as
+    /// libgit2's read streams do and its write streams do not.
+    /// `git_odb_stream_read` calls the member without checking.
+    ///
+    /// Wraps `fld::git_odb_stream.read`
+    #[doc(alias = "git_odb_stream.read")]
+    #[must_use]
+    pub fn can_read(&self) -> bool {
+        // SAFETY: as in `backend`.
+        let read_ptr = unsafe { &raw const (*self.as_ptr()).read };
+        // SAFETY: a read through the shared handle's pointer to a live stream: an
+        // optional function pointer, which C leaves NULL or sets.
+        unsafe { read_ptr.read() }.is_some()
+    }
+
+    /// Whether the stream can be written: whether its backend set its `write` member,
+    /// as libgit2's write streams do and its read streams do not.
+    /// `git_odb_stream_write` calls the member without checking.
+    ///
+    /// Wraps `fld::git_odb_stream.write`
+    #[doc(alias = "git_odb_stream.write")]
+    #[must_use]
+    pub fn can_write(&self) -> bool {
+        // SAFETY: as in `backend`.
+        let write_ptr = unsafe { &raw const (*self.as_ptr()).write };
+        // SAFETY: as in `can_read`.
+        unsafe { write_ptr.read() }.is_some()
+    }
+
+    /// Whether the stream can store what was written: whether its backend set its
+    /// `finalize_write` member, as libgit2's write streams do and its read streams do
+    /// not. `git_odb_stream_finalize_write` calls the member without checking, unless
+    /// the object already exists.
+    ///
+    /// Wraps `fld::git_odb_stream.finalize_write`
+    #[doc(alias = "git_odb_stream.finalize_write")]
+    #[must_use]
+    pub fn can_finalize_write(&self) -> bool {
+        // SAFETY: as in `backend`.
+        let finalize_write_ptr = unsafe { &raw const (*self.as_ptr()).finalize_write };
+        // SAFETY: as in `can_read`.
+        unsafe { finalize_write_ptr.read() }.is_some()
+    }
+}
+
+impl fmt::Debug for OdbStreamRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("OdbStreamRef");
+        s.field("mode", &self.mode());
+        match self.oid_type() {
+            Ok(oid_type) => s.field("oid_type", &oid_type),
+            Err(raw) => s.field("oid_type", &raw.raw()),
+        };
+        s.field("declared_size", &self.declared_size())
+            .field("received_bytes", &self.received_bytes())
+            .field("can_read", &self.can_read())
+            .field("can_write", &self.can_write())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for OdbStreamMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+/// Releases a stream through `git_odb_stream_free`: its hashing context, then the
+/// stream itself through its own `free` member, which releases the backend's container
+/// (a loose write stream's temporary file, a read stream's mapping and inflater, the
+/// fake stream's buffer). Stateless: the routine is recovered from the object.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OdbStreamFree;
+
+// SAFETY: `git_odb_stream_free` releases exactly the stream it is given, once: the
+// hashing context libgit2 allocated for it (cleaned up, then `git__free`d; NULL is
+// accepted), then the container through the member its backend set. Every owner holds
+// a stream that a backend made, with its `free` member set, and whose context is NULL
+// or libgit2's (`OdbStreamBox::from_raw`'s caller vouches for that). It reads no state
+// beyond the stream; the backend's member reaches the backend at most, which `'o`
+// keeps alive.
+unsafe impl<'o> CDrop<OdbStream<'o>> for OdbStreamFree {
+    /// Wraps `fn::git_odb_stream_free`
+    ///
+    /// Wraps `fld::git_odb_stream.free`
+    #[doc(alias = "git_odb_stream_free")]
+    #[doc(alias = "git_odb_stream.free")]
+    unsafe fn c_drop(&self, ptr: NonNull<OdbStream<'o>>) {
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live stream the caller owns
+        // and gives up; `OdbStream` is transparent over `git_odb_stream`.
+        unsafe { ffi::git_odb_stream_free(ptr.as_ptr().cast()) }
+    }
+}
+
+/// The sole owner of a stream, released through [`OdbStreamFree`]; it borrows the odb
+/// whose backend made it for `'o`.
+///
+/// [`OdbRef::open_write_stream`] and [`OdbRef::open_read_stream`] build one. It is not
+/// `Clone`: libgit2 copies no stream.
+pub type OdbStreamBox<'o> = CBox<OdbStream<'o>, OdbStreamFree>;
+
+// The layout type is the C type's size, so a stream pointer converts both ways, and the
+// owner is pointer-sized.
+const _: () = assert!(size_of::<OdbStream<'static>>() == size_of::<ffi::git_odb_stream>());
+
+const _: () = assert!(size_of::<OdbStreamBox<'static>>() == size_of::<*mut ffi::git_odb_stream>());
+
+/// What [`OdbRef::open_read_stream`] opens: the stream, and the object's length and type
+/// as its backend reported them.
+#[derive(Debug)]
+pub struct OdbReadStream<'o> {
+    /// The stream, positioned at the start of the object's content.
+    pub stream: OdbStreamBox<'o>,
+    /// The length of the object's content, in bytes.
+    pub len: usize,
+    /// The object's type; `None` for a value the header does not name, which a custom
+    /// backend may report.
+    pub kind: Option<ObjectType>,
+}
+
+impl<'a> OdbRef<'a, '_> {
+    /// Opens a stream that writes one object of `kind`, whose content is `size` bytes
+    /// long, into the odb.
+    ///
+    /// The first backend that writes (alternates are skipped) makes the stream, in
+    /// priority order: through its own streaming writes, or else through a stream
+    /// libgit2 fakes over its `write`, which buffers the whole object. libgit2 then
+    /// starts hashing the object's id, over the odb's id type, and records `size`: the
+    /// stream's writes must add up to exactly that before it can store the object.
+    /// The stream borrows the odb.
+    ///
+    /// # Errors
+    ///
+    /// The code and libgit2's error of the backend that failed, as C returns them; a
+    /// `GIT_ERROR_ODB` error when no backend writes (an odb without backends, or one with
+    /// only read-only ones), or when every backend that writes passes the request on
+    /// (`GIT_PASSTHROUGH`), for which libgit2 reports success without a stream.
+    ///
+    /// Wraps `fn::git_odb_open_wstream`
+    #[doc(alias = "git_odb_open_wstream")]
+    pub fn open_write_stream(
+        &self,
+        size: u64,
+        kind: ObjectType,
+    ) -> Result<OdbStreamBox<'a>, StreamError> {
+        let mut out = ptr::null_mut();
+        // SAFETY: `out` is a writable slot, which the routine fills with a fresh stream
+        // on success; the odb is live for `'a` and locks itself while it picks a
+        // backend; `kind` is a valid object type and `size` any value.
+        let rc = unsafe {
+            ffi::git_odb_open_wstream(&raw mut out, self.as_ptr().cast_mut(), size, kind.raw())
+        };
+        if rc < 0 {
+            return Err(StreamError::from_libgit2(rc));
+        }
+        // SAFETY: the routine succeeded, so `out` is NULL (every backend passed) or a
+        // stream its backend made for this odb, with its `free` member set and a hashing
+        // context libgit2 allocated, which the caller owns and `git_odb_stream_free`
+        // releases. It reaches the odb's backend, so it borrows the odb for `'a`.
+        unsafe { OdbStreamBox::from_c(out.cast()) }.ok_or_else(passed)
+    }
+
+    /// Opens a stream that reads the object `id` out of the odb, with the object's length
+    /// and type.
+    ///
+    /// Only backends that stream reads can open one: libgit2's loose objects do, its
+    /// packfiles do not. The stream borrows the odb.
+    ///
+    /// # Errors
+    ///
+    /// The code and libgit2's error of the backend that failed, as C returns them:
+    /// `GIT_ENOTFOUND` when no backend that streams reads has the object. A
+    /// `GIT_ERROR_ODB` error when no backend streams reads, or when every one passes the
+    /// request on (`GIT_PASSTHROUGH`), for which libgit2 reports success without a
+    /// stream.
+    ///
+    /// Wraps `fn::git_odb_open_rstream`
+    #[doc(alias = "git_odb_open_rstream")]
+    pub fn open_read_stream(&self, id: OidRef<'_>) -> Result<OdbReadStream<'a>, StreamError> {
+        let mut out = ptr::null_mut();
+        let mut len = 0;
+        let mut kind = ffi::GIT_OBJECT_INVALID;
+        // SAFETY: the out slots are writable, and filled on success; `id` is a live
+        // `git_oid`, read for the call only; the odb is live for `'a` and locks itself
+        // while it picks a backend.
+        let rc = unsafe {
+            ffi::git_odb_open_rstream(
+                &raw mut out,
+                &raw mut len,
+                &raw mut kind,
+                self.as_ptr().cast_mut(),
+                id.as_ptr(),
+            )
+        };
+        if rc < 0 {
+            return Err(StreamError::from_libgit2(rc));
+        }
+        // SAFETY: as in `open_write_stream`, for a stream its backend made to read from
+        // this odb; its hashing context is NULL or one libgit2 allocated (the loose
+        // backend's), which `git_odb_stream_free` releases.
+        let stream = unsafe { OdbStreamBox::from_c(out.cast()) }.ok_or_else(passed)?;
+        Ok(OdbReadStream {
+            stream,
+            len,
+            kind: ObjectType::from_raw(kind),
+        })
+    }
+}
+
+/// The failure of an open that libgit2 reports as success without a stream: every
+/// backend passed the request on.
+fn passed() -> StreamError {
+    StreamError::new(
+        ErrorClass::Odb,
+        c"every backend passed on opening the stream",
+    )
+    .with_code(ErrorCode::Passthrough)
+}
+
+/// A pack being written into an object database (`git_odb_writepack`), as a backend
+/// implements it: the layout type named by [`OdbWritepackBox`] and the handles, never
+/// held by value.
+///
+/// libgit2's pack backend makes one, as the first member of a container holding an
+/// indexer (`pack_writepack`); a fetch or clone streams the downloaded pack into it,
+/// [`append`](OdbWritepackMut::append) by append, and [`commit`](Self::commit)s it, which
+/// moves the pack and its index into the odb. The wrapper of `git_odb_write_pack`
+/// opens one; dropping it unfinished discards the pack.
+///
+/// `'o` is the borrow of the odb whose backend made the writepack: its indexer reads
+/// that odb to resolve the bases of a thin pack, and it keeps the backend without a
+/// reference, so neither an owner nor a handle outlives the odb. The exclusive handle
+/// is invariant in `'o`:
+///
+/// ```compile_fail
+/// use libgit2::libgit2::src::libgit2::odb::OdbWritepackMut;
+///
+/// fn shrink<'a, 'o>(m: OdbWritepackMut<'a, 'static>) -> OdbWritepackMut<'a, 'o> {
+///     m
+/// }
+/// ```
+///
+/// Neither the owner nor the handles are `Send` or `Sync`: an indexer runs its
+/// progress callback, which may be tied to its thread, from whichever thread appends.
+///
+/// ```compile_fail,E0277
+/// use libgit2::libgit2::src::libgit2::odb::OdbWritepackBox;
+///
+/// fn send<T: Send>(_: T) {}
+/// fn forward(writepack: OdbWritepackBox<'static>) {
+///     send(writepack);
+/// }
+/// ```
+///
+/// There are no setters: the members belong to the container their backend cast the
+/// writepack to.
+///
+/// Wraps `ty::git_odb_writepack`
+#[doc(alias = "git_odb_writepack")]
+#[repr(transparent)]
+pub struct OdbWritepack<'o>(
+    ffi::git_odb_writepack,
+    PhantomData<(*const (), &'o ffi::git_odb)>,
+);
+
+/// Shared borrow of an [`OdbWritepack`]: its getters. `Copy`, like `&T`.
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct OdbWritepackRef<'a, 'o>(CBorrowedPtr<'a, OdbWritepack<'o>>);
+
+/// Exclusive borrow of an [`OdbWritepack`]: what [`append`](Self::append) takes. Reaches
+/// the getters with [`as_ref`](Self::as_ref).
+#[repr(transparent)]
+pub struct OdbWritepackMut<'a, 'o>(
+    OdbWritepackRef<'a, 'o>,
+    // Invariant in the writepack, and so in `'o`, as `&'a mut` is; see `CCell`.
+    PhantomData<&'a mut OdbWritepack<'o>>,
+);
+
+// SAFETY: as for `OdbStream`: `OdbWritepack` is `#[repr(transparent)]` over
+// `git_odb_writepack` with a zero-sized marker; both handles are `#[repr(transparent)]`
+// over `CBorrowedPtr<'a, OdbWritepack<'o>>` with zero-sized markers and no `Drop`, hand
+// out no reference to the writepack, and `OdbWritepackRef` has no write operation.
+// `OdbWritepackMut` is invariant in the writepack through its `PhantomData`.
+unsafe impl<'o> CCell for OdbWritepack<'o> {
+    type C = ffi::git_odb_writepack;
+    type Mut<'a>
+        = OdbWritepackMut<'a, 'o>
+    where
+        Self: 'a;
+    type Ref<'a>
+        = OdbWritepackRef<'a, 'o>
+    where
+        Self: 'a;
+}
+
+impl<'a, 'o: 'a> CRefSeam<'a> for OdbWritepackRef<'a, 'o> {
+    type Cell = OdbWritepack<'o>;
+}
+
+impl<'a, 'o: 'a> CMutSeam<'a> for OdbWritepackMut<'a, 'o> {
+    type Cell = OdbWritepack<'o>;
+}
+
+impl<'o> OdbWritepackMut<'_, 'o> {
+    /// Reborrows shared.
+    #[must_use]
+    pub fn as_ref(&self) -> OdbWritepackRef<'_, 'o> {
+        self.0
+    }
+
+    /// Reborrows exclusively, keeping this handle frozen while the result lives.
+    pub fn as_mut(&mut self) -> OdbWritepackMut<'_, 'o> {
+        OdbWritepackMut(self.0, PhantomData)
+    }
+
+    /// Appends `data`, the next piece of the pack, and updates `stats` with the
+    /// indexer's progress: its `append` member, given the slice's pointer and length.
+    ///
+    /// libgit2's pack backend writes the piece to its temporary packfile and indexes
+    /// the objects it completes, calling the progress callback the writepack was opened
+    /// with. The writepack reads `data` during the call only. A failed append leaves the
+    /// pack incomplete; libgit2's own callers stop there and drop the writepack.
+    ///
+    /// # Errors
+    ///
+    /// The member's negative return and the thread's libgit2 error: a malformed pack
+    /// (`GIT_ERROR_INDEXER`), a write that failed, or the code a progress callback
+    /// returned to stop. A `GIT_ERROR_ODB` error, without calling anything, when the
+    /// backend set no `append` member.
+    ///
+    /// Wraps `fld::git_odb_writepack.append`
+    #[doc(alias = "git_odb_writepack.append")]
+    pub fn append(
+        &mut self,
+        data: &[u8],
+        mut stats: IndexerProgressMut<'_>,
+    ) -> Result<(), StreamError> {
+        let writepack = self.as_mut_ptr();
+        // SAFETY: `writepack` is the handle's pointer to the live writepack it borrows;
+        // the projection forms no reference to it.
+        let append_ptr = unsafe { &raw const (*writepack).append };
+        // SAFETY: a read through the exclusive handle's pointer: an optional function
+        // pointer, which C leaves NULL or sets.
+        let Some(append) = (unsafe { append_ptr.read() }) else {
+            return Err(missing_member(c"the writepack has no append member"));
+        };
+        // SAFETY: `append` is the member the writepack's backend set for this
+        // writepack, in place in its container; it reads `data.len()` bytes at `data`
+        // (never NULL, even when empty) during the call only, and writes the progress
+        // through `stats`, a live, exclusively borrowed `git_indexer_progress`. The
+        // handle is exclusive, so no other call on the writepack runs meanwhile.
+        let rc = unsafe {
+            append(
+                writepack,
+                data.as_ptr().cast(),
+                data.len(),
+                stats.as_mut_ptr(),
+            )
+        };
+        member_result(rc)
+    }
+
+    /// Commits the pack: its `commit` member.
+    ///
+    /// # Safety
+    ///
+    /// Committing ends the writepack: libgit2's pack backend closes the packfile and
+    /// moves it, so afterwards the writepack must not be appended to or committed again,
+    /// only freed.
+    unsafe fn commit(&mut self, mut stats: IndexerProgressMut<'_>) -> Result<(), StreamError> {
+        let writepack = self.as_mut_ptr();
+        // SAFETY: as in `append`.
+        let commit_ptr = unsafe { &raw const (*writepack).commit };
+        // SAFETY: as in `append`.
+        let Some(commit) = (unsafe { commit_ptr.read() }) else {
+            return Err(missing_member(c"the writepack has no commit member"));
+        };
+        // SAFETY: as in `append`, for the `commit` member, which writes the final
+        // progress through `stats`; the caller ends the writepack.
+        let rc = unsafe { commit(writepack, stats.as_mut_ptr()) };
+        member_result(rc)
+    }
+}
+
+impl OdbWritepackRef<'_, '_> {
+    /// The backend that made the writepack, which libgit2 hands back to the backend's
+    /// own members; NULL only for a writepack no backend set up.
+    ///
+    /// A raw pointer until `git_odb_backend` is wrapped: the backend belongs to the odb
+    /// the writepack borrows for `'o`, and is reached only through it. Nothing here
+    /// dereferences it.
+    ///
+    /// Wraps `fld::git_odb_writepack.backend`
+    #[doc(alias = "git_odb_writepack.backend")]
+    #[must_use]
+    pub fn backend(&self) -> *mut ffi::git_odb_backend {
+        // SAFETY: `self.as_ptr()` addresses the live writepack this handle borrows; the
+        // projection forms no reference to it.
+        let backend_ptr = unsafe { &raw const (*self.as_ptr()).backend };
+        // SAFETY: a read through the shared handle's pointer to a live writepack; any
+        // value is a valid raw pointer.
+        unsafe { backend_ptr.read() }
+    }
+}
+
+impl fmt::Debug for OdbWritepackRef<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("OdbWritepackRef")
+            .field(&self.as_ptr())
+            .finish()
+    }
+}
+
+impl fmt::Debug for OdbWritepackMut<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl OdbWritepack<'_> {
+    /// Commits the pack, then frees the writepack: its `commit` member, then its `free`
+    /// member.
+    ///
+    /// libgit2's pack backend checks the pack's trailer, resolves its deltas, writes its
+    /// index and moves both into the odb's pack directory, updating `stats` with the
+    /// final progress. Committing ends a writepack, so the owner is consumed and freed
+    /// whether or not the commit succeeds; a failed commit leaves nothing in the odb.
+    ///
+    /// # Errors
+    ///
+    /// The member's negative return and the thread's libgit2 error: an incomplete pack
+    /// (`GIT_ERROR_INDEXER`, `incomplete pack header`), unexpected or missing trailing
+    /// data, a checksum mismatch, a write or rename that failed, or the code a progress
+    /// callback returned to stop. A `GIT_ERROR_ODB` error, without calling anything,
+    /// when the backend set no `commit` member.
+    ///
+    /// Wraps `fld::git_odb_writepack.commit`
+    #[doc(alias = "git_odb_writepack.commit")]
+    pub fn commit(
+        mut writepack: OdbWritepackBox<'_>,
+        stats: IndexerProgressMut<'_>,
+    ) -> Result<(), StreamError> {
+        // SAFETY: `writepack` is dropped right below, so it is freed and never appended
+        // to or committed again.
+        let committed = unsafe { writepack.as_mut().commit(stats) };
+        drop(writepack);
+        committed
+    }
+}
+
+/// Releases a writepack through its own `free` member, which frees the container it is
+/// embedded in: the pack backend's indexer, with the temporary packfile of a pack never
+/// committed, and the allocation. Stateless: the routine is recovered from the object.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OdbWritepackFree;
+
+// SAFETY: the member releases exactly the writepack it is given, once, and reads no
+// state beyond it; it reaches the backend and odb at most, which `'o` keeps alive. Every
+// owner holds a writepack its backend made, with its members set (the adopter vouches).
+unsafe impl<'o> CDrop<OdbWritepack<'o>> for OdbWritepackFree {
+    /// Wraps `fld::git_odb_writepack.free`
+    #[doc(alias = "git_odb_writepack.free")]
+    unsafe fn c_drop(&self, ptr: NonNull<OdbWritepack<'o>>) {
+        let writepack: *mut ffi::git_odb_writepack = ptr.as_ptr().cast();
+        // SAFETY: per `c_drop`'s contract, `ptr` addresses a live writepack the caller
+        // owns; `OdbWritepack` is transparent over `git_odb_writepack`. The projection
+        // forms no reference to it.
+        let free_ptr = unsafe { &raw const (*writepack).free };
+        // SAFETY: reads the initialised member.
+        let free = unsafe { free_ptr.read() };
+        // A writepack without one is left alone: no backend leaves the member unset.
+        if let Some(free) = free {
+            // SAFETY: `free` is the member the writepack's backend set for it; it releases
+            // the container (the pack backend's indexer, its temporary packfile unless
+            // committed, and the allocation), which the caller gives up.
+            unsafe { free(writepack) }
+        }
+    }
+}
+
+/// The sole owner of a writepack, released through [`OdbWritepackFree`]; it borrows the
+/// odb whose backend made it for `'o`.
+///
+/// The wrapper of `git_odb_write_pack` builds one; [`OdbWritepack::commit`] consumes
+/// it. It is not `Clone`: libgit2 copies no writepack.
+pub type OdbWritepackBox<'o> = CBox<OdbWritepack<'o>, OdbWritepackFree>;
+
+const _: () = assert!(size_of::<OdbWritepack<'static>>() == size_of::<ffi::git_odb_writepack>());
+
+const _: () =
+    assert!(size_of::<OdbWritepackBox<'static>>() == size_of::<*mut ffi::git_odb_writepack>());
+
+/// The failure of a call on a member its backend did not set.
+fn missing_member(message: &CStr) -> StreamError {
+    StreamError::new(ErrorClass::Odb, message)
+}
+
+/// A member's return as a result: negative is an error, described by the thread's last
+/// libgit2 error; anything else is success, as libgit2's callers read it.
+fn member_result(rc: c_int) -> Result<(), StreamError> {
+    if rc < 0 {
+        Err(StreamError::from_libgit2(rc))
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use std::ffi::{c_char, c_int, c_void};
@@ -2641,6 +3379,277 @@ mod unit_tests {
                 (raw.id.type_, raw.length, raw.type_),
                 (0, 4, ffi::GIT_OBJECT_TAG)
             );
+        }
+    }
+
+    /// The stream and writepack layouts, built in Rust storage with members of their own,
+    /// adopted where a test needs an owner: the getters, the members' calls and the
+    /// teardown, without a backend.
+    mod stream {
+        use core::cell::RefCell;
+
+        use super::*;
+        use crate::libgit2::src::libgit2::indexer::IndexerProgress;
+
+        /// A stream with every field set, its members `read`/`write`/`finalize_write`
+        /// present when `members` is set.
+        fn raw_stream(members: bool) -> ffi::git_odb_stream {
+            unsafe extern "C" fn read(
+                _: *mut ffi::git_odb_stream,
+                _: *mut c_char,
+                _: usize,
+            ) -> c_int {
+                0
+            }
+            unsafe extern "C" fn write(
+                _: *mut ffi::git_odb_stream,
+                _: *const c_char,
+                _: usize,
+            ) -> c_int {
+                0
+            }
+            unsafe extern "C" fn finalize(
+                _: *mut ffi::git_odb_stream,
+                _: *const ffi::git_oid,
+            ) -> c_int {
+                0
+            }
+            ffi::git_odb_stream {
+                backend: ptr::without_provenance_mut(0x1000),
+                mode: ffi::GIT_STREAM_RW,
+                hash_ctx: if members {
+                    ptr::without_provenance_mut(0x2000)
+                } else {
+                    ptr::null_mut()
+                },
+                oid_type: if members { ffi::GIT_OID_SHA256 } else { 77 },
+                declared_size: u64::MAX,
+                received_bytes: 12,
+                read: members.then_some::<unsafe extern "C" fn(_, _, _) -> _>(read),
+                write: members.then_some::<unsafe extern "C" fn(_, _, _) -> _>(write),
+                finalize_write: members.then_some::<unsafe extern "C" fn(_, _) -> _>(finalize),
+                free: None,
+            }
+        }
+
+        #[test]
+        fn stream_getters_read_every_field() {
+            for members in [true, false] {
+                let mut raw = raw_stream(members);
+                // SAFETY: `raw` is a live stream in Rust storage, only read through the
+                // handle while it lives.
+                let s = unsafe { OdbStreamRef::from_ptr(&raw mut raw) }.unwrap();
+                assert_eq!(s.backend().addr(), 0x1000);
+                assert_eq!(s.mode(), ffi::GIT_STREAM_RW);
+                assert_eq!(s.has_hash_ctx(), members);
+                if members {
+                    assert_eq!(s.oid_type(), Ok(OidType::Sha256));
+                } else {
+                    assert_eq!(s.oid_type().unwrap_err().raw(), 77);
+                }
+                assert_eq!((s.declared_size(), s.received_bytes()), (u64::MAX, 12));
+                assert_eq!(
+                    (s.can_read(), s.can_write(), s.can_finalize_write()),
+                    (members, members, members)
+                );
+                let debug = format!("{s:?}");
+                assert!(debug.contains("received_bytes: 12"), "{debug}");
+            }
+        }
+
+        #[test]
+        fn stream_exclusive_handle_reborrows_to_the_getters() {
+            let mut raw = raw_stream(true);
+            // SAFETY: `raw` is a live stream in Rust storage, reached only through the
+            // handle while it lives.
+            let mut m = unsafe { OdbStreamMut::from_ptr(&raw mut raw) }.unwrap();
+            assert_eq!(m.as_mut().as_ref().received_bytes(), 12);
+            assert!(m.as_ref().can_read());
+            assert_eq!(format!("{m:?}"), format!("{:?}", m.as_ref()));
+        }
+
+        /// A stream in a container that records its `free` call, as a backend's does.
+        #[repr(C)]
+        struct Counted<'l> {
+            stream: ffi::git_odb_stream,
+            log: &'l RefCell<Vec<&'static str>>,
+        }
+
+        unsafe extern "C" fn counted_free(stream: *mut ffi::git_odb_stream) {
+            // SAFETY: the stream heads a boxed `Counted`, given up by its owner.
+            let counted = unsafe { Box::from_raw(stream.cast::<Counted<'_>>()) };
+            counted.log.borrow_mut().push("free");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn stream_owner_frees_through_git_odb_stream_free_once() {
+            assert!(runtime_pinned());
+            let log = RefCell::new(Vec::new());
+            let mut stream = raw_stream(true);
+            stream.hash_ctx = ptr::null_mut();
+            stream.free = Some(counted_free);
+            let counted = Box::into_raw(Box::new(Counted { stream, log: &log }));
+            // SAFETY: a stream whose `free` member releases its container, which the owner
+            // takes, with no hashing context; `log` outlives it.
+            let owner = unsafe { OdbStreamBox::from_c(counted.cast()) }.unwrap();
+            assert!(owner.as_ref().can_write());
+            assert!(log.borrow().is_empty());
+            drop(owner);
+            assert_eq!(*log.borrow(), ["free"]);
+        }
+
+        /// A writepack in a container that records its members' calls.
+        #[repr(C)]
+        struct Pack<'l> {
+            writepack: ffi::git_odb_writepack,
+            log: &'l RefCell<Vec<String>>,
+        }
+
+        /// The log of the `Pack` a writepack heads.
+        ///
+        /// # Safety
+        ///
+        /// `wp` heads a live `Pack`.
+        unsafe fn log_of<'l>(wp: *mut ffi::git_odb_writepack) -> &'l RefCell<Vec<String>> {
+            // SAFETY: per this function's contract.
+            unsafe { (*wp.cast::<Pack<'l>>()).log }
+        }
+
+        unsafe extern "C" fn pack_append(
+            wp: *mut ffi::git_odb_writepack,
+            data: *const c_void,
+            size: usize,
+            stats: *mut ffi::git_indexer_progress,
+        ) -> c_int {
+            // SAFETY: the writepack heads a live `Pack`; `stats` is writable.
+            unsafe {
+                log_of(wp)
+                    .borrow_mut()
+                    .push(format!("append {size} {}", data.is_null()));
+            }
+            // SAFETY: `stats` is a live, writable progress.
+            unsafe { (*stats).received_bytes += size };
+            0
+        }
+
+        unsafe extern "C" fn pack_commit(
+            wp: *mut ffi::git_odb_writepack,
+            stats: *mut ffi::git_indexer_progress,
+        ) -> c_int {
+            // SAFETY: as in `pack_append`.
+            unsafe { log_of(wp).borrow_mut().push("commit".to_owned()) };
+            // SAFETY: as in `pack_append`.
+            unsafe { (*stats).indexed_objects = 9 };
+            1
+        }
+
+        unsafe extern "C" fn pack_free(wp: *mut ffi::git_odb_writepack) {
+            // SAFETY: the writepack heads a boxed `Pack`, given up by its owner.
+            let pack = unsafe { Box::from_raw(wp.cast::<Pack<'_>>()) };
+            pack.log.borrow_mut().push("free".to_owned());
+        }
+
+        /// A writepack owner over a fresh `Pack` logging into `log`, with the members
+        /// `members` sets.
+        fn pack(log: &RefCell<Vec<String>>, members: bool) -> OdbWritepackBox<'_> {
+            let writepack = ffi::git_odb_writepack {
+                backend: ptr::null_mut(),
+                append: members.then_some::<unsafe extern "C" fn(_, _, _, _) -> _>(pack_append),
+                commit: members.then_some::<unsafe extern "C" fn(_, _) -> _>(pack_commit),
+                free: Some(pack_free),
+            };
+            let raw = Box::into_raw(Box::new(Pack { writepack, log }));
+            // SAFETY: a writepack whose `free` member releases its container, which the
+            // owner takes; `log` outlives it, as the owner's lifetime says.
+            unsafe { OdbWritepackBox::from_c(raw.cast()) }.unwrap()
+        }
+
+        #[test]
+        fn writepack_members_run_in_order_and_free_once() {
+            let log = RefCell::new(Vec::new());
+            let mut wp = pack(&log, true);
+            assert!(wp.as_ref().backend().is_null());
+            assert!(format!("{:?}", wp.as_mut()).starts_with("OdbWritepackRef"));
+            let mut stats = IndexerProgress::default();
+            wp.as_mut().append(b"abc", stats.as_mut()).unwrap();
+            // An empty piece still passes a pointer, never NULL.
+            wp.as_mut().as_mut().append(&[], stats.as_mut()).unwrap();
+            assert_eq!(stats.as_ref().received_bytes(), 3);
+            // A positive return is success, as libgit2's callers read it.
+            OdbWritepack::commit(wp, stats.as_mut()).unwrap();
+            assert_eq!(stats.as_ref().indexed_objects(), 9);
+            assert_eq!(
+                *log.borrow(),
+                ["append 3 false", "append 0 false", "commit", "free"]
+            );
+
+            // Dropped unfinished: freed, never committed.
+            let log = RefCell::new(Vec::new());
+            drop(pack(&log, true));
+            assert_eq!(*log.borrow(), ["free"]);
+        }
+
+        #[test]
+        fn writepack_without_members_fails_without_calling() {
+            let log = RefCell::new(Vec::new());
+            let mut wp = pack(&log, false);
+            let mut stats = IndexerProgress::default();
+            let err = wp.as_mut().append(b"abc", stats.as_mut()).unwrap_err();
+            assert_eq!(err.class(), Some(ErrorClass::Odb));
+            assert_eq!(err.message(), c"the writepack has no append member");
+            assert_eq!(err.code(), Some(ErrorCode::Generic));
+            let err = OdbWritepack::commit(wp, stats.as_mut()).unwrap_err();
+            assert_eq!(err.message(), c"the writepack has no commit member");
+            assert_eq!(*log.borrow(), ["free"]);
+            assert_eq!(stats.as_ref().received_bytes(), 0);
+        }
+
+        #[test]
+        fn writepack_without_free_is_left_alone() {
+            let mut raw = ffi::git_odb_writepack {
+                backend: ptr::null_mut(),
+                append: None,
+                commit: None,
+                free: None,
+            };
+            // SAFETY: a writepack in Rust storage, outliving the owner, whose drop runs no
+            // member since none is set.
+            let owner = unsafe { OdbWritepackBox::from_c(&raw mut raw) }.unwrap();
+            drop(owner);
+            assert!(raw.free.is_none());
+        }
+
+        #[test]
+        fn passed_reports_passthrough() {
+            let err = passed();
+            assert_eq!(err.code(), Some(ErrorCode::Passthrough));
+            assert_eq!(err.class(), Some(ErrorClass::Odb));
+        }
+
+        unsafe extern "C" fn failing_append(
+            _: *mut ffi::git_odb_writepack,
+            _: *const c_void,
+            _: usize,
+            _: *mut ffi::git_indexer_progress,
+        ) -> c_int {
+            crate::libgit2::src::util::errors::set(ErrorClass::Indexer, c"bad pack");
+            -7
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_failing_member_returns_its_code_and_error() {
+            let log = RefCell::new(Vec::new());
+            let mut wp = pack(&log, true);
+            // SAFETY: the owner's writepack, live; its `append` member is replaced by one
+            // of the same signature that touches nothing.
+            unsafe { (*wp.as_c_ptr()).append = Some(failing_append) };
+            let mut stats = IndexerProgress::default();
+            let err = wp.as_mut().append(b"x", stats.as_mut()).unwrap_err();
+            assert_eq!(err.raw_code(), -7);
+            assert_eq!(err.class(), Some(ErrorClass::Indexer));
+            assert_eq!(err.message(), c"bad pack");
         }
     }
 }

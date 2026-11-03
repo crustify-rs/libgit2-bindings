@@ -625,7 +625,7 @@ impl StreamError {
     }
 
     /// The failure a member reported by returning `code`, with the thread's last error.
-    fn from_libgit2(code: c_int) -> Self {
+    pub(crate) fn from_libgit2(code: c_int) -> Self {
         let error = last();
         Self {
             code,
