@@ -59,7 +59,8 @@ define_ctype!(
     /// [`as_ref`](CVal::as_ref) / [`as_mut`](CVal::as_mut) handles. Not `Clone`: it owns
     /// its allocation, so a copy is [`BufRef::to_buf`], which allocates.
     ///
-    /// Wraps: git_buf
+    /// Wraps `ty::git_buf`
+    #[doc(alias = "git_buf")]
     Buf,
     BufRef,
     BufMut,
@@ -104,9 +105,6 @@ const INIT: ffi::git_buf = ffi::git_buf {
 /// free, and the call would be `git__free(NULL)` for `GIT_BUF_INIT`, which reads
 /// `git__allocator` without synchronisation against the first `git_libgit2_init` another
 /// thread may be running. Nothing orders an unallocated buffer after that initialisation.
-///
-/// Wraps: `git_buf_dispose`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BufDispose;
 
@@ -116,6 +114,8 @@ pub struct BufDispose;
 // allocator it reads is settled), never the static empty string. A buffer with
 // `reserved == 0` owns nothing and is released without C.
 unsafe impl CDispose<Buf> for BufDispose {
+    /// Wraps `fn::git_buf_dispose`
+    #[doc(alias = "git_buf_dispose")]
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<Buf>) {
         let raw: *mut ffi::git_buf = ptr.as_ptr().cast();
@@ -234,7 +234,8 @@ impl<'a> BufRef<'a> {
     /// The number of bytes held, the terminating NUL excluded; 0 for a buffer owning
     /// nothing, whatever `size` says, as [`as_bytes`](Self::as_bytes) reads it.
     ///
-    /// Field: `git_buf.size`
+    /// Wraps `fld::git_buf.size`
+    #[doc(alias = "git_buf.size")]
     #[must_use]
     pub fn len(&self) -> usize {
         self.parts().2
@@ -249,7 +250,8 @@ impl<'a> BufRef<'a> {
     /// The size of the allocation the buffer owns, the room for the terminating NUL
     /// included, which libgit2 reuses before reallocating; 0 when it owns none.
     ///
-    /// Field: `git_buf.reserved`
+    /// Wraps `fld::git_buf.reserved`
+    #[doc(alias = "git_buf.reserved")]
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.parts().0
@@ -258,7 +260,8 @@ impl<'a> BufRef<'a> {
     /// The contents, borrowed in place for as long as the buffer is, NUL bytes included;
     /// empty for a buffer owning nothing.
     ///
-    /// Field: `git_buf.ptr`
+    /// Wraps `fld::git_buf.ptr`
+    #[doc(alias = "git_buf.ptr")]
     #[must_use]
     pub fn as_bytes(&self) -> &'a [u8] {
         match self.parts() {
@@ -341,9 +344,12 @@ impl BufMut<'_> {
 
     /// Replaces the contents with `value`'s, releasing the ones held before.
     ///
-    /// Field: `git_buf.ptr`
-    /// Field: `git_buf.reserved`
-    /// Field: `git_buf.size`
+    /// Wraps `fld::git_buf.ptr`
+    /// Wraps `fld::git_buf.reserved`
+    /// Wraps `fld::git_buf.size`
+    #[doc(alias = "git_buf.ptr")]
+    #[doc(alias = "git_buf.reserved")]
+    #[doc(alias = "git_buf.size")]
     pub fn set(&mut self, value: BufVal) {
         let raw = value.into_inner().into_raw();
         // SAFETY: `raw` comes out of a `BufVal`, so it keeps the invariant, and its owner
@@ -354,9 +360,12 @@ impl BufMut<'_> {
     /// Takes the contents out, leaving the buffer empty and owning nothing
     /// (`GIT_BUF_INIT`): what `git_buf_dispose` would release, owned.
     ///
-    /// Field: `git_buf.ptr`
-    /// Field: `git_buf.reserved`
-    /// Field: `git_buf.size`
+    /// Wraps `fld::git_buf.ptr`
+    /// Wraps `fld::git_buf.reserved`
+    /// Wraps `fld::git_buf.size`
+    #[doc(alias = "git_buf.ptr")]
+    #[doc(alias = "git_buf.reserved")]
+    #[doc(alias = "git_buf.size")]
     pub fn take(&mut self) -> BufVal {
         let buf = self.as_mut_ptr();
         // SAFETY: reads the struct, then writes the empty buffer, through the exclusive
@@ -374,8 +383,10 @@ impl BufMut<'_> {
     /// `None` when that allocation fails, or libgit2 cannot be initialised; the buffer is
     /// left as it was.
     ///
-    /// Field: `git_buf.ptr`
-    /// Field: `git_buf.size`
+    /// Wraps `fld::git_buf.ptr`
+    /// Wraps `fld::git_buf.size`
+    #[doc(alias = "git_buf.ptr")]
+    #[doc(alias = "git_buf.size")]
     pub fn set_bytes(&mut self, bytes: &[u8]) -> Option<()> {
         let (reserved, data, _) = self.as_ref().parts();
         if bytes.len() < reserved {
@@ -405,7 +416,8 @@ impl BufMut<'_> {
     /// Replaces the contents with `s`, adopting its allocation without a copy; the old
     /// contents are released.
     ///
-    /// Field: `git_buf.ptr`
+    /// Wraps `fld::git_buf.ptr`
+    #[doc(alias = "git_buf.ptr")]
     pub fn set_str(&mut self, s: OdbDataStr) {
         let size = s.len();
         let data = s.into_raw();
@@ -428,7 +440,8 @@ impl BufMut<'_> {
     /// contents past one are not represented, though the whole allocation is still
     /// released. [`take_bytes`](Self::take_bytes) keeps them.
     ///
-    /// Field: `git_buf.ptr`
+    /// Wraps `fld::git_buf.ptr`
+    #[doc(alias = "git_buf.ptr")]
     pub fn take_str(&mut self) -> Option<OdbDataStr> {
         let raw = self.take().into_inner().into_raw();
         if raw.reserved == 0 {
@@ -444,7 +457,8 @@ impl BufMut<'_> {
     /// leaving the buffer empty and owning nothing: what `git_buf_dispose` would release,
     /// owned. Empty and unallocated when the buffer owns no allocation.
     ///
-    /// Field: `git_buf.ptr`
+    /// Wraps `fld::git_buf.ptr`
+    #[doc(alias = "git_buf.ptr")]
     pub fn take_bytes(&mut self) -> OdbDataVec<u8> {
         let raw = self.take().into_inner().into_raw();
         if raw.reserved == 0 {
