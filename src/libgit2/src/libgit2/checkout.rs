@@ -98,8 +98,8 @@ use crate::libgit2::src::libgit2::tree::TreeRef;
 /// Not `Clone`: the payloads its callbacks receive may be exclusive borrows, which a
 /// copy would alias. Build another with [`new`](Self::new) instead.
 ///
-/// Wraps: `git_checkout_options`
-/// Handwritten
+/// Wraps `ty::git_checkout_options`
+#[doc(alias = "git_checkout_options")]
 #[repr(transparent)]
 pub struct CheckoutOptions<'o>(
     ffi::git_checkout_options,
@@ -107,16 +107,12 @@ pub struct CheckoutOptions<'o>(
 );
 
 /// Shared borrow of a [`CheckoutOptions`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct CheckoutOptionsRef<'a, 'o>(CBorrowedPtr<'a, CheckoutOptions<'o>>);
 
 /// Exclusive borrow of a [`CheckoutOptions`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct CheckoutOptionsMut<'a, 'o>(
     CheckoutOptionsRef<'a, 'o>,
@@ -158,12 +154,13 @@ impl<'o> CheckoutOptions<'o> {
     /// `GIT_CHECKOUT_OPTIONS_VERSION`, and with that version it reaches no global, no
     /// allocator and no thread state, so this needs no initialised library.
     ///
-    /// Wraps: `git_checkout_options_init`
+    /// Wraps `fn::git_checkout_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_checkout_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_checkout_options>::uninit();
@@ -212,7 +209,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The structure's version, `GIT_CHECKOUT_OPTIONS_VERSION`; fixed by
     /// [`CheckoutOptions::new`].
     ///
-    /// Field: `git_checkout_options.version`
+    /// Wraps `fld::git_checkout_options.version`
+    #[doc(alias = "git_checkout_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
@@ -226,7 +224,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The checkout strategy, the raw bits of `git_checkout_strategy_t`: 0, the default,
     /// is a safe checkout.
     ///
-    /// Field: `git_checkout_options.checkout_strategy`
+    /// Wraps `fld::git_checkout_options.checkout_strategy`
+    #[doc(alias = "git_checkout_options.checkout_strategy")]
     #[must_use]
     pub fn strategy(&self) -> u32 {
         let p = self.as_ptr();
@@ -240,7 +239,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Whether filters such as CRLF conversion are skipped when files are written; no
     /// by default.
     ///
-    /// Field: `git_checkout_options.disable_filters`
+    /// Wraps `fld::git_checkout_options.disable_filters`
+    #[doc(alias = "git_checkout_options.disable_filters")]
     #[must_use]
     pub fn disable_filters(&self) -> bool {
         let p = self.as_ptr();
@@ -254,7 +254,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
 
     /// The mode directories are created with; 0, the default, means `0755`.
     ///
-    /// Field: `git_checkout_options.dir_mode`
+    /// Wraps `fld::git_checkout_options.dir_mode`
+    #[doc(alias = "git_checkout_options.dir_mode")]
     #[must_use]
     pub fn dir_mode(&self) -> u32 {
         let p = self.as_ptr();
@@ -268,7 +269,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The mode files are created with; 0, the default, means the blob's own (`0644`
     /// or `0755`).
     ///
-    /// Field: `git_checkout_options.file_mode`
+    /// Wraps `fld::git_checkout_options.file_mode`
+    #[doc(alias = "git_checkout_options.file_mode")]
     #[must_use]
     pub fn file_mode(&self) -> u32 {
         let p = self.as_ptr();
@@ -282,7 +284,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The `open(2)` flags files are written with; 0, the default, and any negative
     /// value mean `O_CREAT | O_TRUNC | O_WRONLY`.
     ///
-    /// Field: `git_checkout_options.file_open_flags`
+    /// Wraps `fld::git_checkout_options.file_open_flags`
+    #[doc(alias = "git_checkout_options.file_open_flags")]
     #[must_use]
     pub fn file_open_flags(&self) -> i32 {
         let p = self.as_ptr();
@@ -296,7 +299,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The situations the notification callback is called for, the raw bits of
     /// `git_checkout_notify_t`; none by default.
     ///
-    /// Field: `git_checkout_options.notify_flags`
+    /// Wraps `fld::git_checkout_options.notify_flags`
+    #[doc(alias = "git_checkout_options.notify_flags")]
     #[must_use]
     pub fn notify_flags(&self) -> u32 {
         let p = self.as_ptr();
@@ -312,8 +316,10 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_notify_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: `git_checkout_options.notify_cb`
-    /// Field: `git_checkout_options.notify_payload`
+    /// Wraps `fld::git_checkout_options.notify_cb`
+    /// Wraps `fld::git_checkout_options.notify_payload`
+    #[doc(alias = "git_checkout_options.notify_cb")]
+    #[doc(alias = "git_checkout_options.notify_payload")]
     #[must_use]
     pub fn notify_callback(&self) -> (ffi::git_checkout_notify_cb, *mut c_void) {
         let p = self.as_ptr();
@@ -334,8 +340,10 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_progress_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: `git_checkout_options.progress_cb`
-    /// Field: `git_checkout_options.progress_payload`
+    /// Wraps `fld::git_checkout_options.progress_cb`
+    /// Wraps `fld::git_checkout_options.progress_payload`
+    #[doc(alias = "git_checkout_options.progress_cb")]
+    #[doc(alias = "git_checkout_options.progress_payload")]
     #[must_use]
     pub fn progress_callback(&self) -> (ffi::git_checkout_progress_cb, *mut c_void) {
         let p = self.as_ptr();
@@ -356,8 +364,10 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// Raw seam: the callback is `git_checkout_perfdata_cb`, which this crate does not
     /// wrap yet.
     ///
-    /// Field: `git_checkout_options.perfdata_cb`
-    /// Field: `git_checkout_options.perfdata_payload`
+    /// Wraps `fld::git_checkout_options.perfdata_cb`
+    /// Wraps `fld::git_checkout_options.perfdata_payload`
+    #[doc(alias = "git_checkout_options.perfdata_cb")]
+    #[doc(alias = "git_checkout_options.perfdata_payload")]
     #[must_use]
     pub fn perfdata_callback(&self) -> (ffi::git_checkout_perfdata_cb, *mut c_void) {
         let p = self.as_ptr();
@@ -377,7 +387,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// default, means every path. Borrowed from the options, since the array header is
     /// stored in them.
     ///
-    /// Field: `git_checkout_options.paths`
+    /// Wraps `fld::git_checkout_options.paths`
+    #[doc(alias = "git_checkout_options.paths")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -400,7 +411,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// default, means `HEAD`'s (unless a [`baseline_index`](Self::baseline_index) is
     /// set). Borrowed for `'o`, as it was set.
     ///
-    /// Field: `git_checkout_options.baseline`
+    /// Wraps `fld::git_checkout_options.baseline`
+    #[doc(alias = "git_checkout_options.baseline")]
     #[must_use]
     pub fn baseline(&self) -> Option<TreeRef<'o, 'o>> {
         let p = self.as_ptr();
@@ -418,7 +430,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The baseline index, which overrides [`baseline`](Self::baseline); `None` by
     /// default. Borrowed for `'o`, as it was set.
     ///
-    /// Field: `git_checkout_options.baseline_index`
+    /// Wraps `fld::git_checkout_options.baseline_index`
+    #[doc(alias = "git_checkout_options.baseline_index")]
     #[must_use]
     pub fn baseline_index(&self) -> Option<IndexRef<'o>> {
         let p = self.as_ptr();
@@ -435,7 +448,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The directory files are written to; `None`, the default, means the repository's
     /// working directory.
     ///
-    /// Field: `git_checkout_options.target_directory`
+    /// Wraps `fld::git_checkout_options.target_directory`
+    #[doc(alias = "git_checkout_options.target_directory")]
     #[must_use]
     pub fn target_directory(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -452,7 +466,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The name of the common ancestor's side in conflict markers; `None`, the
     /// default, means `"ancestor"`.
     ///
-    /// Field: `git_checkout_options.ancestor_label`
+    /// Wraps `fld::git_checkout_options.ancestor_label`
+    #[doc(alias = "git_checkout_options.ancestor_label")]
     #[must_use]
     pub fn ancestor_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -469,7 +484,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The name of "our" side in conflict markers; `None`, the default, means
     /// `"ours"`.
     ///
-    /// Field: `git_checkout_options.our_label`
+    /// Wraps `fld::git_checkout_options.our_label`
+    #[doc(alias = "git_checkout_options.our_label")]
     #[must_use]
     pub fn our_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -486,7 +502,8 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// The name of "their" side in conflict markers; `None`, the default, means
     /// `"theirs"`.
     ///
-    /// Field: `git_checkout_options.their_label`
+    /// Wraps `fld::git_checkout_options.their_label`
+    #[doc(alias = "git_checkout_options.their_label")]
     #[must_use]
     pub fn their_label(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -546,7 +563,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets the checkout strategy, the raw bits of `git_checkout_strategy_t`. libgit2
     /// tests the bits it knows and ignores the rest.
     ///
-    /// Field: `git_checkout_options.checkout_strategy`
+    /// Wraps `fld::git_checkout_options.checkout_strategy`
+    #[doc(alias = "git_checkout_options.checkout_strategy")]
     pub fn set_strategy(&mut self, strategy: u32) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -560,7 +578,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets whether filters such as CRLF conversion are skipped when files are
     /// written.
     ///
-    /// Field: `git_checkout_options.disable_filters`
+    /// Wraps `fld::git_checkout_options.disable_filters`
+    #[doc(alias = "git_checkout_options.disable_filters")]
     pub fn set_disable_filters(&mut self, disable: bool) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -573,7 +592,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Sets the mode directories are created with; 0 means `0755`.
     ///
-    /// Field: `git_checkout_options.dir_mode`
+    /// Wraps `fld::git_checkout_options.dir_mode`
+    #[doc(alias = "git_checkout_options.dir_mode")]
     pub fn set_dir_mode(&mut self, mode: u32) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -586,7 +606,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Sets the mode files are created with; 0 means the blob's own.
     ///
-    /// Field: `git_checkout_options.file_mode`
+    /// Wraps `fld::git_checkout_options.file_mode`
+    #[doc(alias = "git_checkout_options.file_mode")]
     pub fn set_file_mode(&mut self, mode: u32) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -601,7 +622,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// `O_CREAT | O_TRUNC | O_WRONLY`. Flags that cannot write the file (`O_EXCL` over
     /// an existing one, say) make the checkout fail with libgit2's error.
     ///
-    /// Field: `git_checkout_options.file_open_flags`
+    /// Wraps `fld::git_checkout_options.file_open_flags`
+    #[doc(alias = "git_checkout_options.file_open_flags")]
     pub fn set_file_open_flags(&mut self, flags: i32) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -615,7 +637,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets the situations the notification callback is called for, the raw bits of
     /// `git_checkout_notify_t`.
     ///
-    /// Field: `git_checkout_options.notify_flags`
+    /// Wraps `fld::git_checkout_options.notify_flags`
+    #[doc(alias = "git_checkout_options.notify_flags")]
     pub fn set_notify_flags(&mut self, flags: u32) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -642,8 +665,10 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// must be sound to call that way, and `payload` must stay valid for whatever
     /// `callback` does with it.
     ///
-    /// Field: `git_checkout_options.notify_cb`
-    /// Field: `git_checkout_options.notify_payload`
+    /// Wraps `fld::git_checkout_options.notify_cb`
+    /// Wraps `fld::git_checkout_options.notify_payload`
+    #[doc(alias = "git_checkout_options.notify_cb")]
+    #[doc(alias = "git_checkout_options.notify_payload")]
     pub unsafe fn set_notify_callback(
         &mut self,
         callback: ffi::git_checkout_notify_cb,
@@ -672,8 +697,10 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// As [`set_notify_callback`](Self::set_notify_callback), for
     /// `git_checkout_progress_cb`'s arguments: the path may be NULL.
     ///
-    /// Field: `git_checkout_options.progress_cb`
-    /// Field: `git_checkout_options.progress_payload`
+    /// Wraps `fld::git_checkout_options.progress_cb`
+    /// Wraps `fld::git_checkout_options.progress_payload`
+    #[doc(alias = "git_checkout_options.progress_cb")]
+    #[doc(alias = "git_checkout_options.progress_payload")]
     pub unsafe fn set_progress_callback(
         &mut self,
         callback: ffi::git_checkout_progress_cb,
@@ -703,8 +730,10 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// As [`set_notify_callback`](Self::set_notify_callback), for
     /// `git_checkout_perfdata_cb`'s arguments.
     ///
-    /// Field: `git_checkout_options.perfdata_cb`
-    /// Field: `git_checkout_options.perfdata_payload`
+    /// Wraps `fld::git_checkout_options.perfdata_cb`
+    /// Wraps `fld::git_checkout_options.perfdata_payload`
+    #[doc(alias = "git_checkout_options.perfdata_cb")]
+    #[doc(alias = "git_checkout_options.perfdata_payload")]
     pub unsafe fn set_perfdata_callback(
         &mut self,
         callback: ffi::git_checkout_perfdata_cb,
@@ -733,7 +762,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     ///
     /// [`StrArrayView`]: crate::libgit2::src::libgit2::strarray::StrArrayView
     ///
-    /// Field: `git_checkout_options.paths`
+    /// Wraps `fld::git_checkout_options.paths`
+    #[doc(alias = "git_checkout_options.paths")]
     pub fn set_paths(&mut self, paths: StrArrayRef<'o>) {
         // A NULL array reads as empty whatever its count; C would read `count` strings.
         let count = paths.len();
@@ -758,7 +788,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Lifts the path restriction: every path is checked out.
     ///
-    /// Field: `git_checkout_options.paths`
+    /// Wraps `fld::git_checkout_options.paths`
+    #[doc(alias = "git_checkout_options.paths")]
     pub fn clear_paths(&mut self) {
         let empty = ffi::git_strarray {
             strings: ptr::null_mut(),
@@ -780,7 +811,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// The tree is borrowed for `'o` from the owner holding it, which then outlives the
     /// options, as does the repository the tree was looked up in.
     ///
-    /// Field: `git_checkout_options.baseline`
+    /// Wraps `fld::git_checkout_options.baseline`
+    #[doc(alias = "git_checkout_options.baseline")]
     pub fn set_baseline(&mut self, tree: Option<TreeRef<'o, 'o>>) {
         let tree = tree.map_or(ptr::null_mut(), |t| t.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
@@ -801,7 +833,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// options, and an [`IndexBox`](crate::libgit2::src::libgit2::index::IndexBox) lends no
     /// exclusive handle meanwhile.
     ///
-    /// Field: `git_checkout_options.baseline_index`
+    /// Wraps `fld::git_checkout_options.baseline_index`
+    #[doc(alias = "git_checkout_options.baseline_index")]
     pub fn set_baseline_index(&mut self, index: Option<IndexRef<'o>>) {
         let index = index.map_or(ptr::null_mut(), |i| i.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
@@ -817,7 +850,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets the directory files are written to, created when missing; `None` means
     /// the repository's working directory, which a bare repository lacks.
     ///
-    /// Field: `git_checkout_options.target_directory`
+    /// Wraps `fld::git_checkout_options.target_directory`
+    #[doc(alias = "git_checkout_options.target_directory")]
     pub fn set_target_directory(&mut self, directory: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
@@ -830,7 +864,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets the name of the common ancestor's side in conflict markers; `None` means
     /// `"ancestor"`.
     ///
-    /// Field: `git_checkout_options.ancestor_label`
+    /// Wraps `fld::git_checkout_options.ancestor_label`
+    #[doc(alias = "git_checkout_options.ancestor_label")]
     pub fn set_ancestor_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -843,7 +878,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Sets the name of "our" side in conflict markers; `None` means `"ours"`.
     ///
-    /// Field: `git_checkout_options.our_label`
+    /// Wraps `fld::git_checkout_options.our_label`
+    #[doc(alias = "git_checkout_options.our_label")]
     pub fn set_our_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -856,7 +892,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Sets the name of "their" side in conflict markers; `None` means `"theirs"`.
     ///
-    /// Field: `git_checkout_options.their_label`
+    /// Wraps `fld::git_checkout_options.their_label`
+    #[doc(alias = "git_checkout_options.their_label")]
     pub fn set_their_label(&mut self, label: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
