@@ -276,8 +276,8 @@ use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, ErrorCode, last, s
 /// }
 /// ```
 ///
-/// Wraps: `git_commit`
-/// Handwritten
+/// Wraps `ty::git_commit`
+#[doc(alias = "git_commit")]
 #[repr(transparent)]
 pub struct Commit<'r>(ffi::git_commit, PhantomData<(*const (), &'r ())>);
 
@@ -293,8 +293,6 @@ pub struct Commit<'r>(ffi::git_commit, PhantomData<(*const (), &'r ())>);
 ///     send(handle)
 /// }
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct CommitRef<'a, 'r>(CBorrowedPtr<'a, Commit<'r>>);
@@ -303,8 +301,6 @@ pub struct CommitRef<'a, 'r>(CBorrowedPtr<'a, Commit<'r>>);
 /// [`as_ref`](Self::as_ref).
 ///
 /// No owner hands one out: every commit is shared with its repository's cache.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct CommitMut<'a, 'r>(
     CommitRef<'a, 'r>,
@@ -419,7 +415,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// drop(parent);
     /// ```
     ///
-    /// Wraps: `git_commit_parent`
+    /// Wraps `fn::git_commit_parent`
     ///
     /// # Errors
     ///
@@ -433,6 +429,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     ///
     /// Panics, with `a parent lookup succeeded without a commit`, only if libgit2 breaks its
     /// contract.
+    #[doc(alias = "git_commit_parent")]
     pub fn parent(&self, n: u32) -> Result<CommitArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
@@ -459,7 +456,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// The ancestor lives no longer than the repository's borrow `'r`, as this commit
     /// does.
     ///
-    /// Wraps: `git_commit_nth_gen_ancestor`
+    /// Wraps `fn::git_commit_nth_gen_ancestor`
     ///
     /// # Errors
     ///
@@ -472,6 +469,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     ///
     /// Panics, with `an ancestor lookup succeeded without a commit`, only if libgit2 breaks its
     /// contract.
+    #[doc(alias = "git_commit_nth_gen_ancestor")]
     pub fn nth_gen_ancestor(&self, n: u32) -> Result<CommitArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: as in `parent`. libgit2 also takes, and later releases or hands out,
@@ -508,7 +506,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// drop(tree);
     /// ```
     ///
-    /// Wraps: `git_commit_tree`
+    /// Wraps `fn::git_commit_tree`
     ///
     /// # Errors
     ///
@@ -520,6 +518,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// # Panics
     ///
     /// Panics, with `a tree lookup succeeded without a tree`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_tree")]
     pub fn tree(&self) -> Result<TreeArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: as in `parent`: `out` is a writable slot, the handle addresses a live
@@ -553,7 +552,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// let _ = message.to_bytes();
     /// ```
     ///
-    /// Wraps: `git_commit_message`
+    /// Wraps `fn::git_commit_message`
+    #[doc(alias = "git_commit_message")]
     #[must_use]
     pub fn message(&self) -> &'a CStr {
         // SAFETY: the handle addresses a live, fully parsed commit for `'a`, whose raw
@@ -569,7 +569,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// blank line that ends its headers (empty without one), leading newlines
     /// included. Borrowed in place for as long as the handle.
     ///
-    /// Wraps: `git_commit_message_raw`
+    /// Wraps `fn::git_commit_message_raw`
+    #[doc(alias = "git_commit_message_raw")]
     #[must_use]
     pub fn message_raw(&self) -> &'a CStr {
         // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
@@ -585,7 +586,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// place for as long as the handle; `None` without that header, where git assumes
     /// UTF-8. Only the last `encoding` header counts, and libgit2 leaks the others.
     ///
-    /// Wraps: `git_commit_message_encoding`
+    /// Wraps `fn::git_commit_message_encoding`
+    #[doc(alias = "git_commit_message_encoding")]
     #[must_use]
     pub fn message_encoding(&self) -> Option<&'a CStr> {
         // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
@@ -601,7 +603,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// blank line that ends them (`tree`, the `parent`s, `author`, `committer`, then
     /// any others), each with its newline. Borrowed in place for as long as the handle.
     ///
-    /// Wraps: `git_commit_raw_header`
+    /// Wraps `fn::git_commit_raw_header`
+    #[doc(alias = "git_commit_raw_header")]
     #[must_use]
     pub fn raw_header(&self) -> &'a CStr {
         // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads its
@@ -618,7 +621,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// continues it (a line starting with a space) adds a newline and the line without
     /// its space, as a `gpgsig` signature spans several.
     ///
-    /// Wraps: `git_commit_header_field`
+    /// Wraps `fn::git_commit_header_field`
     ///
     /// # Errors
     ///
@@ -631,6 +634,7 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// header's name holds: libgit2 matches the field against the rest of the headers,
     /// across line ends, and on such a match copies a negative length, overflowing a
     /// pointer or requesting an allocation of nearly `usize::MAX` bytes.
+    #[doc(alias = "git_commit_header_field")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a C string holds no NUL"
@@ -665,12 +669,13 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// owner and handle of the commit (so a commit is not `Sync`); it lives as long as
     /// the commit, and the result is borrowed for as long as the handle.
     ///
-    /// Wraps: `git_commit_summary`
+    /// Wraps `fn::git_commit_summary`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's out-of-memory error, only when it cannot allocate even an
     /// empty summary; a summary that runs out of memory part-way comes out empty.
+    #[doc(alias = "git_commit_summary")]
     pub fn summary(&self) -> Result<&'a CStr, ErrorBuf> {
         // SAFETY: the handle addresses a live, fully parsed commit for `'a`. libgit2
         // writes its `summary` field once, when NULL, through this pointer: nothing else
@@ -688,7 +693,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
 
     /// When the commit was made, as its committer's time: seconds since the epoch.
     ///
-    /// Wraps: `git_commit_time`
+    /// Wraps `fn::git_commit_time`
+    #[doc(alias = "git_commit_time")]
     #[must_use]
     pub fn time(&self) -> i64 {
         // SAFETY: the handle addresses a live, fully parsed commit for `'a`, whose
@@ -699,7 +705,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
 
     /// The timezone the commit was made in, as its committer's: minutes east of UTC.
     ///
-    /// Wraps: `git_commit_time_offset`
+    /// Wraps `fn::git_commit_time_offset`
+    #[doc(alias = "git_commit_time_offset")]
     #[must_use]
     pub fn time_offset(&self) -> i32 {
         // SAFETY: as in `time`.
@@ -709,7 +716,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// The id of the commit's tree, as the commit records it, borrowed in place for as
     /// long as the handle. [`tree`](Self::tree) looks the tree up.
     ///
-    /// Wraps: `git_commit_tree_id`
+    /// Wraps `fn::git_commit_tree_id`
+    #[doc(alias = "git_commit_tree_id")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -727,7 +735,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// How many parents the commit records: 0 for a root commit, 2 or more for a
     /// merge.
     ///
-    /// Wraps: `git_commit_parentcount`
+    /// Wraps `fn::git_commit_parentcount`
+    #[doc(alias = "git_commit_parentcount")]
     #[must_use]
     pub fn parent_count(&self) -> u32 {
         // SAFETY: the handle addresses a live commit for `'a`; the call only reads the
@@ -739,7 +748,8 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// [`parent`](Self::parent) does, as the commit records it, borrowed in place for
     /// as long as the handle; `None` when the commit has `n` parents or fewer.
     ///
-    /// Wraps: `git_commit_parent_id`
+    /// Wraps `fn::git_commit_parent_id`
+    #[doc(alias = "git_commit_parent_id")]
     #[must_use]
     pub fn parent_id(&self, n: u32) -> Option<OidRef<'a>> {
         // SAFETY: the handle addresses a live commit for `'a`; libgit2 bounds-checks `n`
@@ -846,11 +856,12 @@ impl<'a> CommitRef<'a, '_> {
     /// let _ = author.name();
     /// ```
     ///
-    /// Wraps: `git_commit_author`
+    /// Wraps `fn::git_commit_author`
     ///
     /// # Panics
     ///
     /// Panics, with `a parsed commit has an author`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_author")]
     #[must_use]
     pub fn author(&self) -> SignatureRef<'a> {
         // SAFETY: the handle addresses a live commit for `'a`, which libgit2 only reads.
@@ -865,11 +876,12 @@ impl<'a> CommitRef<'a, '_> {
     /// The commit's committer: who recorded the commit, and when (the commit's time).
     /// Borrowed in place for as long as the handle, as [`author`](Self::author) is.
     ///
-    /// Wraps: `git_commit_committer`
+    /// Wraps `fn::git_commit_committer`
     ///
     /// # Panics
     ///
     /// Panics, with `a parsed commit has a committer`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_committer")]
     #[must_use]
     pub fn committer(&self) -> SignatureRef<'a> {
         // SAFETY: the handle addresses a live commit for `'a`, which libgit2 only reads.
@@ -889,7 +901,7 @@ impl<'a> CommitRef<'a, '_> {
     ///
     /// [`Signature::new`]: crate::libgit2::src::libgit2::signature::Signature::new
     ///
-    /// Wraps: `git_commit_author_with_mailmap`
+    /// Wraps `fn::git_commit_author_with_mailmap`
     ///
     /// # Errors
     ///
@@ -897,6 +909,7 @@ impl<'a> CommitRef<'a, '_> {
     /// with the `GIT_ERROR_INTERNAL` error a release build of libgit2 reports from its
     /// assertion ("unrecoverable internal error: 'name'", or `'email'`): a debug build
     /// would abort.
+    #[doc(alias = "git_commit_author_with_mailmap")]
     pub fn author_with_mailmap(
         &self,
         mailmap: Option<MailmapRef<'_>>,
@@ -918,11 +931,12 @@ impl<'a> CommitRef<'a, '_> {
     /// The commit's committer as `mailmap` maps them, as
     /// [`author_with_mailmap`](Self::author_with_mailmap) maps the author.
     ///
-    /// Wraps: `git_commit_committer_with_mailmap`
+    /// Wraps `fn::git_commit_committer_with_mailmap`
     ///
     /// # Errors
     ///
     /// Fails as [`author_with_mailmap`](Self::author_with_mailmap) does, for the committer.
+    #[doc(alias = "git_commit_committer_with_mailmap")]
     pub fn committer_with_mailmap(
         &self,
         mailmap: Option<MailmapRef<'_>>,
@@ -946,7 +960,8 @@ impl<'a> CommitRef<'a, '_> {
     /// every holder: it is borrowed for as long as the handle, and later calls return
     /// the same string.
     ///
-    /// Wraps: `git_commit_body`
+    /// Wraps `fn::git_commit_body`
+    #[doc(alias = "git_commit_body")]
     #[must_use]
     pub fn body(&self) -> Option<&'a CStr> {
         // SAFETY: the handle addresses a live commit for `'a`. libgit2 writes its
@@ -1000,22 +1015,18 @@ impl<'a> CommitRef<'a, '_> {
 /// }
 /// ```
 ///
-/// Wraps: `git_commitarray`
-/// Handwritten
+/// Wraps `ty::git_commitarray`
+#[doc(alias = "git_commitarray")]
 #[repr(transparent)]
 pub struct CommitArray<'r>(ffi::git_commitarray, PhantomData<(*const (), &'r ())>);
 
 /// Shared borrow of a [`CommitArray`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct CommitArrayRef<'a, 'r>(CBorrowedPtr<'a, CommitArray<'r>>);
 
 /// Exclusive borrow of a [`CommitArray`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct CommitArrayMut<'a, 'r>(
     CommitArrayRef<'a, 'r>,
@@ -1058,9 +1069,6 @@ impl<'a, 'r: 'a> CMutSeam<'a> for CommitArrayMut<'a, 'r> {
 /// against the first `git_libgit2_init` another thread may be running; it would also
 /// read a NULL buffer for a non-zero `count`. Nothing orders an empty array after that
 /// initialisation, since nothing allocated for it.
-///
-/// Wraps: `git_commitarray_dispose`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CommitArrayDispose;
 
@@ -1071,6 +1079,8 @@ pub struct CommitArrayDispose;
 // allocated through libgit2's allocator; `clear` and `take` leave the empty array `new`
 // builds, which owns nothing and is released without C.
 unsafe impl<'r> CDispose<CommitArray<'r>> for CommitArrayDispose {
+    /// Wraps `fn::git_commitarray_dispose`
+    #[doc(alias = "git_commitarray_dispose")]
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<CommitArray<'r>>) {
         let raw: *mut ffi::git_commitarray = ptr.as_ptr().cast();
@@ -1174,7 +1184,8 @@ impl<'a, 'r> CommitArrayRef<'a, 'r> {
     /// The number of commits; 0 without a buffer, whatever `count` says, as
     /// [`get`](Self::get) reads it.
     ///
-    /// Field: `git_commitarray.count`
+    /// Wraps `fld::git_commitarray.count`
+    #[doc(alias = "git_commitarray.count")]
     #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
@@ -1210,7 +1221,8 @@ impl<'a, 'r> CommitArrayRef<'a, 'r> {
     /// let _ = first;
     /// ```
     ///
-    /// Field: `git_commitarray.commits`
+    /// Wraps `fld::git_commitarray.commits`
+    #[doc(alias = "git_commitarray.commits")]
     #[must_use]
     pub fn get(&self, index: usize) -> Option<CommitRef<'a, 'r>> {
         if index >= self.len() {
@@ -1238,7 +1250,8 @@ impl<'a, 'r> CommitArrayRef<'a, 'r> {
     /// The commits, in order, each borrowed from the array as [`get`](Self::get) lends
     /// it.
     ///
-    /// Field: `git_commitarray.commits`
+    /// Wraps `fld::git_commitarray.commits`
+    #[doc(alias = "git_commitarray.commits")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: an index under len"
@@ -1279,7 +1292,8 @@ impl<'r> CommitArrayMut<'_, 'r> {
     /// `git_commitarray_dispose` leaves, and the storage libgit2 fills again without
     /// leaking what it overwrites.
     ///
-    /// Field: `git_commitarray.commits`
+    /// Wraps `fld::git_commitarray.commits`
+    #[doc(alias = "git_commitarray.commits")]
     pub fn clear(&mut self) {
         let array = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer is non-NULL, as every handle's is.
@@ -1314,14 +1328,16 @@ impl<'r> CommitArrayMut<'_, 'r> {
     /// }
     /// ```
     ///
-    /// Field: `git_commitarray.commits`
-    /// Field: `git_commitarray.count`
+    /// Wraps `fld::git_commitarray.commits`
+    /// Wraps `fld::git_commitarray.count`
     ///
     /// # Errors
     ///
     /// Fails, handing `commits` back and leaving the array as it was, when the buffer
     /// cannot be allocated, or libgit2 cannot be initialised (libgit2's error is then
     /// set on the calling thread).
+    #[doc(alias = "git_commitarray.commits")]
+    #[doc(alias = "git_commitarray.count")]
     pub fn set_commits(&mut self, commits: Vec<CommitArc<'r>>) -> Result<(), Vec<CommitArc<'r>>> {
         let Some(mut buffer) = OdbDataArrayFree::new_uninit::<*mut ffi::git_commit>(commits.len())
         else {
@@ -1352,11 +1368,12 @@ impl<'r> CommitArrayMut<'_, 'r> {
     /// Takes the commits out, in order, leaving the empty array: what
     /// `git_commitarray_dispose` would release, owned. The buffer is released.
     ///
-    /// Field: `git_commitarray.commits`
+    /// Wraps `fld::git_commitarray.commits`
     ///
     /// # Panics
     ///
     /// Panics, with `a non-NULL buffer`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commitarray.commits")]
     pub fn take(&mut self) -> Vec<CommitArc<'r>> {
         let array = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer addresses a live `git_commitarray`; the projection
@@ -1443,7 +1460,8 @@ define_ctype!(
     /// }
     /// ```
     ///
-    /// Wraps: git_commitbuilder
+    /// Wraps `ty::git_commitbuilder`
+    #[doc(alias = "git_commitbuilder")]
     CommitBuilder,
     CommitBuilderRef,
     CommitBuilderMut,
@@ -1480,13 +1498,14 @@ impl CommitBuilderMut<'_> {
     /// git parses differently, and one holding a blank line moves where the next header
     /// goes.
     ///
-    /// Wraps: `git_commitbuilder_add_header`
+    /// Wraps `fn::git_commitbuilder_add_header`
     ///
     /// # Errors
     ///
     /// Fails with `GIT_ERROR_INVALID`, "malformed commit contents", when the contents
     /// have no blank line (a commit libgit2 writes always has one), and with libgit2's
     /// out-of-memory error.
+    #[doc(alias = "git_commitbuilder_add_header")]
     pub fn add_header(&mut self, field: &CStr, value: &CStr) -> Result<(), ErrorBuf> {
         let builder = self.as_mut_ptr();
         // SAFETY: the exclusive handle addresses the live builder libgit2 lent the
@@ -1555,8 +1574,8 @@ type SignFn<'f> =
 /// send(SignatureCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: `git_commit_signature_cb`
-/// Handwritten
+/// Wraps `ty::git_commit_signature_cb`
+#[doc(alias = "git_commit_signature_cb")]
 pub struct SignatureCallback<'f> {
     f: &'f mut SignFn<'f>,
     /// A panic the closure raised inside a C call, resumed once that call returns.
@@ -1673,7 +1692,7 @@ fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
 /// turned off, the tree and every parent must exist in the repository with those
 /// types; the signature is not checked. libgit2 writes `field` as given.
 ///
-/// Wraps: `git_commit_create_with_signature`
+/// Wraps `fn::git_commit_create_with_signature`
 ///
 /// # Errors
 ///
@@ -1682,6 +1701,7 @@ fn failed<T>(rc: c_int) -> Result<T, RepositoryError> {
 /// "malformed commit contents", for a signed one without a blank line after its headers;
 /// and with libgit2's error when a tree or parent is missing or the object database
 /// cannot be loaded or written.
+#[doc(alias = "git_commit_create_with_signature")]
 pub fn create_with_signature(
     repo: RepositoryRef<'_>,
     content: &CStr,
@@ -1718,7 +1738,7 @@ pub fn create_with_signature(
 /// `field` as a prefix: a header whose name only starts with `field` (`gpgsig-sha256`
 /// for `gpgsig`), placed before the one taken, loses those bytes from the signed data.
 ///
-/// Wraps: `git_commit_extract_signature`
+/// Wraps `fn::git_commit_extract_signature`
 ///
 /// # Errors
 ///
@@ -1733,6 +1753,7 @@ pub fn create_with_signature(
 /// format it out of bounds), and an empty `field`, with `GIT_ERROR_INVALID`, "the
 /// signature header field name is empty": libgit2 would never get past the commit's
 /// first line.
+#[doc(alias = "git_commit_extract_signature")]
 pub fn extract_signature(
     repo: RepositoryRef<'_>,
     id: OidRef<'_>,
@@ -1904,7 +1925,7 @@ fn creatable(
 /// # std::fs::remove_dir_all(&dir).unwrap();
 /// ```
 ///
-/// Wraps: `git_commit_create`
+/// Wraps `fn::git_commit_create`
 ///
 /// # Errors
 ///
@@ -1916,6 +1937,7 @@ fn creatable(
 /// by libgit2's parser) or whose offset is `i32::MIN` minutes, which libgit2 cannot
 /// write. Fails with libgit2's error when the reference cannot be read or written, or
 /// the object database cannot be loaded or written.
+#[doc(alias = "git_commit_create")]
 #[expect(
     clippy::too_many_arguments,
     reason = "the C routine's parameters, in its order"
@@ -1975,11 +1997,12 @@ pub const MAX_ARRAY_PARENTS: usize = 16;
 /// # let _ = octopus as fn(_, _, _, _, _, _, _, _) -> _;
 /// ```
 ///
-/// Wraps: `git_commit_create_v`
+/// Wraps `fn::git_commit_create_v`
 ///
 /// # Errors
 ///
 /// Fails as [`create`] does.
+#[doc(alias = "git_commit_create_v")]
 #[expect(
     clippy::too_many_arguments,
     reason = "the C routine's parameters, in its order"
@@ -2063,12 +2086,13 @@ pub fn create_from_array<'r, const N: usize>(
 /// with their types, unless strict object creation is turned off; they are objects of `repo`, so
 /// they do.
 ///
-/// Wraps: `git_commit_create_buffer`
+/// Wraps `fn::git_commit_create_buffer`
 ///
 /// # Errors
 ///
 /// Refuses what [`create`] refuses, and fails with libgit2's error when the object database cannot
 /// be read.
+#[doc(alias = "git_commit_create_buffer")]
 pub fn create_buffer<'r>(
     repo: RepositoryRef<'r>,
     author: SignatureRef<'_>,
@@ -2114,12 +2138,13 @@ pub fn create_buffer<'r>(
 /// returned. An error the closure returns fails the call with its code and message,
 /// before anything is written.
 ///
-/// Wraps: `git_commit_create_ext`
+/// Wraps `fn::git_commit_create_ext`
 ///
 /// # Errors
 ///
 /// Refuses what [`create`] refuses, and fails as it does, and with the signing
 /// callback's error.
+#[doc(alias = "git_commit_create_ext")]
 pub fn create_ext<'r>(
     repo: RepositoryRef<'r>,
     author: SignatureRef<'_>,
@@ -2172,7 +2197,7 @@ impl<'r> CommitRef<'_, 'r> {
     /// `GIT_ERROR_REFERENCE`, "commit to amend is not the tip of the given branch", or
     /// libgit2's error when the reference cannot be read (a missing one included).
     ///
-    /// Wraps: `git_commit_amend`
+    /// Wraps `fn::git_commit_amend`
     ///
     /// # Errors
     ///
@@ -2180,6 +2205,7 @@ impl<'r> CommitRef<'_, 'r> {
     /// (this commit's own included). Fails with libgit2's error when this commit's tree
     /// cannot be read, a reference cannot be written, or the object database cannot be
     /// written; libgit2 then leaks the reference it read for `update_ref`.
+    #[doc(alias = "git_commit_amend")]
     pub fn amend(
         &self,
         update_ref: Option<&CStr>,
@@ -2404,7 +2430,7 @@ fn commit_on_head<'r>(
 /// # std::fs::remove_dir_all(&dir).unwrap();
 /// ```
 ///
-/// Replaces: `git_commit_create_from_stage`
+/// Replaces `fn::git_commit_create_from_stage`
 ///
 /// # Errors
 ///
@@ -2415,6 +2441,7 @@ fn commit_on_head<'r>(
 /// read (`HEAD` at an object that is not a commit or a tag included); with libgit2's
 /// error when the diff against `HEAD` fails, `HEAD` has moved meanwhile
 /// ([`ErrorCode::Modified`]), or the reference or the object database cannot be written.
+#[doc(alias = "git_commit_create_from_stage")]
 pub fn create_from_stage(
     repo: RepositoryRef<'_>,
     message: &CStr,
@@ -2453,7 +2480,7 @@ pub fn create_from_stage(
 /// This is `git_commit_create_from_tree` composed from the routines it calls, as
 /// [`create_from_stage`] is, for the same defects.
 ///
-/// Replaces: `git_commit_create_from_tree`
+/// Replaces `fn::git_commit_create_from_tree`
 ///
 /// # Errors
 ///
@@ -2461,6 +2488,7 @@ pub fn create_from_stage(
 /// the error a release build of libgit2 reports from its assertion (`GIT_ERROR_INVALID`,
 /// "invalid argument: '`git_tree_owner(tree)` == repo'"; a debug build aborts), which it
 /// reaches only after diffing that tree against `HEAD`.
+#[doc(alias = "git_commit_create_from_tree")]
 pub fn create_from_tree<'r>(
     repo: RepositoryRef<'r>,
     tree: TreeRef<'_, 'r>,
@@ -2586,7 +2614,7 @@ fn amend_on_head<'r>(
 /// message. Either way the index's tree, written before signing, stays in the object
 /// database, and `HEAD` does not move.
 ///
-/// Wraps: `git_commit_amend_from_stage`
+/// Wraps `fn::git_commit_amend_from_stage`
 ///
 /// # Errors
 ///
@@ -2596,6 +2624,7 @@ fn amend_on_head<'r>(
 /// written as a tree; with [`ErrorCode::UnbornBranch`] on an unborn `HEAD`, and with
 /// libgit2's error when `HEAD` cannot be peeled to a commit, the default signature is
 /// needed and missing, or the reference or the object database cannot be written.
+#[doc(alias = "git_commit_amend_from_stage")]
 pub fn amend_from_stage(
     repo: RepositoryRef<'_>,
     message: Option<&CStr>,
@@ -2655,13 +2684,14 @@ pub fn amend_from_stage(
 /// # std::fs::remove_dir_all(&dir).unwrap();
 /// ```
 ///
-/// Wraps: `git_commit_amend_from_tree`
+/// Wraps `fn::git_commit_amend_from_tree`
 ///
 /// # Errors
 ///
 /// Refuses besides, before libgit2 runs, a `tree` looked up in another repository, with
 /// the error [`create_from_tree`] reports for one: libgit2 does not check it here, and
 /// writes its id, of whatever type, unchecked.
+#[doc(alias = "git_commit_amend_from_tree")]
 pub fn amend_from_tree<'r>(
     repo: RepositoryRef<'r>,
     tree: TreeRef<'_, 'r>,
@@ -2763,8 +2793,8 @@ type CreateFn<'f> = dyn for<'c> FnMut(
 /// send(CreateCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: `git_commit_create_cb`
-/// Handwritten
+/// Wraps `ty::git_commit_create_cb`
+#[doc(alias = "git_commit_create_cb")]
 pub struct CreateCallback<'f> {
     f: &'f mut CreateFn<'f>,
     /// A panic the closure raised inside a C call, resumed once that call returns.
@@ -3019,23 +3049,19 @@ unsafe extern "C" fn create_with_closure(
 /// through the strings, and only the exclusive handle writes the fields. Equal when
 /// both strings are.
 ///
-/// Wraps: `git_commit_header`
-/// Handwritten
+/// Wraps `ty::git_commit_header`
+#[doc(alias = "git_commit_header")]
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Header<'h>(ffi::git_commit_header, PhantomData<&'h CStr>);
 
 /// Shared borrow of a [`Header`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct HeaderRef<'a, 'h>(CBorrowedPtr<'a, Header<'h>>);
 
 /// Exclusive borrow of a [`Header`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct HeaderMut<'a, 'h>(
     HeaderRef<'a, 'h>,
@@ -3139,7 +3165,8 @@ impl fmt::Debug for Header<'_> {
 impl<'h> HeaderRef<'_, 'h> {
     /// The field name, borrowed for `'h`, as it was set.
     ///
-    /// Field: `git_commit_header.field`
+    /// Wraps `fld::git_commit_header.field`
+    #[doc(alias = "git_commit_header.field")]
     #[must_use]
     pub fn field(&self) -> &'h CStr {
         let p = self.as_ptr();
@@ -3155,7 +3182,8 @@ impl<'h> HeaderRef<'_, 'h> {
 
     /// The value, borrowed for `'h`, as it was set.
     ///
-    /// Field: `git_commit_header.value`
+    /// Wraps `fld::git_commit_header.value`
+    #[doc(alias = "git_commit_header.value")]
     #[must_use]
     pub fn value(&self) -> &'h CStr {
         let p = self.as_ptr();
@@ -3199,7 +3227,8 @@ impl<'h> HeaderMut<'_, 'h> {
 
     /// Replaces the field name; the old string, borrowed, needs no release.
     ///
-    /// Field: `git_commit_header.field`
+    /// Wraps `fld::git_commit_header.field`
+    #[doc(alias = "git_commit_header.field")]
     pub fn set_field(&mut self, field: &'h CStr) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -3213,7 +3242,8 @@ impl<'h> HeaderMut<'_, 'h> {
 
     /// Replaces the value; the old string, borrowed, needs no release.
     ///
-    /// Field: `git_commit_header.value`
+    /// Wraps `fld::git_commit_header.value`
+    #[doc(alias = "git_commit_header.value")]
     pub fn set_value(&mut self, value: &'h CStr) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -3302,8 +3332,8 @@ const _: () = assert!(
 /// Not `Clone`: the payload its callback receives may be an exclusive borrow, which a
 /// copy would alias. Build another with [`new`](Self::new) instead.
 ///
-/// Wraps: `git_commit_create_ext_options`
-/// Handwritten
+/// Wraps `ty::git_commit_create_ext_options`
+#[doc(alias = "git_commit_create_ext_options")]
 #[repr(transparent)]
 pub struct CreateExtOptions<'o>(
     ffi::git_commit_create_ext_options,
@@ -3311,16 +3341,12 @@ pub struct CreateExtOptions<'o>(
 );
 
 /// Shared borrow of a [`CreateExtOptions`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct CreateExtOptionsRef<'a, 'o>(CBorrowedPtr<'a, CreateExtOptions<'o>>);
 
 /// Exclusive borrow of a [`CreateExtOptions`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct CreateExtOptionsMut<'a, 'o>(
     CreateExtOptionsRef<'a, 'o>,
@@ -3363,12 +3389,13 @@ impl<'o> CreateExtOptions<'o> {
     /// `GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION`, and with that version it reaches no
     /// global, no allocator and no thread state, so this needs no initialised library.
     ///
-    /// Wraps: `git_commit_create_ext_options_init`
+    /// Wraps `fn::git_commit_create_ext_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_commit_create_ext_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_commit_create_ext_options>::uninit();
@@ -3423,7 +3450,8 @@ impl<'o> CreateExtOptionsRef<'_, 'o> {
     /// The structure's version, `GIT_COMMIT_CREATE_EXT_OPTIONS_VERSION`; fixed by
     /// [`CreateExtOptions::new`].
     ///
-    /// Field: `git_commit_create_ext_options.version`
+    /// Wraps `fld::git_commit_create_ext_options.version`
+    #[doc(alias = "git_commit_create_ext_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
@@ -3437,7 +3465,8 @@ impl<'o> CreateExtOptionsRef<'_, 'o> {
     /// The name of the reference moved to the new commit; `None`, the default, moves
     /// none.
     ///
-    /// Field: `git_commit_create_ext_options.update_ref`
+    /// Wraps `fld::git_commit_create_ext_options.update_ref`
+    #[doc(alias = "git_commit_create_ext_options.update_ref")]
     #[must_use]
     pub fn update_ref(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -3454,7 +3483,8 @@ impl<'o> CreateExtOptionsRef<'_, 'o> {
     /// The message's encoding, written as the commit's `encoding` header; `None`, the
     /// default, writes no such header (git reads the message as UTF-8).
     ///
-    /// Field: `git_commit_create_ext_options.message_encoding`
+    /// Wraps `fld::git_commit_create_ext_options.message_encoding`
+    #[doc(alias = "git_commit_create_ext_options.message_encoding")]
     #[must_use]
     pub fn message_encoding(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -3472,8 +3502,10 @@ impl<'o> CreateExtOptionsRef<'_, 'o> {
     /// empty, the default, writes none. Borrowed for `'o`, as they were set; each reads
     /// through its [`HeaderRef`].
     ///
-    /// Field: `git_commit_create_ext_options.extra_headers`
-    /// Field: `git_commit_create_ext_options.extra_headers_len`
+    /// Wraps `fld::git_commit_create_ext_options.extra_headers`
+    /// Wraps `fld::git_commit_create_ext_options.extra_headers_len`
+    #[doc(alias = "git_commit_create_ext_options.extra_headers")]
+    #[doc(alias = "git_commit_create_ext_options.extra_headers_len")]
     #[must_use]
     pub fn extra_headers(&self) -> CSlice<'o, Header<'o>> {
         let p = self.as_ptr();
@@ -3501,8 +3533,10 @@ impl<'o> CreateExtOptionsRef<'_, 'o> {
     /// Whether a signing callback is set
     /// ([`set_signer`](CreateExtOptionsMut::set_signer)); `false` by default.
     ///
-    /// Field: `git_commit_create_ext_options.sign`
-    /// Field: `git_commit_create_ext_options.payload`
+    /// Wraps `fld::git_commit_create_ext_options.sign`
+    /// Wraps `fld::git_commit_create_ext_options.payload`
+    #[doc(alias = "git_commit_create_ext_options.sign")]
+    #[doc(alias = "git_commit_create_ext_options.payload")]
     #[must_use]
     pub fn has_signer(&self) -> bool {
         let p = self.as_ptr();
@@ -3569,7 +3603,8 @@ impl<'o> CreateExtOptionsMut<'_, 'o> {
     /// missing; an existing one must point at the commit's first parent, or the call
     /// fails with `GIT_EMODIFIED` without writing the reference.
     ///
-    /// Field: `git_commit_create_ext_options.update_ref`
+    /// Wraps `fld::git_commit_create_ext_options.update_ref`
+    #[doc(alias = "git_commit_create_ext_options.update_ref")]
     pub fn set_update_ref(&mut self, name: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -3583,7 +3618,8 @@ impl<'o> CreateExtOptionsMut<'_, 'o> {
     /// Sets the message's encoding, written as the commit's `encoding` header as given;
     /// `None` writes no such header.
     ///
-    /// Field: `git_commit_create_ext_options.message_encoding`
+    /// Wraps `fld::git_commit_create_ext_options.message_encoding`
+    #[doc(alias = "git_commit_create_ext_options.message_encoding")]
     pub fn set_message_encoding(&mut self, encoding: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
@@ -3597,8 +3633,10 @@ impl<'o> CreateExtOptionsMut<'_, 'o> {
     /// each as `<field> <value>`; an empty run writes none, and is stored as C stores
     /// it, NULL with a length of 0. Borrowed for `'o`, run and strings alike.
     ///
-    /// Field: `git_commit_create_ext_options.extra_headers`
-    /// Field: `git_commit_create_ext_options.extra_headers_len`
+    /// Wraps `fld::git_commit_create_ext_options.extra_headers`
+    /// Wraps `fld::git_commit_create_ext_options.extra_headers_len`
+    #[doc(alias = "git_commit_create_ext_options.extra_headers")]
+    #[doc(alias = "git_commit_create_ext_options.extra_headers_len")]
     pub fn set_extra_headers(&mut self, headers: &'o [Header<'o>]) {
         let run: *const ffi::git_commit_header = if headers.is_empty() {
             ptr::null()
@@ -3647,8 +3685,10 @@ impl<'o> CreateExtOptionsMut<'_, 'o> {
     /// drop((options, other));
     /// ```
     ///
-    /// Field: `git_commit_create_ext_options.sign`
-    /// Field: `git_commit_create_ext_options.payload`
+    /// Wraps `fld::git_commit_create_ext_options.sign`
+    /// Wraps `fld::git_commit_create_ext_options.payload`
+    #[doc(alias = "git_commit_create_ext_options.sign")]
+    #[doc(alias = "git_commit_create_ext_options.payload")]
     pub fn set_signer(&mut self, signer: Option<&'o mut SignatureCallback<'_>>) {
         let (callback, payload): (ffi::git_commit_signature_cb, *mut c_void) = match signer {
             Some(signer) => (Some(sign_with_closure), ptr::from_mut(signer).cast()),
@@ -3775,8 +3815,8 @@ const _: () = assert!(
 /// Not `Clone`: the payload its callback receives may be an exclusive borrow, which a
 /// copy would alias. Build another with [`new`](Self::new) instead.
 ///
-/// Wraps: `git_commit_create_options`
-/// Handwritten
+/// Wraps `ty::git_commit_create_options`
+#[doc(alias = "git_commit_create_options")]
 #[repr(transparent)]
 pub struct CreateOptions<'o>(
     ffi::git_commit_create_options,
@@ -3784,16 +3824,12 @@ pub struct CreateOptions<'o>(
 );
 
 /// Shared borrow of a [`CreateOptions`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct CreateOptionsRef<'a, 'o>(CBorrowedPtr<'a, CreateOptions<'o>>);
 
 /// Exclusive borrow of a [`CreateOptions`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct CreateOptionsMut<'a, 'o>(
     CreateOptionsRef<'a, 'o>,
@@ -3835,12 +3871,13 @@ impl<'o> CreateOptions<'o> {
     /// `GIT_COMMIT_CREATE_OPTIONS_VERSION`, and with that version it reaches no global,
     /// no allocator and no thread state, so this needs no initialised library.
     ///
-    /// Wraps: `git_commit_create_options_init`
+    /// Wraps `fn::git_commit_create_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_commit_create_options_init")]
     #[must_use]
     pub fn new() -> Self {
         // Zeroed rather than uninitialised: the bitfield's storage byte holds seven
@@ -3898,7 +3935,8 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// The structure's version, `GIT_COMMIT_CREATE_OPTIONS_VERSION`; fixed by
     /// [`CreateOptions::new`].
     ///
-    /// Field: `git_commit_create_options.version`
+    /// Wraps `fld::git_commit_create_options.version`
+    #[doc(alias = "git_commit_create_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
@@ -3917,7 +3955,8 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// `git_commit_create_from_tree` returns `-1` (`GIT_ERROR`) for the same check.
     /// Only the routines creating a commit read it; amending ignores it.
     ///
-    /// Field: `git_commit_create_options.allow_empty_commit`
+    /// Wraps `fld::git_commit_create_options.allow_empty_commit`
+    #[doc(alias = "git_commit_create_options.allow_empty_commit")]
     #[must_use]
     pub fn allow_empty_commit(&self) -> bool {
         let p = self.as_ptr();
@@ -3932,7 +3971,8 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// creating, and the amended commit's author when amending. Borrowed for `'o`, as
     /// it was set.
     ///
-    /// Field: `git_commit_create_options.author`
+    /// Wraps `fld::git_commit_create_options.author`
+    #[doc(alias = "git_commit_create_options.author")]
     #[must_use]
     pub fn author(&self) -> Option<SignatureRef<'o>> {
         let p = self.as_ptr();
@@ -3950,7 +3990,8 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// The commit's committer; `None`, the default, is the repository's default
     /// signature, when creating and amending alike. Borrowed for `'o`, as it was set.
     ///
-    /// Field: `git_commit_create_options.committer`
+    /// Wraps `fld::git_commit_create_options.committer`
+    #[doc(alias = "git_commit_create_options.committer")]
     #[must_use]
     pub fn committer(&self) -> Option<SignatureRef<'o>> {
         let p = self.as_ptr();
@@ -3968,7 +4009,8 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// default, writes no such header (git reads the message as UTF-8). Amending
     /// without a new message keeps the amended commit's encoding instead.
     ///
-    /// Field: `git_commit_create_options.message_encoding`
+    /// Wraps `fld::git_commit_create_options.message_encoding`
+    #[doc(alias = "git_commit_create_options.message_encoding")]
     #[must_use]
     pub fn message_encoding(&self) -> Option<&'o CStr> {
         let p = self.as_ptr();
@@ -3986,8 +4028,10 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// empty, the default, writes none. Borrowed for `'o`, as they were set; each reads
     /// through its [`HeaderRef`].
     ///
-    /// Field: `git_commit_create_options.extra_headers`
-    /// Field: `git_commit_create_options.extra_headers_len`
+    /// Wraps `fld::git_commit_create_options.extra_headers`
+    /// Wraps `fld::git_commit_create_options.extra_headers_len`
+    #[doc(alias = "git_commit_create_options.extra_headers")]
+    #[doc(alias = "git_commit_create_options.extra_headers_len")]
     #[must_use]
     pub fn extra_headers(&self) -> CSlice<'o, Header<'o>> {
         let p = self.as_ptr();
@@ -4015,8 +4059,10 @@ impl<'o> CreateOptionsRef<'_, 'o> {
     /// Whether a signing callback is set
     /// ([`set_signer`](CreateOptionsMut::set_signer)); `false` by default.
     ///
-    /// Field: `git_commit_create_options.sign`
-    /// Field: `git_commit_create_options.payload`
+    /// Wraps `fld::git_commit_create_options.sign`
+    /// Wraps `fld::git_commit_create_options.payload`
+    #[doc(alias = "git_commit_create_options.sign")]
+    #[doc(alias = "git_commit_create_options.payload")]
     #[must_use]
     pub fn has_signer(&self) -> bool {
         let p = self.as_ptr();
@@ -4074,7 +4120,8 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// Sets whether a commit that changes nothing is written (see
     /// [`CreateOptionsRef::allow_empty_commit`]).
     ///
-    /// Field: `git_commit_create_options.allow_empty_commit`
+    /// Wraps `fld::git_commit_create_options.allow_empty_commit`
+    #[doc(alias = "git_commit_create_options.allow_empty_commit")]
     pub fn set_allow_empty_commit(&mut self, allow: bool) {
         let p = self.as_mut_ptr();
         // SAFETY: a read-modify-write of the one-bit field's storage byte through the
@@ -4092,7 +4139,8 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// email (see the [signature docs](crate::libgit2::src::libgit2::signature#signatures)), which
     /// the options store as given.
     ///
-    /// Field: `git_commit_create_options.author`
+    /// Wraps `fld::git_commit_create_options.author`
+    #[doc(alias = "git_commit_create_options.author")]
     pub fn set_author(&mut self, author: Option<SignatureRef<'o>>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -4108,7 +4156,8 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// [`CreateOptionsRef::committer`]). Borrowed for `'o`; refused by the writing
     /// wrappers when it lost a string, as [`set_author`](Self::set_author)'s is.
     ///
-    /// Field: `git_commit_create_options.committer`
+    /// Wraps `fld::git_commit_create_options.committer`
+    #[doc(alias = "git_commit_create_options.committer")]
     pub fn set_committer(&mut self, committer: Option<SignatureRef<'o>>) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -4121,7 +4170,8 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// Sets the message's encoding, written as the commit's `encoding` header as given;
     /// `None` writes no such header.
     ///
-    /// Field: `git_commit_create_options.message_encoding`
+    /// Wraps `fld::git_commit_create_options.message_encoding`
+    #[doc(alias = "git_commit_create_options.message_encoding")]
     pub fn set_message_encoding(&mut self, encoding: Option<&'o CStr>) {
         let p = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer addresses live options; the projection forms no
@@ -4135,8 +4185,10 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// each as `<field> <value>`; an empty run writes none, and is stored as C stores
     /// it, NULL with a length of 0. Borrowed for `'o`, run and strings alike.
     ///
-    /// Field: `git_commit_create_options.extra_headers`
-    /// Field: `git_commit_create_options.extra_headers_len`
+    /// Wraps `fld::git_commit_create_options.extra_headers`
+    /// Wraps `fld::git_commit_create_options.extra_headers_len`
+    #[doc(alias = "git_commit_create_options.extra_headers")]
+    #[doc(alias = "git_commit_create_options.extra_headers_len")]
     pub fn set_extra_headers(&mut self, headers: &'o [Header<'o>]) {
         let run: *const ffi::git_commit_header = if headers.is_empty() {
             ptr::null()
@@ -4189,8 +4241,10 @@ impl<'o> CreateOptionsMut<'_, 'o> {
     /// drop((options, other));
     /// ```
     ///
-    /// Field: `git_commit_create_options.sign`
-    /// Field: `git_commit_create_options.payload`
+    /// Wraps `fld::git_commit_create_options.sign`
+    /// Wraps `fld::git_commit_create_options.payload`
+    #[doc(alias = "git_commit_create_options.sign")]
+    #[doc(alias = "git_commit_create_options.payload")]
     pub fn set_signer(&mut self, signer: Option<&'o mut SignatureCallback<'_>>) {
         let (callback, payload): (ffi::git_commit_signature_cb, *mut c_void) = match signer {
             Some(signer) => (Some(sign_with_closure), ptr::from_mut(signer).cast()),
@@ -4360,8 +4414,8 @@ type ParentFn<'f> = dyn FnMut(usize) -> Option<Oid> + 'f;
 /// send(ParentCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: `git_commit_parent_callback`
-/// Handwritten
+/// Wraps `ty::git_commit_parent_callback`
+#[doc(alias = "git_commit_parent_callback")]
 pub struct ParentCallback<'f> {
     f: &'f mut ParentFn<'f>,
     /// The id last handed out, which libgit2 copies before it calls again.
@@ -4493,7 +4547,7 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
 /// `update_ref`, the reference is moved as `create` moves it, an existing one only from
 /// the first parent.
 ///
-/// Wraps: `git_commit_create_from_callback`
+/// Wraps `fn::git_commit_create_from_callback`
 ///
 /// # Errors
 ///
@@ -4503,6 +4557,7 @@ unsafe extern "C" fn parent_with(idx: usize, payload: *mut c_void) -> *const ffi
 /// [`object` module](crate::libgit2::src::libgit2::object#looking-objects-up)); and a
 /// signature `create` refuses. A panic of the callback's closure propagates before
 /// libgit2 runs.
+#[doc(alias = "git_commit_create_from_callback")]
 #[expect(
     clippy::too_many_arguments,
     reason = "the C routine's parameters, in its order"
@@ -4554,12 +4609,13 @@ pub fn create_from_callback(
 
 /// [`create_from_callback`], with the parents given by id in order, as a slice.
 ///
-/// Wraps: `git_commit_create_from_ids`
+/// Wraps `fn::git_commit_create_from_ids`
 ///
 /// # Errors
 ///
 /// Refuses what [`create_from_callback`] refuses, a parent id of another type than
 /// `repo`'s included, and fails as it does.
+#[doc(alias = "git_commit_create_from_ids")]
 #[expect(
     clippy::too_many_arguments,
     reason = "the C routine's parameters, in its order"
