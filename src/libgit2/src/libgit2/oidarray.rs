@@ -50,7 +50,8 @@ define_ctype!(
     /// [`as_mut`](CVal::as_mut) handles. Not `Clone`: it owns its buffer, so a copy is
     /// [`OidArrayRef::to_oid_array`], which allocates.
     ///
-    /// Wraps: git_oidarray
+    /// Wraps `ty::git_oidarray`
+    #[doc(alias = "git_oidarray")]
     OidArray,
     OidArrayRef,
     OidArrayMut,
@@ -88,9 +89,6 @@ unsafe impl Sync for OidArrayMut<'_> {}
 /// would be `git__free(NULL)`, which reads `git__allocator` without synchronisation
 /// against the first `git_libgit2_init` another thread may be running. Nothing orders
 /// an empty array after that initialisation, since nothing allocated for it.
-///
-/// Wraps: `git_oidarray_dispose`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OidArrayDispose;
 
@@ -101,6 +99,8 @@ pub struct OidArrayDispose;
 // which the free ignores. The empty array, which `new`, `take_ids` and `set_ids` of an
 // empty run leave, owns nothing and is released without C.
 unsafe impl CDispose<OidArray> for OidArrayDispose {
+    /// Wraps `fn::git_oidarray_dispose`
+    #[doc(alias = "git_oidarray_dispose")]
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<OidArray>) {
         let raw: *mut ffi::git_oidarray = ptr.as_ptr().cast();
@@ -160,7 +160,8 @@ impl<'a> OidArrayRef<'a> {
     /// The number of ids; 0 without a buffer, whatever `count` says, as
     /// [`ids`](Self::ids) reads it.
     ///
-    /// Field: `git_oidarray.count`
+    /// Wraps `fld::git_oidarray.count`
+    #[doc(alias = "git_oidarray.count")]
     #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
@@ -185,7 +186,8 @@ impl<'a> OidArrayRef<'a> {
     /// The ids, borrowed in place as a run of [`len`](Self::len) handles for as long as
     /// the array is.
     ///
-    /// Field: `git_oidarray.ids`
+    /// Wraps `fld::git_oidarray.ids`
+    #[doc(alias = "git_oidarray.ids")]
     #[must_use]
     pub fn ids(&self) -> CSlice<'a, Oid> {
         let len = self.len();
@@ -255,7 +257,8 @@ impl OidArrayMut<'_> {
     /// The ids, borrowed exclusively in place as a run of handles, for editing them, as
     /// libgit2 reverses a result in place.
     ///
-    /// Field: `git_oidarray.ids`
+    /// Wraps `fld::git_oidarray.ids`
+    #[doc(alias = "git_oidarray.ids")]
     pub fn ids_mut(&mut self) -> CSliceMut<'_, Oid> {
         let len = self.as_ref().len();
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -276,8 +279,10 @@ impl OidArrayMut<'_> {
 
     /// Replaces the ids, and with them the count, releasing the ones held before.
     ///
-    /// Field: `git_oidarray.ids`
-    /// Field: `git_oidarray.count`
+    /// Wraps `fld::git_oidarray.ids`
+    /// Wraps `fld::git_oidarray.count`
+    #[doc(alias = "git_oidarray.ids")]
+    #[doc(alias = "git_oidarray.count")]
     pub fn set_ids(&mut self, ids: OdbDataVec<Oid>) {
         drop(self.take_ids());
         let (ids, count) = ids.into_raw_parts();
@@ -298,7 +303,8 @@ impl OidArrayMut<'_> {
     /// Takes the ids out, leaving the array empty: what `git_oidarray_dispose` would
     /// release, owned.
     ///
-    /// Field: `git_oidarray.ids`
+    /// Wraps `fld::git_oidarray.ids`
+    #[doc(alias = "git_oidarray.ids")]
     pub fn take_ids(&mut self) -> OdbDataVec<Oid> {
         let array = self.as_mut_ptr();
         let (ids, count) = {
@@ -333,7 +339,8 @@ impl OidArrayMut<'_> {
     /// Shortens the array to its first `len` ids; nothing changes when it holds no more
     /// than that. The buffer is kept, and released whole on dispose.
     ///
-    /// Field: `git_oidarray.count`
+    /// Wraps `fld::git_oidarray.count`
+    #[doc(alias = "git_oidarray.count")]
     pub fn truncate(&mut self, len: usize) {
         if len < self.as_ref().len() {
             // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
