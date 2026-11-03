@@ -118,12 +118,13 @@ use crate::libgit2::src::util::errors::{
 /// assert_eq!(name_is_valid(c"v1..0"), Ok(false));
 /// ```
 ///
-/// Wraps: `git_tag_name_is_valid`
+/// Wraps `fn::git_tag_name_is_valid`
 ///
 /// # Errors
 ///
 /// Fails, with libgit2's error, only when libgit2 runs out of memory building the
 /// reference name, or cannot be initialised.
+#[doc(alias = "git_tag_name_is_valid")]
 pub fn name_is_valid(name: &CStr) -> Result<bool, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
@@ -170,8 +171,8 @@ pub fn name_is_valid(name: &CStr) -> Result<bool, ErrorBuf> {
 /// }
 /// ```
 ///
-/// Wraps: `git_tag`
-/// Handwritten
+/// Wraps `ty::git_tag`
+#[doc(alias = "git_tag")]
 #[repr(transparent)]
 pub struct Tag<'r>(ffi::git_tag, PhantomData<(*const (), &'r ())>);
 
@@ -185,8 +186,6 @@ pub struct Tag<'r>(ffi::git_tag, PhantomData<(*const (), &'r ())>);
 /// fn sync<T: Sync>() {}
 /// sync::<TagRef<'static, 'static>>();
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct TagRef<'a, 'r>(CBorrowedPtr<'a, Tag<'r>>);
@@ -195,8 +194,6 @@ pub struct TagRef<'a, 'r>(CBorrowedPtr<'a, Tag<'r>>);
 /// [`as_ref`](Self::as_ref).
 ///
 /// No owner hands one out: every tag is shared with its repository's cache.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct TagMut<'a, 'r>(
     TagRef<'a, 'r>,
@@ -356,11 +353,12 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// let _ = name;
     /// ```
     ///
-    /// Wraps: `git_tag_name`
+    /// Wraps `fn::git_tag_name`
     ///
     /// # Panics
     ///
     /// Panics, with `a parsed tag always has a name`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_name")]
     #[must_use]
     pub fn name(&self) -> &'a CStr {
         // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
@@ -375,7 +373,8 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// first NUL; `None` when the content ends with the header. Borrowed in place for
     /// as long as the handle.
     ///
-    /// Wraps: `git_tag_message`
+    /// Wraps `fn::git_tag_message`
+    #[doc(alias = "git_tag_message")]
     #[must_use]
     pub fn message(&self) -> Option<&'a CStr> {
         // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
@@ -407,7 +406,8 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// let _ = tagger;
     /// ```
     ///
-    /// Wraps: `git_tag_tagger`
+    /// Wraps `fn::git_tag_tagger`
+    #[doc(alias = "git_tag_tagger")]
     #[must_use]
     pub fn tagger(&self) -> Option<SignatureRef<'a>> {
         // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
@@ -422,11 +422,12 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// The id of the object the tag points at, as its `object` header records it, of
     /// the repository's id type. Borrowed in place for as long as the handle.
     ///
-    /// Wraps: `git_tag_target_id`
+    /// Wraps `fn::git_tag_target_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live tag has a target id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_target_id")]
     #[must_use]
     pub fn target_id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live tag for `'a`; libgit2 only reads it and
@@ -439,12 +440,13 @@ impl<'a, 'r> TagRef<'a, 'r> {
 
     /// The type of the object the tag points at, as its `type` header records it.
     ///
-    /// Wraps: `git_tag_target_type`
+    /// Wraps `fn::git_tag_target_type`
     ///
     /// # Panics
     ///
     /// Panics, with `a parsed tag records a named target type`, only if libgit2 breaks its
     /// contract.
+    #[doc(alias = "git_tag_target_type")]
     #[must_use]
     pub fn target_kind(&self) -> ObjectType {
         // SAFETY: the handle addresses a live tag for `'a`, which libgit2 only reads.
@@ -458,7 +460,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// one more counted reference of the repository's cache, or a fresh parse, living
     /// no longer than the repository's borrow `'r`, as the tag does.
     ///
-    /// Wraps: `git_tag_target`
+    /// Wraps `fn::git_tag_target`
     ///
     /// # Errors
     ///
@@ -472,6 +474,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_target")]
     pub fn target(&self) -> Result<ObjectArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; the handle addresses a
@@ -494,7 +497,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// of a tag, that tag's target, and so on. [`ObjectRef::peel`] of the tag's object
     /// with `None`; the result lives no longer than the repository's borrow `'r`.
     ///
-    /// Wraps: `git_tag_peel`
+    /// Wraps `fn::git_tag_peel`
     ///
     /// # Errors
     ///
@@ -504,6 +507,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// # Panics
     ///
     /// Panics, with `a peel succeeded without an object`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_peel")]
     pub fn peel(&self) -> Result<ObjectArc<'r>, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: as in `target`: `out` is a writable slot, the handle addresses a live
@@ -529,7 +533,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
 /// checked as [`create_lightweight`] checks one: only `refs/tags/<name>` must be a
 /// valid reference name.
 ///
-/// Wraps: `git_tag_create_from_buffer`
+/// Wraps `fn::git_tag_create_from_buffer`
 ///
 /// # Errors
 ///
@@ -544,6 +548,7 @@ impl<'a, 'r> TagRef<'a, 'r> {
 /// missing one, with libgit2's `GIT_ERROR_ODB` error "odb: cannot read object: null OID
 /// cannot exist", before libgit2 frees an uninitialised pointer for it (see the
 /// [module docs](self)).
+#[doc(alias = "git_tag_create_from_buffer")]
 pub fn create_from_buffer(
     repo: RepositoryRef<'_>,
     buffer: &CStr,
@@ -688,7 +693,7 @@ fn normalizes(refname: &CStr) -> bool {
 /// Creates the lightweight tag `name`: points `refs/tags/<name>` at `target`, an
 /// object of `repo`, of any type, and returns `target`'s id.
 ///
-/// Wraps: `git_tag_create_lightweight`
+/// Wraps `fn::git_tag_create_lightweight`
 ///
 /// # Errors
 ///
@@ -699,6 +704,7 @@ fn normalizes(refname: &CStr) -> bool {
 /// exists and `force` is not set; `force` replaces it. Fails with libgit2's error when
 /// `refs/tags/<name>` is not a valid reference name, or the reference cannot be read
 /// or written.
+#[doc(alias = "git_tag_create_lightweight")]
 pub fn create_lightweight(
     repo: RepositoryRef<'_>,
     name: &CStr,
@@ -740,7 +746,7 @@ pub fn create_lightweight(
 /// of memory can be) is refused before libgit2 runs, with `-1` and a
 /// `GIT_ERROR_INVALID` error: libgit2 would print the missing string through `%s`.
 ///
-/// Wraps: `git_tag_create`
+/// Wraps `fn::git_tag_create`
 ///
 /// # Errors
 ///
@@ -754,6 +760,7 @@ pub fn create_lightweight(
 /// `GIT_ERROR_OBJECT` ("failed to create tag annotation") when the object cannot be
 /// written, and with libgit2's error when `refs/tags/<name>` is not a valid reference
 /// name, or the reference cannot be read or written.
+#[doc(alias = "git_tag_create")]
 pub fn create(
     repo: RepositoryRef<'_>,
     name: &CStr,
@@ -793,13 +800,14 @@ pub fn create(
 /// another repository is recorded by its id and type, which `repo` may lack (or, for another object
 /// id type, which its id type cannot name).
 ///
-/// Wraps: `git_tag_annotation_create`
+/// Wraps `fn::git_tag_annotation_create`
 ///
 /// # Errors
 ///
 /// Fails with `-1` and `GIT_ERROR_OBJECT` ("failed to create tag annotation") when the object
 /// cannot be written or the object database loaded, and refuses a tagger without its name or its
 /// email as [`create`] does.
+#[doc(alias = "git_tag_annotation_create")]
 pub fn create_annotation(
     repo: RepositoryRef<'_>,
     name: &CStr,
@@ -847,13 +855,14 @@ fn printable(tagger: SignatureRef<'_>) -> Result<(), RepositoryError> {
 /// Deletes the tag `name`: removes the reference `refs/tags/<name>`, and its reflog.
 /// The object it points at stays.
 ///
-/// Wraps: `git_tag_delete`
+/// Wraps `fn::git_tag_delete`
 ///
 /// # Errors
 ///
 /// Fails with [`ErrorCode::NotFound`] when there is no such reference,
 /// [`ErrorCode::InvalidSpec`] when `refs/tags/<name>` is not a valid reference name,
 /// and with libgit2's error when the reference cannot be removed.
+#[doc(alias = "git_tag_delete")]
 pub fn delete(repo: RepositoryRef<'_>, name: &CStr) -> Result<(), RepositoryError> {
     // SAFETY: `repo` is a live repository on this thread, whose reference database
     // libgit2 loads and writes through this shared handle; `name` a NUL-terminated
@@ -868,7 +877,7 @@ pub fn delete(repo: RepositoryRef<'_>, name: &CStr) -> Result<(), RepositoryErro
 /// The names of `repo`'s tags (`v1.0` for `refs/tags/v1.0`), in the order the
 /// reference database lists them (by name, for the files backend).
 ///
-/// Wraps: `git_tag_list`
+/// Wraps `fn::git_tag_list`
 ///
 /// # Errors
 ///
@@ -876,6 +885,7 @@ pub fn delete(repo: RepositoryRef<'_>, name: &CStr) -> Result<(), RepositoryErro
 /// whose target is missing), or the references cannot be listed: with code `-1` and
 /// the thread's last error, which libgit2 sets but does not return (see the
 /// [module docs](self)).
+#[doc(alias = "git_tag_list")]
 pub fn list(repo: RepositoryRef<'_>) -> Result<StrArrayVal, RepositoryError> {
     listed(|names| {
         // SAFETY: `names` is a live, empty array the routine fills with an array and
@@ -889,11 +899,12 @@ pub fn list(repo: RepositoryRef<'_>) -> Result<StrArrayVal, RepositoryError> {
 /// reads one (`*`, `?`, `[…]`, and `\` to escape), matched against the name below
 /// `refs/tags/`, in the order [`list`] gives; every tag for an empty pattern.
 ///
-/// Wraps: `git_tag_list_match`
+/// Wraps `fn::git_tag_list_match`
 ///
 /// # Errors
 ///
 /// Fails as [`list`] does.
+#[doc(alias = "git_tag_list_match")]
 pub fn list_match(repo: RepositoryRef<'_>, pattern: &CStr) -> Result<StrArrayVal, RepositoryError> {
     listed(|names| {
         // SAFETY: as in `list`; `pattern` is a NUL-terminated string read for the call.
@@ -936,13 +947,14 @@ fn listed(
 /// The closure may use the repository, as libgit2 reads each reference afresh: a tag
 /// it deletes before the walk reaches it fails the walk as not found.
 ///
-/// Wraps: `git_tag_foreach`
+/// Wraps `fn::git_tag_foreach`
 ///
 /// # Errors
 ///
 /// Fails with libgit2's error when the references cannot be listed, or a tag's
 /// reference cannot be resolved to an id (a symbolic reference under `refs/tags/`
 /// whose target is missing: [`ErrorCode::NotFound`]); the tags before it were visited.
+#[doc(alias = "git_tag_foreach")]
 pub fn foreach(
     repo: RepositoryRef<'_>,
     callback: &mut ForeachCallback<'_>,
@@ -1053,8 +1065,8 @@ type ForeachFn<'f> = dyn FnMut(&CStr, OidRef<'_>) -> ControlFlow<NonZero<c_int>>
 /// send(ForeachCallback::new(&mut f));
 /// ```
 ///
-/// Wraps: `git_tag_foreach_cb`
-/// Handwritten
+/// Wraps `ty::git_tag_foreach_cb`
+#[doc(alias = "git_tag_foreach_cb")]
 pub struct ForeachCallback<'f> {
     f: &'f mut ForeachFn<'f>,
     /// The code the closure stopped the last walk with: what it broke with, or
