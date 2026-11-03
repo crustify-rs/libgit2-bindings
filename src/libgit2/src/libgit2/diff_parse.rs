@@ -14,9 +14,12 @@ impl Diff<'static> {
     ///
     /// # Errors
     ///
-    /// Non-Git unified diffs are rejected by C. Wraps: `git_diff_from_buffer`
+    /// Non-Git unified diffs are rejected by C.
     ///
     /// Fails, as well, with libgit2's error when it cannot be initialised.
+    ///
+    /// Wraps `fn::git_diff_from_buffer`
+    #[doc(alias = "git_diff_from_buffer")]
     pub fn from_buffer(content: &[u8]) -> Result<DiffBox<'static>, DiffError> {
         if !runtime_pinned() {
             return Err(DiffError::from_libgit2(-1));
@@ -32,11 +35,13 @@ impl Diff<'static> {
     }
 
     /// Parse with an explicit object-id type (the entire parse-options surface).
-    /// Wraps: `git_diff_from_buffer_ext`
     ///
     /// # Errors
     ///
     /// Fails as [`from_buffer`](Self::from_buffer) does.
+    ///
+    /// Wraps `fn::git_diff_from_buffer_ext`
+    #[doc(alias = "git_diff_from_buffer_ext")]
     pub fn from_buffer_with_oid_type(
         content: &[u8],
         kind: OidType,
