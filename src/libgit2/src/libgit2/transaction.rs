@@ -50,21 +50,17 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// require_sync::<TransactionBox<'static>>();
 /// ```
 ///
-/// Wraps: `git_transaction`
-/// Handwritten
+/// Wraps `ty::git_transaction`
+#[doc(alias = "git_transaction")]
 #[repr(transparent)]
 pub struct Transaction<'r>(ffi::git_transaction, PhantomData<(*const (), &'r ())>);
 
 /// Shared, copyable borrow of a reference transaction.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct TransactionRef<'a, 'r>(CBorrowedPtr<'a, Transaction<'r>>);
 
 /// Exclusive borrow of a reference transaction; reborrows freeze this handle.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct TransactionMut<'a, 'r>(TransactionRef<'a, 'r>, PhantomData<&'a mut Transaction<'r>>);
 
@@ -118,9 +114,6 @@ impl fmt::Debug for TransactionMut<'_, '_> {
 
 /// Releases pending locks without committing, then releases C's storage. The
 /// discriminator selects pool teardown for references or free for configuration.
-///
-/// Wraps: `git_transaction_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TransactionFree;
 
@@ -128,6 +121,8 @@ pub struct TransactionFree;
 // each remaining lock exactly once and frees the matching allocation. It does not
 // release the borrowed repository/config, which remain live through the owner.
 unsafe impl<'r> CDrop<Transaction<'r>> for TransactionFree {
+    /// Wraps `fn::git_transaction_free`
+    #[doc(alias = "git_transaction_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Transaction<'r>>) {
         // SAFETY: the caller transfers one live transaction allocated by C, with
         // its parent still alive. Transaction has the C type's layout.
@@ -147,12 +142,13 @@ impl<'r> Transaction<'r> {
     /// out of memory, libgit2 crashes rather than failing: `git_refdb_open` frees
     /// its uninitialised `db` when `git_refdb_new` cannot allocate it.
     ///
-    /// Wraps: `git_transaction_new`
+    /// Wraps `fn::git_transaction_new`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error when the reference database cannot be opened or the transaction
     /// cannot be allocated.
+    #[doc(alias = "git_transaction_new")]
     pub fn new(repo: RepositoryRef<'r>) -> Result<TransactionBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -193,8 +189,6 @@ impl<'r> Transaction<'r> {
 /// let _alias = config.as_mut();
 /// drop(tx);
 /// ```
-///
-/// Handwritten
 pub struct ConfigTransaction<'c, 'r> {
     // Fields drop in declaration order: release the backend lock before the
     // config borrow. Never lend this common raw owner as a reference transaction.
