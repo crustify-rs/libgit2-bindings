@@ -1,0 +1,9 @@
+error[E0521]: borrowed data escapes outside of closure
+ --> tests/ub_safe/compile_fail/progress_callback_progress_outlives_call.rs:8:9
+  |
+6 | fn keep<'k>(kept: &mut Option<IndexerProgressRef<'k>>) {
+  |             ---- `kept` declared here, outside of the closure body
+7 |     let mut f = |progress: IndexerProgressRef<'_>| {
+  |                  -------- `progress` is a reference that is only valid in the closure body
+8 |         *kept = Some(progress);
+  |         ^^^^^^^^^^^^^^^^^^^^^^ `progress` escapes the closure body here

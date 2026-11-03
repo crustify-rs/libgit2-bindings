@@ -1,5 +1,6 @@
 //! UB tests for `src/libgit2/indexer.c`: the `IndexerProgress` value
-//! (`git_indexer_progress`) and its handles.
+//! (`git_indexer_progress`) and its handles, and the `ProgressCallback`
+//! (`git_indexer_progress_cb`).
 //!
 //! An `IndexerProgress` is a plain 32-byte value without padding: six `unsigned int`
 //! counters and a `size_t`. Its handles project each field out of a pointer, so these tests
@@ -11,12 +12,22 @@
 //! on the shared handle do not compile (`compile_fail/`). None of them calls libgit2, so all
 //! run under Miri; no C routine is given a pointer to these values, so there is no foreign
 //! write or retained pointer to race (`BSan`).
+//!
+//! A `ProgressCallback` is called through its `extern "C"` trampoline, as libgit2 calls it,
+//! with progresses lent from every holder, from inside another callback's closure
+//! (reentrance), after its closure panicked, and on several threads at once, each over its
+//! own closure reading one shared progress (`TSan`). The trampoline is Rust, so these run
+//! under Miri too; the unit tests have libgit2 itself call it while indexing a pack. A
+//! progress kept past the call, a callback moved to another thread and a closure used while
+//! its callback borrows it do not compile (`compile_fail/`).
 
+use std::ops::ControlFlow;
+use std::panic::{self, AssertUnwindSafe};
 use std::thread;
 
 use ffibox::CZeroable;
 use libgit2::libgit2::src::libgit2::indexer::{
-    IndexerProgress, IndexerProgressMut, IndexerProgressRef,
+    IndexerProgress, IndexerProgressMut, IndexerProgressRef, ProgressCallback,
 };
 
 type Counters = (u32, u32, u32, u32, u32, u32, usize);
@@ -177,4 +188,135 @@ fn values_and_exclusive_handles_move_across_threads() {
     .join()
     .unwrap();
     assert_eq!(moved.as_ref().local_objects(), 9);
+}
+
+#[test]
+fn callback_reads_progress_lent_from_every_holder() {
+    let mut local = IndexerProgress::zeroed();
+    let mut boxed = Box::new(IndexerProgress::default());
+    let mut run = vec![IndexerProgress::zeroed()];
+    let mut seen = Vec::new();
+    for i in 0..4 {
+        let c = counters(i);
+        write(local.as_mut(), c);
+        write(IndexerProgress::as_mut(&mut boxed), c);
+        run.push(IndexerProgress::zeroed());
+        let last = run.len() - 1;
+        write(run[last].as_mut(), c);
+        let mut record = |p: IndexerProgressRef<'_>| {
+            seen.push(read(p));
+            ControlFlow::Continue(())
+        };
+        let mut callback = ProgressCallback::new(&mut record);
+        for progress in [&local, &*boxed, &run[last]] {
+            assert_eq!(callback.call(progress.as_ref()), ControlFlow::Continue(()));
+        }
+        // A handle reborrowed from an exclusive one lends the same counters.
+        let m = local.as_mut();
+        assert_eq!(callback.call(m.as_ref()), ControlFlow::Continue(()));
+    }
+    let expected: Vec<Counters> = (0..4).flat_map(|i| [counters(i); 4]).collect();
+    assert_eq!(seen, expected);
+}
+
+#[test]
+fn break_is_reported_and_the_callback_stays_usable() {
+    let progress = IndexerProgress::zeroed();
+    let mut calls = 0u32;
+    let mut every_other = |_: IndexerProgressRef<'_>| {
+        calls += 1;
+        if calls.is_multiple_of(2) {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    };
+    let mut callback = ProgressCallback::new(&mut every_other);
+    let flows: Vec<_> = (0..4).map(|_| callback.call(progress.as_ref())).collect();
+    drop(callback);
+    assert_eq!(
+        flows,
+        [
+            ControlFlow::Continue(()),
+            ControlFlow::Break(()),
+            ControlFlow::Continue(()),
+            ControlFlow::Break(()),
+        ]
+    );
+    assert_eq!(calls, 4);
+}
+
+#[test]
+fn callbacks_nest_inside_a_closure() {
+    let mut outer_progress = IndexerProgress::zeroed();
+    outer_progress.as_mut().set_total_objects(2);
+    let mut inner_seen = Vec::new();
+    let mut outer = |p: IndexerProgressRef<'_>| {
+        // The closure lends what it was lent to a second callback, re-entering the
+        // trampoline while the first call is live.
+        let mut inner = |q: IndexerProgressRef<'_>| {
+            inner_seen.push(read(q));
+            ControlFlow::Break(())
+        };
+        let mut nested = ProgressCallback::new(&mut inner);
+        let flow = nested.call(p);
+        let mut local = p.to_progress();
+        local.as_mut().set_indexed_objects(1);
+        assert_eq!(nested.call(local.as_ref()), ControlFlow::Break(()));
+        flow
+    };
+    let mut callback = ProgressCallback::new(&mut outer);
+    assert_eq!(
+        callback.call(outer_progress.as_ref()),
+        ControlFlow::Break(())
+    );
+    drop(callback);
+    assert_eq!(inner_seen, [(2, 0, 0, 0, 0, 0, 0), (2, 1, 0, 0, 0, 0, 0)]);
+}
+
+#[test]
+fn a_panic_resumes_from_call_and_the_closure_runs_again() {
+    let progress = IndexerProgress::zeroed();
+    let mut calls = 0u32;
+    let mut first_panics = |_: IndexerProgressRef<'_>| {
+        calls += 1;
+        assert!(calls > 1, "first call");
+        ControlFlow::Continue(())
+    };
+    let mut callback = ProgressCallback::new(&mut first_panics);
+    let caught = panic::catch_unwind(AssertUnwindSafe(|| callback.call(progress.as_ref())));
+    let payload = caught.unwrap_err();
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"first call"));
+    // The panic was taken back to Rust: the next call runs the closure again.
+    assert_eq!(
+        format!("{callback:?}"),
+        "ProgressCallback { panicked: false, .. }"
+    );
+    assert_eq!(callback.call(progress.as_ref()), ControlFlow::Continue(()));
+    drop(callback);
+    assert_eq!(calls, 2);
+}
+
+#[test]
+fn callbacks_run_on_several_threads_over_one_progress() {
+    let mut progress = IndexerProgress::zeroed();
+    write(progress.as_mut(), counters(1));
+    let r = progress.as_ref();
+    thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(move || {
+                let mut sum = 0u64;
+                let mut add = |p: IndexerProgressRef<'_>| {
+                    sum += u64::from(p.total_objects());
+                    ControlFlow::Continue(())
+                };
+                let mut callback = ProgressCallback::new(&mut add);
+                for _ in 0..50 {
+                    assert_eq!(callback.call(r), ControlFlow::Continue(()));
+                }
+                drop(callback);
+                assert_eq!(sum, 50 * u64::from(counters(1).0));
+            });
+        }
+    });
 }

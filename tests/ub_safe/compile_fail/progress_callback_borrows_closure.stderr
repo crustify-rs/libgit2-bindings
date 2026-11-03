@@ -1,0 +1,12 @@
+error[E0502]: cannot borrow `seen` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/progress_callback_borrows_closure.rs:16:13
+   |
+ 9 |     let mut f = |progress: IndexerProgressRef<'_>| {
+   |                 ---------------------------------- mutable borrow occurs here
+10 |         seen.push(progress.to_progress());
+   |         ---- first borrow occurs due to use of `seen` in closure
+...
+16 |     assert!(seen.is_empty());
+   |             ^^^^ immutable borrow occurs here
+17 |     let _ = callback.call(progress.as_ref());
+   |             -------- mutable borrow later used here

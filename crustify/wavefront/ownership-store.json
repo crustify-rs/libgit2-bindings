@@ -14422,6 +14422,46 @@
    ]
   },
   {
+   "name": "git_indexer_progress_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "stats: the progress the invoker is updating, lent for the call only and only read. do_progress_callback lends the indexer caller's stats (git_indexer_append/commit, odb writepack append/commit); network_packetsize and git_smart__download_pack's trailing call lend the download's stats, which the transport keeps writing between calls. Never NULL at any call site. Bound as ProgressCallback, whose trampoline hands it out as an IndexerProgressRef that cannot outlive the call."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "payload: the registrant's opaque pointer (git_indexer_options.progress_cb_payload, git_odb_write_pack's progress_payload, git_remote_callbacks.payload), passed through unchanged on every call; libgit2 neither reads nor frees it. It must stay valid while the indexer, writepack or transport may call the callback, which is the registration's lifetime, not one call. May be NULL; the callback may write through it. ProgressCallback passes itself, exclusively borrowed for the duration of the routine that drives the calls."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_libgit2_buildinfo",
    "defined_in": "src/libgit2/settings.c",
    "ptr_ret": {
