@@ -57,8 +57,8 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// `GIT_REFERENCE_ALL` and every value the header does not name, such as the `-1`
 /// that `git_reference_type(NULL)` returns in a release build.
 ///
-/// Wraps: `git_reference_t`
-/// Handwritten
+/// Wraps `ty::git_reference_t`
+#[doc(alias = "git_reference_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -105,8 +105,6 @@ impl From<ReferenceType> for ffi::git_reference_t {
 /// A `git_reference_t` value that is no reference's kind: `GIT_REFERENCE_INVALID`,
 /// `GIT_REFERENCE_ALL`, or a value the header does not name. [`raw`](Self::raw) has
 /// it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NotAReferenceType(ffi::git_reference_t);
 
@@ -160,22 +158,18 @@ impl std::error::Error for NotAReferenceType {}
 /// }
 /// ```
 ///
-/// Wraps: `git_reference`
-/// Handwritten
+/// Wraps `ty::git_reference`
+#[doc(alias = "git_reference")]
 #[repr(transparent)]
 pub struct Reference<'r>(ffi::git_reference, PhantomData<(*const (), &'r ())>);
 
 /// Shared borrow of a [`Reference`]. `Copy`, like `&T`.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct ReferenceRef<'a, 'r>(CBorrowedPtr<'a, Reference<'r>>);
 
 /// Exclusive borrow of a [`Reference`]. Reaches the shared handle with
 /// [`as_ref`](Self::as_ref).
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct ReferenceMut<'a, 'r>(
     ReferenceRef<'a, 'r>,
@@ -257,7 +251,8 @@ define_ctype!(
     /// let _copy = reference.clone();
     /// ```
     ///
-    /// Wraps: git_reference
+    /// Wraps `ty::git_reference`
+    #[doc(alias = "git_reference")]
     UnattachedReference,
     UnattachedReferenceRef,
     UnattachedReferenceMut,
@@ -297,10 +292,6 @@ impl fmt::Debug for UnattachedReferenceMut<'_> {
 /// counting one more reference against the same database, so it is attached to the
 /// same repository, for the same `'r`. An [`UnattachedReference`] has no copy: its
 /// database is NULL, which `git_reference_dup` would count against.
-///
-/// Wraps: `git_reference_free`
-/// Wraps: `git_reference_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReferenceFree;
 
@@ -309,6 +300,8 @@ pub struct ReferenceFree;
 // or not (NULL database, skipped), direct or symbolic (it frees the target only for a
 // symbolic one). It needs no state beyond the pointer, and no repository.
 unsafe impl<'r> CDrop<Reference<'r>> for ReferenceFree {
+    /// Wraps `fn::git_reference_free`
+    #[doc(alias = "git_reference_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Reference<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live reference whose
         // ownership the caller gives up; `Reference` is transparent over
@@ -325,6 +318,8 @@ unsafe impl<'r> CDrop<Reference<'r>> for ReferenceFree {
 // original's. Every `Reference` is attached, so the database it counts against is not
 // NULL.
 unsafe impl<'r> CDupClone<Reference<'r>> for ReferenceFree {
+    /// Wraps `fn::git_reference_dup`
+    #[doc(alias = "git_reference_dup")]
     unsafe fn c_dup(&self, ptr: NonNull<Reference<'r>>) -> Option<NonNull<Reference<'r>>> {
         if !runtime_pinned() {
             return None;
@@ -342,7 +337,13 @@ unsafe impl<'r> CDupClone<Reference<'r>> for ReferenceFree {
     }
 }
 
-impl_cdrop!(ReferenceFree, UnattachedReference, ffi::git_reference_free);
+impl_cdrop!(
+    /// Wraps `fn::git_reference_free`
+    #[doc(alias = "git_reference_free")]
+    ReferenceFree,
+    UnattachedReference,
+    ffi::git_reference_free
+);
 
 /// An owned [`Reference`], freed by `git_reference_free` on drop and copied by
 /// `git_reference_dup` on `clone` (`try_clone` reports a failed copy as `None`).
@@ -359,11 +360,12 @@ impl UnattachedReference {
     /// Without `peel`, the reference has no peeled id: an all-zero one of `target`'s
     /// type. libgit2 copies `name` and the ids without validating either.
     ///
-    /// Wraps: `git_reference__alloc`
+    /// Wraps `fn::git_reference__alloc`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's out-of-memory error, when libgit2 cannot allocate it.
+    #[doc(alias = "git_reference__alloc")]
     pub fn direct(
         name: &CStr,
         target: OidRef<'_>,
@@ -387,12 +389,13 @@ impl UnattachedReference {
     /// `target`, as a backend reads one from storage. libgit2 copies both names without
     /// validating either.
     ///
-    /// Wraps: `git_reference__alloc_symbolic`
+    /// Wraps `fn::git_reference__alloc_symbolic`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's out-of-memory error, when libgit2 cannot allocate it or
     /// its copy of `target`.
+    #[doc(alias = "git_reference__alloc_symbolic")]
     pub fn symbolic(name: &CStr, target: &CStr) -> Result<UnattachedReferenceBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
