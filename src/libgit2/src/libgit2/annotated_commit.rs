@@ -103,22 +103,17 @@ use crate::libgit2::src::util::errors::{ErrorBuf, ErrorClass, last, runtime_pinn
 /// ```
 ///
 /// Wraps `ty::git_annotated_commit`
-/// Handwritten
 #[doc(alias = "git_annotated_commit")]
 #[repr(transparent)]
 pub struct AnnotatedCommit<'r>(ffi::git_annotated_commit, PhantomData<(*const (), &'r ())>);
 
 /// Shared borrow of an [`AnnotatedCommit`]. `Copy`, like `&T`.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct AnnotatedCommitRef<'a, 'r>(CBorrowedPtr<'a, AnnotatedCommit<'r>>);
 
 /// Exclusive borrow of an [`AnnotatedCommit`]. Reaches the shared handle with
 /// [`as_ref`](Self::as_ref).
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct AnnotatedCommitMut<'a, 'r>(
     AnnotatedCommitRef<'a, 'r>,
@@ -192,8 +187,6 @@ impl fmt::Debug for AnnotatedCommitMut<'_, '_> {
 /// commit reference (and the tree merge may have cached), hands its strings to
 /// `git__free`, then frees the struct. libgit2 has no copy routine, so the policy
 /// does not clone.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AnnotatedCommitFree;
 

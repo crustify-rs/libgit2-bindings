@@ -249,8 +249,6 @@ pub(crate) unsafe fn stream_free(stream: *mut ffi::git_writestream) {
 /// Releases a stream through its own `free` member, which frees the container the
 /// header is embedded in: a blob writer's file buffer, hint path and allocation; a
 /// [`RustWriteStream`]'s box. Stateless: the routine is recovered from the object.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WriteStreamFree;
 
@@ -275,8 +273,6 @@ pub type WriteStreamBox = CBox<WriteStream, WriteStreamFree>;
 /// code may see any order, so an implementation must not rely on one. An error is
 /// returned to the caller as its code and becomes the thread's last libgit2 error. A
 /// panic aborts the process, since it cannot unwind into C.
-///
-/// Handwritten
 pub trait StreamWriter {
     /// Takes the next piece of the stream's data.
     ///
@@ -371,8 +367,6 @@ pub(crate) struct Repr<W> {
 /// let stream = RustWriteStream::new(Shared(Rc::new(())));
 /// std::thread::spawn(move || drop(stream));
 /// ```
-///
-/// Handwritten
 pub struct RustWriteStream<W: StreamWriter> {
     pub(crate) raw: NonNull<Repr<W>>,
     _owns: PhantomData<Box<Repr<W>>>,
@@ -570,8 +564,6 @@ unsafe extern "C" fn free_with<W: StreamWriter>(stream: *mut ffi::git_writestrea
 ///
 /// A writer's error reaches its caller the way C's do: its member returns the code,
 /// and the class and message become the thread's last error.
-///
-/// Handwritten
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StreamError {
     pub(crate) code: c_int,
@@ -765,7 +757,6 @@ impl std::error::Error for StreamError {}
 /// ```
 ///
 /// Wraps `ty::git_filter_list`
-/// Handwritten
 #[doc(alias = "git_filter_list")]
 #[repr(transparent)]
 pub struct FilterList<'r>(
@@ -774,16 +765,12 @@ pub struct FilterList<'r>(
 );
 
 /// Shared borrow of a [`FilterList`]. `Copy`, like `&T`.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct FilterListRef<'a, 'r>(CBorrowedPtr<'a, FilterList<'r>>);
 
 /// Exclusive borrow of a [`FilterList`]. Reaches the shared handle with
 /// [`as_ref`](Self::as_ref).
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct FilterListMut<'a, 'r>(
     FilterListRef<'a, 'r>,
@@ -847,8 +834,6 @@ impl fmt::Debug for FilterListMut<'_, '_> {
 ///
 /// The free reads neither the repository nor the path; it reaches each filter the list
 /// holds, which the registry keeps (see the [module docs](self#the-repository)).
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FilterListFree;
 

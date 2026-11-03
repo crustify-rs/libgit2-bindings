@@ -119,7 +119,6 @@ use crate::libgit2::src::util::errors::ErrorCode;
 ///
 /// Wraps `ty::git_blob_filter_flag_t`
 #[doc(alias = "git_blob_filter_flag_t")]
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -194,8 +193,6 @@ const _: () = assert!(
 
 /// A blob filter flag value that this version of libgit2's header does not name: `0`,
 /// a combination of flags, or a later header's bit. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedFilterFlag(ffi::git_blob_filter_flag_t);
 
@@ -231,7 +228,6 @@ impl std::error::Error for UnnamedFilterFlag {}
 ///
 /// Wraps `ty::git_blob_filter_flag_t`
 #[doc(alias = "git_blob_filter_flag_t")]
-/// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct FilterFlags(u32);
 
@@ -398,8 +394,6 @@ impl fmt::Debug for FilterFlags {
 
 /// The named flags of a [`FilterFlags`] set, in ascending bit order
 /// ([`FilterFlags::iter`]).
-///
-/// Handwritten
 #[derive(Clone, Debug)]
 pub struct FilterFlagsIter {
     set: FilterFlags,
@@ -459,7 +453,6 @@ impl core::iter::FusedIterator for FilterFlagsIter {}
 ///
 /// Wraps `ty::git_blob`
 #[doc(alias = "git_blob")]
-/// Handwritten
 #[repr(transparent)]
 pub struct Blob<'r>(ffi::git_blob, PhantomData<(*const (), &'r ())>);
 
@@ -475,8 +468,6 @@ pub struct Blob<'r>(ffi::git_blob, PhantomData<(*const (), &'r ())>);
 ///     send(handle)
 /// }
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct BlobRef<'a, 'r>(CBorrowedPtr<'a, Blob<'r>>);
@@ -485,8 +476,6 @@ pub struct BlobRef<'a, 'r>(CBorrowedPtr<'a, Blob<'r>>);
 /// [`as_ref`](Self::as_ref).
 ///
 /// No owner hands one out: a blob may be shared with its repository's cache.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct BlobMut<'a, 'r>(
     BlobRef<'a, 'r>,
@@ -1437,8 +1426,6 @@ pub fn create_from_stream<'r>(
 ///     send(writer)
 /// }
 /// ```
-///
-/// Handwritten
 pub struct BlobWriter<'r> {
     /// The open blob stream, never closed: committed or freed.
     stream: WriteStreamBox,
