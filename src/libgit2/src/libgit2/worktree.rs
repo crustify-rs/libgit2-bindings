@@ -124,8 +124,8 @@ use crate::libgit2::src::util::errors::{
 /// [`from_raw`](Self::from_raw) gives `None` for any value without a variant: `0`,
 /// a combination of bits, or a bit this version of libgit2's header does not name.
 ///
-/// Wraps: `git_worktree_prune_t`
-/// Handwritten
+/// Wraps `ty::git_worktree_prune_t`
+#[doc(alias = "git_worktree_prune_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -187,8 +187,6 @@ impl From<PruneFlag> for ffi::git_worktree_prune_t {
 
 /// A prune flag value that this version of libgit2's header does not name: `0`, a
 /// combination of flags, or a later header's bit. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedPruneFlag(ffi::git_worktree_prune_t);
 
@@ -219,9 +217,6 @@ impl std::error::Error for UnnamedPruneFlag {}
 /// the bits it does not name), so [`bits`](Self::bits) returns what was stored;
 /// [`iter`](Self::iter) and [`contains`](Self::contains) see the named flags, and
 /// [`unnamed_bits`](Self::unnamed_bits) the rest.
-///
-/// Wraps: `git_worktree_prune_t`
-/// Handwritten
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct PruneFlags(u32);
 
@@ -377,8 +372,6 @@ impl fmt::Debug for PruneFlags {
 
 /// The named flags of a [`PruneFlags`] set, in ascending bit order
 /// ([`PruneFlags::iter`]).
-///
-/// Handwritten
 #[derive(Clone, Debug)]
 pub struct PruneFlagsIter {
     set: PruneFlags,
@@ -458,7 +451,8 @@ define_ctype!(
     /// opts.as_ref().set_flags(PruneFlags::empty());
     /// ```
     ///
-    /// Wraps: git_worktree_prune_options
+    /// Wraps `ty::git_worktree_prune_options`
+    #[doc(alias = "git_worktree_prune_options")]
     #[derive(Clone, Copy)]
     PruneOptions,
     PruneOptionsRef,
@@ -497,12 +491,13 @@ impl PruneOptions {
     /// the current version and no flags, so every check applies and only the
     /// worktree's gitdir is removed. Needs no initialised libgit2.
     ///
-    /// Wraps: `git_worktree_prune_options_init`
+    /// Wraps `fn::git_worktree_prune_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_worktree_prune_options_init")]
     #[must_use]
     pub fn new() -> PruneOptions {
         let mut raw = ffi::git_worktree_prune_options::default();
@@ -545,7 +540,8 @@ impl PruneOptionsRef<'_> {
     /// [`PruneOptions::VERSION`]; libgit2 refuses the options with
     /// `GIT_ERROR_INVALID` if it is 0 or above that.
     ///
-    /// Field: `git_worktree_prune_options.version`
+    /// Wraps `fld::git_worktree_prune_options.version`
+    #[doc(alias = "git_worktree_prune_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -558,7 +554,8 @@ impl PruneOptionsRef<'_> {
 
     /// The prune flags, every stored bit kept.
     ///
-    /// Field: `git_worktree_prune_options.flags`
+    /// Wraps `fld::git_worktree_prune_options.flags`
+    #[doc(alias = "git_worktree_prune_options.flags")]
     #[must_use]
     pub fn flags(&self) -> PruneFlags {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -584,7 +581,8 @@ impl PruneOptionsMut<'_> {
     /// Replaces the structure version. Any value is accepted; libgit2 refuses
     /// options whose version is 0 or above [`PruneOptions::VERSION`].
     ///
-    /// Field: `git_worktree_prune_options.version`
+    /// Wraps `fld::git_worktree_prune_options.version`
+    #[doc(alias = "git_worktree_prune_options.version")]
     pub fn set_version(&mut self, version: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -596,7 +594,8 @@ impl PruneOptionsMut<'_> {
 
     /// Replaces the prune flags, every bit as given.
     ///
-    /// Field: `git_worktree_prune_options.flags`
+    /// Wraps `fld::git_worktree_prune_options.flags`
+    #[doc(alias = "git_worktree_prune_options.flags")]
     pub fn set_flags(&mut self, flags: PruneFlags) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -681,7 +680,8 @@ define_ctype!(
     /// let _ = <Worktree as ffibox::CZeroable>::zeroed();
     /// ```
     ///
-    /// Wraps: git_worktree
+    /// Wraps `ty::git_worktree`
+    #[doc(alias = "git_worktree")]
     Worktree,
     WorktreeRef,
     WorktreeMut,
@@ -716,12 +716,16 @@ unsafe impl Sync for WorktreeMut<'_> {}
 
 /// Releases a worktree through `git_worktree_free`, which hands its six strings, then
 /// the struct, to `git__free`.
-///
-/// Wraps: `git_worktree_free`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorktreeFree;
 
-impl_cdrop!(WorktreeFree, Worktree, ffi::git_worktree_free);
+impl_cdrop!(
+    /// Wraps `fn::git_worktree_free`
+    #[doc(alias = "git_worktree_free")]
+    WorktreeFree,
+    Worktree,
+    ffi::git_worktree_free
+);
 
 /// An owned [`Worktree`], freed by `git_worktree_free` on drop.
 ///
@@ -869,8 +873,8 @@ pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
 /// needs::<AddOptions<'static>>();
 /// ```
 ///
-/// Wraps: `git_worktree_add_options`
-/// Handwritten
+/// Wraps `ty::git_worktree_add_options`
+#[doc(alias = "git_worktree_add_options")]
 #[repr(transparent)]
 pub struct AddOptions<'o>(
     ffi::git_worktree_add_options,
@@ -878,16 +882,12 @@ pub struct AddOptions<'o>(
 );
 
 /// Shared borrow of an [`AddOptions`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct AddOptionsRef<'a, 'o>(CBorrowedPtr<'a, AddOptions<'o>>);
 
 /// Exclusive borrow of an [`AddOptions`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct AddOptionsMut<'a, 'o>(
     AddOptionsRef<'a, 'o>,
@@ -935,12 +935,13 @@ impl<'o> AddOptions<'o> {
     /// with its own it reaches no global, no allocator and no thread state, so this needs
     /// no initialised library.
     ///
-    /// Wraps: `git_worktree_add_options_init`
+    /// Wraps `fn::git_worktree_add_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_worktree_add_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_worktree_add_options>::uninit();
@@ -990,7 +991,8 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// The structure's version, `GIT_WORKTREE_ADD_OPTIONS_VERSION`; fixed by
     /// [`AddOptions::new`].
     ///
-    /// Field: `git_worktree_add_options.version`
+    /// Wraps `fld::git_worktree_add_options.version`
+    #[doc(alias = "git_worktree_add_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         let p = self.as_ptr();
@@ -1005,7 +1007,8 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// Whether the new worktree is created locked: `git_worktree_add` then leaves an
     /// empty `locked` file (no reason) in its administrative directory.
     ///
-    /// Field: `git_worktree_add_options.lock`
+    /// Wraps `fld::git_worktree_add_options.lock`
+    #[doc(alias = "git_worktree_add_options.lock")]
     #[must_use]
     pub fn lock(&self) -> bool {
         let p = self.as_ptr();
@@ -1021,7 +1024,8 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// named after the worktree is checked out rather than a new one created (which
     /// then fails, the branch existing).
     ///
-    /// Field: `git_worktree_add_options.checkout_existing`
+    /// Wraps `fld::git_worktree_add_options.checkout_existing`
+    #[doc(alias = "git_worktree_add_options.checkout_existing")]
     #[must_use]
     pub fn checkout_existing(&self) -> bool {
         let p = self.as_ptr();
@@ -1038,7 +1042,8 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// worktree. `git_worktree_add` refuses a reference that is not a local branch
     /// (`refs/heads/...`) or that another working tree has checked out.
     ///
-    /// Field: `git_worktree_add_options.ref`
+    /// Wraps `fld::git_worktree_add_options.ref`
+    #[doc(alias = "git_worktree_add_options.ref")]
     #[must_use]
     pub fn reference(&self) -> Option<ReferenceRef<'o, 'o>> {
         let p = self.as_ptr();
@@ -1057,7 +1062,8 @@ impl<'a, 'o> AddOptionsRef<'a, 'o> {
     /// The options of the checkout of the new worktree's `HEAD`, which libgit2 copies
     /// into `git_checkout_head` on the new worktree.
     ///
-    /// Field: `git_worktree_add_options.checkout_options`
+    /// Wraps `fld::git_worktree_add_options.checkout_options`
+    #[doc(alias = "git_worktree_add_options.checkout_options")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -1104,7 +1110,8 @@ impl<'o> AddOptionsMut<'_, 'o> {
 
     /// Sets whether the new worktree is created locked.
     ///
-    /// Field: `git_worktree_add_options.lock`
+    /// Wraps `fld::git_worktree_add_options.lock`
+    #[doc(alias = "git_worktree_add_options.lock")]
     pub fn set_lock(&mut self, lock: bool) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -1118,7 +1125,8 @@ impl<'o> AddOptionsMut<'_, 'o> {
     /// Sets whether an existing local branch named after the worktree is checked out
     /// when no reference is set.
     ///
-    /// Field: `git_worktree_add_options.checkout_existing`
+    /// Wraps `fld::git_worktree_add_options.checkout_existing`
+    #[doc(alias = "git_worktree_add_options.checkout_existing")]
     pub fn set_checkout_existing(&mut self, existing: bool) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -1141,7 +1149,8 @@ impl<'o> AddOptionsMut<'_, 'o> {
     /// The reference may belong to another repository than the one the worktree is
     /// added to; libgit2 then only takes its name.
     ///
-    /// Field: `git_worktree_add_options.ref`
+    /// Wraps `fld::git_worktree_add_options.ref`
+    #[doc(alias = "git_worktree_add_options.ref")]
     pub fn set_reference(&mut self, reference: Option<ReferenceRef<'o, 'o>>) {
         let reference = reference.map_or(ptr::null_mut(), |r| r.as_ptr().cast_mut());
         let p = self.as_mut_ptr();
@@ -1158,7 +1167,8 @@ impl<'o> AddOptionsMut<'_, 'o> {
     /// The exclusive handle to the embedded checkout options, which takes borrows for
     /// the same `'o` as these options.
     ///
-    /// Field: `git_worktree_add_options.checkout_options`
+    /// Wraps `fld::git_worktree_add_options.checkout_options`
+    #[doc(alias = "git_worktree_add_options.checkout_options")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: embedded checkout options are never NULL"
@@ -1195,8 +1205,6 @@ const _: () = assert!(
 /// worktree of that name, [`ErrorCode::Locked`] when locking a locked worktree,
 /// [`ErrorCode::Generic`] for the rest. Where libgit2 fails without an error of its
 /// own, the wrapper sets one (see the [module docs](self#routines)).
-///
-/// Handwritten
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct WorktreeError {
     code: c_int,
@@ -1389,11 +1397,12 @@ fn is_worktree_dir(dir: &Path) -> bool {
 /// would list the process's working directory then). Every entry is checked, where libgit2 skips
 /// the one after each entry it drops (see the [module docs](self#routines)).
 ///
-/// Wraps: `git_worktree_list`
+/// Wraps `fn::git_worktree_list`
 ///
 /// # Errors
 ///
 /// Fails with libgit2's error when the directory cannot be read.
+#[doc(alias = "git_worktree_list")]
 pub fn list(repo: RepositoryRef<'_>) -> Result<StrArrayVal, WorktreeError> {
     let mut names = StrArray::new();
     let Some(commondir) = commondir(repo) else {
@@ -1429,7 +1438,7 @@ impl Worktree {
     /// The linked worktree `name` of `repo`: the one whose administrative directory is
     /// `<commondir>/worktrees/<name>`.
     ///
-    /// Wraps: `git_worktree_lookup`
+    /// Wraps `fn::git_worktree_lookup`
     ///
     /// # Errors
     ///
@@ -1441,6 +1450,7 @@ impl Worktree {
     ///
     /// Panics, with `git_worktree_lookup succeeded without a worktree`, only if libgit2 breaks its
     /// contract.
+    #[doc(alias = "git_worktree_lookup")]
     pub fn lookup(repo: RepositoryRef<'_>, name: &CStr) -> Result<WorktreeBox, WorktreeError> {
         if commondir(repo).is_none() {
             return Err(refused(ffi::GIT_ENOTFOUND, NO_PATH));
@@ -1469,7 +1479,7 @@ impl Worktree {
     /// The linked worktree `repo` was opened from: `repo` must have been opened at a
     /// worktree's working directory (or its administrative directory).
     ///
-    /// Wraps: `git_worktree_open_from_repository`
+    /// Wraps `fn::git_worktree_open_from_repository`
     ///
     /// # Errors
     ///
@@ -1480,6 +1490,7 @@ impl Worktree {
     ///
     /// Panics, with `git_worktree_open_from_repository succeeded without a worktree`, only if
     /// libgit2 breaks its contract.
+    #[doc(alias = "git_worktree_open_from_repository")]
     pub fn open_from_repository(repo: RepositoryRef<'_>) -> Result<WorktreeBox, WorktreeError> {
         let mut out = ptr::null_mut();
         checked(
@@ -1550,7 +1561,7 @@ impl Worktree {
     ///
     /// libgit2 reads the options, and copies the reference, for the call only.
     ///
-    /// Wraps: `git_worktree_add`
+    /// Wraps `fn::git_worktree_add`
     ///
     /// # Errors
     ///
@@ -1560,6 +1571,7 @@ impl Worktree {
     /// [`ErrorCode::Exists`] or `GIT_ERROR_OS` when a directory cannot be made, with
     /// [`ErrorCode::NotFound`] for a repository without paths, and with libgit2's error when the
     /// checkout fails.
+    #[doc(alias = "git_worktree_add")]
     pub fn add(
         repo: RepositoryRef<'_>,
         name: &CStr,
@@ -1644,7 +1656,8 @@ impl<'a> WorktreeRef<'a> {
     /// }
     /// ```
     ///
-    /// Wraps: `git_worktree_name`
+    /// Wraps `fn::git_worktree_name`
+    #[doc(alias = "git_worktree_name")]
     #[must_use]
     pub fn name(&self) -> &'a CStr {
         // SAFETY: a live worktree, only read.
@@ -1657,7 +1670,8 @@ impl<'a> WorktreeRef<'a> {
     /// The path of the worktree's working directory, as its `gitdir` file records it
     /// (the directory of the `.git` link), without a trailing slash.
     ///
-    /// Wraps: `git_worktree_path`
+    /// Wraps `fn::git_worktree_path`
+    #[doc(alias = "git_worktree_path")]
     #[must_use]
     pub fn path(&self) -> &'a CStr {
         // SAFETY: a live worktree, only read.
@@ -1672,12 +1686,13 @@ impl<'a> WorktreeRef<'a> {
     /// repository's working directory, the common directory and its own working
     /// directory, in that order.
     ///
-    /// Wraps: `git_worktree_validate`
+    /// Wraps `fn::git_worktree_validate`
     ///
     /// # Errors
     ///
     /// Fails with [`ErrorCode::Generic`] and a `GIT_ERROR_WORKTREE` message naming the
     /// first one missing.
+    #[doc(alias = "git_worktree_validate")]
     pub fn validate(&self) -> Result<(), WorktreeError> {
         checked(
             || {
@@ -1692,11 +1707,12 @@ impl<'a> WorktreeRef<'a> {
     /// Whether the worktree is locked: its administrative directory holds a `locked`
     /// file. Reads the file system, not the state [`WorktreeMut::lock`] recorded.
     ///
-    /// Wraps: `git_worktree_is_locked`
+    /// Wraps `fn::git_worktree_is_locked`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error when the `locked` file cannot be read.
+    #[doc(alias = "git_worktree_is_locked")]
     pub fn is_locked(&self) -> Result<bool, WorktreeError> {
         let rc = checked(
             || {
@@ -1712,12 +1728,13 @@ impl<'a> WorktreeRef<'a> {
     /// The reason the worktree is locked: the contents of its `locked` file (empty when
     /// none was given), or `None` when it is not locked.
     ///
-    /// Wraps: `git_worktree_is_locked`
+    /// Wraps `fn::git_worktree_is_locked`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the `locked` entry cannot be read (a
     /// directory, say).
+    #[doc(alias = "git_worktree_is_locked")]
     pub fn lock_reason(&self) -> Result<Option<BufVal>, WorktreeError> {
         let mut reason = Buf::new();
         let rc = checked(
@@ -1739,12 +1756,13 @@ impl<'a> WorktreeRef<'a> {
     /// When it is not prunable, libgit2 leaves the reason as the thread's last error, which
     /// [`last`] reads.
     ///
-    /// Wraps: `git_worktree_is_prunable`
+    /// Wraps `fn::git_worktree_is_prunable`
     ///
     /// # Errors
     ///
     /// Fails when `opts`' version is not one libgit2 accepts, or when the `locked` entry cannot be
     /// read.
+    #[doc(alias = "git_worktree_is_prunable")]
     pub fn is_prunable(&self, opts: PruneOptionsRef<'_>) -> Result<bool, WorktreeError> {
         let rc = checked(
             || {
@@ -1766,7 +1784,7 @@ impl<'a> WorktreeRef<'a> {
     /// with [`PruneFlag::WorkingTree`], its working directory if it still has its
     /// `.git` link. The worktree itself stays readable.
     ///
-    /// Wraps: `git_worktree_prune`
+    /// Wraps `fn::git_worktree_prune`
     ///
     /// # Errors
     ///
@@ -1775,6 +1793,7 @@ impl<'a> WorktreeRef<'a> {
     /// routine's error when it fails (where libgit2 would prune all the same; see the
     /// [module docs](self#routines)), and with libgit2's error when a directory cannot
     /// be removed.
+    #[doc(alias = "git_worktree_prune")]
     pub fn prune(&self, opts: PruneOptionsRef<'_>) -> Result<(), WorktreeError> {
         if !self.is_prunable(opts)? {
             return Err(WorktreeError::from_libgit2(
@@ -1809,12 +1828,13 @@ impl WorktreeMut<'_> {
     /// }
     /// ```
     ///
-    /// Wraps: `git_worktree_lock`
+    /// Wraps `fn::git_worktree_lock`
     ///
     /// # Errors
     ///
     /// Fails with [`ErrorCode::Locked`] when it is already locked, and with libgit2's
     /// error when the file cannot be created.
+    #[doc(alias = "git_worktree_lock")]
     pub fn lock(&mut self, reason: Option<&CStr>) -> Result<(), WorktreeError> {
         let reason = reason.map_or(ptr::null(), CStr::as_ptr);
         let worktree = self.as_mut_ptr();
@@ -1832,12 +1852,13 @@ impl WorktreeMut<'_> {
     /// Unlocks the worktree: removes its `locked` file. `true` when it was locked,
     /// `false` when there was nothing to remove.
     ///
-    /// Wraps: `git_worktree_unlock`
+    /// Wraps `fn::git_worktree_unlock`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error when the file cannot be checked, and with
     /// `GIT_ERROR_OS` when it cannot be removed.
+    #[doc(alias = "git_worktree_unlock")]
     pub fn unlock(&mut self) -> Result<bool, WorktreeError> {
         let worktree = self.as_mut_ptr();
         let rc = checked(
