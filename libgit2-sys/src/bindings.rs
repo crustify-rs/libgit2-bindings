@@ -1866,6 +1866,20 @@ impl Default for git_odb_options {
     }
 }
 unsafe extern "C" {
+    /** Initialize git_odb_options_options structure
+
+ Initialize a `git_odb_options` with default values. Equivalent to
+ creating an instance with GIT_ODB_OPTIONS_INIT.
+
+ @param opts The `git_odb_options` struct to initialize.
+ @param version The struct version; pass `GIT_ODB_OPTIONS_VERSION`
+ @return 0 on success or -1 on failure.*/
+    pub fn git_odb_options_init(
+        opts: *mut git_odb_options,
+        version: ::std::os::raw::c_uint,
+    ) -> ::std::os::raw::c_int;
+}
+unsafe extern "C" {
     /** Create a new object database with no backends.
 
  Before the ODB can be used for read/writing, a custom database
@@ -1984,6 +1998,69 @@ unsafe extern "C" {
  @param id the object to search for.
  @return 1 if the object was found, 0 otherwise*/
     pub fn git_odb_exists(db: *mut git_odb, id: *const git_oid) -> ::std::os::raw::c_int;
+}
+/** The information about object IDs to query in `git_odb_expand_ids`,
+ which will be populated upon return.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct git_odb_expand_id {
+    /// The object ID to expand
+    pub id: git_oid,
+    /** The length of the object ID (in nibbles, or packets of 4 bits; the
+ number of hex characters)*/
+    pub length: ::std::os::raw::c_ushort,
+    /** The (optional) type of the object to search for; leave as `0` or set
+ to `GIT_OBJECT_ANY` to query for any object matching the ID.*/
+    pub type_: git_object_t,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of git_odb_expand_id"][::std::mem::size_of::<git_odb_expand_id>() - 40usize];
+    [
+        "Alignment of git_odb_expand_id",
+    ][::std::mem::align_of::<git_odb_expand_id>() - 4usize];
+    [
+        "Offset of field: git_odb_expand_id::id",
+    ][::std::mem::offset_of!(git_odb_expand_id, id) - 0usize];
+    [
+        "Offset of field: git_odb_expand_id::length",
+    ][::std::mem::offset_of!(git_odb_expand_id, length) - 34usize];
+    [
+        "Offset of field: git_odb_expand_id::type_",
+    ][::std::mem::offset_of!(git_odb_expand_id, type_) - 36usize];
+};
+impl Default for git_odb_expand_id {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+unsafe extern "C" {
+    /** Determine if one or more objects can be found in the object database
+ by their abbreviated object ID and type.
+
+ The given array will be updated in place: for each abbreviated ID that is
+ unique in the database, and of the given type (if specified),
+ the full object ID, object ID length (`GIT_OID_SHA1_HEXSIZE`) and type will be
+ written back to the array. For IDs that are not found (or are ambiguous),
+ the array entry will be zeroed.
+
+ Note that since this function operates on multiple objects, the
+ underlying database will not be asked to be reloaded if an object is
+ not found (which is unlike other object database operations.)
+
+ @param db The database to be searched for the given objects.
+ @param ids An array of short object IDs to search for
+ @param count The length of the `ids` array
+ @return 0 on success or an error code on failure*/
+    pub fn git_odb_expand_ids(
+        db: *mut git_odb,
+        ids: *mut git_odb_expand_id,
+        count: usize,
+    ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
     /** Write an object directly into the ODB

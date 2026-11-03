@@ -1,0 +1,21 @@
+error[E0499]: cannot borrow `m` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/odb_expand_id_mut_aliased.rs:10:5
+   |
+ 9 |     let mut id = m.id_mut();
+   |                  - first mutable borrow occurs here
+10 |     m.set_length(4);
+   |     ^ second mutable borrow occurs here
+11 |     let r = query.as_ref();
+12 |     id.set_raw_kind(1);
+   |     -- first borrow later used here
+
+error[E0502]: cannot borrow `query` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/odb_expand_id_mut_aliased.rs:11:13
+   |
+ 8 |     let mut m = query.as_mut();
+   |                 ----- mutable borrow occurs here
+...
+11 |     let r = query.as_ref();
+   |             ^^^^^ immutable borrow occurs here
+12 |     id.set_raw_kind(1);
+   |     -- mutable borrow later used here

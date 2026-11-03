@@ -1,0 +1,11 @@
+error[E0597]: `query` does not live long enough
+ --> tests/ub_safe/compile_fail/odb_expand_id_handle_outlives_value.rs:8:9
+  |
+6 |     let id = {
+  |         -- borrow later stored here
+7 |         let query = OdbExpandId::zeroed();
+  |             ----- binding `query` declared here
+8 |         query.as_ref().id()
+  |         ^^^^^ borrowed value does not live long enough
+9 |     };
+  |     - `query` dropped here while still borrowed

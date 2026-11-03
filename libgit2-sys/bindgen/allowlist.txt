@@ -170,6 +170,7 @@ function git_object_type_is_valid
 function git_odb_backend_data_alloc
 function git_odb_backend_data_free
 function git_odb_exists
+function git_odb_expand_ids
 function git_odb_free
 function git_odb_new
 function git_odb_new_ext
@@ -180,6 +181,7 @@ function git_odb_object_type
 function git_odb_object_size
 function git_odb_open
 function git_odb_open_ext
+function git_odb_options_init
 function git_odb_read
 function git_odb_read_header
 function git_odb_write
@@ -565,6 +567,7 @@ type git_message_trailer
 type git_message_trailer_array
 type git_object_id_options
 type git_object_t
+type git_odb_expand_id
 type git_odb_options
 type git_oid
 type git_oid_shorten

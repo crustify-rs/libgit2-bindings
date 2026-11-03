@@ -20,9 +20,11 @@ use std::ffi::{CStr, CString, c_int};
 use std::path::{Path, PathBuf};
 use std::{fs, ptr};
 
+use ffibox::CZeroable;
 use libgit2::ffi;
-use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc};
-use libgit2::libgit2::src::libgit2::oid::OidType;
+use libgit2::libgit2::src::libgit2::object::ObjectType;
+use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbExpandId, OdbOptions};
+use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
 use libgit2::libgit2::src::util::errors::ErrorBuf;
 
 /// Takes a `git_libgit2_init` reference that is never released.
@@ -541,4 +543,294 @@ fn a_shared_odb_lives_as_long_as_in_c() {
     drop((c_repo, rust_repo));
     let rust = Odb::open(&dirs.rust).unwrap();
     compare_blobs(c.0, &rust);
+}
+
+/// `git_odb_options_init` into a fresh `git_odb_options`: the return and what it wrote.
+fn c_options_init(version: u32) -> (c_int, ffi::git_odb_options) {
+    let mut opts = ffi::git_odb_options {
+        version: 0xDEAD,
+        oid_type: 0xBEEF,
+    };
+    // SAFETY: `opts` is a live `git_odb_options` the routine may write, not retained.
+    let rc = unsafe { ffi::git_odb_options_init(&raw mut opts, version) };
+    (rc, opts)
+}
+
+/// [`OdbOptions::new`] holds what `git_odb_options_init` writes for this version, which
+/// is `GIT_ODB_OPTIONS_INIT`; and options a Rust value carries build, or fail to build,
+/// the odb the same C options do.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn odb_options_are_what_c_initialises_and_reads() {
+    init();
+    let (rc, c) = c_options_init(ffi::GIT_ODB_OPTIONS_VERSION);
+    assert_eq!(rc, 0);
+    let rust = ffi::git_odb_options::from(OdbOptions::new());
+    assert_eq!((rust.version, rust.oid_type), (c.version, c.oid_type));
+    assert_eq!(
+        (rust.version, rust.oid_type),
+        (1, 0),
+        "GIT_ODB_OPTIONS_INIT"
+    );
+    assert_eq!(OdbOptions::default(), OdbOptions::new());
+
+    // Every type the setter takes, then every version, each step compared through the
+    // odb `git_odb_new_ext` builds from the C options and from the Rust value.
+    let mut opts = OdbOptions::new();
+    let kinds = [None, Some(OidType::Sha1), Some(OidType::Sha256)];
+    for kind in kinds {
+        opts.as_mut().set_oid_type(kind);
+        let c = c_new_ext(Some(&c_options(kind.map_or(0, OidType::raw)))).unwrap();
+        let rust = c_new_ext(Some(&ffi::git_odb_options::from(opts))).unwrap();
+        // SAFETY: `rust.0` is the one reference `git_odb_new_ext` returned, given up to
+        // the owner here.
+        let rust = unsafe { OdbArc::from_c(rust.into_raw()) }.unwrap();
+        compare_blobs(c.0, &rust);
+    }
+    for version in [0, 2, u32::MAX, ffi::GIT_ODB_OPTIONS_VERSION] {
+        opts.as_mut().set_version(version);
+        let c_opts = ffi::git_odb_options {
+            version,
+            oid_type: ffi::GIT_OID_SHA256,
+        };
+        let c = c_new_ext(Some(&c_opts)).map(drop);
+        let rust = c_new_ext(Some(&ffi::git_odb_options::from(opts))).map(drop);
+        assert_eq!(rust, c, "version {version}");
+        assert_eq!(c.is_ok(), version == 1, "version {version}");
+        let c_init = c_options_init(version);
+        assert_eq!(c_init.0 == 0, version == 1, "version {version}");
+    }
+}
+
+impl COdb {
+    /// Gives the reference up, unreleased.
+    fn into_raw(self) -> *mut ffi::git_odb {
+        core::mem::ManuallyDrop::new(self).0
+    }
+}
+
+/// One query's fields: the id's type byte and bytes, the length and the type.
+type QueryFields = (u8, [u8; 32], u16, ffi::git_object_t);
+
+fn c_fields(q: &ffi::git_odb_expand_id) -> QueryFields {
+    (q.id.type_, q.id.id, q.length, q.type_)
+}
+
+fn rust_fields(q: &OdbExpandId) -> QueryFields {
+    let r = q.as_ref();
+    (r.id().raw_kind(), r.id().id(), r.length(), r.raw_kind())
+}
+
+/// `git_odb_expand_ids` over a run of queries: the return and, after a failure, the
+/// thread's error.
+///
+/// # Safety
+///
+/// `odb` is live, and `ids` addresses `count` writable `git_odb_expand_id`s.
+unsafe fn expand(
+    odb: *mut ffi::git_odb,
+    ids: *mut ffi::git_odb_expand_id,
+    count: usize,
+) -> Result<(), (c_int, (c_int, String))> {
+    // SAFETY: per the contract.
+    let rc = unsafe { ffi::git_odb_expand_ids(odb, ids, count) };
+    if rc == 0 { Ok(()) } else { Err((rc, c_last())) }
+}
+
+/// What [`expand`] answered for the C queries and for the Rust ones.
+type Expanded = (
+    Result<(), (c_int, (c_int, String))>,
+    Result<(), (c_int, (c_int, String))>,
+);
+
+/// [`expand`] over the first `count` queries of each run (all of them for `None`): the C
+/// ones on `c_odb`, the Rust ones on `rust_odb`.
+fn expand_both(
+    c_odb: *mut ffi::git_odb,
+    rust_odb: &OdbArc<'_>,
+    c: &mut [ffi::git_odb_expand_id],
+    rust: &mut [OdbExpandId],
+    count: Option<usize>,
+) -> Expanded {
+    let (c_count, rust_count) = count.map_or((c.len(), rust.len()), |n| (n, n));
+    assert!(c_count <= c.len() && rust_count <= rust.len());
+    // SAFETY: `c_odb` is live (the caller holds it); `c` holds at least `c_count`
+    // writable queries, borrowed exclusively for the call.
+    let c_rc = unsafe { expand(c_odb, c.as_mut_ptr(), c_count) };
+    // SAFETY: the owner keeps `rust_odb` live; `rust` holds at least `rust_count`
+    // writable queries, borrowed exclusively for the call, which `OdbExpandId` lays out
+    // as `git_odb_expand_id`s (it is `repr(transparent)` over one).
+    let rust_rc = unsafe { expand(rust_odb.as_c_ptr(), rust.as_mut_ptr().cast(), rust_count) };
+    (c_rc, rust_rc)
+}
+
+/// The C queries and their Rust twins, built independently from the same description:
+/// the C ones as struct literals, the Rust ones through [`OdbExpandId::new`] and the
+/// setters.
+fn queries(kind: OidType, stored: &[Id]) -> (Vec<ffi::git_odb_expand_id>, Vec<OdbExpandId>) {
+    let hex = u16::try_from(kind.hex_size()).unwrap();
+    let missing = {
+        let mut id = stored[0];
+        id.1[..kind.size()].iter_mut().for_each(|b| *b ^= 0xA5);
+        id
+    };
+    // (id, length, the type as C stores it, the type the Rust setter takes)
+    let mut plan: Vec<(Id, u16, ffi::git_object_t, Option<Option<ObjectType>>)> = Vec::new();
+    for &id in stored {
+        plan.extend([
+            (id, hex, ffi::GIT_OBJECT_ANY, Some(None)),
+            (id, hex, ffi::GIT_OBJECT_BLOB, Some(Some(ObjectType::Blob))),
+            (
+                id,
+                hex,
+                ffi::GIT_OBJECT_COMMIT,
+                Some(Some(ObjectType::Commit)),
+            ),
+            (id, 8, 0, None),
+            (id, 8, ffi::GIT_OBJECT_BLOB, Some(Some(ObjectType::Blob))),
+            (id, 8, ffi::GIT_OBJECT_TREE, Some(Some(ObjectType::Tree))),
+            (id, 4, ffi::GIT_OBJECT_ANY, Some(None)),
+            (id, 3, ffi::GIT_OBJECT_ANY, Some(None)),
+            (id, hex - 1, ffi::GIT_OBJECT_ANY, Some(None)),
+            (id, u16::MAX, ffi::GIT_OBJECT_ANY, Some(None)),
+        ]);
+    }
+    plan.extend([
+        (missing, hex, ffi::GIT_OBJECT_ANY, Some(None)),
+        (missing, 8, ffi::GIT_OBJECT_ANY, Some(None)),
+        ((0, [0; 32]), 0, 0, None),
+    ]);
+    let c = plan
+        .iter()
+        .map(|&((type_, id), length, kind, _)| ffi::git_odb_expand_id {
+            id: ffi::git_oid { type_, id },
+            length,
+            type_: kind,
+        })
+        .collect();
+    let rust = plan
+        .iter()
+        .map(|&((type_, id), length, raw, kind)| {
+            let size = OidType::from_raw(type_.into()).map_or(0, OidType::size);
+            let mut q = if size == 0 {
+                OdbExpandId::zeroed()
+            } else {
+                let oid =
+                    Oid::from_raw(&id[..size], OidType::from_raw(type_.into()).unwrap()).unwrap();
+                OdbExpandId::new(oid.as_ref(), length, None)
+            };
+            match kind {
+                Some(kind) => q.as_mut().set_kind(kind),
+                None => assert_eq!(raw, 0),
+            }
+            if size == 0 {
+                q.as_mut().set_length(length);
+            } else if kind.is_none() {
+                // Leave the type 0, as the C query does: the routine reads it as any.
+                let mut raw_q = ffi::git_odb_expand_id::from(q);
+                raw_q.type_ = 0;
+                q = OdbExpandId::from(raw_q);
+            }
+            q
+        })
+        .collect();
+    (c, rust)
+}
+
+/// Runs the queries on both odbs, then again over what the first pass wrote, then after
+/// narrowing every query to an 8-digit prefix of any type, comparing every query's
+/// fields and the routine's result after each pass.
+fn compare_expand(
+    c_odb: *mut ffi::git_odb,
+    rust_odb: &OdbArc<'_>,
+    kind: OidType,
+    stored: &[Id],
+    found: bool,
+) {
+    let (mut c, mut rust) = queries(kind, stored);
+    assert_eq!(c.len(), rust.len());
+    let compare = |c: &[ffi::git_odb_expand_id], rust: &[OdbExpandId], pass: &str| {
+        for (i, (c, rust)) in c.iter().zip(rust).enumerate() {
+            assert_eq!(rust_fields(rust), c_fields(c), "{pass}: query {i}");
+        }
+    };
+    compare(&c, &rust, "built");
+    for pass in ["first", "again"] {
+        let (c_rc, rust_rc) = expand_both(c_odb, rust_odb, &mut c, &mut rust, None);
+        assert_eq!(rust_rc, c_rc, "{pass}");
+        compare(&c, &rust, pass);
+        // Per stored id: the full id untyped and as a blob, the 8-digit prefixes untyped
+        // and as a blob, the 4-digit and the one-short ones, are found (a found prefix
+        // takes the full length; a length past it is kept); a wrong type and a 3-digit
+        // prefix are cleared. Without backends, everything is cleared.
+        for (n, chunk) in rust.chunks(10).take(stored.len()).enumerate() {
+            let hex = u16::try_from(kind.hex_size()).unwrap();
+            let lengths: Vec<u16> = chunk.iter().map(|q| q.as_ref().length()).collect();
+            let want = |f: u16| if found { f } else { 0 };
+            assert_eq!(
+                lengths,
+                [
+                    want(hex),
+                    want(hex),
+                    0,
+                    want(hex),
+                    want(hex),
+                    0,
+                    want(hex),
+                    0,
+                    want(hex),
+                    want(u16::MAX)
+                ],
+                "{pass}: stored id {n}"
+            );
+            if found {
+                assert_eq!(chunk[3].as_ref().kind(), Some(ObjectType::Blob));
+                assert_eq!(chunk[3].as_ref().id().id(), stored[n].1);
+            }
+        }
+    }
+    for (c, rust) in c.iter_mut().zip(&mut rust) {
+        c.length = 8;
+        c.type_ = ffi::GIT_OBJECT_ANY;
+        let mut m = rust.as_mut();
+        m.set_length(8);
+        m.set_kind(None);
+    }
+    compare(&c, &rust, "narrowed");
+    let (c_rc, rust_rc) = expand_both(c_odb, rust_odb, &mut c, &mut rust, None);
+    assert_eq!(rust_rc, c_rc, "narrowed");
+    compare(&c, &rust, "narrowed, expanded");
+    // A run of no queries changes nothing and succeeds.
+    let (c_rc, rust_rc) = expand_both(c_odb, rust_odb, &mut c, &mut rust, Some(0));
+    assert_eq!((rust_rc, c_rc), (Ok(()), Ok(())));
+}
+
+/// Queries built through [`OdbExpandId`] are answered by `git_odb_expand_ids` exactly as
+/// C-built ones: full ids and prefixes found, typed and untyped, a wrong type, a prefix
+/// too short, a missing id and an empty query cleared; over every id type, on an odb
+/// with backends and one without.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn expand_ids_answers_rust_queries_as_c_queries() {
+    init();
+    for kind in [OidType::Sha1, OidType::Sha256] {
+        let dirs = Pair::new(&format!("expand-{}", kind.raw()), |_| {});
+        let c = c_open_ext(&dirs.c, Some(&c_options(kind.raw()))).unwrap();
+        let rust = Odb::open_with_oid_type(&dirs.rust, kind).unwrap();
+        let mut stored = Vec::new();
+        for blob in blobs() {
+            let seen = step(c.0, Op::Write(&blob));
+            assert_eq!(step(rust.as_c_ptr(), Op::Write(&blob)), seen);
+            let Seen::Written(id) = seen else {
+                panic!("an on-disk odb writes")
+            };
+            stored.push(id);
+        }
+        compare_expand(c.0, &rust, kind, &stored, true);
+
+        // No backends: nothing is found, and every query is cleared alike.
+        let c = c_new_ext(Some(&c_options(kind.raw()))).unwrap();
+        let rust = Odb::with_oid_type(kind).unwrap();
+        compare_expand(c.0, &rust, kind, &stored, false);
+    }
 }

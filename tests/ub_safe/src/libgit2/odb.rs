@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use libgit2::ffi;
-use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbRef};
+use libgit2::libgit2::src::libgit2::object::ObjectType;
+use libgit2::libgit2::src::libgit2::odb::{Odb, OdbArc, OdbExpandId, OdbOptions, OdbRef};
 use libgit2::libgit2::src::libgit2::oid::OidType;
 
 use crate::fixture::odb::{Repo, backends, read_header, write_blob};
@@ -249,4 +250,113 @@ fn first_constructors_race_to_pin_the_runtime() {
             }
         },
     );
+}
+
+/// Options built before libgit2 is initialised, on several threads at once (`TSan`: the
+/// init routine touches no shared state; `MSan`: every byte it hands back is written),
+/// moved across threads and used there to build odbs of the type they carry.
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn odb_options_build_anywhere_and_cross_threads() {
+    isolated(
+        concat!(
+            module_path!(),
+            "::odb_options_build_anywhere_and_cross_threads"
+        ),
+        || {
+            let built: Vec<OdbOptions> = (0..8)
+                .map(|_| std::thread::spawn(OdbOptions::new))
+                .map(|t| t.join().unwrap())
+                .collect();
+            for opts in &built {
+                assert_eq!(*opts, OdbOptions::default());
+                assert_eq!(opts.as_ref().oid_type(), None);
+            }
+            let kinds = [None, Some(OidType::Sha1), Some(OidType::Sha256)];
+            let threads: Vec<_> = kinds
+                .into_iter()
+                .map(|kind| {
+                    let mut opts = built[0];
+                    opts.as_mut().set_oid_type(kind);
+                    std::thread::spawn(move || {
+                        let shared = opts.as_ref();
+                        assert_eq!(shared.to_options(), opts);
+                        let kind = shared.oid_type().unwrap_or_default();
+                        let odb = Odb::with_oid_type(kind).unwrap();
+                        assert_eq!(backends(&odb), 0);
+                        format!("{opts:?}")
+                    })
+                })
+                .collect();
+            for t in threads {
+                assert!(t.join().unwrap().starts_with("OdbOptions { version: 1"));
+            }
+        },
+    );
+}
+
+/// Queries held in Rust storage: handles taken again and again and used between writes,
+/// the id edited in place through a reborrow, copies outliving the borrow they came from,
+/// a run shared by several reader threads at once (`TSan`) and queries moved to threads
+/// that rewrite them. A query built from a zeroed one needs no libgit2 at all.
+#[test]
+fn odb_expand_ids_are_plain_values() {
+    let mut run = vec![OdbExpandId::default(); 16];
+    for (n, q) in run.iter_mut().enumerate() {
+        let mut m = q.as_mut();
+        m.set_length(u16::try_from(n).unwrap() * 4);
+        m.set_kind(
+            [None, Some(ObjectType::Blob), Some(ObjectType::Tree)]
+                .get(n % 4)
+                .copied()
+                .flatten(),
+        );
+        {
+            let mut id = m.id_mut();
+            id.set_raw_kind(1);
+            assert!(id.id_mut().set_elem(0, u8::try_from(n).unwrap()));
+        }
+        let shared = m.as_ref();
+        assert_eq!(shared.id().id()[0], u8::try_from(n).unwrap());
+        let copy = shared.to_expand_id();
+        m.set_length(0);
+        assert_eq!(copy.as_ref().length(), u16::try_from(n).unwrap() * 4);
+    }
+    let first = run[0];
+    run[1].as_mut().set_id(first.as_ref().id());
+    let (x, y) = (run[1].as_ref().id(), run[0].as_ref().id());
+    assert_eq!((x.raw_kind(), x.id()), (y.raw_kind(), y.id()));
+
+    let shared: Arc<[OdbExpandId]> = run.clone().into();
+    let readers: Vec<_> = (0..4)
+        .map(|_| {
+            let shared = Arc::clone(&shared);
+            std::thread::spawn(move || {
+                shared
+                    .iter()
+                    .map(|q| (q.as_ref().length(), q.as_ref().raw_kind()))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let views: Vec<_> = readers.into_iter().map(|t| t.join().unwrap()).collect();
+    assert!(views.windows(2).all(|w| w[0] == w[1]));
+
+    let writers: Vec<_> = run
+        .into_iter()
+        .map(|mut q| {
+            std::thread::spawn(move || {
+                q.as_mut().set_kind(Some(ObjectType::Commit));
+                q.as_mut().set_length(u16::MAX);
+                q
+            })
+        })
+        .collect();
+    for t in writers {
+        let q = t.join().unwrap();
+        assert_eq!(
+            (q.as_ref().length(), q.as_ref().kind()),
+            (u16::MAX, Some(ObjectType::Commit))
+        );
+    }
 }

@@ -86,21 +86,29 @@
 //!
 //! The constructors pin libgit2's runtime first (`runtime_pinned`), since they
 //! allocate, and return the thread's libgit2 error, copied out, as an [`ErrorBuf`].
+//!
+//! # Plain values
+//!
+//! Two structs of the header own nothing and are held by value: [`OdbOptions`], the
+//! options the `_ext` constructors read, and [`OdbExpandId`], one query of
+//! `git_odb_expand_ids`, which a caller fills and the routine answers in place.
 
 use core::ffi::{CStr, c_char, c_int};
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit, align_of, size_of};
 use core::ptr::{self, NonNull};
 
 use ffibox::{
     CAlloc, CAllocZeroed, CArc, CBorrowedPtr, CBox, CCell, CDrop, CMutSeam, CNew, CPlainElem,
-    CRefSeam, CStrBox, CVec, CZeroable, impl_cdrop_str, impl_cdupclone_str, impl_clenclone,
-    impl_clendrop,
+    CRefSeam, CStrBox, CVec, CZeroable, define_ctype, impl_cdrop_str, impl_cdupclone_str,
+    impl_clenclone, impl_clendrop,
 };
 
 use crate::ffi;
-use crate::libgit2::src::libgit2::oid::OidType;
+use crate::libgit2::src::libgit2::object::ObjectType;
+use crate::libgit2::src::libgit2::oid::{OidMut, OidRef, OidType};
 use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 
 /// An object database (`git_odb`): the layout type named by [`OdbArc`] and the
@@ -338,15 +346,6 @@ unsafe impl CNew<Odb<'static>> for OdbFree {
 /// ```
 pub type OdbArc<'r> = CArc<Odb<'r>, OdbFree>;
 
-/// The options `git_odb_new_ext` / `git_odb_open_ext` read: this version's struct with
-/// `oid_type`, the only setting it has.
-fn options(oid_type: OidType) -> ffi::git_odb_options {
-    ffi::git_odb_options {
-        version: ffi::GIT_ODB_OPTIONS_VERSION,
-        oid_type: oid_type.raw(),
-    }
-}
-
 /// Runs a constructor that stores a new reference in its out slot, and adopts it.
 ///
 /// Pins the runtime first; a constructor that fails leaves the slot NULL (or untouched,
@@ -397,12 +396,12 @@ impl Odb<'static> {
     /// Fails as [`new`](Self::new) does.
     #[doc(alias = "git_odb_new_ext")]
     pub fn with_oid_type(oid_type: OidType) -> Result<OdbArc<'static>, ErrorBuf> {
-        let opts = options(oid_type);
+        let opts = OdbOptions::with_oid_type(oid_type);
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
             // success; `opts` is a live options struct of this version, which the
             // routine copies and does not retain. The runtime is pinned.
-            unsafe { ffi::git_odb_new_ext(out, &raw const opts) }
+            unsafe { ffi::git_odb_new_ext(out, opts.as_ref().as_ptr()) }
         })
     }
 
@@ -447,11 +446,11 @@ impl Odb<'static> {
         objects_dir: &CStr,
         oid_type: OidType,
     ) -> Result<OdbArc<'static>, ErrorBuf> {
-        let opts = options(oid_type);
+        let opts = OdbOptions::with_oid_type(oid_type);
         construct(|out| {
             // SAFETY: as in `open`; `opts` is a live options struct of this version,
             // which the routine copies and does not retain.
-            unsafe { ffi::git_odb_open_ext(out, objects_dir.as_ptr(), &raw const opts) }
+            unsafe { ffi::git_odb_open_ext(out, objects_dir.as_ptr(), opts.as_ref().as_ptr()) }
         })
     }
 }
@@ -463,6 +462,571 @@ const _: () = assert!(size_of::<Odb<'static>>() == size_of::<ffi::git_odb>());
 const _: () = assert!(size_of::<OdbArc<'static>>() == size_of::<*mut ffi::git_odb>());
 
 const _: () = assert!(size_of::<Option<OdbArc<'static>>>() == size_of::<*mut ffi::git_odb>());
+
+define_ctype!(
+    /// The options of an object database (`git_odb_options`): the structure version, and
+    /// the object id type the odb hashes with.
+    ///
+    /// A plain value of 8 bytes, resource-free: `Copy`, held inline, never released. Build
+    /// one with [`new`](Self::new) (or `Default`), then read and write its fields through
+    /// [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut):
+    ///
+    /// ```
+    /// use libgit2::libgit2::src::libgit2::odb::OdbOptions;
+    /// use libgit2::libgit2::src::libgit2::oid::OidType;
+    ///
+    /// let mut opts = OdbOptions::new();
+    /// assert_eq!(opts.as_ref().oid_type(), None);
+    /// opts.as_mut().set_oid_type(Some(OidType::Sha256));
+    /// assert_eq!(opts.as_ref().oid_type(), Some(OidType::Sha256));
+    /// assert_eq!(opts.as_ref().version(), OdbOptions::VERSION);
+    /// ```
+    ///
+    /// libgit2 does not check `oid_type`: an odb built with a type it does not name hashes
+    /// and sizes ids as no type at all. So the value only ever holds 0, which libgit2 reads
+    /// as its default, SHA-1, or a named [`OidType`]; there is no conversion from a raw
+    /// `git_odb_options`, and the setter takes an `Option<OidType>`. The version is
+    /// checked by every routine that reads the options, so any version may be stored.
+    ///
+    /// A handle borrows the value, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0597
+    /// use libgit2::libgit2::src::libgit2::odb::OdbOptions;
+    ///
+    /// let handle = {
+    ///     let opts = OdbOptions::new();
+    ///     opts.as_ref()
+    /// };
+    /// let _ = handle.version();
+    /// ```
+    ///
+    /// and the shared handle only reads:
+    ///
+    /// ```compile_fail,E0599
+    /// use libgit2::libgit2::src::libgit2::odb::OdbOptions;
+    ///
+    /// let opts = OdbOptions::new();
+    /// opts.as_ref().set_oid_type(None);
+    /// ```
+    ///
+    /// Wraps `ty::git_odb_options`
+    #[doc(alias = "git_odb_options")]
+    #[derive(Clone, Copy)]
+    OdbOptions,
+    OdbOptionsRef,
+    OdbOptionsMut,
+    ffi::git_odb_options
+);
+
+// SAFETY: an `OdbOptions` is 8 plain bytes: no pointer, no interior mutability, no thread
+// affinity, nothing to release, so moving one to another thread moves bytes.
+unsafe impl Send for OdbOptions {}
+
+// SAFETY: `OdbOptionsMut` is an exclusive borrow of such a value, as `&mut OdbOptions`.
+unsafe impl Send for OdbOptionsMut<'_> {}
+
+// SAFETY: shared access only reads the fields (every write goes through `OdbOptionsMut`,
+// which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for OdbOptions {}
+
+// SAFETY: as above; `OdbOptionsRef` is a shared borrow, as `&OdbOptions`.
+unsafe impl Send for OdbOptionsRef<'_> {}
+
+// SAFETY: as above.
+unsafe impl Sync for OdbOptionsRef<'_> {}
+
+// SAFETY: `&OdbOptionsMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for OdbOptionsMut<'_> {}
+
+impl OdbOptions {
+    /// The structure version this crate's header declares (`GIT_ODB_OPTIONS_VERSION`), the
+    /// only one libgit2 accepts.
+    pub const VERSION: u32 = ffi::GIT_ODB_OPTIONS_VERSION;
+
+    /// The default options, as `git_odb_options_init` fills them for
+    /// [`VERSION`](Self::VERSION) and `GIT_ODB_OPTIONS_INIT` spells them: the current
+    /// version, and `oid_type` 0, which libgit2 reads as SHA-1. Needs no initialised
+    /// libgit2.
+    ///
+    /// Wraps `fn::git_odb_options_init`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version of the options it defines itself, which it
+    /// never does.
+    #[doc(alias = "git_odb_options_init")]
+    #[must_use]
+    pub fn new() -> OdbOptions {
+        let mut raw = ffi::git_odb_options::default();
+        // SAFETY: `raw` is a live `git_odb_options` the call may write, and is not retained.
+        // With the header's own version the routine's version check passes, so it only
+        // copies the 8-byte `GIT_ODB_OPTIONS_INIT` template into `raw`: no allocation and no
+        // error state, so no initialised runtime is needed.
+        let rc = unsafe { ffi::git_odb_options_init(&raw mut raw, Self::VERSION) };
+        assert_eq!(rc, 0, "git_odb_options_init refused its own version");
+        OdbOptions(raw, PhantomData)
+    }
+
+    /// The default options with `oid_type` set: what the constructors on [`Odb`] pass
+    /// libgit2.
+    #[must_use]
+    pub fn with_oid_type(oid_type: OidType) -> OdbOptions {
+        let mut opts = OdbOptions::new();
+        opts.as_mut().set_oid_type(Some(oid_type));
+        opts
+    }
+}
+
+impl Default for OdbOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The `git_odb_options` value, for code that passes one by value.
+impl From<OdbOptions> for ffi::git_odb_options {
+    fn from(opts: OdbOptions) -> ffi::git_odb_options {
+        opts.0
+    }
+}
+
+impl OdbOptionsRef<'_> {
+    /// The structure version. [`OdbOptions::new`] sets [`OdbOptions::VERSION`]; libgit2
+    /// refuses the options with `GIT_ERROR_INVALID` if it is 0 or above that.
+    ///
+    /// Wraps `fld::git_odb_options.version`
+    #[doc(alias = "git_odb_options.version")]
+    #[must_use]
+    pub fn version(&self) -> u32 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let version_ptr = unsafe { &raw const (*self.as_ptr()).version };
+        // SAFETY: a read through the shared handle's pointer to a live `git_odb_options`;
+        // any value is a valid `u32`.
+        unsafe { version_ptr.read() }
+    }
+
+    /// The object id type the odb hashes with; `None` for 0, which libgit2 reads as its
+    /// default, [`OidType::Sha1`].
+    ///
+    /// Wraps `fld::git_odb_options.oid_type`
+    #[doc(alias = "git_odb_options.oid_type")]
+    #[must_use]
+    pub fn oid_type(&self) -> Option<OidType> {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let oid_type_ptr = unsafe { &raw const (*self.as_ptr()).oid_type };
+        // SAFETY: a read through the shared handle's pointer to a live `git_odb_options`;
+        // any value is a valid `git_oid_t`.
+        let raw = unsafe { oid_type_ptr.read() };
+        OidType::from_raw(raw)
+    }
+
+    /// A copy of the options, as a value of its own.
+    #[must_use]
+    pub fn to_options(&self) -> OdbOptions {
+        let mut opts = OdbOptions::new();
+        let mut m = opts.as_mut();
+        m.set_version(self.version());
+        m.set_oid_type(self.oid_type());
+        opts
+    }
+}
+
+impl OdbOptionsMut<'_> {
+    /// Replaces the structure version. Any value is accepted; libgit2 refuses options whose
+    /// version is 0 or above [`OdbOptions::VERSION`].
+    ///
+    /// Wraps `fld::git_odb_options.version`
+    #[doc(alias = "git_odb_options.version")]
+    pub fn set_version(&mut self, version: u32) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let version_ptr = unsafe { &raw mut (*self.as_mut_ptr()).version };
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_odb_options`; the field is a plain integer.
+        unsafe { version_ptr.write(version) }
+    }
+
+    /// Replaces the object id type; `None` stores 0, libgit2's default (SHA-1).
+    ///
+    /// Wraps `fld::git_odb_options.oid_type`
+    #[doc(alias = "git_odb_options.oid_type")]
+    pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
+        let raw = oid_type.map_or(0, OidType::raw);
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let oid_type_ptr = unsafe { &raw mut (*self.as_mut_ptr()).oid_type };
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_odb_options`; the field is a plain integer, and `raw` is 0 or a named type.
+        unsafe { oid_type_ptr.write(raw) }
+    }
+}
+
+impl fmt::Debug for OdbOptionsRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OdbOptions")
+            .field("version", &self.version())
+            .field("oid_type", &self.oid_type())
+            .finish()
+    }
+}
+
+impl fmt::Debug for OdbOptionsMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for OdbOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'b> PartialEq<OdbOptionsRef<'b>> for OdbOptionsRef<'_> {
+    /// Field by field.
+    fn eq(&self, other: &OdbOptionsRef<'b>) -> bool {
+        self.version() == other.version() && self.oid_type() == other.oid_type()
+    }
+}
+
+impl Eq for OdbOptionsRef<'_> {}
+
+impl Hash for OdbOptionsRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.version().hash(state);
+        self.oid_type().hash(state);
+    }
+}
+
+impl PartialEq for OdbOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for OdbOptions {}
+
+impl Hash for OdbOptions {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
+
+// An `OdbOptions` is a `git_odb_options`, so C reads a value Rust holds in place.
+const _: () = assert!(
+    size_of::<OdbOptions>() == size_of::<ffi::git_odb_options>()
+        && align_of::<OdbOptions>() == align_of::<ffi::git_odb_options>()
+);
+
+define_ctype!(
+    /// One query of `git_odb_expand_ids` (`git_odb_expand_id`): an object id, or a prefix
+    /// of one, and the type the object must have; the routine writes the answer over it.
+    ///
+    /// A plain value of 40 bytes, resource-free: `Copy`, held inline, never released.
+    /// Build one with [`new`](Self::new), or start from [`OdbExpandId::default`] /
+    /// [`OdbExpandId::zeroed`](ffibox::CZeroable::zeroed), which queries nothing; read and
+    /// write its fields through [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut).
+    ///
+    /// The fields are in and out at once. On the way in, `length` is how many hex digits
+    /// of `id` to match (a full id's own hex size for a full id; fewer than
+    /// `GIT_OID_MINPREFIXLEN`, 4, finds nothing), and `type` the type the object must have,
+    /// `GIT_OBJECT_ANY` or 0 for any. On the way out, a query that found exactly one
+    /// object of a matching type holds its full id, the id type's hex size as `length`
+    /// and the object's type; any other, the id type's zero id, `length` 0 and `type` 0.
+    ///
+    /// Every value is valid for the type: libgit2 reads no more than the 32 id bytes
+    /// whatever `length` says, and a `type` it does not know matches nothing.
+    ///
+    /// ```
+    /// use libgit2::libgit2::src::libgit2::object::ObjectType;
+    /// use libgit2::libgit2::src::libgit2::odb::OdbExpandId;
+    /// use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    ///
+    /// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+    /// let prefix = Oid::from_prefix(b"4a202b34", OidType::Sha1).unwrap();
+    /// let mut query = OdbExpandId::new(prefix.as_ref(), 8, Some(ObjectType::Blob));
+    /// assert_eq!(query.as_ref().length(), 8);
+    /// query.as_mut().set_kind(None);
+    /// assert_eq!(query.as_ref().raw_kind(), libgit2::ffi::GIT_OBJECT_ANY);
+    /// ```
+    ///
+    /// Wraps `ty::git_odb_expand_id`
+    #[doc(alias = "git_odb_expand_id")]
+    #[derive(Clone, Copy)]
+    OdbExpandId,
+    OdbExpandIdRef,
+    OdbExpandIdMut,
+    ffi::git_odb_expand_id
+);
+
+// SAFETY: all zero is libgit2's typeless `GIT_OID_NONE` id, `length` 0 and `type` 0, which
+// `git_odb_expand_ids` reads as "any type" and answers as not found, the very state it
+// writes for a miss; every getter reads plain bytes, and there is no teardown.
+unsafe impl CZeroable for OdbExpandId {}
+
+// SAFETY: an `OdbExpandId` is 40 plain bytes: no pointer, no interior mutability, no thread
+// affinity, nothing to release, so moving one to another thread moves bytes.
+unsafe impl Send for OdbExpandId {}
+
+// SAFETY: `OdbExpandIdMut` is an exclusive borrow of such a value, as `&mut OdbExpandId`.
+unsafe impl Send for OdbExpandIdMut<'_> {}
+
+// SAFETY: shared access only reads the fields (every write goes through `OdbExpandIdMut`,
+// which excludes other handles), so concurrent readers race nothing.
+unsafe impl Sync for OdbExpandId {}
+
+// SAFETY: as above; `OdbExpandIdRef` is a shared borrow, as `&OdbExpandId`.
+unsafe impl Send for OdbExpandIdRef<'_> {}
+
+// SAFETY: as above.
+unsafe impl Sync for OdbExpandIdRef<'_> {}
+
+// SAFETY: `&OdbExpandIdMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for OdbExpandIdMut<'_> {}
+
+impl OdbExpandId {
+    /// A query for the object whose id starts with the first `length` hex digits of `id`,
+    /// of type `kind`, or of any type for `None` (`GIT_OBJECT_ANY`).
+    #[must_use]
+    pub fn new(id: OidRef<'_>, length: u16, kind: Option<ObjectType>) -> OdbExpandId {
+        let mut query = OdbExpandId::zeroed();
+        let mut m = query.as_mut();
+        m.set_id(id);
+        m.set_length(length);
+        m.set_kind(kind);
+        query
+    }
+}
+
+/// The empty query, as [`zeroed`](ffibox::CZeroable::zeroed) gives it.
+impl Default for OdbExpandId {
+    fn default() -> OdbExpandId {
+        OdbExpandId::zeroed()
+    }
+}
+
+/// The `git_odb_expand_id` value as it is, for code that already holds one by value.
+impl From<ffi::git_odb_expand_id> for OdbExpandId {
+    fn from(raw: ffi::git_odb_expand_id) -> OdbExpandId {
+        OdbExpandId(raw, PhantomData)
+    }
+}
+
+/// The `git_odb_expand_id` value, for code that passes one by value.
+impl From<OdbExpandId> for ffi::git_odb_expand_id {
+    fn from(query: OdbExpandId) -> ffi::git_odb_expand_id {
+        query.0
+    }
+}
+
+impl<'a> OdbExpandIdRef<'a> {
+    /// The object id, or the prefix of one, in place, for as long as the query is
+    /// borrowed.
+    ///
+    /// Wraps `fld::git_odb_expand_id.id`
+    #[doc(alias = "git_odb_expand_id.id")]
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field is never NULL"
+    )]
+    pub fn id(&self) -> OidRef<'a> {
+        // SAFETY: the shared handle's pointer addresses a live query; the projection forms
+        // no reference to it.
+        let id = unsafe { &raw const (*self.as_ptr()).id };
+        // SAFETY: `id` addresses an initialised `git_oid`, which lives for `'a` with the
+        // query and which nothing writes meanwhile (every write needs the exclusive
+        // handle); `OidRef` only reads it.
+        unsafe { OidRef::from_ptr(id.cast_mut()) }.expect("a field is never NULL")
+    }
+
+    /// How many hex digits of [`id`](Self::id) the query matches; after
+    /// `git_odb_expand_ids`, the id type's hex size when it found the object, 0 when not.
+    ///
+    /// Wraps `fld::git_odb_expand_id.length`
+    #[doc(alias = "git_odb_expand_id.length")]
+    #[must_use]
+    pub fn length(&self) -> u16 {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let length_ptr = unsafe { &raw const (*self.as_ptr()).length };
+        // SAFETY: a read through the shared handle's pointer to a live
+        // `git_odb_expand_id`; any value is a valid `u16`.
+        unsafe { length_ptr.read() }
+    }
+
+    /// The object's type: the type the query asks for, or the type found. `None` for any
+    /// type (`GIT_OBJECT_ANY` or 0, which a miss leaves) and for a value no object type
+    /// has; [`raw_kind`](Self::raw_kind) tells them apart.
+    ///
+    /// Wraps `fld::git_odb_expand_id.type`
+    #[doc(alias = "git_odb_expand_id.type")]
+    #[must_use]
+    pub fn kind(&self) -> Option<ObjectType> {
+        ObjectType::from_raw(self.raw_kind())
+    }
+
+    /// The type as libgit2 stores it, `GIT_OBJECT_ANY` and 0 included.
+    ///
+    /// Wraps `fld::git_odb_expand_id.type`
+    #[doc(alias = "git_odb_expand_id.type")]
+    #[must_use]
+    pub fn raw_kind(&self) -> ffi::git_object_t {
+        // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let type_ptr = unsafe { &raw const (*self.as_ptr()).type_ };
+        // SAFETY: a read through the shared handle's pointer to a live
+        // `git_odb_expand_id`; any value is a valid `git_object_t`, a C `int`.
+        unsafe { type_ptr.read() }
+    }
+
+    /// A copy of the query, as a value of its own.
+    #[must_use]
+    pub fn to_expand_id(&self) -> OdbExpandId {
+        OdbExpandId::from(ffi::git_odb_expand_id {
+            id: copy_oid(self.id()),
+            length: self.length(),
+            type_: self.raw_kind(),
+        })
+    }
+}
+
+impl OdbExpandIdMut<'_> {
+    /// The object id, in place, borrowed exclusively to change it.
+    ///
+    /// Wraps `fld::git_odb_expand_id.id`
+    #[doc(alias = "git_odb_expand_id.id")]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic: a field is never NULL"
+    )]
+    pub fn id_mut(&mut self) -> OidMut<'_> {
+        // SAFETY: the exclusive handle's pointer addresses a live query; the projection
+        // forms no reference to it.
+        let id = unsafe { &raw mut (*self.as_mut_ptr()).id };
+        // SAFETY: `id` addresses an initialised `git_oid`, any of whose bytes may be
+        // written; the result borrows this handle exclusively, so nothing else reaches the
+        // query meanwhile.
+        unsafe { OidMut::from_ptr(id) }.expect("a field is never NULL")
+    }
+
+    /// Replaces the id with a copy of `id`, type and all 32 bytes.
+    ///
+    /// Wraps `fld::git_odb_expand_id.id`
+    #[doc(alias = "git_odb_expand_id.id")]
+    pub fn set_id(&mut self, id: OidRef<'_>) {
+        let id = copy_oid(id);
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let id_ptr = unsafe { &raw mut (*self.as_mut_ptr()).id };
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_odb_expand_id`; the field is plain bytes, and `id` was copied out before the
+        // write, so a source inside this query is read whole first.
+        unsafe { id_ptr.write(id) }
+    }
+
+    /// Replaces how many hex digits of the id the query matches. Any value is accepted:
+    /// libgit2 matches a prefix only from 4 digits up, and a full id from its type's hex
+    /// size up.
+    ///
+    /// Wraps `fld::git_odb_expand_id.length`
+    #[doc(alias = "git_odb_expand_id.length")]
+    pub fn set_length(&mut self, length: u16) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let length_ptr = unsafe { &raw mut (*self.as_mut_ptr()).length };
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_odb_expand_id`; the field is a plain integer.
+        unsafe { length_ptr.write(length) }
+    }
+
+    /// Replaces the type the object must have; `None` stores `GIT_OBJECT_ANY`, any type.
+    ///
+    /// Wraps `fld::git_odb_expand_id.type`
+    #[doc(alias = "git_odb_expand_id.type")]
+    pub fn set_kind(&mut self, kind: Option<ObjectType>) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the
+        // projection forms no reference to it.
+        let type_ptr = unsafe { &raw mut (*self.as_mut_ptr()).type_ };
+        // SAFETY: a write through the exclusive handle's pointer to a live
+        // `git_odb_expand_id`; the field is a plain integer.
+        unsafe { type_ptr.write(ObjectType::raw_or_any(kind)) }
+    }
+}
+
+/// The 33 bytes of `id`, as a value of its own.
+fn copy_oid(id: OidRef<'_>) -> ffi::git_oid {
+    ffi::git_oid {
+        type_: id.raw_kind(),
+        id: id.id(),
+    }
+}
+
+impl fmt::Debug for OdbExpandIdRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OdbExpandId")
+            .field("id", &self.id())
+            .field("length", &self.length())
+            .field("type", &self.raw_kind())
+            .finish()
+    }
+}
+
+impl fmt::Debug for OdbExpandIdMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for OdbExpandId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<'b> PartialEq<OdbExpandIdRef<'b>> for OdbExpandIdRef<'_> {
+    /// Field by field: the id's 33 bytes, as `OidRef`'s `==` compares them, the length and
+    /// the stored type.
+    fn eq(&self, other: &OdbExpandIdRef<'b>) -> bool {
+        let (x, y) = (self.id(), other.id());
+        (x.raw_kind(), x.id()) == (y.raw_kind(), y.id())
+            && self.length() == other.length()
+            && self.raw_kind() == other.raw_kind()
+    }
+}
+
+impl Eq for OdbExpandIdRef<'_> {}
+
+impl Hash for OdbExpandIdRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id().hash(state);
+        self.length().hash(state);
+        self.raw_kind().hash(state);
+    }
+}
+
+impl PartialEq for OdbExpandId {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for OdbExpandId {}
+
+impl Hash for OdbExpandId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state);
+    }
+}
+
+// An `OdbExpandId` is a `git_odb_expand_id`, so C reads and writes a run of them Rust holds
+// in place.
+const _: () = assert!(
+    size_of::<OdbExpandId>() == size_of::<ffi::git_odb_expand_id>()
+        && align_of::<OdbExpandId>() == align_of::<ffi::git_odb_expand_id>()
+);
 
 /// The alignment `git_odb_backend_data_alloc` storage is guaranteed to have.
 ///
@@ -1595,9 +2159,10 @@ mod unit_tests {
         }
 
         #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
         fn options_carry_this_version_and_the_type() {
             for kind in [OidType::Sha1, OidType::Sha256] {
-                let opts = options(kind);
+                let opts = ffi::git_odb_options::from(OdbOptions::with_oid_type(kind));
                 assert_eq!(opts.version, ffi::GIT_ODB_OPTIONS_VERSION);
                 assert_eq!(OidType::from_raw(opts.oid_type), Some(kind));
             }
@@ -1864,6 +2429,217 @@ mod unit_tests {
                         assert_eq!(err.class(), Some(ErrorClass::NoMemory), "{err:?}");
                     }
                 },
+            );
+        }
+    }
+
+    /// `OdbOptions` and `OdbExpandId`, the header's plain values.
+    mod plain_values {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        use super::*;
+        use crate::libgit2::src::libgit2::oid::Oid;
+
+        fn hash_of(value: &impl Hash) -> u64 {
+            let mut h = DefaultHasher::new();
+            value.hash(&mut h);
+            h.finish()
+        }
+
+        /// An oid of type `kind` whose id bytes count up from `seed`, built in Rust.
+        fn oid(kind: u8, seed: u8) -> ffi::git_oid {
+            let mut id = [0u8; 32];
+            for (i, b) in id.iter_mut().enumerate() {
+                *b = seed.wrapping_add(u8::try_from(i).unwrap());
+            }
+            ffi::git_oid { type_: kind, id }
+        }
+
+        fn raw_query(id: ffi::git_oid, length: u16, type_: ffi::git_object_t) -> OdbExpandId {
+            OdbExpandId::from(ffi::git_odb_expand_id { id, length, type_ })
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn options_start_from_the_init_template() {
+            let opts = OdbOptions::new();
+            let raw = ffi::git_odb_options::from(opts);
+            assert_eq!(
+                (raw.version, raw.oid_type),
+                (ffi::GIT_ODB_OPTIONS_VERSION, 0)
+            );
+            assert_eq!(opts.as_ref().version(), OdbOptions::VERSION);
+            assert_eq!(opts.as_ref().oid_type(), None);
+            assert_eq!(OdbOptions::default(), opts);
+            assert_eq!(
+                format!("{opts:?}"),
+                "OdbOptions { version: 1, oid_type: None }"
+            );
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn options_setters_store_what_the_getters_read() {
+            let mut opts = OdbOptions::new();
+            for kind in [Some(OidType::Sha256), Some(OidType::Sha1), None] {
+                opts.as_mut().set_oid_type(kind);
+                assert_eq!(opts.as_ref().oid_type(), kind);
+                let raw = ffi::git_odb_options::from(opts);
+                assert_eq!(raw.oid_type, kind.map_or(0, OidType::raw));
+            }
+            for version in [0, 2, u32::MAX, OdbOptions::VERSION] {
+                let mut m = opts.as_mut();
+                m.set_version(version);
+                assert_eq!(m.as_ref().version(), version);
+            }
+            let typed = OdbOptions::with_oid_type(OidType::Sha256);
+            assert_eq!(typed.as_ref().oid_type(), Some(OidType::Sha256));
+            assert_eq!(typed.as_ref().version(), OdbOptions::VERSION);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn options_copy_compare_and_hash_by_field() {
+            let mut a = OdbOptions::with_oid_type(OidType::Sha1);
+            a.as_mut().set_version(7);
+            let copy = a.as_ref().to_options();
+            assert_eq!(copy, a);
+            assert_eq!(hash_of(&copy), hash_of(&a));
+            assert_eq!(format!("{:?}", a.as_mut()), format!("{a:?}"));
+            let mut b = a;
+            b.as_mut().set_oid_type(Some(OidType::Sha256));
+            assert_ne!(a, b);
+            b.as_mut().set_oid_type(Some(OidType::Sha1));
+            b.as_mut().set_version(8);
+            assert_ne!(a, b);
+            // `None` and SHA-1 store different bytes, though libgit2 builds the same odb
+            // from both.
+            let (mut c, d) = (a, a);
+            c.as_mut().set_oid_type(None);
+            assert_ne!(c, d);
+        }
+
+        #[test]
+        fn zeroed_query_is_all_zero_and_default() {
+            let q = OdbExpandId::zeroed();
+            let raw = ffi::git_odb_expand_id::from(q);
+            assert_eq!(
+                (raw.id.type_, raw.id.id, raw.length, raw.type_),
+                (0, [0; 32], 0, 0)
+            );
+            assert_eq!(OdbExpandId::default(), q);
+            let r = q.as_ref();
+            assert_eq!((r.length(), r.raw_kind(), r.kind()), (0, 0, None));
+            assert_eq!((r.id().raw_kind(), r.id().id()), (0, [0; 32]));
+        }
+
+        #[test]
+        fn query_fields_read_back_what_was_stored() {
+            let q = raw_query(oid(1, 9), 40, ffi::GIT_OBJECT_TREE);
+            let r = q.as_ref();
+            assert_eq!(r.length(), 40);
+            assert_eq!(r.kind(), Some(ObjectType::Tree));
+            assert_eq!((r.id().raw_kind(), r.id().id()), (1, oid(1, 9).id));
+            for (raw, kind) in [
+                (ffi::GIT_OBJECT_ANY, None),
+                (ffi::GIT_OBJECT_INVALID, None),
+                (0, None),
+                (99, None),
+                (ffi::GIT_OBJECT_COMMIT, Some(ObjectType::Commit)),
+                (ffi::GIT_OBJECT_BLOB, Some(ObjectType::Blob)),
+                (ffi::GIT_OBJECT_TAG, Some(ObjectType::Tag)),
+            ] {
+                let q = raw_query(oid(2, 0), 0, raw);
+                assert_eq!((q.as_ref().raw_kind(), q.as_ref().kind()), (raw, kind));
+            }
+        }
+
+        #[test]
+        fn query_setters_write_each_field_alone() {
+            let mut q = OdbExpandId::zeroed();
+            let src = raw_query(oid(2, 200), 0, 0);
+            q.as_mut().set_id(src.as_ref().id());
+            let raw = ffi::git_odb_expand_id::from(q);
+            assert_eq!(
+                (raw.id.type_, raw.id.id, raw.length, raw.type_),
+                (2, oid(2, 200).id, 0, 0)
+            );
+            for length in [0, 3, 4, 39, 40, 64, 65, u16::MAX] {
+                q.as_mut().set_length(length);
+                assert_eq!(q.as_ref().length(), length);
+            }
+            q.as_mut().set_kind(Some(ObjectType::Blob));
+            assert_eq!(q.as_ref().raw_kind(), ffi::GIT_OBJECT_BLOB);
+            q.as_mut().set_kind(None);
+            assert_eq!(q.as_ref().raw_kind(), ffi::GIT_OBJECT_ANY);
+            assert_eq!(ffi::git_odb_expand_id::from(q).id.id, oid(2, 200).id);
+        }
+
+        #[test]
+        fn query_id_is_edited_in_place() {
+            let mut q = raw_query(oid(1, 0), 40, ffi::GIT_OBJECT_ANY);
+            {
+                let mut m = q.as_mut();
+                let mut id = m.id_mut();
+                id.set_raw_kind(2);
+                id.set_id([0xAB; 32]);
+            }
+            let raw = ffi::git_odb_expand_id::from(q);
+            assert_eq!((raw.id.type_, raw.id.id), (2, [0xAB; 32]));
+            assert_eq!((raw.length, raw.type_), (40, ffi::GIT_OBJECT_ANY));
+            // Copying a query's id over itself, through a copy, leaves it whole.
+            let before = q;
+            let copy = q;
+            q.as_mut().set_id(copy.as_ref().id());
+            assert_eq!(q, before);
+        }
+
+        #[test]
+        fn query_copies_compare_and_hash_by_field() {
+            let q = raw_query(oid(1, 5), 12, ffi::GIT_OBJECT_COMMIT);
+            let copy = q.as_ref().to_expand_id();
+            assert_eq!(copy, q);
+            assert_eq!(hash_of(&copy), hash_of(&q));
+            assert_eq!(hash_of(&copy.as_ref()), hash_of(&q.as_ref()));
+            for other in [
+                raw_query(oid(2, 5), 12, ffi::GIT_OBJECT_COMMIT),
+                raw_query(oid(1, 6), 12, ffi::GIT_OBJECT_COMMIT),
+                raw_query(oid(1, 5), 13, ffi::GIT_OBJECT_COMMIT),
+                raw_query(oid(1, 5), 12, ffi::GIT_OBJECT_ANY),
+            ] {
+                assert_ne!(other, q);
+            }
+            let mut moved = q;
+            assert_eq!(format!("{:?}", moved.as_mut()), format!("{q:?}"));
+            let text = format!("{q:?}");
+            assert!(
+                text.starts_with("OdbExpandId { id: Oid { kind: Sha1, id: 0506"),
+                "{text}"
+            );
+            assert!(text.ends_with("length: 12, type: 1 }"), "{text}");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls libgit2")]
+        fn new_query_fills_every_field() {
+            let id = Oid::from_prefix(b"4a202b34", OidType::Sha1).unwrap();
+            let q = OdbExpandId::new(id.as_ref(), 8, Some(ObjectType::Blob));
+            let r = q.as_ref();
+            assert_eq!(r.id(), id.as_ref());
+            assert_eq!((r.length(), r.kind()), (8, Some(ObjectType::Blob)));
+            let any = OdbExpandId::new(id.as_ref(), 40, None);
+            assert_eq!(any.as_ref().raw_kind(), ffi::GIT_OBJECT_ANY);
+        }
+
+        #[test]
+        fn new_query_from_a_zero_id_needs_no_c() {
+            let zero = OdbExpandId::zeroed();
+            let q = OdbExpandId::new(zero.as_ref().id(), 4, Some(ObjectType::Tag));
+            let raw = ffi::git_odb_expand_id::from(q);
+            assert_eq!(
+                (raw.id.type_, raw.length, raw.type_),
+                (0, 4, ffi::GIT_OBJECT_TAG)
             );
         }
     }

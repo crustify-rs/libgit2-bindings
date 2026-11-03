@@ -1,0 +1,11 @@
+error[E0599]: no method named `set_length` found for struct `OdbExpandIdRef<'a>` in the current scope
+ --> tests/ub_safe/compile_fail/odb_expand_id_ref_has_no_setters.rs:8:7
+  |
+8 |     r.set_length(4);
+  |       ^^^^^^^^^^
+  |
+help: there is a method `length` with a similar name, but with different arguments
+ --> src/libgit2/src/libgit2/odb.rs
+  |
+  |     pub fn length(&self) -> u16 {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^

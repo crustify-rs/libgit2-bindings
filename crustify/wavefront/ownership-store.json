@@ -16051,6 +16051,39 @@
    ]
   },
   {
+   "name": "git_odb_options_init",
+   "defined_in": "src/libgit2/odb.c",
+   "lifetime": {
+    "for": "opts",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": false,
+     "init": true
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "opts",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:opts"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Caller-provided storage for one git_odb_options, written in place (GIT_INIT_STRUCTURE_FROM_TEMPLATE memcpys GIT_ODB_OPTIONS_INIT over it) and not retained. NULL fails GIT_ASSERT_ARG. With a version of 0 or above GIT_ODB_OPTIONS_VERSION the routine sets GIT_ERROR_INVALID and returns -1 before writing anything."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_oid_cmp",
    "defined_in": "src/libgit2/oid.c",
    "ptr_args": [
