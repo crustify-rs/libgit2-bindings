@@ -11903,7 +11903,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/indexer.c",
       "foundational": false,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           171
@@ -11920,7 +11920,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_indexer_progress",
@@ -11938,7 +11938,9 @@
               "home": "src/libgit2/src/libgit2/indexer.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9f243dd2ec60c1ef2ad88343d56f1efae544b57c"
+          ]
         }
       ]
     },

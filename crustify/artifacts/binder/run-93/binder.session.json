@@ -1,0 +1,13 @@
+{
+ "cli": "claude",
+ "provider": "openrouter",
+ "model": "anthropic/claude-opus-5.5",
+ "session_id": "2f3e3533-c665-4aba-a059-6b901ebe85af",
+ "transcript": "/work/.claude/projects/-target-libgit2-bindings-crustify--worktrees-crustify-batches-wave-172-batch-0/2f3e3533-c665-4aba-a059-6b901ebe85af.jsonl",
+ "exit_code": 0,
+ "resumed": false,
+ "agent": "binder",
+ "started_at": "2026-11-03T19:53:28+00:00",
+ "ended_at": "2026-11-03T20:19:46+00:00",
+ "duration_ms": 1577458
+}

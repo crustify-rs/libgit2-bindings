@@ -1,0 +1,29 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_indexer_progress",
+      "defined_in": "include/git2/indexer.h",
+      "kind": "type",
+      "field_anchors": [
+        "received_bytes",
+        "indexed_deltas",
+        "total_deltas",
+        "local_objects",
+        "received_objects",
+        "indexed_objects",
+        "total_objects"
+      ],
+      "home": "src/libgit2/src/libgit2/indexer.rs"
+    }
+  ],
+  "wave": 172,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/indexer.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-172",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
