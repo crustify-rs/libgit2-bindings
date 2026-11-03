@@ -108,19 +108,17 @@ impl std::error::Error for DiffError {}
 /// sync::<DiffRef<'static, 'static>>();
 /// ```
 ///
-/// Wraps: `git_diff`
-/// Handwritten
+/// Wraps `ty::git_diff`
+#[doc(alias = "git_diff")]
 #[repr(transparent)]
 pub struct Diff<'r>(ffi::git_diff, PhantomData<(*const (), &'r ())>);
 
 /// A shared, copyable borrow. Getters never modify the diff.
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct DiffRef<'a, 'r>(CBorrowedPtr<'a, Diff<'r>>);
 
 /// An exclusive borrow; reborrows cannot outlive this handle.
-/// Handwritten
 #[repr(transparent)]
 pub struct DiffMut<'a, 'r>(DiffRef<'a, 'r>, PhantomData<&'a mut Diff<'r>>);
 
@@ -148,7 +146,8 @@ impl<'a, 'r: 'a> CMutSeam<'a> for DiffMut<'a, 'r> {
 
 impl<'a> DiffRef<'a, '_> {
     /// Number of deltas (including unmodified entries if requested).
-    /// Wraps: `git_diff_num_deltas`
+    /// Wraps `fn::git_diff_num_deltas`
+    #[doc(alias = "git_diff_num_deltas")]
     #[must_use]
     pub fn len(&self) -> usize {
         // SAFETY: the handle keeps an initialized, unmodified diff alive.
@@ -162,7 +161,8 @@ impl<'a> DiffRef<'a, '_> {
     }
 
     /// A delta borrowed from this diff, or None when the index is out of bounds.
-    /// Wraps: `git_diff_get_delta`
+    /// Wraps `fn::git_diff_get_delta`
+    #[doc(alias = "git_diff_get_delta")]
     #[must_use]
     pub fn get(&self, index: usize) -> Option<DiffDeltaRef<'a>> {
         // SAFETY: C bounds-checks index; a returned delta and its paths are kept
@@ -188,14 +188,14 @@ impl<'r> DiffMut<'_, 'r> {
 
 /// Releases a counted reference, dispatching to C's generated/parsed destructor.
 /// No public routine can clone or retain a diff independently.
-/// Wraps: `git_diff_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DiffFree;
 
 // SAFETY: git_diff_free decrements exactly one live reference and frees the
 // concrete generated/parsed storage and its children only at count zero.
 unsafe impl<'r> CDrop<Diff<'r>> for DiffFree {
+    /// Wraps `fn::git_diff_free`
+    #[doc(alias = "git_diff_free")]
     unsafe fn c_drop(&self, p: NonNull<Diff<'r>>) {
         // SAFETY: the caller surrenders one counted reference of the matching type.
         unsafe { ffi::git_diff_free(p.as_ptr().cast()) }
@@ -242,7 +242,8 @@ pub(crate) fn constructed(rc: i32, diff: Option<DiffBox<'_>>) -> Result<DiffBox<
 define_ctype!(
     /// A read-only delta borrowed from a diff, patch, or callback. All fields are
     /// initialized, but flags identify which id/size values C actually knows.
-    /// Wraps: git_diff_delta
+    /// Wraps `ty::git_diff_delta`
+    #[doc(alias = "git_diff_delta")]
     DiffDelta,
     DiffDeltaRef,
     DiffDeltaMut,
@@ -250,7 +251,8 @@ define_ctype!(
 );
 
 impl<'a> DiffDeltaRef<'a> {
-    /// Field: `git_diff_delta.status`
+    /// Wraps `fld::git_diff_delta.status`
+    #[doc(alias = "git_diff_delta.status")]
     #[must_use]
     pub fn status(&self) -> ffi::git_delta_t {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -260,7 +262,8 @@ impl<'a> DiffDeltaRef<'a> {
         unsafe { status_ptr.read() }
     }
 
-    /// Field: `git_diff_delta.flags`
+    /// Wraps `fld::git_diff_delta.flags`
+    #[doc(alias = "git_diff_delta.flags")]
     #[must_use]
     pub fn flags(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -270,7 +273,8 @@ impl<'a> DiffDeltaRef<'a> {
         unsafe { flags_ptr.read() }
     }
 
-    /// Field: `git_diff_delta.similarity`
+    /// Wraps `fld::git_diff_delta.similarity`
+    #[doc(alias = "git_diff_delta.similarity")]
     #[must_use]
     pub fn similarity(&self) -> u16 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -280,7 +284,8 @@ impl<'a> DiffDeltaRef<'a> {
         unsafe { similarity_ptr.read() }
     }
 
-    /// Field: `git_diff_delta.nfiles`
+    /// Wraps `fld::git_diff_delta.nfiles`
+    #[doc(alias = "git_diff_delta.nfiles")]
     #[must_use]
     pub fn nfiles(&self) -> u16 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -291,7 +296,8 @@ impl<'a> DiffDeltaRef<'a> {
     }
 
     /// Shared projection of the embedded file, kept alive by the delta borrow.
-    /// Field: `git_diff_delta.old_file`
+    /// Wraps `fld::git_diff_delta.old_file`
+    #[doc(alias = "git_diff_delta.old_file")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -306,7 +312,8 @@ impl<'a> DiffDeltaRef<'a> {
     }
 
     /// Shared projection of the embedded file, kept alive by the delta borrow.
-    /// Field: `git_diff_delta.new_file`
+    /// Wraps `fld::git_diff_delta.new_file`
+    #[doc(alias = "git_diff_delta.new_file")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -325,7 +332,8 @@ impl<'a> DiffDeltaRef<'a> {
 // API. C publishes files only as output through const deltas/callback pointers.
 define_ctype!(
     /// One embedded side of a delta. Borrowed from its parent, never freed alone.
-    /// Wraps: git_diff_file
+    /// Wraps `ty::git_diff_file`
+    #[doc(alias = "git_diff_file")]
     DiffFile,
     DiffFileRef,
     DiffFileMut,
@@ -334,7 +342,8 @@ define_ctype!(
 
 impl<'a> DiffFileRef<'a> {
     /// The path, if present. It belongs to the parent's pool/patch, not this field.
-    /// Field: `git_diff_file.path`
+    /// Wraps `fld::git_diff_file.path`
+    #[doc(alias = "git_diff_file.path")]
     #[must_use]
     pub fn path(&self) -> Option<&'a CStr> {
         {
@@ -354,7 +363,8 @@ impl<'a> DiffFileRef<'a> {
         }
     }
 
-    /// Field: `git_diff_file.id`
+    /// Wraps `fld::git_diff_file.id`
+    #[doc(alias = "git_diff_file.id")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -367,7 +377,8 @@ impl<'a> DiffFileRef<'a> {
         unsafe { OidRef::from_ptr(value.cast_mut()) }.expect("an embedded field is non-null")
     }
 
-    /// Field: `git_diff_file.size`
+    /// Wraps `fld::git_diff_file.size`
+    #[doc(alias = "git_diff_file.size")]
     #[must_use]
     pub fn size(&self) -> u64 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -377,7 +388,8 @@ impl<'a> DiffFileRef<'a> {
         unsafe { size_ptr.read() }
     }
 
-    /// Field: `git_diff_file.flags`
+    /// Wraps `fld::git_diff_file.flags`
+    #[doc(alias = "git_diff_file.flags")]
     #[must_use]
     pub fn flags(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -387,7 +399,8 @@ impl<'a> DiffFileRef<'a> {
         unsafe { flags_ptr.read() }
     }
 
-    /// Field: `git_diff_file.mode`
+    /// Wraps `fld::git_diff_file.mode`
+    #[doc(alias = "git_diff_file.mode")]
     #[must_use]
     pub fn mode(&self) -> u16 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -397,7 +410,8 @@ impl<'a> DiffFileRef<'a> {
         unsafe { mode_ptr.read() }
     }
 
-    /// Field: `git_diff_file.id_abbrev`
+    /// Wraps `fld::git_diff_file.id_abbrev`
+    #[doc(alias = "git_diff_file.id_abbrev")]
     #[must_use]
     pub fn id_abbrev(&self) -> u16 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
